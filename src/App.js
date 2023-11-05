@@ -1,8 +1,8 @@
 // App.js
 import React, { useState } from "react";
 import "./App.css";
-import Timer from "./components/Timer";
-import TimeList from "./components/TimeList";
+import Timer from "./components/Timer/Timer";
+import TimeList from "./components/TimeList/TimeList";
 import Scramble from "./components/Scramble";
 import Navigation from "./components/Navigation";
 import Detail from "./components/Detail";

@@ -1,0 +1,17 @@
+/* TimeItem.css */
+.time-item {
+    margin: 5px; /* Adjust margins as needed */
+    padding: 5px; /* Adjust padding as needed */
+    cursor: pointer; /* Indicates the item is clickable */
+    flex: 0 0 calc(100% / 12 - 10px); /* Start with 12 items per row */
+    text-align: center; /* Center text within the item */
+    /* Add additional styling here as needed */
+  }
+  
+  /* For smaller screens, adjust to 5 items per row */
+  @media (max-width: 767px) {
+    .time-item {
+      flex: 0 0 calc(100% / 5 - 10px); /* Adjust width calculation as per margin/padding */
+    }
+  }
+  

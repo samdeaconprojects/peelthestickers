@@ -1,5 +1,6 @@
 // TimeList.js
 import React from 'react';
+import './TimeList.css'; // Ensure this is the correct path to your CSS file
 
 function TimeList({ times }) {
   const formatTime = (milliseconds) => {
@@ -11,19 +12,17 @@ function TimeList({ times }) {
     let formattedSeconds = seconds.toString().padStart(2, '0');
     let formattedMilliseconds = millisecondsLeft.toString().padStart(3, '0').substring(0, 2);
 
-    let formattedTime = minutes > 0 
+    return minutes > 0 
       ? `${minutes}:${formattedSeconds}.${formattedMilliseconds}` 
       : `${formattedSeconds}.${formattedMilliseconds}`;
-    
-    return formattedTime;
   };
 
   return (
-    <div>
+    <div className="time-list-container">
       <h2>Time List</h2>
-      <ul>
+      <ul className="TimeList">
         {times.map((time, index) => (
-          <li key={index}>{formatTime(time)}</li>
+          <li className="TimeItem" key={index}>{formatTime(time)}</li>
         ))}
       </ul>
     </div>
