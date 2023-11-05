@@ -1,38 +1,58 @@
+/* TimeList.css */
+.time-list-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  min-height: 100vh; /* This ensures that the container takes at least the full viewport height */
+}
+
+/* TimeList.css */
+.time-list-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  min-height: 100vh; /* This ensures that the container takes at least the full viewport height */
+}
+
 .TimeList {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center; /* Aligns items to the start of the container */
-  padding: 0;
-  margin: 5 auto; /* Centers the list in the container */
-  list-style-type: none; /* Removes default list bullets */
-  width: 100%; /* Full width to center the content */
-  max-width: 720px; /* Adjust this value based on the total width of 12 items */
-}
-
-.TimeList ul {
-  display: flex; /* Make sure the UL is a flex container */
-  flex-wrap: wrap; /* Allow flex items to wrap */
+  justify-content: left; /* This will center the items in the list */
   padding: 0;
   margin: 0;
-  width: 100%; /* Ensure UL takes the full width */
-  justify-content: center; /* Center the items horizontally */
+  list-style-type: none; /* If you were using a list, this would remove bullets */
 }
 
-.TimeList li {
-  margin: 1px; /* Adjust margins as needed */
-  padding: 1px; /* Adjust padding as needed */
-  width: calc(100%/12 - 10px); /* Adjust width calculation as per margin/padding */
-  text-align: center; /* Center text within each time */
+.TimeItem {
+  margin: 5px;
+  padding: 5px;
+  cursor: pointer;
+  flex: 0 0 calc(100% / 12 - 10px); /* For 12 items per row */
+  text-align: center;
+  /* Additional styling as needed */
 }
 
-@media (max-width: 1000px) { /* Adjust this breakpoint based on your max-width above */
-  .TimeList li {
-    width: calc(100%/5 - 10px); /* Adjust width calculation as per margin/padding for smaller screens */
+/* For smaller screens, adjust to 5 items per row */
+@media (max-width: 767px) {
+  .TimeItem {
+    flex: 0 0 calc(100% / 5 - 10px); /* For 5 items per row */
   }
 }
 
-@media (max-width: 400px) { /* Adjust for even smaller screens if necessary */
-  .TimeList li {
-    width: calc(100% - 10px); /* Full width for very small screens */
+
+.TimeItem {
+  padding: 5px;
+  cursor: pointer;
+  flex: 0 0 calc(100% / 12 - 10px); /* For 12 items per row */
+  text-align: center;
+  /* Additional styling as needed */
+}
+
+/* For smaller screens, adjust to 5 items per row */
+@media (max-width: 767px) {
+  .TimeItem {
+    flex: 0 0 calc(100% / 5 - 10px); /* For 5 items per row */
   }
 }

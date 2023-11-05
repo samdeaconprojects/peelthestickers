@@ -26,7 +26,7 @@ function App() {
 
   return (
     <div className="App">
-      <Navigation />
+      
       <div className="main-content">
         {/* Pass times as a prop to Scramble */}
         <Scramble onScrambleClick={handleScrambleClick} times={times} />
