@@ -4,7 +4,7 @@ import "./App.css";
 import Timer from "./components/Timer/Timer";
 import TimeList from "./components/TimeList/TimeList";
 import Scramble from "./components/Scramble";
-import Navigation from "./components/Navigation";
+import Navigation from "./components/Navigation/Navigation";
 import Detail from "./components/Detail";
 import EmailTester from './components/EmailTester';
 

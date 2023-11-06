@@ -19,7 +19,6 @@ function TimeList({ times }) {
 
   return (
     <div className="time-list-container">
-      <h2>Time List</h2>
       <div className="TimeList">
         {times.map((time, index) => (
           <div className="TimeItem" key={index}>{formatTime(time)}</div>

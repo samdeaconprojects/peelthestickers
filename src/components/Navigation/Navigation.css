@@ -1,0 +1,55 @@
+/* navigation.css */
+
+.Navigation {
+    /*height: 100vh;*/ /* Full height of the viewport */
+    width: 70px; /* Width of the navigation bar */
+    position: fixed; /* Fixed position on the left */
+    left: 0; /* Align to the left side of the viewport */
+    top: 0; /* Align to the top of the viewport */
+    display: flex; /* Use flexbox for the alignment */
+    flex-direction: column; /* Stack items vertically */
+    align-items: center; /* Center items horizontally */
+    background-color: #001524; /* Navigation background color */
+    color: white; /* Text color */
+  }
+
+  
+  
+  .Navigation ul {
+    list-style-type: none; /* Remove default list styling */
+    padding: 0;
+    top: 50px; /* Remove default padding */
+    position: fixed;
+  }
+  
+  .Navigation li {
+    padding: 20px; /* Add some padding around each list item */
+  }
+  
+  .Navigation a {
+    color: white; /* Make links white */
+    text-decoration: none; /* Remove underlines from links */
+  }
+  
+  .logo {
+    max-width: 60px; /* Adjust as necessary for your design */
+    height: auto; /* This will maintain the aspect ratio */
+    display: block; /* To prevent inline default space */
+    margin-bottom: 20px; /* Space between logo and the first navigation item */
+    left: 5px;
+    top: 5px;
+    position: fixed;
+  }
+  
+  /* Add this if you want to ensure the logo is not too big on smaller screens */
+  @media (max-width: 768px) {
+    .logo {
+      max-width: 60px; /* Adjust as necessary for your design */
+    }
+    
+    /* Adjust the width of the navigation bar for smaller screens */
+    .Navigation {
+      width: 200px; /* Adjust as necessary for your design */
+    }
+  }
+  
