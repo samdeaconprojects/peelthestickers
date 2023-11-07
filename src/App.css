@@ -28,16 +28,34 @@ body {
   font-size: 96pt;
 }
 
+
+.scramble-text {
+  display: inline-block; /* Add this to allow max-width to work properly */
+  font-size: 24pt;
+  max-width: 70%; /* Adjust this value as needed */
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-align: center;
+  margin: 0 auto;
+}
+
+
 .Scramble {
   position: absolute;
-  top: 20px;
   text-align: center;
   width: 100%;
 }
 
-/* Scramble.css */
-.scramble-text {
-  font-size: 24pt;
+
+select {
+  border: #FDFFFC solid 1px;
+  border-radius: 3px;
+  padding: 3px;
+  width: 80px;
+  background-color: #001524;
+  color: #FDFFFC;
+  margin-top: 20px;
 }
 
 
