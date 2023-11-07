@@ -5,7 +5,7 @@ import Timer from "./components/Timer/Timer";
 import TimeList from "./components/TimeList/TimeList";
 import Scramble from "./components/Scramble/Scramble";
 import Navigation from "./components/Navigation/Navigation";
-import Detail from "./components/Detail";
+import Detail from "./components/Detail/Detail";
 import EmailTester from './components/EmailTester';
 import { randomScrambleForEvent } from "cubing/scramble"; // Make sure to import this
 
@@ -59,6 +59,10 @@ function App() {
     // No need to call generateNewScramble here since it's called by useEffect when currentEvent changes
   };
 
+  const handleCloseDetail = () => {
+    setShowDetail(false);
+  };
+
   return (
     <div className="App">
       <Navigation />
@@ -78,7 +82,7 @@ function App() {
   <EmailTester />
 </div>
 
-      {showDetail && <Detail scramble={scramble} />}
+      {showDetail && <Detail scramble={scramble} currentEvent={currentEvent} onClose={handleCloseDetail} />}
     </div>
   );
 }

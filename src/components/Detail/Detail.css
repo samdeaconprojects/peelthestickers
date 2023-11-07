@@ -1,0 +1,40 @@
+.Detail {
+    display: none;
+    position: fixed;
+    right: 0;
+    top: 0;
+    height: 100vh;
+    /*width: 300px;*/
+    background-color: #001524;
+    padding: 20px;
+    border-left: #FDFFFC solid 2px;
+  }
+  
+  
+  
+  .Detail.active {
+    display: block;
+  }
+  
+
+.close-button {
+    position: absolute;
+    top: 10px; /* Adjust as needed */
+    right: 10px; /* Adjust as needed */
+    padding: 5px 10px;
+    border: #FDFFFC solid 1px;
+    border-radius: 3px;
+    background-color: #001524;
+    color: #FDFFFC;
+    cursor: pointer;
+  }
+  
+  /* Add :hover styles for better user experience */
+  .close-button:hover {
+    background-color: #FDFFFC; /* Darker red on hover */
+    color: #001524;
+}
+
+  .visualization {
+    margin-top: 20px;
+  }
