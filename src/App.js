@@ -20,6 +20,7 @@ function App() {
     '555': [],
     '666': [],
     '777': [],
+    '333OH': [],
     // ... other events if necessary
   });
 
@@ -29,7 +30,11 @@ function App() {
 
   const generateNewScramble = async () => {
     try {
-      const newScramble = await randomScrambleForEvent(currentEvent);
+      var currentEventToScramble = currentEvent
+      if (currentEventToScramble === "333OH") {
+        currentEventToScramble = "333"
+      }
+      const newScramble = await randomScrambleForEvent(currentEventToScramble);
       setScramble(newScramble.toString());
     } catch (error) {
       console.error('Error generating scramble:', error);
@@ -74,6 +79,7 @@ function App() {
           <option value="555">5x5x5</option>
           <option value="666">6x6x6</option>
           <option value="777">7x7x7</option>
+          <option value="333OH">3x3x3 One-Handed</option>
           {/* Add more options for other events as needed */}
         </select>
       <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} />
