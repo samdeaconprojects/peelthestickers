@@ -7,11 +7,21 @@ function Navigation() {
   return (
     <nav className="Navigation">
       <Link to="/">
-          <img src={require('../../assets/logo.png')} alt="Logo" className="logo" />
+          <img src={require('../../assets/PTS.png')} alt="Logo" className="logo" />
       </Link>
       <ul>
-        <li><Link to="/"><i className="social-icon">1</i></Link></li>
-        <li><Link to="/social"><i className="social-icon">2</i></Link></li>
+        <li><Link to="/"><i className="social-icon">
+          <img src={require('../../assets/Profile.png')} alt="Profile" className="profile" />
+        </i></Link></li>
+        <li><Link to="/"><i className="social-icon">
+          <img src={require('../../assets/Stats.png')} alt="Stats" className="stats" />
+        </i></Link></li>
+        <li><Link to="/"><i className="social-icon">
+          <img src={require('../../assets/Social.png')} alt="Social" className="social" />
+        </i></Link></li>
+        <li><Link to="/"><i className="social-icon">
+          <img src={require('../../assets/Settings.png')} alt="Settings" className="settings" />
+        </i></Link></li>
         {/* Add additional navigation options here */}
       </ul>
     </nav>

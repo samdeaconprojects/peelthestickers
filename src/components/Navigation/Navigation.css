@@ -17,7 +17,7 @@
   
   .Navigation ul {
     list-style-type: none; /* Remove default list styling */
-    padding: 0;
+    padding: 20px;
     top: 50px; /* Remove default padding */
     position: fixed;
   }
@@ -32,12 +32,41 @@
   }
   
   .logo {
-    max-width: 60px; /* Adjust as necessary for your design */
+    max-width: 40px; /* Adjust as necessary for your design */
     height: auto; /* This will maintain the aspect ratio */
     display: block; /* To prevent inline default space */
     margin-bottom: 20px; /* Space between logo and the first navigation item */
     left: 15px;
     top: 15px;
+    position: fixed;
+  }
+
+  .profile {
+    max-width: 30px;
+    left: 22px;
+    top: 100px;
+    position: fixed;
+  }
+
+  .stats {
+    max-width: 25px;
+    left: 26px;
+    top: 200px;
+    position: fixed;
+    cursor: pointer;
+  }
+
+  .social {
+    max-width: 30px;
+    left: 25px;
+    top: 300px;
+    position: fixed;
+  }
+
+  .settings {
+    max-width: 30px;
+    left: 26px;
+    top: 400px;
     position: fixed;
   }
   
