@@ -5,7 +5,7 @@
     cursor: pointer; /* Indicates the item is clickable */
     flex: 0 0 calc(100% / 12 - 10px); /* Start with 12 items per row */
     text-align: center; /* Center text within the item */
-    /* Add additional styling here as needed */
+    background-color: #3B4349;
   }
   
   /* For smaller screens, adjust to 5 items per row */

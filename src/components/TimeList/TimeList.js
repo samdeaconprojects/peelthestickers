@@ -17,15 +17,67 @@ function TimeList({ times }) {
       : `${formattedSeconds}.${formattedMilliseconds}`;
   };
 
+  const calculateAverage = (timesArray) => {
+    const sum = timesArray.reduce((a, b) => a + b, 0);
+    return sum / timesArray.length;
+  };
+
+  const calculateAverageOfFive = (times) => {
+    // Take the last 5 solves, or less if there aren't enough
+    const lastFiveSolves = times.slice(-5);
+    if (lastFiveSolves.length === 0) return 'N/A';
+    return calculateAverage(lastFiveSolves);
+  };
+
+  const calculateBestAverageOfFive = (times) => {
+    let bestAvg = Infinity;
+    for (let i = 0; i <= times.length - 5; i++) {
+      const avg = calculateAverage(times.slice(i, i + 5));
+      if (avg < bestAvg) {
+        bestAvg = avg;
+      }
+    }
+    return isFinite(bestAvg) ? bestAvg : 'N/A';
+  };
+
+  const currentAvgOfFive = calculateAverageOfFive(times);
+  const bestAvgOfFive = calculateBestAverageOfFive(times);
+
+  // Create rows with 12 cells each and an extra 13th cell for the average
+  const rows = [];
+  for (let i = 0; i < times.length; i += 12) {
+    const timesRow = times.slice(i, i + 12);
+    rows.push(
+      <tr key={i}>
+        {timesRow.map((time, index) => (
+          <td className="TimeItem" key={index}>{formatTime(time)}</td>
+        ))}
+        {timesRow.length < 12 && // Fill in empty cells if the row is not complete
+          [...Array(12 - timesRow.length)].map((e, index) => (
+            <td className="TimeItem" key={12 + index}>&nbsp;</td>
+          ))
+        }
+        <td className="TimeItem">{formatTime(calculateAverage(timesRow))}</td>
+      </tr>
+    );
+  }
+
   return (
     <div className="time-list-container">
-      <div className="TimeList">
-        {times.map((time, index) => (
-          <div className="TimeItem" key={index}>{formatTime(time)}</div>
-        ))}
+      <div className="averages-display">
+        Current Avg of 5: {formatTime(currentAvgOfFive)}
+        <br />
+        Best Avg of 5: {formatTime(bestAvgOfFive)}
       </div>
+      <table className="TimeList">
+        <tbody>
+          {rows}
+        </tbody>
+      </table>
     </div>
   );
+
 }
+
 
 export default TimeList;

@@ -4,32 +4,56 @@
   justify-content: center;
   align-items: center;
   flex-direction: column;
-  width: 60%;
-  height: 200px;
-  background-color: #3B4349;
   margin-bottom: 50px;
 }
+.averages-display {
+  text-align: left; /* Align the text to the left */
+  color: #fff; /* White text for readability */
+  padding: 10px 0; /* Add some padding above and below the averages */
+ /* Match the width of the TimeList table */
+  box-sizing: border-box; /* Include padding in the width calculation */
+  margin-left: auto; /* Align the container to the center */
+  margin-right: auto; /* Align the container to the center */
+}
+
 
 .TimeList {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr)); /* Creates 12 columns */
-  row-gap: 10px; /* Adjust gap size as needed */
-  width: 50%;
-  height: 175px;
-  overflow-y: scroll;
-  max-width: 1200px; /* Adjust based on your preference */
-  margin-right: 25px;
+  width: 60%; /* Table will fill the container */
+  table-layout: fixed; /* Ensures each column is of equal width */
+  border-collapse: collapse; /* For cleaner border styling */
+}
+
+.TimeList tbody {
+  display: block;
+  height: 180px; /* Height to allow for 5 rows before scrolling */
+  overflow-y: auto; /* Scrollable only vertically */
+}
+
+.TimeList tr {
+  display: table;
+  height: 35px;
+  width: 100%; /* Ensure the row takes up 100% of the table width */
+  table-layout: fixed; /* Inherit fixed layout from table */
+}
+
+.TimeList td {
+  padding: 5px;
+  text-align: center;
+  border: 1px solid #ccc; /* Cell border */
+  background-color: #3B4349; /* Default cell background color */
+  color: white; /* Cell text color */
+}
+
+/* Style for the 13th column */
+.TimeList td:nth-child(13) {
+  background-color: #2EC4B6; /* Different background for the average column */
 }
 
 @media (max-width: 1100px) {
-  .TimeList {
-    grid-template-columns: repeat(5, 1fr); /* Creates 5 columns for smaller screens */
+  /* Adjustments for smaller screens */
+  .time-list-container {
+    width: 100%; /* Full width on smaller screens */
   }
 }
 
-.TimeItem {
-  padding: 5px;
-  cursor: pointer;
-  text-align: center;
-  /* Additional styling as needed */
-}
+/* You can keep your existing .TimeItem styles if you have any */

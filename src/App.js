@@ -85,6 +85,7 @@ function App() {
       <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} />
   <Timer addTime={addSolve} />
   <TimeList times={sessions[currentEvent].map(solve => solve.time)} />
+
 </div>
 
       {showDetail && <Detail scramble={scramble} currentEvent={currentEvent} onClose={handleCloseDetail} />}
