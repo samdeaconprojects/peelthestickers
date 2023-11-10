@@ -1,84 +1,49 @@
 /* navigation.css */
 
 .Navigation {
-    /*height: 100vh;*/ /* Full height of the viewport */
-    width: 70px; /* Width of the navigation bar */
-    position: fixed; /* Fixed position on the left */
-    left: 0; /* Align to the left side of the viewport */
-    top: 0; /* Align to the top of the viewport */
-    display: flex; /* Use flexbox for the alignment */
-    flex-direction: column; /* Stack items vertically */
-    align-items: center; /* Center items horizontally */
-    background-color: #001524; /* Navigation background color */
-    color: white; /* Text color */
-  }
+  /* Full height of the viewport removed */
+  width: 70px; /* Width of the navigation bar */
+  position: fixed; /* Fixed position on the left */
+  left: 0; /* Align to the left side of the viewport */
+  top: 0; /* Align to the top of the viewport */
+  bottom: 0; /* Stretch from top to bottom */
+  display: flex; /* Use flexbox for the alignment */
+  flex-direction: column; /* Stack items vertically */
+  align-items: center; /* Center items horizontally */
+  background-color: transparent; /* Navigation background color */
+  color: white; /* Text color */
+  z-index: 1; /* Ensure it's above other content */
+}
 
-  
-  
-  .Navigation ul {
-    list-style-type: none; /* Remove default list styling */
-    padding: 20px;
-    top: 50px; /* Remove default padding */
-    position: fixed;
-  }
-  
-  .Navigation li {
-    padding: 20px; /* Add some padding around each list item */
-  }
-  
-  .Navigation a {
-    color: white; /* Make links white */
-    text-decoration: none; /* Remove underlines from links */
-  }
-  
-  .logo {
-    max-width: 40px; /* Adjust as necessary for your design */
-    height: auto; /* This will maintain the aspect ratio */
-    display: block; /* To prevent inline default space */
-    margin-bottom: 20px; /* Space between logo and the first navigation item */
-    left: 15px;
-    top: 15px;
-    position: fixed;
-  }
+.Navigation ul {
+  list-style-type: none; /* Remove default list styling */
+  padding: 0; /* Remove default padding */
+  margin-top: 70px; /* Space from top including logo */
+  width: 100%; /* Full width of the Navigation bar */
+}
 
-  .profile {
-    max-width: 30px;
-    left: 22px;
-    top: 100px;
-    position: fixed;
-  }
+.Navigation li {
+  padding: 20px; /* Add some padding around each list item */
+}
 
-  .stats {
-    max-width: 25px;
-    left: 26px;
-    top: 200px;
-    position: fixed;
-    cursor: pointer;
-  }
+.Navigation a {
+  color: white; /* Make links white */
+  text-decoration: none; /* Remove underlines from links */
+}
 
-  .social {
-    max-width: 30px;
-    left: 25px;
-    top: 300px;
-    position: fixed;
-  }
+.logo {
+  max-width: 40px; /* Adjust as necessary for your design */
+  height: auto; /* This will maintain the aspect ratio */
+  display: block; /* To prevent inline default space */
+  margin-top: 15px; /* Space from the top */
+  margin-bottom: 20px; /* Space between logo and the first navigation item */
+}
 
-  .settings {
-    max-width: 30px;
-    left: 26px;
-    top: 400px;
-    position: fixed;
-  }
-  
-  /* Add this if you want to ensure the logo is not too big on smaller screens */
-  @media (max-width: 768px) {
-    .logo {
-      max-width: 60px; /* Adjust as necessary for your design */
-    }
-    
-    /* Adjust the width of the navigation bar for smaller screens */
-    .Navigation {
-      width: 200px; /* Adjust as necessary for your design */
-    }
-  }
-  
+/* Icons should inherit position from the ul */
+.profile, .stats, .social, .settings {
+  max-width: 30px;
+  display: block; /* To prevent inline default space */
+  margin: 10px 0; /* Spacing between icons */
+  cursor: pointer;
+}
+

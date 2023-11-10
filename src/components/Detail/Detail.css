@@ -3,11 +3,15 @@
     position: fixed;
     right: 0;
     top: 0;
-    height: 100vh;
+    height: 300px;
     /*width: 300px;*/
-    background-color: #001524;
+    background-color: #121212;
     padding: 20px;
-    border-left: #FDFFFC solid 2px;
+    border-left: #FFB044 solid 2px;
+    border-right: #FFB044 solid 2px;
+    border-top: #FB596D solid 2px;
+    border-bottom: #FB596D solid 2px;
+    border-radius: 2px;
   }
   
   

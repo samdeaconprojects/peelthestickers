@@ -8,52 +8,59 @@
 }
 .averages-display {
   text-align: left; /* Align the text to the left */
-  color: #fff; /* White text for readability */
+  color: #FDFFFC; /* White text for readability */
   padding: 10px 0; /* Add some padding above and below the averages */
  /* Match the width of the TimeList table */
   box-sizing: border-box; /* Include padding in the width calculation */
-  margin-left: auto; /* Align the container to the center */
-  margin-right: auto; /* Align the container to the center */
+  margin-right: 40%; /* Align the container to the center */
+  font-family: 'Jost', sans-serif;
+  font-weight: bold;
 }
 
+.highlight {
+  background-color: #ffff99; /* Or any highlight color you prefer */
+}
 
 .TimeList {
-  width: 60%; /* Table will fill the container */
-  table-layout: fixed; /* Ensures each column is of equal width */
-  border-collapse: collapse; /* For cleaner border styling */
+  width: 100%; /* Adjust the width as necessary */
+  max-width: 1000px; /* Set a maximum width */
+  table-layout: fixed;
+  border-collapse: collapse;
 }
 
 .TimeList tbody {
   display: block;
-  height: 180px; /* Height to allow for 5 rows before scrolling */
-  overflow-y: auto; /* Scrollable only vertically */
+  height: 180px;
+  overflow-y: auto;
 }
 
 .TimeList tr {
-  display: table;
-  height: 35px;
-  width: 100%; /* Ensure the row takes up 100% of the table width */
-  table-layout: fixed; /* Inherit fixed layout from table */
+  display: grid;
+  grid-template-columns: repeat(12, 1fr) auto; /* 12 columns for solves + 1 for average */
+  width: 100%;
 }
 
 .TimeList td {
   padding: 5px;
   text-align: center;
-  border: 1px solid #ccc; /* Cell border */
-  background-color: #3B4349; /* Default cell background color */
-  color: white; /* Cell text color */
+  border: 1px solid #ccc;
 }
 
-/* Style for the 13th column */
 .TimeList td:nth-child(13) {
   background-color: #2EC4B6; /* Different background for the average column */
 }
 
+/* For smaller screens */
 @media (max-width: 1100px) {
-  /* Adjustments for smaller screens */
-  .time-list-container {
-    width: 100%; /* Full width on smaller screens */
+  .TimeList tr {
+    grid-template-columns: repeat(5, 1fr) auto; /* 5 columns for solves + 1 for average */
+  }
+
+  .TimeList {
+    width: 600px;
+  }
+
+  .TimeList td:nth-child(6) {
+    background-color: #2EC4B6; /* Different background for the average column */
   }
 }
-
-/* You can keep your existing .TimeItem styles if you have any */

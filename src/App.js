@@ -13,6 +13,7 @@ function App() {
   const [currentEvent, setCurrentEvent] = useState('333');
   const [scramble, setScramble] = useState('');
   const [showDetail, setShowDetail] = useState(false);
+  const [isMusicPlayerMode, setIsMusicPlayerMode] = useState(false); // New state for toggling the layout
   const [sessions, setSessions] = useState({
     '222': [],
     '333': [],
@@ -68,10 +69,21 @@ function App() {
     setShowDetail(false);
   };
 
+  const toggleMusicPlayerMode = () => {
+    setIsMusicPlayerMode(!isMusicPlayerMode); // Toggle the layout mode
+  };
+
+  const resetToDefaultLayout = () => {
+    setIsMusicPlayerMode(false);
+  };
+
   return (
-    <div className="App">
-      <Navigation />
-      <div className="main-content">
+    <div className={`App ${isMusicPlayerMode ? 'music-player-mode' : ''}`}>
+      <Navigation 
+        onNavClick={toggleMusicPlayerMode}
+        onMainLogoClick={resetToDefaultLayout}
+      />
+      <div className={`main-content ${isMusicPlayerMode ? 'hide-content' : ''}`}>
         <select onChange={handleEventChange} value={currentEvent}>
           <option value="222">2x2</option>
           <option value="333">3x3</option>
@@ -82,15 +94,27 @@ function App() {
           <option value="333OH">3x3 One-Handed</option>
           {/* Add more options for other events as needed */}
         </select>
-      <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} />
-  <Timer addTime={addSolve} />
-  <TimeList times={sessions[currentEvent].map(solve => solve.time)} />
+        {!isMusicPlayerMode && (
+          <>
+            <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} />
+            <Timer addTime={addSolve} />
+            <TimeList times={sessions[currentEvent].map(solve => solve.time)} />
 
-</div>
-
+          </>
+        )}
+      </div>
       {showDetail && <Detail scramble={scramble} currentEvent={currentEvent} onClose={handleCloseDetail} />}
+      {isMusicPlayerMode && (
+        <div className="player">
+          <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} />
+          <Timer addTime={addSolve} />
+          <TimeList times={sessions[currentEvent].map(solve => solve.time)} />
+        </div>
+      )}
     </div>
   );
+  
+  
 }
 
 export default App;

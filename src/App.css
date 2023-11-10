@@ -55,6 +55,7 @@ select {
   background-color: #001524;
   color: #FDFFFC;
   margin-top: 20px;
+  margin-bottom: 10px;
 }
 
 .TimeList {
@@ -64,3 +65,60 @@ select {
   width: 100%;
 }
 
+.music-player-mode .content {
+  /* Your styles for the new page content above the player */
+}
+
+.music-player-mode .player {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-left: 80px;
+  padding-right: 80px;
+  padding-bottom: 15px;
+  position: absolute;
+  bottom: 0px;
+  left: 0;
+  right: 0;
+  background-color: #121212;
+  border-left: #50B6FF solid 2px;
+  border-right: #50B6FF solid 2px;
+  border-top: #2EC4B6 solid 2px;
+  border-bottom: #2EC4B6 solid 2px;
+  border-radius: 2px;
+  height: 15%;
+  z-index: 2;
+}
+
+.music-player-mode .Timer {
+  font-size: 72pt; /* Adjust as needed */
+  /* Add any additional positioning styles if needed */
+}
+
+.music-player-mode .scramble-text {
+  font-size: 20pt; /* Adjust font size */
+  max-width: 70%; /* Adjust width as needed */
+  /* Update positioning if needed */
+  bottom: 230px;
+  left: 50%; /* Center horizontally */
+  transform: translateX(-50%); /* Center align */
+}
+
+.music-player-mode .TimeList {
+  width: 60%; /* Adjust width as needed */
+  /* Add any additional styles for TimeList in music player mode */
+}
+
+.music-player-mode .time-list-container {
+  margin-top: 90px; /* Adjust top margin */
+  /* Add any additional styles for time list container in music player mode */
+}
+
+/* Ensure the table and its content adjust correctly */
+.music-player-mode .TimeList table {
+  width: 100%; /* Table width should be 100% of TimeList width */
+}
+
+.music-player-mode .TimeList td {
+  /* Adjust table cell styles if needed */
+}

@@ -1,8 +1,21 @@
 // TimeList.js
-import React from 'react';
-import './TimeList.css'; // Ensure this is the correct path to your CSS file
+import React, { useState, useEffect } from 'react';
+import './TimeList.css';
 
 function TimeList({ times }) {
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setWindowWidth(window.innerWidth);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
   const formatTime = (milliseconds) => {
     let totalSeconds = Math.floor(milliseconds / 1000);
     let minutes = Math.floor(totalSeconds / 60);
@@ -23,7 +36,6 @@ function TimeList({ times }) {
   };
 
   const calculateAverageOfFive = (times) => {
-    // Take the last 5 solves, or less if there aren't enough
     const lastFiveSolves = times.slice(-5);
     if (lastFiveSolves.length === 0) return 'N/A';
     return calculateAverage(lastFiveSolves);
@@ -43,20 +55,20 @@ function TimeList({ times }) {
   const currentAvgOfFive = calculateAverageOfFive(times);
   const bestAvgOfFive = calculateBestAverageOfFive(times);
 
-  // Create rows with 12 cells each and an extra 13th cell for the average
+  // Determine the number of columns per row based on window width
+  const colsPerRow = windowWidth > 1100 ? 12 : 5; 
+
   const rows = [];
-  for (let i = 0; i < times.length; i += 12) {
-    const timesRow = times.slice(i, i + 12);
+  for (let i = 0; i < times.length; i += colsPerRow) {
+    const timesRow = times.slice(i, i + colsPerRow);
     rows.push(
       <tr key={i}>
         {timesRow.map((time, index) => (
           <td className="TimeItem" key={index}>{formatTime(time)}</td>
         ))}
-        {timesRow.length < 12 && // Fill in empty cells if the row is not complete
-          [...Array(12 - timesRow.length)].map((e, index) => (
-            <td className="TimeItem" key={12 + index}>&nbsp;</td>
-          ))
-        }
+        {timesRow.length < colsPerRow && [...Array(colsPerRow - timesRow.length)].map((e, index) => (
+          <td className="TimeItem" key={colsPerRow + index}>&nbsp;</td>
+        ))}
         <td className="TimeItem">{formatTime(calculateAverage(timesRow))}</td>
       </tr>
     );
@@ -76,8 +88,6 @@ function TimeList({ times }) {
       </table>
     </div>
   );
-
 }
-
 
 export default TimeList;
