@@ -30,8 +30,7 @@
 
 .TimeList tbody {
   display: block;
-  height: 180px;
-  overflow-y: auto;
+  overflow-y: scroll;
 }
 
 .TimeList tr {
@@ -43,7 +42,9 @@
 .TimeList td {
   padding: 5px;
   text-align: center;
-  border: 1px solid #ccc;
+  border: 1px solid #50B6FF;
+  border-radius: 5px;
+  margin: 3px;
 }
 
 .TimeList td:nth-child(13) {

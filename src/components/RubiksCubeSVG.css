@@ -1,0 +1,32 @@
+.cube {
+    position: relative;
+    top: 200px;
+  }
+  
+  .face {
+    position: absolute;
+    width: 33px; /* Adjust based on your SVG size */
+    height: 33px; /* Adjust based on your SVG size */
+  }
+  
+  .topFace, .leftFace, .rightFace svg {
+    width: 30px;
+    height: 30px;
+  }
+  
+  .leftFace {
+    transform: skewY(30deg);
+  }
+  
+  .rightFace {
+    transform: skewY(-30deg) scaleY(1.10);
+    top: 1px;
+    left: 33px;
+  }
+  
+  .topFace {
+    transform: rotate(60deg) skewY(-30deg) scaleY(1.10);
+    top: -26px;
+    left: 16px;
+  }
+  

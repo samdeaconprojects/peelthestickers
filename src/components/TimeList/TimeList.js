@@ -31,7 +31,25 @@ function TimeList({ times }) {
   };
 
   const calculateAverage = (timesArray) => {
+    console.log(timesArray);
+    let min = 0;
+    let max = 0;
+    
+    for (let i = 1; i < 5; i++) {
+      if (times[i] < min) {
+        min = i;
+      }
+      if (times[i] > max) {
+        max = i;
+      }
+    }
+  timesArray.splice(min,1);
+  timesArray.splice(max,1);
+
+  //console.log(timesArray);
+
     const sum = timesArray.reduce((a, b) => a + b, 0);
+    //console.log(sum / timesArray.length);
     return sum / timesArray.length;
   };
 

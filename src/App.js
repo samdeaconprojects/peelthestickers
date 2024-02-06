@@ -6,6 +6,7 @@ import TimeList from "./components/TimeList/TimeList";
 import Scramble from "./components/Scramble/Scramble";
 import Navigation from "./components/Navigation/Navigation";
 import Detail from "./components/Detail/Detail";
+import RubiksCubeSVG from "./components/RubiksCubeSVG";
 import EmailTester from './components/EmailTester';
 import { randomScrambleForEvent } from "cubing/scramble"; // Make sure to import this
 
@@ -22,11 +23,10 @@ function App() {
     '666': [],
     '777': [],
     '333OH': [],
-    // ... other events if necessary
   });
 
   useEffect(() => {
-    generateNewScramble(); // Generate an initial scramble when the app loads
+    setScramble(generateScramble()); // Generate an initial scramble when the app loads
   }, [currentEvent]); // Also regenerate when the current event changes
 
   const generateNewScramble = async () => {
@@ -41,6 +41,99 @@ function App() {
       console.error('Error generating scramble:', error);
     }
   };
+
+  function getRandomInt(min, max) {
+    min = Math.ceil(min);
+    max = Math.floor(max);
+    return Math.floor(Math.random() * (max - min)) + min; // max is exclusive
+  }
+  
+  function generateScramble() {
+    let n;
+    var currentEventToScramble = currentEvent
+    switch (currentEvent) {
+      case '222':
+        n = 2;
+        break;
+      case '333':
+        n = 3;
+        break;
+      case '444':
+        n = 4;
+        break;
+      case '555':
+        n = 5;
+        break;
+      case '666':
+        n = 6;
+        break;
+      case '777':
+        n = 7;
+        break;
+      default:
+        n = 3; // Default to 3x3 if currentEvent is not recognized
+    }
+
+    console.log("n: " + n);
+  
+    let faceArray = ["U", "D", "R", "L", "B", "F"];
+    const modArray = ["'", "", "2"];
+    const nudgeArray = [-1, 0, 1];
+    let moves;
+  
+    if (n === 2) {
+      moves = 10;
+      faceArray = ["U", "R", "F"];
+    } else if (n === 4) {
+      moves = 45;
+    } else {
+      moves = (n - 2) * 20;
+    }
+  
+    moves += nudgeArray[getRandomInt(0, nudgeArray.length)];
+    let randomScramble = "";
+    let faceTemp = "";
+  
+    for (let i = 0; i < moves; i++) {
+      let move = "";
+      const layers = n > 3 ? getRandomInt(1, Math.floor(n / 2) + 1) : 1;
+  
+      if (layers === 1) {
+        const faceIndex = getRandomInt(0, faceArray.length);
+        if (i > 0) {
+          faceArray.push(faceTemp);
+        }
+        move += faceArray[faceIndex];
+        faceTemp = faceArray[faceIndex];
+        faceArray.splice(faceIndex, 1);
+      } else {
+        if (layers > 2) {
+          move += String(layers);
+        }
+  
+        const faceIndex = getRandomInt(0, faceArray.length);
+        if (i > 0) {
+          faceArray.push(faceTemp);
+        }
+        move += faceArray[faceIndex];
+        faceTemp = faceArray[faceIndex];
+        faceArray.splice(faceIndex, 1);
+  
+        if (layers > 1) {
+          move += "w";
+        }
+      }
+  
+      move += modArray[getRandomInt(0, modArray.length)];
+      randomScramble += move + " ";
+    }
+  
+    console.log("Moves:", moves);
+    console.log("Scramble:", randomScramble);
+    return randomScramble;
+  }
+  
+  
 
   const handleScrambleClick = () => {
     setShowDetail(true);
@@ -57,7 +150,7 @@ function App() {
       [currentEvent]: [...prevSessions[currentEvent], newSolve]
     }));
     setShowDetail(false); // Optionally hide detail when new time is added
-    generateNewScramble(); // Generate a new scramble after adding the solve
+    setScramble(generateScramble()); // Generate a new scramble after adding the solve
   };
 
   const handleEventChange = (event) => {
@@ -94,6 +187,7 @@ function App() {
           <option value="333OH">3x3 One-Handed</option>
           {/* Add more options for other events as needed */}
         </select>
+        <RubiksCubeSVG n={3} scramble={['red', 'green', 'blue']} />
         {!isMusicPlayerMode && (
           <>
             <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} />
@@ -106,8 +200,8 @@ function App() {
       {showDetail && <Detail scramble={scramble} currentEvent={currentEvent} onClose={handleCloseDetail} />}
       {isMusicPlayerMode && (
         <div className="player">
-          <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} />
           <Timer addTime={addSolve} />
+          <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} />
           <TimeList times={sessions[currentEvent].map(solve => solve.time)} />
         </div>
       )}
