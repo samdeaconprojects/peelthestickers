@@ -31,7 +31,7 @@ function TimeList({ times }) {
   };
 
   const calculateAverage = (timesArray) => {
-    console.log(timesArray);
+    console.log("calculateAverage: " + timesArray);
     let min = 0;
     let max = 0;
     
@@ -46,15 +46,17 @@ function TimeList({ times }) {
   timesArray.splice(min,1);
   timesArray.splice(max,1);
 
-  //console.log(timesArray);
+  console.log("after splice: " + timesArray);
 
     const sum = timesArray.reduce((a, b) => a + b, 0);
-    //console.log(sum / timesArray.length);
+    console.log("sum / timesarray");
+    console.log(sum / timesArray.length);
     return sum / timesArray.length;
   };
 
   const calculateAverageOfFive = (times) => {
     const lastFiveSolves = times.slice(-5);
+    console.log("calculate average of five, last five solves: " + lastFiveSolves);
     if (lastFiveSolves.length === 0) return 'N/A';
     return calculateAverage(lastFiveSolves);
   };

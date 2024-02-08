@@ -29,9 +29,21 @@ body {
 }
 
 .RubiksCubeSVG {
-  width: 100%;
-  max-width: 800px; /* Adjust as needed */
+  position: fixed;
+  bottom: 50px;
   height: auto; /* Maintain aspect ratio */
+}
+
+.scramble-select-container {
+  display: flex; /* This will layout its children in a row */
+  align-items: center; /* This will vertically center-align the children */
+  justify-content: center; /* This aligns children to the start of the container */
+  padding: 20px; /* Add some padding around */
+  margin-right: 25px;
+}
+
+.event-select {
+  margin-right: 80px; /* Add some space between the select and the SVG */
 }
 
 
@@ -121,3 +133,5 @@ select {
 .music-player-mode .TimeList td {
   /* Adjust table cell styles if needed */
 }
+
+

@@ -1,6 +1,7 @@
 .cube {
     position: relative;
-    top: 200px;
+    top: 10px;
+    scale: 50%;
   }
   
   .face {
@@ -10,8 +11,9 @@
   }
   
   .topFace, .leftFace, .rightFace svg {
-    width: 30px;
-    height: 30px;
+    width: 100px;
+    height: 100px;
+    
   }
   
   .leftFace {
@@ -19,14 +21,12 @@
   }
   
   .rightFace {
-    transform: skewY(-30deg) scaleY(1.10);
-    top: 1px;
-    left: 33px;
+    transform: skewY(-30deg) scaleY(1) scaleX(.93); /*7: Y 1.0 x .95*/
+  
   }
   
   .topFace {
     transform: rotate(60deg) skewY(-30deg) scaleY(1.10);
-    top: -26px;
-    left: 16px;
+    
   }
   

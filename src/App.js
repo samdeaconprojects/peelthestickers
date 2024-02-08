@@ -177,7 +177,8 @@ function App() {
         onMainLogoClick={resetToDefaultLayout}
       />
       <div className={`main-content ${isMusicPlayerMode ? 'hide-content' : ''}`}>
-        <select onChange={handleEventChange} value={currentEvent}>
+        <div className="scramble-select-container">
+        <select onChange={handleEventChange} value={currentEvent} className="event-select">
           <option value="222">2x2</option>
           <option value="333">3x3</option>
           <option value="444">4x4</option>
@@ -187,7 +188,8 @@ function App() {
           <option value="333OH">3x3 One-Handed</option>
           {/* Add more options for other events as needed */}
         </select>
-        <RubiksCubeSVG n={3} scramble={['red', 'green', 'blue']} />
+        <RubiksCubeSVG n={currentEvent} scramble={['red', 'green', 'blue', 'orange', 'yellow', 'white']} />
+        </div>
         {!isMusicPlayerMode && (
           <>
             <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} />
