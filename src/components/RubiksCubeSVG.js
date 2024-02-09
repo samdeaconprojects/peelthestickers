@@ -1,7 +1,8 @@
 import React from 'react';
 import './RubiksCubeSVG.css';
 
-const RubiksCubeSVG = ({ n, scramble }) => {
+const RubiksCubeSVG = ({ n, faces }) => {
+  console.log(faces);
   switch (n) {
     case '222':
       n = 2;
@@ -26,7 +27,7 @@ const RubiksCubeSVG = ({ n, scramble }) => {
   }
   let size = 10; // Size of each sticker
   let gap = 1;   // Gap between stickers
-  const faceSize = n * size + (n - 1) * gap; // Calculate the total size of a face
+  let cubeScale =  50;
 
   let topFaceTop = 0;
   let topFaceLeft = 0;
@@ -38,6 +39,8 @@ const RubiksCubeSVG = ({ n, scramble }) => {
     case 2:
       size = 20;
       gap = 2;
+      cubeScale = 60;
+
       topFaceTop = -48;
       topFaceLeft = -7;
 
@@ -88,14 +91,16 @@ const RubiksCubeSVG = ({ n, scramble }) => {
       rightFaceTop = 6;
       rightFaceLeft = 76;
       break;
+    default:
+      break;
   }
 
-  const drawFace = (n) => {
+  const drawFace = (n, currFace) => { //currFace, 0 - top, 1 - left, 2 - right (+= n / 2 for back sides?)
     const stickers = [];
     let stickerColor = "";
     for (let row = 0; row < n; row++) {
       for (let col = 0; col < n; col++) {
-        switch (scramble[row]) {
+        switch (faces[currFace][row][col]) {
           case "yellow":
             stickerColor = "#FFF629";
             break;
@@ -114,7 +119,8 @@ const RubiksCubeSVG = ({ n, scramble }) => {
           case "green":
             stickerColor = "#12EA68";
             break;  
-
+          default:
+            break;
         }
         
         stickers.push(
@@ -135,15 +141,15 @@ const RubiksCubeSVG = ({ n, scramble }) => {
   };
 
   return (
-    <div className="cube" style={{ '--face-size': `${faceSize}px` }}>
+    <div className="cube" style={{ 'scale': `${cubeScale}%` }}>
       <div className="face topFace" style={{ 'top': `${topFaceTop}px`, 'left': `${topFaceLeft}px` }}>
-        <svg>{drawFace(n)}</svg>
+        <svg>{drawFace(n, 0)}</svg>
       </div>
       <div className="face leftFace">
-        <svg>{drawFace(n)}</svg>
+        <svg>{drawFace(n, 1)}</svg>
       </div>
       <div className="face rightFace" style={{ 'top': `${rightFaceTop}px`, 'left': `${rightFaceLeft}px` }}>
-        <svg>{drawFace(n)}</svg>
+        <svg>{drawFace(n, 2)}</svg>
       </div>
     </div>
   );
