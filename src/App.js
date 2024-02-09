@@ -541,11 +541,12 @@ function App() {
           <option value="333OH">3x3 One-Handed</option>
           {/* Add more options for other events as needed */}
         </select>
+        <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} />
+
         <RubiksCubeSVG n={currentEvent} faces={getScrambledFaces(scramble)} />
         </div>
         {!isMusicPlayerMode && (
           <>
-            <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} />
             <Timer addTime={addSolve} />
             <TimeList times={sessions[currentEvent].map(solve => solve.time)} />
 
@@ -556,7 +557,6 @@ function App() {
       {isMusicPlayerMode && (
         <div className="player">
           <Timer addTime={addSolve} />
-          <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} />
           <TimeList times={sessions[currentEvent].map(solve => solve.time)} />
         </div>
       )}

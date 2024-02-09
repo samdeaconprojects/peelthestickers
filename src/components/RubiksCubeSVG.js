@@ -27,7 +27,7 @@ const RubiksCubeSVG = ({ n, faces }) => {
   }
   let size = 10; // Size of each sticker
   let gap = 1;   // Gap between stickers
-  let cubeScale =  50;
+  let cubeScale =  60;
 
   let topFaceTop = 0;
   let topFaceLeft = 0;
@@ -39,7 +39,7 @@ const RubiksCubeSVG = ({ n, faces }) => {
     case 2:
       size = 20;
       gap = 2;
-      cubeScale = 60;
+      cubeScale = 70;
 
       topFaceTop = -48;
       topFaceLeft = -7;
@@ -50,6 +50,7 @@ const RubiksCubeSVG = ({ n, faces }) => {
     case 3:
       size = 20;
       gap = 2;
+
       topFaceTop = -60;
       topFaceLeft = 14;
 
@@ -59,6 +60,7 @@ const RubiksCubeSVG = ({ n, faces }) => {
     case 4:
       size = 16;
       gap = 2;
+
       topFaceTop = -63;
       topFaceLeft = 20;
   
@@ -68,6 +70,8 @@ const RubiksCubeSVG = ({ n, faces }) => {
     case 5:
       size = 15;
       gap = 2;
+      cubeScale = 50;
+
       topFaceTop = -70;
       topFaceLeft = 32;
   
@@ -102,16 +106,16 @@ const RubiksCubeSVG = ({ n, faces }) => {
       for (let col = 0; col < n; col++) {
         switch (faces[currFace][row][col]) {
           case "yellow":
-            stickerColor = "#FFF629";
+            stickerColor = "#FFFF00";
             break;
           case "white":
             stickerColor = "#FDFFFC";
             break;
           case "red":
-            stickerColor = "#FB596D";
+            stickerColor = "#F64258";
             break;
           case "orange":
-            stickerColor = "#FFA529";
+            stickerColor = "#FF8F0C";
             break;
           case "blue":
             stickerColor = "#50B6FF";
