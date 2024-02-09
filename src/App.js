@@ -23,6 +23,7 @@ function App() {
     '666': [],
     '777': [],
     '333OH': [],
+    '333BLD': [],
   });
 
   useEffect(() => {
@@ -56,6 +57,8 @@ function App() {
         n = 2;
         break;
       case '333':
+      case '333OH':
+      case '333BLD':
         n = 3;
         break;
       case '444':
@@ -142,6 +145,8 @@ function App() {
         n = 2;
         break;
       case '333':
+      case '333OH':
+      case '333BLD':
         n = 3;
         break;
       case '444':
@@ -539,9 +544,10 @@ function App() {
           <option value="666">6x6</option>
           <option value="777">7x7</option>
           <option value="333OH">3x3 One-Handed</option>
+          <option value="333BLD">3x3 Blindfolded</option>
           {/* Add more options for other events as needed */}
         </select>
-        <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} />
+        <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} currentEvent={currentEvent} />
 
         <RubiksCubeSVG n={currentEvent} faces={getScrambledFaces(scramble)} />
         </div>
