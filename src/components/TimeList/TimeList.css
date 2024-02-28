@@ -51,6 +51,8 @@
   background-color: #2EC4B6; /* Different background for the average column */
 }
 
+
+
 /* For smaller screens */
 @media (max-width: 1100px) {
   .TimeList tr {

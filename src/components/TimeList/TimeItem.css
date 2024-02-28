@@ -6,6 +6,55 @@
     flex: 0 0 calc(100% / 12 - 10px); /* Start with 12 items per row */
     text-align: center; /* Center text within the item */
     background-color: #3B4349;
+    
+  }
+
+  .TimeItem {
+    opacity: 50%;
+  }
+
+  .dashed-border-max {
+    border: 2px dashed #FF0000 !important; /* Example: orange dashed border */
+  }
+
+  .dashed-border-min {
+    border: 2px dashed #00FF00 !important; /* Example: orange dashed border */
+  }
+
+  .overall-border-max {
+    border: 2px solid #FF0000 !important; /* Example: orange dashed border */
+  }
+
+  .overall-border-min {
+    border: 2px solid #00FF00 !important; /* Example: orange dashed border */
+  }
+  
+  .current-five {
+    opacity: 100%;
+  }
+
+  .fastest {
+    border: 2px dashed #00FF00 !important;
+  }
+
+  .faster {
+    border: 2px solid #9ACD32 !important;
+  }
+
+  .middle-fast {
+    border: 2px solid #FFFF00 !important; 
+  }
+
+  .slower {
+    border: 2px solid #FFA500 !important; 
+  }
+
+  .slowest {
+    border: 2px dashed #FF0000 !important;
+  }
+  
+  .not-current-five {
+    opacity: 50%;
   }
   
   /* For smaller screens, adjust to 5 items per row */

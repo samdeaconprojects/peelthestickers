@@ -543,8 +543,8 @@ function App() {
           <option value="555">5x5</option>
           <option value="666">6x6</option>
           <option value="777">7x7</option>
-          <option value="333OH">3x3 One-Handed</option>
-          <option value="333BLD">3x3 Blindfolded</option>
+          <option value="333OH">3x3 OH</option>
+          <option value="333BLD">3x3 BLD</option>
           {/* Add more options for other events as needed */}
         </select>
         <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} currentEvent={currentEvent} />

@@ -27,7 +27,7 @@ const RubiksCubeSVG = ({ n, faces }) => {
   }
   let size = 10; // Size of each sticker
   let gap = 1;   // Gap between stickers
-  let cubeScale =  60;
+  let cubeScale =  90;
 
   let topFaceTop = 0;
   let topFaceLeft = 0;
@@ -39,7 +39,7 @@ const RubiksCubeSVG = ({ n, faces }) => {
     case 2:
       size = 20;
       gap = 2;
-      cubeScale = 70;
+      cubeScale = 100;
 
       topFaceTop = -48;
       topFaceLeft = -7;
@@ -70,7 +70,7 @@ const RubiksCubeSVG = ({ n, faces }) => {
     case 5:
       size = 15;
       gap = 2;
-      cubeScale = 50;
+      cubeScale = 80;
 
       topFaceTop = -70;
       topFaceLeft = 32;
@@ -109,7 +109,7 @@ const RubiksCubeSVG = ({ n, faces }) => {
             stickerColor = "#FFFF00";
             break;
           case "white":
-            stickerColor = "#FDFFFC";
+            stickerColor = "#FFFFFF";
             break;
           case "red":
             stickerColor = "#F64258";

@@ -30,13 +30,15 @@ body {
 
 .cube {
   position: fixed;
-  right: 110px;
-  top: 60px;
+  right: 160px;
+  top: 80px;
 }
 
 .event-select {
   margin-right: 0px; /* Add some space between the select and the SVG */
   position: fixed;
+  font-weight: 500;
+  font-size: 16pt;
   left: 100px;
   top: 6px;
 }
@@ -50,14 +52,15 @@ body {
   overflow-wrap: break-word;
   text-align: center;
   margin: 0 auto;
-  margin-top: 20px;
+  margin-top: 50px;
 }
 
 select {
   border: #FDFFFC solid 1px;
   border-radius: 3px;
   padding: 3px;
-  width: 140px;
+  width: 100px;
+  height: 35px;
   background-color: #001524;
   color: #FDFFFC;
   margin-top: 20px;
