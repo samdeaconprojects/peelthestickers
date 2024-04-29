@@ -82,7 +82,7 @@ function Timer({ addTime }) {
 
     let formattedTime = minutes > 0
       ? `${minutes}:${formattedSeconds}.${formattedMilliseconds}`
-      : `${formattedSeconds}.${formattedMilliseconds}`;
+      : `${seconds}.${formattedMilliseconds}`;
 
     return formattedTime;
   };

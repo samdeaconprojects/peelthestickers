@@ -34,6 +34,12 @@ body {
   top: 80px;
 }
 
+.music-player-mode .cube {
+  top: 90%;
+  right: 100px;
+  z-index: 3;
+}
+
 .event-select {
   margin-right: 0px; /* Add some space between the select and the SVG */
   position: fixed;
@@ -41,6 +47,13 @@ body {
   font-size: 16pt;
   left: 100px;
   top: 6px;
+}
+
+.music-player-mode .event-select {
+  top: 85%;
+  left: 250px;
+  z-index: 3;
+  background-color: #121212;
 }
 
 .scramble-text {
@@ -88,7 +101,7 @@ select {
   left: 0;
   right: 0;
   background-color: #121212;
-  border-top: 1px solid #ccc;
+  border-top: 1px solid yellow;
   height: 15%;
   z-index: 2;
 }
@@ -100,15 +113,18 @@ select {
 }
 
 .music-player-mode .scramble-text {
-  font-size: 12pt; /* Adjust font size */
+  font-size: 8pt; /* Adjust font size */
   max-width: 100%; /* Adjust width as needed */
   /* Update positioning if needed */
-  bottom: 230px;
+  top: 79%;
+  position: fixed;
+  z-index: 3;
 }
 
 .music-player-mode .TimeList {
   width: 100%; /* Adjust width as needed */
   /* Add any additional styles for TimeList in music player mode */
+  margin-right: 50px;
 }
 
 .music-player-mode .time-list-container {
@@ -125,4 +141,7 @@ select {
   /* Adjust table cell styles if needed */
 }
 
+.Page {
+  margin-left: 100px;
+}
 

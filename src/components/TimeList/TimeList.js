@@ -30,7 +30,7 @@ function TimeList({ times }) {
 
     let formattedTime = minutes > 0
       ? `${minutes}:${formattedSeconds}.${formattedMilliseconds}`
-      : `${formattedSeconds}.${formattedMilliseconds}`;
+      : `${seconds}.${formattedMilliseconds}`;
 
     return formattedTime;
   };

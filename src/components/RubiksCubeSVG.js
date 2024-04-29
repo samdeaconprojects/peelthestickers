@@ -1,7 +1,7 @@
 import React from 'react';
 import './RubiksCubeSVG.css';
 
-const RubiksCubeSVG = ({ n, faces }) => {
+const RubiksCubeSVG = ({ n, faces, isMusicPlayer }) => {
   console.log(faces);
   switch (n) {
     case '222':
@@ -97,6 +97,10 @@ const RubiksCubeSVG = ({ n, faces }) => {
       break;
     default:
       break;
+  }
+
+  if (isMusicPlayer) {
+    cubeScale = cubeScale / 2;
   }
 
   const drawFace = (n, currFace) => { //currFace, 0 - top, 1 - left, 2 - right (+= n / 2 for back sides?)
