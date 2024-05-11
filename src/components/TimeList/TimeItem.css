@@ -5,9 +5,45 @@
     cursor: pointer; /* Indicates the item is clickable */
     flex: 0 0 calc(100% / 12 - 10px); /* Start with 12 items per row */
     text-align: center; /* Center text within the item */
-    background-color: #3B4349;
+    background-color: transparent;
     
   }
+
+  /* TimeItem.css */
+.time-item {
+  position: relative;
+  
+  
+  display: inline-block;
+}
+
+.TimeItem {
+  position: relative; /* Needed to position the delete button absolutely */
+  padding: 5px; /* Adjust padding as needed */
+}
+
+.delete-icon {
+  position: absolute;
+  width: 17px;
+  height: 17px;
+  top: 0;
+  right: 0;
+  border: none;
+  background: #FB596D;
+  border-radius: 100%;
+  color: white;
+  cursor: pointer;
+  display: none;
+  margin-right: -5px;
+  margin-top: -5px;
+  overflow: auto;
+  font-size: 10pt;
+  font-weight: 100;
+}
+
+.TimeItem:hover .delete-icon {
+  display: block;
+}
 
   .TimeItem {
     opacity: 50%;

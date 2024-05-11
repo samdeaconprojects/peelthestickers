@@ -4,7 +4,7 @@ import './TimeList.css';
 import './TimeItem.css';
 
 
-function TimeList({ times }) {
+function TimeList({ times, deleteTime }) {
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
   useEffect(() => {
@@ -121,6 +121,7 @@ const getOveralls = (timesArray) => {
   const colsPerRow = windowWidth > 1100 ? 12 : 5; 
 
   const rows = [];
+    
   for (let i = 0; i < times.length; i += colsPerRow) {
     //overall
     const overallData = getOveralls(times);
@@ -142,7 +143,10 @@ const getOveralls = (timesArray) => {
       <tr key={i}>
         {timesRow.map((time, index) => (
           /* ${i + index === times.length - (5 - currentArray[0].index) ? 'fastest' : ''} ${i + index === times.length - (5 - currentArray[1].index) ? 'faster' : ''} ${i + index === times.length - (5 - currentArray[2].index) ? 'middle-fast' : ''} ${i + index === times.length - (5 - currentArray[3].index) ? 'slower' : ''} ${i + index === times.length - (5 - currentArray[4].index) ? 'slowest' : ''} */
-          <td className={`TimeItem ${(i + index) === overallMin ? 'overall-border-min' : ''} ${(i + index) === overallMax ? 'overall-border-max' : ''} ${i + index > times.length - 6 && i + index < times.length ? 'current-five' : 'not-current-five'}  `}  key={index}>{formatTime(time)}</td>
+          <td className={`TimeItem ${(i + index) === overallMin ? 'overall-border-min' : ''} ${(i + index) === overallMax ? 'overall-border-max' : ''} ${i + index > times.length - 6 && i + index < times.length ? 'current-five' : 'not-current-five'}  `}  key={index}>
+            {formatTime(time)}
+            <span className="delete-icon" onClick={() => deleteTime(i + index)}>x</span>
+            </td>
         ))}
         {timesRow.length < colsPerRow && [...Array(colsPerRow - timesRow.length)].map((e, index) => (
           <td className="TimeItem" key={colsPerRow + index}>&nbsp;</td>

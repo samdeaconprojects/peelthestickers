@@ -32,11 +32,12 @@
 }
 
 .logo {
-  max-width: 40px; /* Adjust as necessary for your design */
+  max-width: 90px; /* Adjust as necessary for your design */
+  margin-left: 25px;
   height: auto; /* This will maintain the aspect ratio */
   display: block; /* To prevent inline default space */
-  margin-top: 15px; /* Space from the top */
-  margin-bottom: 20px; /* Space between logo and the first navigation item */
+  margin-top: -10px; /* Space from the top */
+  margin-bottom: 40px; /* Space between logo and the first navigation item */
 }
 
 /* Icons should inherit position from the ul */

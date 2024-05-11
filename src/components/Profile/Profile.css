@@ -1,0 +1,38 @@
+.profilePicture {
+    border: 2px solid #2EC4B6;
+    border-radius: 12px;
+    width: 130px;
+    height: 130px;
+    margin: 35px;
+}
+
+.profileCube {
+    position: fixed;
+    left: 153px;
+    top: 98px;
+    scale: 85%;
+}
+
+.profileName {
+    font-size: 36pt;
+    font-weight: bold;
+    margin-top: 50px;
+}
+
+.profileInfo {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.profileAndName {
+    display: flex;
+    flex-direction: row;
+}
+
+.profileStats {
+    width: 200px;
+    height: 130px;
+    margin: 35px;
+    background-color: #2EC4B6;
+}

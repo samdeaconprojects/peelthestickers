@@ -1,7 +1,7 @@
 import React from 'react';
 import './RubiksCubeSVG.css';
 
-const RubiksCubeSVG = ({ n, faces, isMusicPlayer }) => {
+const RubiksCubeSVG = ({ n, faces, isMusicPlayer, isTimerCube }) => {
   console.log(faces);
   switch (n) {
     case '222':
@@ -103,6 +103,8 @@ const RubiksCubeSVG = ({ n, faces, isMusicPlayer }) => {
     cubeScale = cubeScale / 2;
   }
 
+  const cubeClassName = isTimerCube ? 'cube' : 'nonTimerCube';
+
   const drawFace = (n, currFace) => { //currFace, 0 - top, 1 - left, 2 - right (+= n / 2 for back sides?)
     const stickers = [];
     let stickerColor = "";
@@ -149,7 +151,7 @@ const RubiksCubeSVG = ({ n, faces, isMusicPlayer }) => {
   };
 
   return (
-    <div className="cube" style={{ 'scale': `${cubeScale}%` }}>
+    <div className={cubeClassName} style={{ 'scale': `${cubeScale}%` }}>
       <div className="face topFace" style={{ 'top': `${topFaceTop}px`, 'left': `${topFaceLeft}px` }}>
         <svg>{drawFace(n, 0)}</svg>
       </div>

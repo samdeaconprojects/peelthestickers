@@ -1,11 +1,29 @@
 import React from 'react';
 import './Profile.css';
+import RubiksCubeSVG from '../RubiksCubeSVG';
+import { getScrambledFaces } from '../cubeStructure';
 
 function Profile() {
   return (
     <div className="Page">
-      <h1>Profile Page</h1>
-      <p>This is the Profile page.</p>
+      <div className='profileInfo'>
+        <div className='profileAndName'>
+            <div className='profilePicture'>
+                <div className='profileCube'>
+                    <RubiksCubeSVG className="profileCube" n={"777"} faces={getScrambledFaces("U2 F2 U2 F B D2 U2 L2 B' L F' R F' U' B D F2 U D2 L'", "777")} isMusicPlayer={false} isTimerCube={false} />
+                </div>     
+            </div>
+            <div className='profileName'>sam</div>
+        </div>
+        <div className='mainContent'>
+            <div>
+        
+            </div>
+        </div>
+        <div className='profileStats'>
+            
+        </div>
+      </div>
     </div>
   );
 }

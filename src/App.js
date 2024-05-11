@@ -20,15 +20,15 @@ function App() {
   const [scramble, setScramble] = useState('');
   const [showDetail, setShowDetail] = useState(false);
   const [sessions, setSessions] = useState({
-    '222': [],
-    '333': [],
-    '444': [],
-    '555': [],
-    '666': [],
-    '777': [],
-    '333OH': [],
-    '333BLD': [],
-  });
+        '222': [],
+        '333': [],
+        '444': [],
+        '555': [],
+        '666': [],
+        '777': [],
+        '333OH': [],
+        '333BLD': [],
+    });
 
   useEffect(() => {
     setScramble(generateScramble(currentEvent)); // Generate an initial scramble when the app loads
@@ -53,6 +53,15 @@ function App() {
     }));
     setShowDetail(false); // Optionally hide detail when new time is added
     setScramble(generateScramble(currentEvent)); // Generate a new scramble after adding the solve
+  };
+
+  // Function to delete a time from the sessions
+  const deleteTime = (eventKey, index) => {
+    const newEventTimes = sessions[eventKey].filter((_, idx) => idx !== index);
+    setSessions(prevSessions => ({
+      ...prevSessions,
+      [eventKey]: newEventTimes
+    }));
   };
 
   const handleEventChange = (event) => {
@@ -90,12 +99,12 @@ function App() {
         </select>
         <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} currentEvent={currentEvent} isMusicPlayer={!isHomePage} />
 
-        <RubiksCubeSVG n={currentEvent} faces={getScrambledFaces(scramble, currentEvent)} isMusicPlayer={!isHomePage} />
+        <RubiksCubeSVG n={currentEvent} faces={getScrambledFaces(scramble, currentEvent)} isMusicPlayer={!isHomePage} isTimerCube={true} />
         </div>
         {isHomePage && (
           <>
             <Timer addTime={addSolve} />
-            <TimeList times={sessions[currentEvent].map(solve => solve.time)} />
+            <TimeList times={sessions[currentEvent].map(solve => solve.time)} deleteTime={(index) => deleteTime(currentEvent, index)} />
 
           </>
         )}
@@ -104,7 +113,7 @@ function App() {
       {!isHomePage && (
         <div className="player">
           <Timer addTime={addSolve} />
-          <TimeList times={sessions[currentEvent].map(solve => solve.time)} />
+          <TimeList times={sessions[currentEvent].map(solve => solve.time)} deleteTime={(index) => deleteTime(currentEvent, index)} />
         </div>
       )}
       
