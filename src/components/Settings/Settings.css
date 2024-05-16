@@ -1,13 +1,91 @@
+.page {
+  padding: 20px;
+  max-width: 600px;
+  margin: 0 auto;
+  text-align: center;
+  margin-left: 100px;
+}
+
+.settings-container {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.setting-item {
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+.setting-item label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 16px;
+  color: #fff;
+  text-align: left;
+}
+
+.setting-item select, .setting-item input {
+  width: 100%;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+h1 {
+  color: #4CAF50; /* Green color for headings */
+}
+
+/* Styling for the sliders */
+input[type=range] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 8px;
+  border-radius: 5px;
+  background: #d3d3d3;
+  outline: none;
+  opacity: 0.7;
+  -webkit-transition: .2s;
+  transition: opacity .2s;
+}
+
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: #4CAF50;
+  cursor: pointer;
+}
+
+input[type=range]::-moz-range-thumb {
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: #4CAF50;
+  cursor: pointer;
+}
+
 /* Settings.css */
 .settings-container {
-    padding: 20px;
-  }
-  
-  .setting-item {
-    margin-bottom: 10px;
-  }
-  
-  .setting-item label {
-    margin-right: 10px;
-  }
-  
+  display: flex;
+  flex-direction: column;
+  margin: 20px;
+}
+
+.setting-item {
+  margin: 10px;
+  display: flex;
+  align-items: center;
+}
+
+.setting-item label {
+  margin-right: 10px;
+}
+
+.setting-item select, .setting-item input[type="color"] {
+  margin-left: 10px;
+  cursor: pointer;
+}

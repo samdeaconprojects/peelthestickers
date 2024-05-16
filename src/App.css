@@ -1,8 +1,20 @@
+/* styles.css or App.css */
+:root {
+  --primary-color: #0E171D; /* Green by default */
+  --secondary-color: white; /* Dark grey by default */
+}
+
+
+
+/* Other styles that use these colors */
+
+
 .App {
   display: flex;
   height: 100vh;
-  background-color: #0E171D;
-  color: white;
+  background-color: var(--primary-color);
+  color: var(--secondary-color);
+ 
 }
 
 body {
@@ -59,7 +71,7 @@ body {
   top: 85%;
   left: 250px;
   z-index: 3;
-  background-color: #121212;
+  background-color: transparent;
 }
 
 .scramble-text {
@@ -80,7 +92,7 @@ select {
   padding: 3px;
   width: 100px;
   height: 35px;
-  background-color: #001524;
+  background-color: transparent;
   color: #FDFFFC;
   margin-top: 20px;
   margin-bottom: 10px;
