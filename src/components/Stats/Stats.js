@@ -25,8 +25,8 @@ function Stats() {
     <div className='Page'>
     <div style={styles.chartComponentsContainer}>
       <div/>
-      <ChartTitle text="Movements per Day of the Week"/>
-      <Label text="Movements" rotate/>
+      <ChartTitle text="Current Average: 3x3"/>
+      <Label text="Time" rotate/>
       <div style={styles.chartWrapper}>
         <LineChart
         width={500 }
@@ -38,7 +38,7 @@ function Stats() {
         />
       </div>
       <div/>
-      <Label text="Days of the Week"/>
+      <Label text="Solves"/>
     </div>
     </div>
   );

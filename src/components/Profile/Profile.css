@@ -35,4 +35,6 @@
     height: 130px;
     margin: 35px;
     background-color: #2EC4B6;
+    position: fixed;
+    right: 0px;
 }

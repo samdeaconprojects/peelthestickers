@@ -13,6 +13,7 @@ import Stats from "./components/Stats/Stats";
 import Social from "./components/Social/Social";
 import Settings from "./components/Settings/Settings";
 import { Routes, Route, useLocation } from 'react-router-dom';
+import { SettingsProvider } from './contexts/SettingsContext';
 
 
 function App() {
@@ -74,7 +75,7 @@ function App() {
   };
 
   return (
-   
+   <SettingsProvider>
     <div className={`App ${!isHomePage ? 'music-player-mode' : ''}`}>
       <Navigation/>
       <Routes>
@@ -119,7 +120,7 @@ function App() {
       
     
     </div>
-      
+    </SettingsProvider>  
   );
   
   
