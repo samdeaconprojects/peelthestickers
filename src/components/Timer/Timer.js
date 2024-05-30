@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import './Timer.css';
+import { useSettings } from '../../contexts/SettingsContext';
+
 
 function Timer({ addTime }) {
+  const { settings, updateSettings } = useSettings();
+  const [manualTime, setManualTime] = useState('');
   const [elapsedTime, setElapsedTime] = useState(0);
   const [lastTime, setLastTime] = useState(0);
   const [timerOn, setTimerOn] = useState(false);
@@ -53,6 +58,17 @@ function Timer({ addTime }) {
     }
   };
 
+  const handleManualEntry = (event) => {
+    setManualTime(event.target.value);
+  };
+
+  const handleSubmitManualTime = (event) => {
+    if (event.key === 'Enter') {
+      addTime(parseFloat(manualTime) * 1000);  // Converts seconds to milliseconds
+      setManualTime('');  // Reset input after submission
+    }
+  };
+
   useEffect(() => {
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("keyup", handleKeyUp);
@@ -89,7 +105,17 @@ function Timer({ addTime }) {
 
   return (
     <div className='timer-display'>
-      <p className='Timer'>{formatTime()}</p>
+      {settings.timerInput === 'Keyboard' ? (
+        <p className='Timer'>{formatTime()}</p>
+      ) : (
+        <input
+          type="text"
+          value={manualTime}
+          onChange={handleManualEntry}
+          onKeyDown={handleSubmitManualTime}
+          autoFocus
+        />
+      )}
     </div>
   );
 }

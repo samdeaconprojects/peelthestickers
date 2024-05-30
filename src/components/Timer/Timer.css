@@ -1,0 +1,6 @@
+input {
+    width: 300px;
+    height: 100px;
+    font-size: 48pt;
+    background-color: var(--secondary-color);;
+}

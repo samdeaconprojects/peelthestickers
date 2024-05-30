@@ -27,6 +27,10 @@ function Settings() {
         updateSettings({ secondaryColor: event.target.value });
     };
 
+    const handleTimerInputChange = (event) => {
+        updateSettings({ timerInput: event.target.value });
+    };
+
     return (
         <div className='Page'>
             <h1>Customize Theme</h1>
@@ -54,6 +58,15 @@ function Settings() {
                     {settings.secondaryColor === 'custom' && (
                         <input type="color" value={settings.secondaryColor} onChange={handleCustomSecondaryChange} />
                     )}
+                </div>
+                <div className="setting-item">
+                    <label>Timer Input:</label>
+                    <select onChange={handleTimerInputChange} value={settings.timerInput}>
+                        <option value="Keyboard">Keyboard</option>
+                        <option value="Type">Type</option>
+                        <option value="Stackmat">Stackmat</option>
+                    </select>
+                    
                 </div>
             </div>
         </div>

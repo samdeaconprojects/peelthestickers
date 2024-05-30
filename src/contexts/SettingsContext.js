@@ -8,7 +8,8 @@ export const useSettings = () => useContext(SettingsContext);
 export const SettingsProvider = ({ children }) => {
     const [settings, setSettings] = useState({
         primaryColor: '#0E171D',  // Default primary color
-        secondaryColor: '#ffffff' // Default secondary color
+        secondaryColor: '#ffffff', // Default secondary color
+        timerInput: 'Keyboard'
     });
 
     const updateSettings = (newSettings) => {
