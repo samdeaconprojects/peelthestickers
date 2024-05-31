@@ -13,7 +13,10 @@ function Profile() {
                     <RubiksCubeSVG className="profileCube" n={"333"} faces={getScrambledFaces("U2 F2 U2 F B D2 U2 L2 B' L F' R F' U' B D F2 U D2 L'", "777")} isMusicPlayer={false} isTimerCube={false} />
                 </div>     
             </div>
-            <div className='profileName'>sam</div>
+            <div className='profileNameAndUsername'>
+              <div className='profileName'>sam</div>
+              <div className='profileUsername'>@sam</div>
+            </div>
         </div>
         <div className='mainContent'>
             <div>
