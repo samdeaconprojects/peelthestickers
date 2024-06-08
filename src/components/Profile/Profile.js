@@ -1,6 +1,7 @@
 import React from 'react';
 import './Profile.css';
 import RubiksCubeSVG from '../RubiksCubeSVG';
+import Post from './Post';
 import { getScrambledFaces } from '../cubeStructure';
 
 function Profile() {
@@ -10,7 +11,7 @@ function Profile() {
         <div className='profileAndName'>
             <div className='profilePicture'>
                 <div className='profileCube'>
-                    <RubiksCubeSVG className="profileCube" n={"333"} faces={getScrambledFaces("U2 F2 U2 F B D2 U2 L2 B' L F' R F' U' B D F2 U D2 L'", "777")} isMusicPlayer={false} isTimerCube={false} />
+                    <RubiksCubeSVG className="profileCube" n={"333"} faces={getScrambledFaces("U2 F2 U2 F B D2 U2 L2 B' L F' R F' U' B D F2 U D2 L'", "333")} isMusicPlayer={false} isTimerCube={false} />
                 </div>     
             </div>
             <div className='profileNameAndUsername'>
@@ -18,14 +19,14 @@ function Profile() {
               <div className='profileUsername'>@sam</div>
             </div>
         </div>
-        <div className='mainContent'>
-            <div>
         
-            </div>
-        </div>
         <div className='profileStats'>
             
         </div>
+      </div>
+
+      <div className='profileContent'>
+          <Post/>
       </div>
     </div>
   );
