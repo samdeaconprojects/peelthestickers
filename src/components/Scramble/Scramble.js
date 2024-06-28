@@ -20,23 +20,23 @@ function Scramble({ onScrambleClick, scramble, currentEvent }) {
       break;
     case '444':
       fontSize = 20;
-      maxWidth = 50;
+      maxWidth = 80;
       break;
     case '555':
       fontSize = 16;
-      maxWidth = 50;
+      maxWidth = 70;
       break;
     case '666':
       fontSize = 14;
-      maxWidth = 50;
+      maxWidth = 70;
       break;
     case '777':
       fontSize = 13;
-      maxWidth = 50;
+      maxWidth = 70;
       break;
     default:
       fontSize = 20;
-      maxWidth = 50; // Default to 3x3 if currentEvent is not recognized
+      maxWidth = 80; // Default to 3x3 if currentEvent is not recognized
   }
 
   return (

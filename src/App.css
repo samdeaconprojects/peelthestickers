@@ -2,6 +2,7 @@
 :root {
   --primary-color: #0E171D; /* Green by default */
   --secondary-color: white; /* Dark grey by default */
+  --current-page-color: #2ec4b6;
 }
 
 
@@ -11,6 +12,10 @@
 
 .App {
   display: flex;
+  /*
+  flex-direction: column;
+  justify-content: space-between;
+  */
   height: 100vh;
   background-color: var(--primary-color);
   color: var(--secondary-color);
@@ -33,17 +38,22 @@ body {
 .timer-display {
   text-align: right;
   font-family: 'Droid Sans Mono', monospace;
+  
 }
 
 .Timer {
   z-index: 10;
   font-size: 96pt;
+  justify-content: center;
+  align-items: center;
+  display: flex;
 }
 
 .cube {
-  position: fixed;
-  right: 160px;
-  top: 80px;
+  height: 50px;
+  width: 50px;
+  margin-top: 80px;
+  margin-right: 10px;
 }
 
 .profileCube {
@@ -60,11 +70,10 @@ body {
 
 .event-select {
   margin-right: 0px; /* Add some space between the select and the SVG */
-  position: fixed;
+
   font-weight: 500;
   font-size: 16pt;
-  left: 100px;
-  top: 6px;
+  margin-top: 30px;
 }
 
 .music-player-mode .event-select {
@@ -72,6 +81,15 @@ body {
   left: 250px;
   z-index: 3;
   background-color: transparent;
+}
+
+.scramble-select-container {
+  display: flex;
+  flex-direction: row;
+
+
+  justify-content: space-between;
+  width: 90%;
 }
 
 .scramble-text {
@@ -82,20 +100,18 @@ body {
   word-wrap: break-word;
   overflow-wrap: break-word;
   text-align: center;
-  margin: 0 auto;
-  margin-top: 50px;
+
 }
 
 select {
   border: #FDFFFC solid 1px;
   border-radius: 3px;
-  padding: 3px;
+
   width: 100px;
   height: 35px;
   background-color: transparent;
   color: #FDFFFC;
-  margin-top: 20px;
-  margin-bottom: 10px;
+
 }
 
 .TimeList {
@@ -119,7 +135,7 @@ select {
   left: 0;
   right: 0;
   background-color: #121212;
-  border-top: 1px solid yellow;
+  border-top: 1px solid var(--current-page-color);
   height: 15%;
   z-index: 2;
 }
@@ -134,8 +150,6 @@ select {
   font-size: 8pt; /* Adjust font size */
   max-width: 100%; /* Adjust width as needed */
   /* Update positioning if needed */
-  top: 79%;
-  position: fixed;
   z-index: 3;
 }
 
@@ -146,8 +160,7 @@ select {
 }
 
 .music-player-mode .time-list-container {
-  margin-top: 90px; /* Adjust top margin */
-  /* Add any additional styles for time list container in music player mode */
+
 }
 
 /* Ensure the table and its content adjust correctly */

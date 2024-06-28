@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import './Navigation.css';
 
 function Navigation({ onNavClick, onMainLogoClick }) {
+
   return (
     <nav className="Navigation">
       <Link to="/" onClick={onMainLogoClick}>

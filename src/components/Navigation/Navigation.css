@@ -1,18 +1,17 @@
 /* navigation.css */
 
 .Navigation {
-  /* Full height of the viewport removed */
-  width: 70px; /* Width of the navigation bar */
-  position: fixed; /* Fixed position on the left */
-  left: 0; /* Align to the left side of the viewport */
-  top: 0; /* Align to the top of the viewport */
-  bottom: 0; /* Stretch from top to bottom */
-  display: flex; /* Use flexbox for the alignment */
-  flex-direction: column; /* Stack items vertically */
-  align-items: center; /* Center items horizontally */
-  background-color: transparent; /* Navigation background color */
-  color: white; /* Text color */
-  z-index: 1; /* Ensure it's above other content */
+  width: 70px; 
+  position: fixed;
+  left: 0; 
+  top: 0;
+  bottom: 0; 
+  display: flex; 
+  flex-direction: column;
+  align-items: center;
+  background-color: transparent; 
+  color: white; 
+  z-index: 1; 
 }
 
 .Navigation ul {
@@ -33,11 +32,7 @@
 
 .logo {
   max-width: 90px; /* Adjust as necessary for your design */
-  margin-left: 25px;
-  height: auto; /* This will maintain the aspect ratio */
-  display: block; /* To prevent inline default space */
-  margin-top: -10px; /* Space from the top */
-  margin-bottom: 40px; /* Space between logo and the first navigation item */
+  margin-left: 8px;
 }
 
 /* Icons should inherit position from the ul */

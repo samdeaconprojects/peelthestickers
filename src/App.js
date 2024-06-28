@@ -7,11 +7,13 @@ import Scramble from "./components/Scramble/Scramble";
 import Navigation from "./components/Navigation/Navigation";
 import Detail from "./components/Detail/Detail";
 import RubiksCubeSVG from "./components/RubiksCubeSVG";
-import { generateScramble, getScrambledFaces } from "./scrambleUtils";
+import { generateScramble, getScrambledFaces } from "./components/scrambleUtils";
 import Profile from "./components/Profile/Profile";
 import Stats from "./components/Stats/Stats";
 import Social from "./components/Social/Social";
 import Settings from "./components/Settings/Settings";
+import PlayerBar from "./components/PlayerBar/PlayerBar"; // Import the new component
+import EventSelector from "./components/EventSelector"; // Import the new component
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { SettingsProvider } from './contexts/SettingsContext';
 
@@ -43,6 +45,16 @@ function App() {
   const isHomePage = location.pathname === '/';
 
   const addSolve = (newTime) => {
+    /*
+    let timeString = newTime.toString();
+
+    if (!timeString.includes('.')) {
+      // Input is in milliseconds without decimal point, convert to seconds
+      let timeInMilliseconds = parseInt(timeString, 10);
+      newTime = (timeInMilliseconds / 1000).toFixed(2);
+    } // If it includes a dot, it's assumed to be already in correct format
+    */
+
     const newSolve = {
       time: newTime, // Ensure that newTime is a number
       scramble: scramble,
@@ -75,53 +87,34 @@ function App() {
   };
 
   return (
-   <SettingsProvider>
-    <div className={`App ${!isHomePage ? 'music-player-mode' : ''}`}>
-      <Navigation/>
-      <Routes>
-          <Route path="/" />
+    <SettingsProvider>
+      <div className={`App ${!isHomePage ? 'music-player-mode' : ''}`}>
+        <Navigation />
+        <div className="main-content">
+        <Routes>
+          <Route path="/" element={
+            <>
+              <div className="scramble-select-container">
+                <EventSelector currentEvent={currentEvent} handleEventChange={handleEventChange} />
+                <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} currentEvent={currentEvent} isMusicPlayer={!isHomePage} />
+                <RubiksCubeSVG n={currentEvent} faces={getScrambledFaces(scramble, currentEvent)} isMusicPlayer={!isHomePage} isTimerCube={true} />
+              </div>
+              <Timer addTime={addSolve} />
+              <TimeList times={sessions[currentEvent].map(solve => solve.time)} deleteTime={(index) => deleteTime(currentEvent, index)} />            </>
+          } />
           <Route path="/profile" element={<Profile />} />
           <Route path="/stats" element={<Stats />} />
           <Route path="/social" element={<Social />} />
           <Route path="/settings" element={<Settings />} />
-      </Routes>
-      <div className={`main-content ${!isHomePage ? 'hide-content' : ''}`}>
-        <div className="scramble-select-container">
-        <select onChange={handleEventChange} value={currentEvent} className="event-select">
-          <option value="222">2x2</option>
-          <option value="333">3x3</option>
-          <option value="444">4x4</option>
-          <option value="555">5x5</option>
-          <option value="666">6x6</option>
-          <option value="777">7x7</option>
-          <option value="333OH">3x3 OH</option>
-          <option value="333BLD">3x3 BLD</option>
-          {/* Add more options for other events as needed */}
-        </select>
-        <Scramble onScrambleClick={handleScrambleClick} scramble={scramble} currentEvent={currentEvent} isMusicPlayer={!isHomePage} />
-
-        <RubiksCubeSVG n={currentEvent} faces={getScrambledFaces(scramble, currentEvent)} isMusicPlayer={!isHomePage} isTimerCube={true} />
-        </div>
-        {isHomePage && (
-          <>
-            <Timer addTime={addSolve} />
-            <TimeList times={sessions[currentEvent].map(solve => solve.time)} deleteTime={(index) => deleteTime(currentEvent, index)} />
-
-          </>
+        </Routes>
+        {!isHomePage && (
+           <PlayerBar sessions={sessions} currentEvent={currentEvent} handleEventChange={handleEventChange} deleteTime={deleteTime} addTime={addSolve} scramble={scramble} />
         )}
       </div>
-      {showDetail && <Detail scramble={scramble} currentEvent={currentEvent} onClose={handleCloseDetail} />}
-      {!isHomePage && (
-        <div className="player">
-          <Timer addTime={addSolve} />
-          <TimeList times={sessions[currentEvent].map(solve => solve.time)} deleteTime={(index) => deleteTime(currentEvent, index)} />
-        </div>
-      )}
-      
-    
-    </div>
-    </SettingsProvider>  
+      </div>
+    </SettingsProvider>
   );
+
   
   
 }
