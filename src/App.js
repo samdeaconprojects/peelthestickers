@@ -103,7 +103,7 @@ function App() {
               <TimeList times={sessions[currentEvent].map(solve => solve.time)} deleteTime={(index) => deleteTime(currentEvent, index)} />            </>
           } />
           <Route path="/profile" element={<Profile />} />
-          <Route path="/stats" element={<Stats />} />
+          <Route path="/stats" element={<Stats times={sessions[currentEvent].map(solve => solve.time)}/>} />
           <Route path="/social" element={<Social />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>

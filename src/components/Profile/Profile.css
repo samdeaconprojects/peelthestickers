@@ -7,21 +7,73 @@
 }
 
 .profileCube {
-    position: fixed;
-    left: 153px;
-    top: 98px;
-    scale: 85%;
+    margin: 35px;
+    margin-left: 0px;
+    scale: 80%;
 }
 
 .post {
+    display: flex;
+    justify-content: space-between;
     border: 2px solid #454545;
     border-radius: 12px;
-    width: 100vh;
-    height: 80px;
+    width: 100%;
+    min-height: 80px;
+}
+
+.titleAndContent {
+    display: flex;
+    flex-direction: column;
+}
+
+.dateAndName {
+    display: flex;
+    flex-direction: column;
+    justify-content: right;    
+}
+
+.postDate {
+    color: #c2c2c2;
+    opacity: 85%;
+    margin-left: auto;
+    padding: 8px;
+}
+
+.postNameAndPicture {
+    display: flex;
+    
+    align-items: center;
+}
+
+.profilePicturePost {
+    border: 2px solid #2EC4B6;
+    border-radius: 12px;
+    width: 100px;
+    height: 100px;
+    scale: 30%;
+}
+
+.postNameCube {
+    scale: 70%;
 }
 
 .postCube {
     scale: 50%;
+}
+
+.postTitle {
+    display: flex;
+    align-items: center;
+}
+
+.postTitleCube {
+    width: 75%;
+    height: 75%;
+    scale: 65%;
+}
+
+.postName {
+    align-content: center;
 }
 
 .profileName {
@@ -34,7 +86,7 @@
     opacity: 50%;
 }
 
-.profileInfo {
+.profileHeader {
     display: flex;
     flex-direction: row;
     justify-content: space-between;
@@ -62,6 +114,4 @@
     background-color: transparent;
     border: 2px solid #2EC4B6;
     border-radius: 8px;
-    position: fixed;
-    right: 0px;
 }
