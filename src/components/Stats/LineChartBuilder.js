@@ -3,7 +3,7 @@ import PropTypes from "prop-types";
 
 const STROKE = 1;
 
-const LineChart = ({
+const LineChartBuilder = ({
   data,
   height,
   width,
@@ -62,6 +62,7 @@ const LineChart = ({
           <polyline
             fill="none"
             stroke="#c2c2c2"
+            opacity={".2"}
             strokeWidth=".5"
             points={`${xCoordinate},${startY} ${xCoordinate},${endY}`}
           />
@@ -84,6 +85,7 @@ const LineChart = ({
           <polyline
             fill="none"
             stroke={"#c2c2c2"}
+            opacity={".2"}
             strokeWidth=".5"
             points={`${startX},${yCoordinate} ${endX},${yCoordinate}`}
           />
@@ -152,6 +154,7 @@ const LineChart = ({
       {numberOfVerticalGuides && <VerticalGuides />}
       <HorizontalGuides />
 
+    
       <polyline
         fill="none"
         stroke="#00FFFF"
@@ -162,7 +165,7 @@ const LineChart = ({
   );
 };
 
-LineChart.defaultProps = {
+LineChartBuilder.defaultProps = {
   height: 200,
   width: 500,
   horizontalGuides: 4,
@@ -170,7 +173,7 @@ LineChart.defaultProps = {
   precision: 2
 };
 
-LineChart.propTypes = {
+LineChartBuilder.propTypes = {
   data: PropTypes.arrayOf(
     PropTypes.shape({
       value: PropTypes.number,
@@ -184,4 +187,4 @@ LineChart.propTypes = {
   precision: PropTypes.number
 };
 
-export default LineChart;
+export default LineChartBuilder;

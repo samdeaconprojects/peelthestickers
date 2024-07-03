@@ -1,0 +1,17 @@
+td:nth-child(13) {
+    background-color: #2EC4B6; /* Different background for the average column */
+  }
+
+  .HorizontalGuides {
+    opacity: 20%;
+  }
+
+  .VerticalGuides {
+    opacity: 20%;
+  }
+
+.chartTitle {
+    display: flex;
+    margin-left: 40px;
+    color: white;
+}

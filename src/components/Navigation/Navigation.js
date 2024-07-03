@@ -8,7 +8,7 @@ function Navigation({ onNavClick, onMainLogoClick }) {
   return (
     <nav className="Navigation">
       <Link to="/" onClick={onMainLogoClick}>
-      <img src={require('../../assets/PerspectiveLogo.png')} alt="logo" className="logo" />
+      <img src={require('../../assets/PTS.png')} alt="logo" className="logo" />
       </Link>
       <ul>
         {/* When these links are clicked, onNavClick will set the app to music player mode */}

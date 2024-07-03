@@ -1,7 +1,8 @@
 import React from 'react';
-import LineChart from "./LineChart";
+import LineChartBuilder from "./LineChartBuilder";
 import Label from "./AxisLabel";
 import ChartTitle from "./ChartTitle";
+import './Stats.css';
 import {formatTime, calculateAverage, getOveralls, calculateAverageOfFive, calculateBestAverageOfFive} from '../TimeList/TimeUtils';
 
 
@@ -9,10 +10,12 @@ import {formatTime, calculateAverage, getOveralls, calculateAverageOfFive, calcu
 function Stats({times}) {
 
   const data = times.map((time, index) => ({
-    label: `Solve ${index + 1}`, // Creating a label with the solve number
+    label: `${index + 1}`, // Creating a label with the solve number
     x: index, // x-coordinate as the index
     y: parseFloat(formatTime(time).replace(':', '.')) // Convert formatted time to a float for y-coordinate
   }));
+
+  const solveCountText = "Solve Count: " + times.length;
   /*
   const data = [
     { label: "S", x: 0, y: 0 },
@@ -43,10 +46,14 @@ function Stats({times}) {
     <div className='Page'>
     <div style={styles.chartComponentsContainer}>
       <div/>
-      <ChartTitle text="Current Average: 3x3"/>
+
+      
+      <div className='chartTitle'>
+        <ChartTitle text="Current Average: 3x3"/>
+      </div>
       <Label text="Time" rotate/>
       <div style={styles.chartWrapper}>
-        <LineChart
+        <LineChartBuilder
         width={500 }
           height={300}
           data={data}
@@ -56,7 +63,7 @@ function Stats({times}) {
         />
       </div>
       <div/>
-      <Label text="Solves"/>
+      <Label text={solveCountText}/>
     </div>
     </div>
   );

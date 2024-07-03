@@ -31,8 +31,8 @@
 }
 
 .logo {
-  max-width: 90px; /* Adjust as necessary for your design */
-  margin-left: 8px;
+  max-width: 55px; /* Adjust as necessary for your design */
+  margin-top: 10px;
 }
 
 /* Icons should inherit position from the ul */
