@@ -12,6 +12,7 @@
 
 .App {
   display: flex;
+  flex-direction: column;
   /*
   flex-direction: column;
   justify-content: space-between;
@@ -21,6 +22,32 @@
   color: var(--secondary-color);
  
 }
+
+.navAndPage {
+  display: flex;
+  height: 100%;
+}
+
+.toggle-bar {
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  padding: 10px;
+}
+
+.toggle-button {
+  background: none;
+  color: white;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  outline: none;
+}
+
+.player-bar {
+  transition: transform 2.3s ease-in-out;
+}
+
 
 body {
   font-family: 'Jost', sans-serif;

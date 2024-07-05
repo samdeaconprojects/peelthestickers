@@ -15,3 +15,41 @@ td:nth-child(13) {
     margin-left: 40px;
     color: white;
 }
+
+.Label {
+    align-items: center;
+}
+
+.stats-page {
+    display: flex;
+    justify-content: center;
+    padding: 20px;
+    overflow-y: auto;
+    -ms-overflow-style: none;  /* Internet Explorer 10+ */
+    scrollbar-width: none;  /* Firefox */
+}
+
+.stats-page::-webkit-scrollbar { 
+  display: none;  /* Safari and Chrome */
+}
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px; /* This will add a gap between both rows and columns */
+    width: 100%;
+  }
+  
+  .stats-item {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    width: 100%;
+  }
+  
+  @media (max-width: 768px) {
+    .stats-grid {
+      grid-template-columns: 1fr; /* Single column layout for smaller screens */
+    }
+  }
+  

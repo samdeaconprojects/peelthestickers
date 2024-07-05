@@ -4,6 +4,7 @@
     width: 130px;
     height: 130px;
     margin: 35px;
+    margin-left: 0px;
 }
 
 .profileCube {
@@ -111,6 +112,7 @@
     width: 250px;
     height: 130px;
     margin: 35px;
+    margin-right: 0px;
     background-color: transparent;
     border: 2px solid #2EC4B6;
     border-radius: 8px;
