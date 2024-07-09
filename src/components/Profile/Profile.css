@@ -67,6 +67,12 @@
     align-items: center;
 }
 
+.titleText {
+    width: 100%;
+    font-size: larger;
+    font-weight: bold;
+}
+
 .postTitleCube {
     width: 75%;
     height: 75%;
@@ -117,3 +123,5 @@
     border: 2px solid #2EC4B6;
     border-radius: 8px;
 }
+
+
