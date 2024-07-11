@@ -35,6 +35,41 @@ export function currentEventToN(currentEvent) {
       return n;
 }
 
+export function currentEventToString(currentEvent) {
+  let n;
+
+  switch (currentEvent) {
+      case '222':
+        n = "2x2";
+        break;
+      case '333':
+        n = "3x3";
+        break;
+      case '333OH':
+        n = "3x3 One-Handed";
+        break;
+      case '333BLD':
+        n = "3x3 Blindfolded";
+        break;
+      case '444':
+        n = "4x4";
+        break;
+      case '555':
+        n = "5x5";
+        break;
+      case '666':
+        n = "6x6";
+        break;
+      case '777':
+        n = "7x7";
+        break;
+      default:
+        n = "3x3"; // Default to 3x3 if currentEvent is not recognized
+    }
+
+    return n;
+}
+
 
 export function generateScramble(currentEvent) {
     let n = currentEventToN(currentEvent); // Assuming currentEventToN is a function that converts event to a numeric size

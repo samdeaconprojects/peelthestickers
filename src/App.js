@@ -54,6 +54,8 @@ function App() {
       ...prevSessions,
       [currentEvent]: [...prevSessions[currentEvent], newSolve]
     }));
+    console.log("SOLVE OBJECT");
+    console.log(newSolve);
     setShowDetail(false);
     setScramble(generateScramble(currentEvent));
   };
@@ -89,7 +91,7 @@ function App() {
                     <RubiksCubeSVG n={currentEvent} faces={getScrambledFaces(scramble, currentEvent)} isMusicPlayer={!isHomePage} isTimerCube={true} />
                   </div>
                   <Timer addTime={addSolve} />
-                  <TimeList times={sessions[currentEvent].map(solve => solve.time)} deleteTime={(index) => deleteTime(currentEvent, index)} />
+                  <TimeList solves={sessions[currentEvent]} deleteTime={(index) => deleteTime(currentEvent, index)} />
                 </>
               } />
               <Route path="/profile" element={<Profile />} />

@@ -38,7 +38,7 @@ function PlayerBar({ sessions, currentEvent, handleEventChange, deleteTime, addT
             <Timer addTime={addTime} />
             <div className='scramble-timelist'>
             <Scramble scramble={scramble} currentEvent={currentEvent} isMusicPlayer={true} />
-            <TimeList times={sessions[currentEvent].map(solve => solve.time)} deleteTime={(index) => deleteTime(currentEvent, index)} />
+            <TimeList solves={sessions[currentEvent]} deleteTime={(index) => deleteTime(currentEvent, index)} />
             </div>
             <EventSelector currentEvent={currentEvent} handleEventChange={handleEventChange}/>
             <RubiksCubeSVG n={currentEvent} faces={getScrambledFaces(scramble, currentEvent)} isMusicPlayer={true} isTimerCube={false} />
