@@ -15,6 +15,17 @@ export const formatTime = (timeToDisplay) => {
     return formattedTime;
   };
 
+  // TimeUtils.js
+export const calculateAverageForGraph = (times) => {
+  if (!times || times.length === 0) {
+    return 0;
+  }
+
+  const sum = times.reduce((total, time) => total + time, 0);
+  return sum / times.length;
+};
+
+
 export  const calculateAverage = (timesArray, removeMinMax) => {
     console.log("Original timesArray: " + timesArray);
 

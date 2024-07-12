@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import PropTypes from "prop-types";
 
 const STROKE = 1;
@@ -11,6 +11,7 @@ const LineChartBuilder = ({
   verticalGuides: numberOfVerticalGuides,
   precision
 }) => {
+  const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, time: '' });
   const FONT_SIZE = width / 50;
   const maximumXFromData = Math.max(...data.map(e => e.x));
   const maximumYFromData = Math.max(...data.map(e => e.y));
@@ -142,26 +143,68 @@ const LineChartBuilder = ({
     });
   };
 
-  return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      //style={{ border: "0.5px solid #ccc" }}
-    >
-      <XAxis />
-      <LabelsXAxis />
-      <YAxis />
-      <LabelsYAxis />
-      {numberOfVerticalGuides && <VerticalGuides />}
-      <HorizontalGuides />
+  const handleMouseOver = (event, time) => {
+    const { clientX, clientY } = event;
+    setTooltip({ visible: true, x: clientX, y: clientY, time });
+  };
 
-    
-      <polyline
-        fill="none"
-        stroke="#00FFFF"
-        strokeWidth={STROKE}
-        points={points}
-      />
-    </svg>
+  const handleMouseOut = () => {
+    setTooltip({ visible: false, x: 0, y: 0, time: '' });
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        //style={{ border: "0.5px solid #ccc" }}
+      >
+        <XAxis />
+        <LabelsXAxis />
+        <YAxis />
+        <LabelsYAxis />
+        {numberOfVerticalGuides && <VerticalGuides />}
+        <HorizontalGuides />
+
+        <polyline
+          fill="none"
+          stroke="#00FFFF"
+          strokeWidth={STROKE}
+          points={points}
+        />
+        {data.map((element, index) => {
+          const x = (element.x / maximumXFromData) * chartWidth + padding;
+          const y =
+            chartHeight - (element.y / maximumYFromData) * chartHeight + padding;
+          return (
+            <circle
+              key={index}
+              cx={x}
+              cy={y}
+              r={5} // Radius of the circle
+              fill={element.color} // Color of the circle
+              onMouseOver={(e) => handleMouseOver(e, element.time)}
+              onMouseOut={handleMouseOut}
+            />
+          );
+        })}
+      </svg>
+      {tooltip.visible && (
+        <div
+          style={{
+            position: 'absolute',
+            left: tooltip.x - 100,
+            top: tooltip.y - 100,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            color: 'white',
+            padding: '5px',
+            borderRadius: '5px',
+            pointerEvents: 'none'
+          }}
+        >
+          {tooltip.time}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -177,7 +220,9 @@ LineChartBuilder.propTypes = {
   data: PropTypes.arrayOf(
     PropTypes.shape({
       value: PropTypes.number,
-      label: PropTypes.string
+      label: PropTypes.string,
+      color: PropTypes.string,
+      time: PropTypes.string
     })
   ).isRequired,
   height: PropTypes.number,
