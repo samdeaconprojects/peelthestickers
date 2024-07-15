@@ -95,7 +95,7 @@ function App() {
                 </>
               } />
               <Route path="/profile" element={<Profile />} />
-              <Route path="/stats" element={<Stats times={sessions[currentEvent].map(solve => solve.time)} />} />
+              <Route path="/stats" element={<Stats solves={sessions[currentEvent]} />} />
               <Route path="/social" element={<Social />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>

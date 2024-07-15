@@ -5,10 +5,13 @@ import ChartTitle from "./ChartTitle";
 import './Stats.css';
 import {formatTime, calculateAverage, getOveralls, calculateAverageOfFive, calculateBestAverageOfFive} from '../TimeList/TimeUtils';
 import LineChart from './LineChart';
+import TimeTable from './TimeTable';
 
 
 
-function Stats({times}) {
+function Stats({solves}) {
+
+  const times = solves.map(solve => solve.time);
 
   
   /*
@@ -42,7 +45,7 @@ function Stats({times}) {
           <LineChart times={times} title={"Current Avg: 3x3"}/>
         </div>
         <div className='stats-item'>
-          <LineChart times={times} title={"Best Time: 3x3"}/>
+          <TimeTable solves={solves}/>
         </div>
         
         {/* Add more LineChart components as needed */}

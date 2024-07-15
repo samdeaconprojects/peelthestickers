@@ -1,0 +1,37 @@
+.time-table-container {
+    margin: 20px;
+    overflow-x: auto;
+    background-color: #121212;
+    opacity: 80%;
+  }
+  
+  .time-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  
+  .time-table th, .time-table td {
+    border: 1px solid #ddd;
+    padding: 8px;
+  }
+  
+  .time-table th {
+    background-color: transparent;
+    text-align: left;
+  }
+  
+  .time-table tr:nth-child(even) {
+    background-color: transparent;
+  }
+  
+  .time-table tr:hover {
+    background-color: #ddd;
+  }
+  
+  .time-table th {
+    padding-top: 12px;
+    padding-bottom: 12px;
+    background-color: transparent;
+    color: white;
+  }
+  
