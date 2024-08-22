@@ -2,7 +2,7 @@
 import React from 'react';
 import './Scramble.css'; // Ensure you have a Scramble.css file
 
-function Scramble({ onScrambleClick, scramble, currentEvent }) {
+function Scramble({ onScrambleClick, scramble, currentEvent, isMusicPlayer }) {
 
   let fontSize;
   let maxWidth;
@@ -19,19 +19,19 @@ function Scramble({ onScrambleClick, scramble, currentEvent }) {
       maxWidth = 80;
       break;
     case '444':
-      fontSize = 20;
+      fontSize = isMusicPlayer ? 16 : 20;
       maxWidth = 80;
       break;
     case '555':
-      fontSize = 16;
+      fontSize = isMusicPlayer ? 15 : 16;
       maxWidth = 70;
       break;
     case '666':
-      fontSize = 14;
+      fontSize = isMusicPlayer ? 12 : 14;
       maxWidth = 70;
       break;
     case '777':
-      fontSize = 13;
+      fontSize = isMusicPlayer ? 11 : 13;
       maxWidth = 70;
       break;
     default:

@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import './TimeList.css';
 import './TimeItem.css';
+import Detail from '../Detail/Detail'; 
 import { formatTime, calculateAverage, getOveralls, calculateAverageOfFive, calculateBestAverageOfFive } from './TimeUtils';
 
 function TimeList({ solves, deleteTime }) {
@@ -66,12 +67,7 @@ function TimeList({ solves, deleteTime }) {
         </tbody>
       </table>
       {selectedSolve && (
-        <div className="scramble-popup">
-          <div className="scramble-popup-content">
-            <span className="close-popup" onClick={() => setSelectedSolve(null)}>x</span>
-            <p>{selectedSolve.scramble}</p>
-          </div>
-        </div>
+        <Detail solve={selectedSolve} onClose={() => setSelectedSolve(null)} />
       )}
     </div>
   );

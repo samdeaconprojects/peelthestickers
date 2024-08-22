@@ -106,6 +106,7 @@ function App() {
             sessions={sessions}
             currentEvent={currentEvent}
             handleEventChange={handleEventChange}
+            handleScrambleClick={handleScrambleClick}
             deleteTime={deleteTime}
             addTime={addSolve}
             scramble={scramble}

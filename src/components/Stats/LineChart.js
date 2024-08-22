@@ -42,7 +42,7 @@ function LineChart({ times, title }) {
       <div className='chartTitle'>
         <ChartTitle text={title} />
       </div>
-      <Label text="Time" rotate />
+      {/*<Label text="Time" rotate />*/}
       <div style={styles.chartWrapper}>
         <LineChartBuilder
           width={500}

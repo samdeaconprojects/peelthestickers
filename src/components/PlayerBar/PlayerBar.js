@@ -11,7 +11,7 @@ import { useLocation } from 'react-router-dom';
 
 
 
-function PlayerBar({ sessions, currentEvent, handleEventChange, deleteTime, addTime, scramble }) {
+function PlayerBar({ sessions, currentEvent, handleEventChange, deleteTime, addTime, scramble, handleScrambleClick }) {
     const location = useLocation();
     const { pathname } = location;
 
@@ -33,11 +33,30 @@ function PlayerBar({ sessions, currentEvent, handleEventChange, deleteTime, addT
         border: `1px solid ${currentBorderColor}`,
     };
 
+    const getScrambleFontSize = (event) => {
+        switch (event) {
+          case '222':
+            return '24px'; // Largest font size
+          case '333':
+            return '22px';
+          case '444':
+            return '18px';
+          case '555':
+            return '15px';
+          case '666':
+            return '12px';
+          case '777':
+            return '8px'; // Smallest font size
+          default:
+            return '16px'; // Default font size
+        }
+      };
+
     return (
         <div className="player-bar" style={{ 'border-top': `1px solid ${currentBorderColor}` }}>
             <Timer addTime={addTime} />
             <div className='scramble-timelist'>
-            <Scramble scramble={scramble} currentEvent={currentEvent} isMusicPlayer={true} />
+            <Scramble style={{ fontSize: getScrambleFontSize(currentEvent) }} onScrambleClick={handleScrambleClick} scramble={scramble} currentEvent={currentEvent} isMusicPlayer={true} />
             <TimeList solves={sessions[currentEvent]} deleteTime={(index) => deleteTime(currentEvent, index)} />
             </div>
             <EventSelector currentEvent={currentEvent} handleEventChange={handleEventChange}/>

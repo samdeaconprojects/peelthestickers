@@ -71,8 +71,9 @@
 
 .titleText {
     width: 100%;
-    font-size: larger;
+    font-size: 16pt;
     font-weight: bold;
+    white-space: nowrap;
 }
 
 .postTitleCube {

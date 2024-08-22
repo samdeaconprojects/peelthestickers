@@ -1,42 +1,81 @@
-// Detail.js
-import React, { useEffect, useRef } from 'react';
-import { TwistyPlayer } from "cubing/twisty";
+import React, { useEffect, useState } from 'react';
 import './Detail.css';
+import RubiksCubeSVG from '../RubiksCubeSVG';
+import { getScrambledFaces } from "../scrambleUtils";
+import { formatTime } from '../TimeList/TimeUtils';
 
-function Detail({ scramble, currentEvent, onClose }) {
-  const twistyRef = useRef(null);
+function Detail({ solve, onClose }) {
+  const [notes, setNotes] = useState(solve.notes || 'double x-cross'); // Use state to handle the editable text
 
-  useEffect(() => {
-    if (twistyRef.current && scramble) {
-      // Clear previous visualization
-      twistyRef.current.innerHTML = '';
+  const handleNoteChange = (e) => {
+    setNotes(e.target.value);
+  };
 
-      // Map event codes to puzzle types
-      const puzzleTypeMap = {
-        '222': '2x2x2',
-        '333': '3x3x3',
-        '444': '4x4x4',
-        '555': '5x5x5',
-        '666': '6x6x6',
-        '777': '7x7x7',
-        // add more mappings for different puzzles if necessary
-      };
-
-      // Get the puzzle type based on the current event
-      const puzzleType = puzzleTypeMap[currentEvent] || '3x3x3'; // default to '3x3x3' if not found
-
-      const player = new TwistyPlayer({
-        puzzle: puzzleType,
-        alg: scramble,
-      });
-      twistyRef.current.appendChild(player);
+  // Close the detail when clicking outside of the detailPopupContent
+  const handleClickOutside = (event) => {
+    if (event.target.className === 'detailPopup') {
+      onClose();
     }
-  }, [scramble, currentEvent]); // Run when the scramble or currentEvent changes
+  };
+
+  // Add event listener when the component mounts
+  useEffect(() => {
+    document.addEventListener('click', handleClickOutside);
+
+    // Clean up the event listener when the component unmounts
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [onClose]);
+
+  // Determine font size based on event type
+  const getScrambleFontSize = (event) => {
+    switch (event) {
+      case '222':
+        return '24px'; // Largest font size
+      case '333':
+        return '22px';
+      case '444':
+        return '18px';
+      case '555':
+        return '15px';
+      case '666':
+        return '12px';
+      case '777':
+        return '12px'; // Smallest font size
+      default:
+        return '16px'; // Default font size
+    }
+  };
 
   return (
-    <div className="Detail" style={{ display: scramble ? 'block' : 'none' }}>
-        <button onClick={onClose} className="close-button">Close</button>
-      <div className='visualization' ref={twistyRef} />
+    <div className="detailPopup">
+      <div className="detailPopupContent">
+        <span className="closePopup" onClick={onClose}>x</span>
+        <div className='detailFlexCol'>
+          <div className='detailTopRow'>
+            <div className='detailTime'>{formatTime(solve.time)}</div>
+            <div 
+              className='detailScramble'
+              style={{ fontSize: getScrambleFontSize(solve.event) }} // Apply dynamic font size
+            >
+              {solve.scramble}
+            </div>
+          </div>
+          <div className='detailBottomRow'>
+            <div className='detailCube'>
+              <RubiksCubeSVG n={solve.event} faces={getScrambledFaces(solve.scramble, solve.event)} isMusicPlayer={false} isTimerCube={false} />
+            </div>
+            <div className='detailInfoSection'>
+              <textarea
+                className='detailNotes'
+                value={notes}
+                onChange={handleNoteChange}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
