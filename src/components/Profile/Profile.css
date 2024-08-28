@@ -1,3 +1,61 @@
+.tabContainer {
+    display: flex;
+}
+
+.tabButton {
+    padding: 10px 20px;
+    cursor: pointer;
+    background-color: transparent;
+    border: 2px solid #FFFFFF;
+    color: white;
+    margin: 0 5px;
+    font-size: 16px;
+    border-radius: 8px;
+    outline: none;
+    transition: background-color 0.3s ease;
+    opacity: 50%;
+}
+
+.tabButton.active {
+    /*background-color: #007B7F;*/
+    opacity: 100%;
+}
+
+.tabButton:hover {
+    /*background-color: #1F8A93*/
+    opacity: 100%;
+}
+
+.profileContent {
+    display: flex;
+    overflow: hidden;
+    width: 100%;
+    height: calc(100% - 60px); /* Adjust height to accommodate the tab buttons */
+    margin-top: 20px;
+    position: relative; /* Ensures proper positioning of the tab content */
+}
+
+.tabContent {
+    min-width: 100%;
+    opacity: 0;
+    transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: none; /* Hide inactive tabs */
+}
+
+.activeContent {
+    opacity: 1;
+    display: block; /* Show only the active tab */
+}
+
+
+
+
+
+
 .profilePicture {
     border: 2px solid #2EC4B6;
     border-radius: 12px;

@@ -25,8 +25,21 @@
 
 .navAndPage {
   display: flex;
+}
+
+/* App.css */
+.navAndPage {
+  transition: height 0.3s ease; /* Smooth transition when height changes */
+}
+
+.navAndPage.fullHeight {
   height: 100%;
 }
+
+.navAndPage.reducedHeight {
+  height: 80%;
+}
+
 
 .toggle-bar {
   position: fixed;
@@ -62,7 +75,24 @@ body {
   align-items: center;
   justify-content: space-between;
   position: relative;
+  overflow-y: scroll;
 }
+
+/* Hide scrollbars in a container for Webkit-based browsers (e.g., Chrome, Safari) */
+.main-content::-webkit-scrollbar {
+  display: none; /* Hide scrollbar for Chrome, Safari, and Opera */
+}
+
+/* Hide scrollbars in a container for Firefox */
+.main-content {
+  scrollbar-width: none; /* Hide scrollbar for Firefox */
+}
+
+/* Hide scrollbars in Internet Explorer 10+ and Edge */
+.main-content {
+  -ms-overflow-style: none; /* Hide scrollbar for IE and Edge */
+}
+
 
 .timer-display {
   text-align: right;

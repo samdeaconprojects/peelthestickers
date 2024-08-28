@@ -1,4 +1,3 @@
-// App.js
 import React, { useState, useEffect } from "react";
 import "./App.css";
 import Timer from "./components/Timer/Timer";
@@ -79,7 +78,7 @@ function App() {
   return (
     <SettingsProvider>
       <div className={`App ${!isHomePage ? 'music-player-mode' : ''}`}>
-        <div className="navAndPage">
+        <div className={`navAndPage ${showPlayerBar ? 'reducedHeight' : 'fullHeight'}`}>
           <Navigation />
           <div className="main-content">
             <Routes>

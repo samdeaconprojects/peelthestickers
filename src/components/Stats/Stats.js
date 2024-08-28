@@ -47,7 +47,18 @@ function Stats({solves}) {
         <div className='stats-item'>
           <TimeTable solves={solves}/>
         </div>
-       
+        <div className='stats-item'>
+          <LineChart times={times} title={"Current Avg: 3x3"}/>
+        </div>
+        <div className='stats-item'>
+          <TimeTable solves={solves}/>
+        </div>
+        <div className='stats-item'>
+          <LineChart times={times} title={"Current Avg: 3x3"}/>
+        </div>
+        <div className='stats-item'>
+          <TimeTable solves={solves}/>
+        </div>
         {/* Add more LineChart components as needed */}
       </div>
     </div>
