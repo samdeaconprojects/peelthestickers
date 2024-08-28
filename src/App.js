@@ -78,7 +78,7 @@ function App() {
   return (
     <SettingsProvider>
       <div className={`App ${!isHomePage ? 'music-player-mode' : ''}`}>
-        <div className={`navAndPage ${showPlayerBar ? 'reducedHeight' : 'fullHeight'}`}>
+        <div className={`navAndPage ${isHomePage || !showPlayerBar ? 'fullHeight' : 'reducedHeight'}`}>
           <Navigation />
           <div className="main-content">
             <Routes>
