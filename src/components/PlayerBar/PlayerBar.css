@@ -14,6 +14,7 @@
 .scramble-timelist {
     display: flex;
     flex-direction: column;
+    width: 100%;
 }
 
 .RubiksCubeSVG {
@@ -26,6 +27,3 @@
     height: 150px;
 }
 
-.scramble-text {
-    max-width: 100%;
-}

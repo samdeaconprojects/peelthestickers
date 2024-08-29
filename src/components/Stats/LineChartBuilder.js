@@ -9,7 +9,8 @@ const LineChartBuilder = ({
   width,
   horizontalGuides: numberOfHorizontalGuides,
   verticalGuides: numberOfVerticalGuides,
-  precision
+  precision,
+  onDotClick // New prop for handling dot clicks
 }) => {
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, time: '' });
   const FONT_SIZE = width / 50;
@@ -156,7 +157,6 @@ const LineChartBuilder = ({
     <div style={{ position: 'relative' }}>
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        //style={{ border: "0.5px solid #ccc" }}
       >
         <XAxis />
         <LabelsXAxis />
@@ -184,6 +184,7 @@ const LineChartBuilder = ({
               fill={element.color} // Color of the circle
               onMouseOver={(e) => handleMouseOver(e, element.time)}
               onMouseOut={handleMouseOut}
+              onClick={() => onDotClick(element.solve)} // Trigger the callback when clicked
             />
           );
         })}
@@ -222,14 +223,16 @@ LineChartBuilder.propTypes = {
       value: PropTypes.number,
       label: PropTypes.string,
       color: PropTypes.string,
-      time: PropTypes.string
+      time: PropTypes.string,
+      solve: PropTypes.object // Added solve object for detail
     })
   ).isRequired,
   height: PropTypes.number,
   width: PropTypes.number,
   horizontalGuides: PropTypes.number,
   verticalGuides: PropTypes.number,
-  precision: PropTypes.number
+  precision: PropTypes.number,
+  onDotClick: PropTypes.func.isRequired // Ensure onDotClick is provided
 };
 
 export default LineChartBuilder;

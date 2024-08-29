@@ -1,7 +1,6 @@
 .time-table-container {
     margin: 20px;
     overflow-x: auto;
-    opacity: 80%;
   }
   
   .time-table {
@@ -32,5 +31,15 @@
     padding-bottom: 12px;
     background-color: transparent;
     color: white;
+  }
+  
+
+  .time-table tr {
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+  }
+  
+  .time-table tr:hover {
+    background-color: #f0f0f0;
   }
   

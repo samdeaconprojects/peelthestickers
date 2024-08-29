@@ -1,56 +1,41 @@
 .tabContainer {
     display: flex;
+    margin-bottom: 20px;
 }
 
 .tabButton {
     padding: 10px 20px;
     cursor: pointer;
     background-color: transparent;
-    border: 2px solid #FFFFFF;
+    border: none;
+    border-bottom: 2px solid transparent;
     color: white;
     margin: 0 5px;
     font-size: 16px;
-    border-radius: 8px;
-    outline: none;
-    transition: background-color 0.3s ease;
+    transition: border-color 0.3s ease, opacity 0.3s ease;
     opacity: 50%;
 }
 
 .tabButton.active {
-    /*background-color: #007B7F;*/
+    border-bottom: 2px solid #FFFFFF;
     opacity: 100%;
 }
 
 .tabButton:hover {
-    /*background-color: #1F8A93*/
     opacity: 100%;
 }
 
 .profileContent {
-    display: flex;
-    overflow: hidden;
     width: 100%;
-    height: calc(100% - 60px); /* Adjust height to accommodate the tab buttons */
-    margin-top: 20px;
-    position: relative; /* Ensures proper positioning of the tab content */
+    box-sizing: border-box;
 }
 
-.tabContent {
-    min-width: 100%;
-    opacity: 0;
-    transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    display: none; /* Hide inactive tabs */
+.tabPanel {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    row-gap: 10px;
 }
-
-.activeContent {
-    opacity: 1;
-    display: block; /* Show only the active tab */
-}
-
 
 
 
@@ -129,8 +114,8 @@
 
 .titleText {
     width: 100%;
-    font-size: 16pt;
-    font-weight: bold;
+    font-size: 18pt;
+    font-weight: 500;
     white-space: nowrap;
 }
 

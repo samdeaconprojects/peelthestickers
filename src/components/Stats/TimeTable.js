@@ -1,14 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import './TimeTable.css';
 import { formatTime } from '../TimeList/TimeUtils';
-
+import Detail from '../Detail/Detail';
 
 const TimeTable = ({ solves }) => {
-  console.log("Solves data:", solves); // Debugging statement
-
-  const times = solves.map(solve => solve.time);
-
+  const [selectedSolve, setSelectedSolve] = useState(null);
 
   return (
     <div className="time-table-container">
@@ -22,7 +19,7 @@ const TimeTable = ({ solves }) => {
         </thead>
         <tbody>
           {solves.map((solve, index) => (
-            <tr key={index}>
+            <tr key={index} onClick={() => setSelectedSolve(solve)}>
               <td>{index + 1}</td>
               <td>{formatTime(solve.time)}</td>
               <td>{solve.scramble}</td>
@@ -30,6 +27,10 @@ const TimeTable = ({ solves }) => {
           ))}
         </tbody>
       </table>
+      
+      {selectedSolve && (
+        <Detail solve={selectedSolve} onClose={() => setSelectedSolve(null)} />
+      )}
     </div>
   );
 };

@@ -11,7 +11,7 @@ import TimeTable from './TimeTable';
 
 function Stats({solves}) {
 
-  const times = solves.map(solve => solve.time);
+  
 
   
   /*
@@ -42,19 +42,19 @@ function Stats({solves}) {
       <div className='stats-page'>
       <div className='stats-grid'>
         <div className='stats-item'>
-          <LineChart times={times} title={"Current Avg: 3x3"}/>
+          <LineChart solves={solves} title={"Current Avg: 3x3"}/>
         </div>
         <div className='stats-item'>
           <TimeTable solves={solves}/>
         </div>
         <div className='stats-item'>
-          <LineChart times={times} title={"Current Avg: 3x3"}/>
+          <LineChart solves={solves} title={"Current Avg: 3x3"}/>
         </div>
         <div className='stats-item'>
           <TimeTable solves={solves}/>
         </div>
         <div className='stats-item'>
-          <LineChart times={times} title={"Current Avg: 3x3"}/>
+          <LineChart solves={solves} title={"Current Avg: 3x3"}/>
         </div>
         <div className='stats-item'>
           <TimeTable solves={solves}/>
