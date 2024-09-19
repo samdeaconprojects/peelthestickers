@@ -6,8 +6,9 @@ import Detail from '../Detail/Detail';
 import './Stats.css';
 import { formatTime, calculateAverageForGraph } from '../TimeList/TimeUtils';
 
-function LineChart({ solves, title }) {
+function LineChart({ solves, title, deleteTime, addPost }) {
   const [selectedSolve, setSelectedSolve] = useState(null);
+  const [selectedSolveIndex, setSelectedSolveIndex] = useState(null);
 
   const times = solves.map(solve => solve.time);
 
@@ -18,19 +19,21 @@ function LineChart({ solves, title }) {
   const getColor = (time) => {
     const ratio = (time - minTime) / (maxTime - minTime);
     if (time <= averageTime) {
-      return `rgb(${255 * ratio}, 255, ${0})`; // Green to Yellow
+      return `rgb(${255 * ratio}, 255, 0)`; // Green to Yellow
     } else {
       return `rgb(255, ${255 * (1 - ratio)}, 0)`; // Yellow to Red
     }
   };
 
+  // Pass both the solve object and its index for easy reference
   const data = solves.map((solve, index) => ({
-    label: `${index + 1}`, // Creating a label with the solve number
-    x: index, // x-coordinate as the index
-    y: parseFloat(formatTime(solve.time).replace(':', '.')), // Convert formatted time to a float for y-coordinate
-    color: getColor(solve.time), // Assign a color based on the time
-    time: formatTime(solve.time), // Include the formatted time for the tooltip
-    solve: solve // Pass the entire solve object for the detail view
+    label: `${index + 1}`,
+    x: index,
+    y: parseFloat(formatTime(solve.time).replace(':', '.')),
+    color: getColor(solve.time),
+    time: formatTime(solve.time),
+    solve: solve,
+    solveIndex: index
   }));
 
   const solveCountText = "Solve Count: " + times.length;
@@ -40,7 +43,7 @@ function LineChart({ solves, title }) {
       display: 'grid', gridTemplateColumns: 'max-content 700px', alignItems: 'center'
     },
     chartWrapper: { maxWidth: 700, alignSelf: 'flex-start' }
-  }
+  };
 
   return (
     <div className='lineChart'>
@@ -56,13 +59,21 @@ function LineChart({ solves, title }) {
           horizontalGuides={5}
           precision={2}
           verticalGuides={7}
-          onDotClick={(solve) => setSelectedSolve(solve)}
+          onDotClick={(solve) => {
+            setSelectedSolve(solve);
+            setSelectedSolveIndex(solve.solveIndex);
+          }}
         />
       </div>
       <div />
       <Label text={solveCountText} />
       {selectedSolve && (
-        <Detail solve={selectedSolve} onClose={() => setSelectedSolve(null)} />
+        <Detail
+          solve={selectedSolve}
+          onClose={() => setSelectedSolve(null)}
+          deleteTime={() => deleteTime(selectedSolveIndex)}
+          addPost={addPost}
+        />
       )}
     </div>
   );

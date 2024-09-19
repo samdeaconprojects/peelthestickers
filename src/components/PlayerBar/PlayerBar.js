@@ -11,7 +11,7 @@ import { useLocation } from 'react-router-dom';
 
 
 
-function PlayerBar({ sessions, currentEvent, handleEventChange, deleteTime, addTime, scramble, handleScrambleClick }) {
+function PlayerBar({ sessions, currentEvent, handleEventChange, deleteTime, addTime, scramble, handleScrambleClick, addPost }) {
     const location = useLocation();
     const { pathname } = location;
 
@@ -46,7 +46,7 @@ function PlayerBar({ sessions, currentEvent, handleEventChange, deleteTime, addT
           case '666':
             return '12px';
           case '777':
-            return '8px'; // Smallest font size
+            return '12px'; // Smallest font size
           default:
             return '16px'; // Default font size
         }
@@ -57,7 +57,7 @@ function PlayerBar({ sessions, currentEvent, handleEventChange, deleteTime, addT
             <Timer addTime={addTime} />
             <div className='scramble-timelist'>
             <Scramble style={{ fontSize: getScrambleFontSize(currentEvent) }} onScrambleClick={handleScrambleClick} scramble={scramble} currentEvent={currentEvent} isMusicPlayer={true} />
-            <TimeList solves={sessions[currentEvent]} deleteTime={(index) => deleteTime(currentEvent, index)} />
+            <TimeList solves={sessions[currentEvent]} deleteTime={(index) => deleteTime(currentEvent, index)} addPost={addPost} rowsToShow={1}/>
             </div>
             <EventSelector currentEvent={currentEvent} handleEventChange={handleEventChange}/>
             <RubiksCubeSVG n={currentEvent} faces={getScrambledFaces(scramble, currentEvent)} isMusicPlayer={true} isTimerCube={false} />

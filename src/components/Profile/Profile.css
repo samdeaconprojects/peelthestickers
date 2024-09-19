@@ -37,6 +37,24 @@
     row-gap: 10px;
 }
 
+.deletePostButton {
+    background-color: #ff4d4d;
+    color: white;
+    border: none;
+    padding: 2px 5px;
+    cursor: pointer;
+    border-radius: 5px;
+   
+  }
+  
+  .deletePostButton:hover {
+    background-color: #ff1a1a;
+  }
+  
+  .belowPost {
+    display: flex;
+    justify-content: flex-end;
+  }
 
 
 

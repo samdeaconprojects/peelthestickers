@@ -224,7 +224,8 @@ LineChartBuilder.propTypes = {
       label: PropTypes.string,
       color: PropTypes.string,
       time: PropTypes.string,
-      solve: PropTypes.object // Added solve object for detail
+      solve: PropTypes.object,
+      solveIndex: PropTypes.number // Added solveIndex to propTypes
     })
   ).isRequired,
   height: PropTypes.number,

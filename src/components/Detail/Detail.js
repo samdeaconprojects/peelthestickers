@@ -4,35 +4,30 @@ import RubiksCubeSVG from '../RubiksCubeSVG';
 import { getScrambledFaces } from "../scrambleUtils";
 import { formatTime } from '../TimeList/TimeUtils';
 
-function Detail({ solve, onClose }) {
-  const [notes, setNotes] = useState(solve.notes || 'double x-cross'); // Use state to handle the editable text
+function Detail({ solve, onClose, deleteTime, addPost }) {
+  const [notes, setNotes] = useState(solve.notes || 'double x-cross'); 
 
   const handleNoteChange = (e) => {
     setNotes(e.target.value);
   };
 
-  // Close the detail when clicking outside of the detailPopupContent
   const handleClickOutside = (event) => {
     if (event.target.className === 'detailPopup') {
       onClose();
     }
   };
 
-  // Add event listener when the component mounts
   useEffect(() => {
     document.addEventListener('click', handleClickOutside);
-
-    // Clean up the event listener when the component unmounts
     return () => {
       document.removeEventListener('click', handleClickOutside);
     };
   }, [onClose]);
 
-  // Determine font size based on event type
   const getScrambleFontSize = (event) => {
     switch (event) {
       case '222':
-        return '24px'; // Largest font size
+        return '24px'; 
       case '333':
         return '22px';
       case '444':
@@ -42,10 +37,27 @@ function Detail({ solve, onClose }) {
       case '666':
         return '12px';
       case '777':
-        return '12px'; // Smallest font size
+        return '12px'; 
       default:
-        return '16px'; // Default font size
+        return '16px'; 
     }
+  };
+
+  const handleDelete = () => {
+    deleteTime(); 
+    onClose(); 
+  };
+
+  const handleShare = () => {
+    const newPost = {
+      date: new Date().toLocaleDateString(),
+      event: solve.event,
+      scramble: solve.scramble,
+      time: formatTime(solve.time),
+      singleOrAverage: "Single", 
+    };
+    addPost(newPost); 
+    onClose();
   };
 
   return (
@@ -57,7 +69,7 @@ function Detail({ solve, onClose }) {
             <div className='detailTime'>{formatTime(solve.time)}</div>
             <div 
               className='detailScramble'
-              style={{ fontSize: getScrambleFontSize(solve.event) }} // Apply dynamic font size
+              style={{ fontSize: getScrambleFontSize(solve.event) }} 
             >
               {solve.scramble}
             </div>
@@ -73,6 +85,10 @@ function Detail({ solve, onClose }) {
                 onChange={handleNoteChange}
               />
             </div>
+          </div>
+          <div className="detailActions">
+            <button className="delete-button" onClick={handleDelete}>Delete</button>
+            <button className="share-button" onClick={handleShare}>Share</button>
           </div>
         </div>
       </div>

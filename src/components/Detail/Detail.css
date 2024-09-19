@@ -80,3 +80,13 @@
   resize: none; /* Disable resizing */
   outline: none; /* Optional: Remove the default focus outline */
 }
+
+.delete-button {
+  color: #F64258;
+  border-color: #F64258;
+  opacity: 100%;
+}
+
+.delete-button:hover {
+  cursor: pointer;
+}

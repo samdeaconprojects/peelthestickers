@@ -3,7 +3,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import './Navigation.css';
 
-function Navigation({ onNavClick, onMainLogoClick }) {
+function Navigation({ onNavClick, onMainLogoClick, handleSignIn, isSignedIn }) {
 
   return (
     <nav className="Navigation">
@@ -12,6 +12,9 @@ function Navigation({ onNavClick, onMainLogoClick }) {
       </Link>
       <ul>
         {/* When these links are clicked, onNavClick will set the app to music player mode */}
+        <button onClick={handleSignIn} className="sign-in-button">
+          {isSignedIn ? "Signed In" : "Sign In"}
+        </button> {/* Add a Sign In button */}
         <li><Link to="/profile" onClick={onNavClick}><i className="nav-icon">
           <img src={require('../../assets/Profile.png')} alt="Profile" className="profile" />
         </i></Link></li>

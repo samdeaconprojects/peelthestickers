@@ -1,16 +1,17 @@
 /* TimeList.css */
 .time-list-container {
   display: flex;
-  justify-content: center;
-  align-items: center;
-  flex-direction: column;
+  justify-content: center; /* Center horizontally */
+  align-items: flex-start; /* Align to the top */
   margin-bottom: 50px;
+  width: 100%; /* Ensure it takes up the full width */
+  position: relative; /* Add relative positioning for the container */
 }
+
 .averages-display {
   text-align: left; /* Align the text to the left */
   color: #FDFFFC; /* White text for readability */
   padding: 10px 0; /* Add some padding above and below the averages */
- /* Match the width of the TimeList table */
   box-sizing: border-box; /* Include padding in the width calculation */
   margin-right: 40%; /* Align the container to the center */
   font-family: 'Jost', sans-serif;
@@ -26,11 +27,13 @@
   max-width: 1000px; /* Set a maximum width */
   table-layout: fixed;
   border-collapse: collapse;
+  margin: 0 auto; /* Center the table horizontally */
 }
 
 .TimeList tbody {
   display: block;
-  overflow-y: scroll;
+  overflow-y: hidden; /* Remove vertical scrolling */
+  overflow-x: hidden; /* Remove horizontal scrolling */
 }
 
 .TimeList tr {
@@ -51,9 +54,6 @@
   background-color: #2EC4B6; /* Different background for the average column */
 }
 
-
-
-/* TimeList.css */
 .scramble-popup {
   position: fixed;
   top: 0;
@@ -82,7 +82,55 @@
   font-size: 24px;
 }
 
+.time-list-container {
+  display: flex;
+  justify-content: center; /* Center the time list horizontally */
+  align-items: flex-start; /* Align the time list to the top */
+  width: 100%;
+  flex-direction: row; /* Ensure the pagination buttons are next to the time list */
+}
 
+.time-list-content {
+  flex-grow: 1;
+  width: 100%; /* Ensure it takes up the full width */
+}
+
+.pagination-buttons {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  position: absolute; /* Absolute positioning to ensure it stays on the right */
+  right: 0; /* Align to the right of the container */
+  top: 0; /* Align to the top of the container */
+}
+
+.pagination-buttons button {
+  background-color: transparent;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 5px;
+}
+
+.pagination-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
+.overall-border-min {
+  border: 2px solid green;
+  opacity: 1;
+}
+
+.overall-border-max {
+  border: 2px solid red;
+  opacity: 1;
+}
+
+.current-five {
+  opacity: 0.8;
+}
 
 /* For smaller screens */
 @media (max-width: 1100px) {
