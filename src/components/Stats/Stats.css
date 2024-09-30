@@ -74,6 +74,10 @@ td:nth-child(13) {
     border-color: #2EC4B6; /* Change border color on focus */
     box-shadow: 0 0 5px rgba(46, 196, 182, 0.5); /* Add a glowing effect */
   }
+
+  /* Bar Chart */
+
+  
   
   /* Stats Summary */
   .stats-summary {

@@ -8,6 +8,7 @@ import LineChart from './LineChart';
 import TimeTable from './TimeTable';
 import PieChart from './PieChart';
 import StatsSummary from './StatsSummary';
+import BarChart from './BarChart';
 
 
 
@@ -28,10 +29,7 @@ function Stats({ sessions, currentEvent, deleteTime, addPost }) {
             <PieChart solves={solves} title="Solves Distribution by Time" />
           </div>
           <div className="stats-item">
-            <TimeTable solves={solves} deleteTime={deleteTime} addPost={addPost} />
-          </div>
-          <div className="stats-item">
-            <LineChart solves={solves} title={"Current Avg: 3x3"} deleteTime={deleteTime} addPost={addPost} />
+            <BarChart solves={solves} />
           </div>
           <div className="stats-item">
             <TimeTable solves={solves} deleteTime={deleteTime} addPost={addPost} />
