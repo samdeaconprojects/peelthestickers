@@ -26,49 +26,48 @@ export const calculateAverageForGraph = (times) => {
 };
 
 
-export  const calculateAverage = (timesArray, removeMinMax) => {
-    console.log("Original timesArray: " + timesArray);
+export const calculateAverage = (timesArray, removeMinMax) => {
+  console.log("Original timesArray: " + timesArray);
 
-    // Create an array of objects with value and original index
-    const indexedArray = timesArray.map((value, index) => ({ value, index }));
+  // Ensure all entries are numeric and map to an array of objects with value and original index
+  const indexedArray = timesArray.map((time, index) => ({ value: parseFloat(time), index }))
+                                 .filter(item => !isNaN(item.value));  // Filter out non-numeric entries
 
-    // Sort indexedArray based on the value in ascending order
-    indexedArray.sort((a, b) => a.value - b.value);
+  if (indexedArray.length === 0) {
+      return { average: null, minIndex: -1, maxIndex: -1 };
+  }
 
-    console.log("Sorted indexedArray: ");
-    indexedArray.forEach(item => console.log(`Value: ${item.value}, Original Index: ${item.index}`));
+  // Sort indexedArray based on the value in ascending order
+  indexedArray.sort((a, b) => a.value - b.value);
 
-    // Calculate the sum of sorted values
-    let sum;
-    let average;
-    if (removeMinMax) {
-      const filteredArray = indexedArray.length > 2 ? indexedArray.slice(1, -1) : indexedArray;
-      console.log(filteredArray);
-      let sum = filteredArray.reduce((acc, curr) => acc + curr.value, 0);
+  console.log("Sorted indexedArray: ");
+  indexedArray.forEach(item => console.log(`Value: ${item.value}, Original Index: ${item.index}`));
 
-      average = sum / filteredArray.length;
+  let sum = 0;  // Initialize sum
+  let currAverage = 0;
 
-    } else {
+  if (removeMinMax && indexedArray.length > 2) {
+      // Remove the smallest and largest values if appropriate
+      const filteredArray = indexedArray.slice(1, -1);
+      sum = filteredArray.reduce((acc, curr) => acc + curr.value, 0);
+      currAverage = sum / filteredArray.length;
+  } else {
+      // Calculate sum of all values
+      sum = indexedArray.reduce((acc, curr) => acc + curr.value, 0);
+      currAverage = sum / indexedArray.length;
+  }
 
-      let sum = indexedArray.reduce((acc, curr) => acc + curr.value, 0);
+  const minIndex = indexedArray[0].index;
+  const maxIndex = indexedArray[indexedArray.length - 1].index;
 
-      // Calculate the average
-      average = sum / indexedArray.length;
+  console.log("Average: " + currAverage);
 
-    }
-
-
-    const minIndex = indexedArray[0].index;
-    const maxIndex = indexedArray[indexedArray.length - 1].index;
-
-    console.log("Average: " + average);
-
-    return {
-        average: average,
-        minIndex: minIndex,
-        maxIndex: maxIndex,
-        sortedWithOriginalIndexes: indexedArray // This includes both sorted values and their original indexes
-    };
+  return {
+      average: currAverage,
+      minIndex: minIndex,
+      maxIndex: maxIndex,
+      sortedWithOriginalIndexes: indexedArray // This includes both sorted values and their original indexes
+  };
 };
 
 

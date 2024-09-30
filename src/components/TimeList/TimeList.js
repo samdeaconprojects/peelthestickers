@@ -58,7 +58,10 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar = false
   const rows = [];
   for (let i = 0; i < visibleSolves.length; i += colsPerRow) {
     const timesRow = visibleSolves.slice(i, i + colsPerRow);
-    const averageData = calculateAverage(timesRow, true);
+    const averageData = calculateAverage(timesRow.map(solve => solve.time), true);
+    console.log("AVERAGE DATA");
+
+    console.log(averageData);
 
     rows.push(
       <tr key={i}>
