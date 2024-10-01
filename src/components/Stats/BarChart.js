@@ -1,7 +1,14 @@
-// BarChart.js
 import React, { useState } from 'react';
 
 function BarChart({ solves }) {
+  // Tooltip state
+  const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, count: 0 });
+
+  // Check if solves is empty or undefined and return a message
+  if (!solves || solves.length === 0) {
+    return <div>No data available for this chart.</div>;
+  }
+
   // Extract the solve times
   const times = solves.map(solve => solve.time);
 
@@ -24,9 +31,6 @@ function BarChart({ solves }) {
   const padding = 40;
   const barWidth = (chartWidth - 2 * padding) / counts.length;
   const maxCount = Math.max(...counts);
-
-  // Tooltip state
-  const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, count: 0 });
 
   // Function to determine the color of each bar
   const getColor = (index) => {
