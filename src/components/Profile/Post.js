@@ -4,12 +4,17 @@ import RubiksCubeSVG from '../RubiksCubeSVG';
 import { getScrambledFaces } from '../cubeStructure';
 import { currentEventToString } from "../../components/scrambleUtils";
 
-function Post({ name, date, event, scramble, singleOrAverage, time, deletePost }) {
+function Post({ name, date, event, scramble, singleOrAverage, time, deletePost, postColor }) {
   const eventToString = currentEventToString(event);
+
+  const styles = {
+    
+    postBorder: { border: `1px solid ${postColor}` }
+  };
 
   return (
     <div>
-    <div className="post">
+    <div className="post" style={styles.postBorder}>
       <div className='titleAndContent'>
         <div className='postTitle'>
           <div className='postTitleCube'>

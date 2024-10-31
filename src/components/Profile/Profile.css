@@ -1,6 +1,7 @@
 .tabContainer {
     display: flex;
     margin-bottom: 20px;
+    margin-top: 20px;
 }
 
 .tabButton {
@@ -9,6 +10,7 @@
     background-color: transparent;
     border: none;
     border-bottom: 2px solid transparent;
+    border-radius: 0px;
     color: white;
     margin: 0 5px;
     font-size: 16px;
@@ -77,7 +79,7 @@
 .post {
     display: flex;
     justify-content: space-between;
-    border: 2px solid #454545;
+    
     border-radius: 12px;
     width: 100%;
 }
@@ -162,6 +164,7 @@
     display: flex;
     flex-direction: row;
     justify-content: space-between;
+    align-items: center;
 }
 
 .profileAndName {
@@ -190,6 +193,26 @@
     background-color: transparent;
     border: 2px solid #2EC4B6;
     border-radius: 8px;
+    display: grid;
+    grid-template-columns: 50% 50%;
+    grid-template-rows: auto;
+    text-align: center;
+    align-items: center;
 }
 
+.personalBests {
+    display: flex;
+    flex-direction: row;
+    gap: 20px;
+}
 
+.pbTitle {
+    font-size: smaller;
+    text-align: center;
+}
+
+.pbTime {
+    font-size: xx-large;
+    font-weight: bold;
+    text-align: center;
+}

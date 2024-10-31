@@ -20,9 +20,33 @@ function ProfileHeader() {
                 <div className='profileUsername'>@sam</div>
              </div>
             </div>
+
+            <div className='personalBests'>
+                <div className='pb'>
+                    <div className='pbTitle'>3x3 Single</div>
+                    <div className='pbTime'>5.66</div>
+                </div>
+                <div className='pb'>
+                    <div className='pbTitle'>3x3 Average</div>
+                    <div className='pbTime'>7.37</div>
+                </div>
+                <div className='pb'>
+                    <div className='pbTitle'>3x3OH Single</div>
+                    <div className='pbTime'>8.72</div>
+                </div>
+                <div className='pb'>
+                    <div className='pbTitle'>4x4 Single</div>
+                    <div className='pbTime'>33.78</div>
+                </div>
+            </div>
         
             <div className='profileStats'>
-            
+                <div>100 Followers</div>
+                <div>40 Following</div>
+                <div>2013DEAC01</div>
+                <div>10,420 Solves</div>
+                <div>CFOP</div>
+                <div>May 4 2024</div>
             </div>
         </div>
     );

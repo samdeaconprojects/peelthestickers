@@ -172,7 +172,7 @@ function App() {
                   <TimeList solves={sessions[currentEvent] || []} deleteTime={(index) => deleteTime(currentEvent, index)} addPost={addPost} rowsToShow={3} />
                 </>
               } />
-              <Route path="/profile" element={<Profile user={user} deletePost={deletePost} />} />
+              <Route path="/profile" element={<Profile user={user} deletePost={deletePost} sessions={sessions} />} />
               <Route path="/stats" element={
                 <Stats 
                   sessions={sessions} 
@@ -182,7 +182,7 @@ function App() {
                   addPost={addPost} 
                 />
               } />
-              <Route path="/social" element={<Social />} />
+              <Route path="/social" element={<Social user={user} deletePost={deletePost} />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </div>
