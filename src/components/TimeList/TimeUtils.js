@@ -27,7 +27,7 @@ export const calculateAverageForGraph = (times) => {
 
 
 export const calculateAverage = (timesArray, removeMinMax) => {
-  console.log("Original timesArray: " + timesArray);
+  //console.log("Original timesArray: " + timesArray);
 
   // Ensure all entries are numeric and map to an array of objects with value and original index
   const indexedArray = timesArray.map((time, index) => ({ value: parseFloat(time), index }))
@@ -40,8 +40,8 @@ export const calculateAverage = (timesArray, removeMinMax) => {
   // Sort indexedArray based on the value in ascending order
   indexedArray.sort((a, b) => a.value - b.value);
 
-  console.log("Sorted indexedArray: ");
-  indexedArray.forEach(item => console.log(`Value: ${item.value}, Original Index: ${item.index}`));
+  //console.log("Sorted indexedArray: ");
+  //indexedArray.forEach(item => console.log(`Value: ${item.value}, Original Index: ${item.index}`));
 
   let sum = 0;  // Initialize sum
   let currAverage = 0;
@@ -60,7 +60,7 @@ export const calculateAverage = (timesArray, removeMinMax) => {
   const minIndex = indexedArray[0].index;
   const maxIndex = indexedArray[indexedArray.length - 1].index;
 
-  console.log("Average: " + currAverage);
+  //console.log("Average: " + currAverage);
 
   return {
       average: currAverage,
@@ -89,7 +89,7 @@ export const getOveralls = (timesArray) => {
 
 export const calculateAverageOfFive = (times) => {
     const lastFiveSolves = times.slice(-5);
-    console.log("calculate average of five, last five solves: " + lastFiveSolves);
+    //console.log("calculate average of five, last five solves: " + lastFiveSolves);
     if (lastFiveSolves.length === 0) return 'N/A';
     return calculateAverage(lastFiveSolves, true).answer;
   };

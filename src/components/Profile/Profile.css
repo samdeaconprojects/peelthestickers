@@ -165,11 +165,13 @@
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
+    color: #c2c2c2;
 }
 
 .profileAndName {
     display: flex;
     flex-direction: row;
+    color: #FFFFFF;
 }
 
 .profileNameAndUsername {
@@ -215,4 +217,5 @@
     font-size: xx-large;
     font-weight: bold;
     text-align: center;
+    color: #FFFFFF;
 }

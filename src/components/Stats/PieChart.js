@@ -34,7 +34,9 @@ function PieChart({ solves, title }) {
 
   const data = [
     { label: `Below ${threshold}s`, value: belowThreshold.length, solves: belowThreshold },
-    { label: `Above ${threshold}s`, value: aboveThreshold.length, solves: aboveThreshold }
+    { label: `Above ${threshold}s`, value: aboveThreshold.length, solves: aboveThreshold },
+    { label: `A ${threshold}s`, value: belowThreshold.length, solves: belowThreshold },
+    { label: `B ${threshold}s`, value: aboveThreshold.length, solves: aboveThreshold }
   ];
 
   // Calculate percentages

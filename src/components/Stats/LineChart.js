@@ -59,9 +59,12 @@ function LineChart({ solves, title, deleteTime, addPost }) {
           horizontalGuides={5}
           precision={2}
           verticalGuides={7}
-          onDotClick={(solve) => {
+          onDotClick={(solve, solveIndex) => {
+            console.log("SOLVE INDEX" + solve);
+            console.log(solveIndex);
+
             setSelectedSolve(solve);
-            setSelectedSolveIndex(solve.solveIndex);
+            setSelectedSolveIndex(solveIndex);
           }}
         />
       </div>

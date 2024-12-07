@@ -9,11 +9,12 @@
 }
 
 .averages-display {
-  text-align: left; /* Align the text to the left */
+  display:grid;
+  grid-template-columns: 50% 50%;
+  grid-template-columns: 200px 200px;
   color: #FDFFFC; /* White text for readability */
-  padding: 10px 0; /* Add some padding above and below the averages */
   box-sizing: border-box; /* Include padding in the width calculation */
-  margin-right: 40%; /* Align the container to the center */
+ 
   font-family: 'Jost', sans-serif;
   font-weight: bold;
 }

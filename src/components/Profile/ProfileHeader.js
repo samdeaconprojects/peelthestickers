@@ -41,7 +41,7 @@ function ProfileHeader() {
             </div>
         
             <div className='profileStats'>
-                <div>100 Followers</div>
+                <div>10 Followers</div>
                 <div>40 Following</div>
                 <div>2013DEAC01</div>
                 <div>10,420 Solves</div>

@@ -1,15 +1,23 @@
-// services/awsService.js
-import dynamoDB from '../components/SignIn/awsConfig';
+import dynamoDB from "../components/SignIn/awsConfig";
 
-// Function to get user data
-export const getUserData = async (userID) => {
+// Function to get user data with optional limit
+export const getUserData = async (userID, limit = null) => {
   const params = {
     TableName: "PTSDev",
-    Key: { UserID: userID }
+    Key: { UserID: userID },
   };
   try {
     const result = await dynamoDB.get(params).promise();
-    return result.Item || null; // Return the user data or null if not found
+    if (result.Item) {
+      const sessions = result.Item.Sessions || {};
+      if (limit) {
+        for (const key in sessions) {
+          sessions[key] = sessions[key].slice(-limit);
+        }
+      }
+      return { ...result.Item, Sessions: sessions };
+    }
+    return null;
   } catch (error) {
     console.error("Error fetching user data:", error);
     throw error;
@@ -58,6 +66,7 @@ export const deleteSolveFromDynamoDB = async (userID, event, index) => {
   }
 };
 
+
 // Function to add a post
 export const addPostToDynamoDB = async (userID, newPost) => {
   const params = {
@@ -93,3 +102,5 @@ export const deletePostFromDynamoDB = async (userID, postIndex) => {
     throw error;
   }
 };
+
+

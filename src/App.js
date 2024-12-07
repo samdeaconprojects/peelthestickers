@@ -14,15 +14,14 @@ import RubiksCubeSVG from "./components/RubiksCubeSVG";
 import { generateScramble, getScrambledFaces } from "./components/scrambleUtils";
 import { Routes, Route, useLocation } from "react-router-dom";
 import { SettingsProvider } from "./contexts/SettingsContext";
-
-// Import the AWS service functions
 import {
   getUserData,
   addSolveToDynamoDB,
   deleteSolveFromDynamoDB,
   addPostToDynamoDB,
   deletePostFromDynamoDB
-} from './services/awsService'; // Ensure this path is correct based on your project structure
+} from './services/awsService';
+import {calculateBestAverageOfFive, calculateAverage, formatTime } from './components/TimeList/TimeUtils';
 
 function App() {
   const [currentEvent, setCurrentEvent] = useState("333");
@@ -41,23 +40,24 @@ function App() {
   const [showDetail, setShowDetail] = useState(false);
   const [user, setUser] = useState(null);
   const [isSignedIn, setIsSignedIn] = useState(false);
-  
-  useEffect(() => {
-    setScramble(generateScramble(currentEvent));
-  }, [currentEvent]);
 
   const location = useLocation();
   const isHomePage = location.pathname === "/";
 
-  // Handle Sign In
+  useEffect(() => {
+    setScramble(generateScramble(currentEvent));
+  }, [currentEvent]);
+
   const handleSignIn = async () => {
-    const userID = "samtest3"; // For now, fixed UserID
+    const userID = "samtest3"; // Example userID
+    const limit = 100; // Load the most recent 300 solves initially
     try {
-      const userData = await getUserData(userID);
+      const userData = await getUserData(userID, limit);
       if (userData) {
         setUser(userData);
         setSessions(userData.Sessions || {});
         setIsSignedIn(true);
+        fetchFullData(userID);
       } else {
         alert("User not found!");
       }
@@ -66,7 +66,17 @@ function App() {
     }
   };
 
-  // Add Solve
+  const fetchFullData = async (userID) => {
+    try {
+      const userData = await getUserData(userID); // Fetch all data without limits
+      if (userData) {
+        setSessions(userData.Sessions || {});
+      }
+    } catch (error) {
+      console.error("Error fetching full data:", error);
+    }
+  };
+
   const addSolve = async (newTime) => {
     const newSolve = {
       time: newTime,
@@ -90,10 +100,9 @@ function App() {
       }
     }
 
-    setScramble(generateScramble(currentEvent)); // Generate a new scramble after saving solve
+    setScramble(generateScramble(currentEvent));
   };
 
-  // Delete Solve
   const deleteTime = async (eventKey, index) => {
     const updatedTimes = sessions[eventKey].filter((_, idx) => idx !== index);
     setSessions((prevSessions) => ({
@@ -110,7 +119,6 @@ function App() {
     }
   };
 
-  // Add Post
   const addPost = async (newPost) => {
     if (user) {
       const updatedUser = {
@@ -129,7 +137,6 @@ function App() {
     }
   };
 
-  // Delete Post
   const deletePost = async (postIndex) => {
     if (user) {
       const updatedUser = {
@@ -148,10 +155,21 @@ function App() {
     }
   };
 
-  // Handle Event Change
   const handleEventChange = (event) => {
     setCurrentEvent(event.target.value);
   };
+
+  const currentSolves = sessions[currentEvent] || [];
+  const avgOfFive = calculateAverage(currentSolves.slice(-5).map(s => s.time), true).average;
+  const avgOfTwelve = calculateAverage(currentSolves.slice(-12).map(s => s.time), true).average || 'N/A';
+  const bestAvgOfFive = calculateBestAverageOfFive(currentSolves.map(s => s.time));
+  const bestAvgOfTwelve = currentSolves.length >= 12 
+    ? Math.min(...currentSolves.map((_, i) =>
+        i + 12 <= currentSolves.length
+          ? calculateAverage(currentSolves.slice(i, i + 12).map(s => s.time), true).average
+          : Infinity
+      ))
+    : 'N/A';
 
   return (
     <SettingsProvider>
@@ -169,6 +187,12 @@ function App() {
                     <RubiksCubeSVG n={currentEvent} faces={getScrambledFaces(scramble, currentEvent)} isMusicPlayer={!isHomePage} isTimerCube={true} />
                   </div>
                   <Timer addTime={addSolve} />
+                  <div className="averages-display">
+                    <p>Avg of 5: {formatTime(avgOfFive)}</p>
+                    <p>Avg of 12: {formatTime(avgOfTwelve)}</p>
+                    <p>Best Avg of 5: {formatTime(bestAvgOfFive)}</p>
+                    <p>Best Avg of 12: {formatTime(bestAvgOfTwelve)}</p>
+                  </div>
                   <TimeList solves={sessions[currentEvent] || []} deleteTime={(index) => deleteTime(currentEvent, index)} addPost={addPost} rowsToShow={3} />
                 </>
               } />
