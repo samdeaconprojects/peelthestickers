@@ -48,6 +48,19 @@
   padding: 10px;
 }
 
+button {
+  background-color: transparent;
+  border: solid #FFFFFF 2px;
+  border-radius: 8px;
+  color: #FFFFFF;
+  opacity: 50%;
+}
+
+button:hover {
+  opacity: 100%;
+  cursor: pointer;
+}
+
 .toggle-button {
   background: none;
   color: white;
@@ -97,7 +110,8 @@ body {
 .timer-display {
   text-align: right;
   font-family: 'Droid Sans Mono', monospace;
-  height: 30%;
+  display: flex;
+  max-height: 30%;
 }
 
 .Timer {
@@ -165,6 +179,27 @@ select {
   background-color: transparent;
   color: #FDFFFC;
 
+}
+
+.averages-display {
+  display:grid;
+  grid-template-columns: 40% 70% 70%;
+  grid-template-rows: 10% 30% 30%;
+  color: #FDFFFC;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Jost', sans-serif;
+  font-weight: bold;
+  text-align: center;
+}
+
+.averagesTime {
+  font-size: 20pt;
+}
+
+.averagesTitle {
+  opacity: 70%;
 }
 
 .TimeList {

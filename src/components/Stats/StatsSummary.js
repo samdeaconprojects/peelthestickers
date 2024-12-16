@@ -71,7 +71,9 @@ function StatsSummary({ solves }) {
 
   return (
     <div className="stats-summary">
-      <h2>Statistics Summary</h2>
+      <div className="stat-item">
+        <strong>Count:</strong> {(solves.length)}
+      </div>
       <div className="stat-item">
         <strong>Average:</strong> {formatTime(average)}
       </div>

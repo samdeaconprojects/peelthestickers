@@ -1,0 +1,61 @@
+.signInPopup {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10;
+  }
+  
+  .signInPopupContent {
+    background: black;
+    padding: 20px;
+    border: 2px solid #FFFFFF;
+    border-radius: 12px;
+    max-width: 400px;
+    text-align: center;
+    width: 80%;
+  }
+  
+  .closePopup {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    cursor: pointer;
+    font-size: 24px;
+    color: white;
+  }
+  
+  .signInInput {
+    width: 90%;
+    margin: 10px 0;
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    outline: none;
+    background-color: #3D3D3D;
+    color: white;
+    height: 50px;
+  }
+
+  .signInButton {
+    background-color: transparent;
+    border: 2px solid #ccc;
+    color: white;
+    padding: 10px 20px;
+    margin: 10px 0;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    height: 50px;
+    width: 50%;
+  }
+  
+  .signInButton:hover {
+    background-color: #45a049;
+  }
+  

@@ -24,6 +24,27 @@ export const getUserData = async (userID, limit = null) => {
   }
 };
 
+// Function to sign up a new user
+export const signUpUser = async (username, password) => {
+  const params = {
+    TableName: "PTSDev",
+    Item: {
+      UserID: username,
+      Password: password, // Store securely (hashed and salted) in production
+      Sessions: {},
+      Posts: [],
+      Friends: [],
+    },
+  };
+  try {
+    await dynamoDB.put(params).promise();
+    return { message: "User created successfully!" };
+  } catch (error) {
+    console.error("Error signing up user:", error);
+    throw error;
+  }
+};
+
 // Function to add a solve
 export const addSolveToDynamoDB = async (userID, event, newSolve) => {
   const params = {
@@ -66,7 +87,6 @@ export const deleteSolveFromDynamoDB = async (userID, event, index) => {
   }
 };
 
-
 // Function to add a post
 export const addPostToDynamoDB = async (userID, newPost) => {
   const params = {
@@ -102,5 +122,3 @@ export const deletePostFromDynamoDB = async (userID, postIndex) => {
     throw error;
   }
 };
-
-

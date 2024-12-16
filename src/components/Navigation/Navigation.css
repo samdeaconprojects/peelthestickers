@@ -1,57 +1,72 @@
 /* navigation.css */
 
 .Navigation {
-  width: 70px; 
-  left: 0; 
+  width: 70px;
+  left: 0;
   top: 0;
-  bottom: 0; 
-  display: flex; 
+  bottom: 0;
+  display: flex;
   flex-direction: column;
   align-items: center;
-  background-color: transparent; 
-  color: white; 
-  z-index: 1; 
+  background-color: transparent;
+  color: white;
+  z-index: 1;
 }
 
 .Navigation ul {
-  list-style-type: none; /* Remove default list styling */
-  padding: 0; /* Remove default padding */
+  list-style-type: none;
+  padding: 0;
   margin-top: 70px; /* Space from top including logo */
-  width: 100%; /* Full width of the Navigation bar */
+  width: 100%;
 }
 
 .Navigation li {
-  padding: 20px; /* Add some padding around each list item */
+  padding: 20px;
 }
 
 .Navigation a {
-  color: white; /* Make links white */
-  text-decoration: none; /* Remove underlines from links */
+  color: white;
+  text-decoration: none;
 }
 
 .logo {
-  max-width: 55px; /* Adjust as necessary for your design */
+  max-width: 55px;
   margin-top: 10px;
 }
 
-/* Icons should inherit position from the ul */
 .profile, .stats, .social, .settings {
   max-width: 30px;
-  display: block; /* To prevent inline default space */
-  margin: 10px 0; /* Spacing between icons */
+  display: block;
+  margin: 10px 0;
   cursor: pointer;
 }
 
-button {
+button.sign-in-button {
   background-color: transparent;
   border: solid #FFFFFF 2px;
   border-radius: 8px;
   color: #FFFFFF;
-  margin: 5px;
   opacity: 50%;
+  width: 60px;
+  margin-top: 15px;
 }
 
-button:hover {
+button.sign-in-button:hover {
   opacity: 100%;
   cursor: pointer;
 }
+
+.bottom-icons {
+  margin-top: auto; /* Push this section to the bottom */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.settings {
+  margin-top: 10px;
+}
+
+
+

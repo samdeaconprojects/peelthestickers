@@ -71,7 +71,7 @@ td:nth-child(13) {
   }
   
   .pie-chart-input:focus {
-    border-color: #2EC4B6; /* Change border color on focus */
+    border-color: #2EC4B6; 
     box-shadow: 0 0 5px rgba(46, 196, 182, 0.5); /* Add a glowing effect */
   }
 
@@ -79,7 +79,6 @@ td:nth-child(13) {
 
   
   
-  /* Stats Summary */
   .stats-summary {
     display: flex;
     flex-direction: column;
@@ -92,15 +91,11 @@ td:nth-child(13) {
     font-size: 16px;
   }
   
-
-  /* Stat options */
-
   .stats-options {
     display: flex;
     gap: 10px;
     margin-top: 20px;
     align-items: center;
-    justify-content: center;
   }
   
 

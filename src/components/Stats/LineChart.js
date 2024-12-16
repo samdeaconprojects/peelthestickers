@@ -40,9 +40,9 @@ function LineChart({ solves, title, deleteTime, addPost }) {
 
   const styles = {
     chartComponentsContainer: {
-      display: 'grid', gridTemplateColumns: 'max-content 700px', alignItems: 'center'
+      display: 'grid',  alignItems: 'center'
     },
-    chartWrapper: { maxWidth: 700, alignSelf: 'flex-start' }
+    chartWrapper: {  alignSelf: 'flex-start' }
   };
 
   return (

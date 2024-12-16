@@ -205,8 +205,12 @@
 .personalBests {
     display: flex;
     flex-direction: row;
-    gap: 20px;
+    gap: 10%;
+    align-items: center;
 }
+
+.pb {
+white-space: nowrap;}
 
 .pbTitle {
     font-size: smaller;

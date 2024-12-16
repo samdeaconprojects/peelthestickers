@@ -85,11 +85,12 @@ function Detail({ solve, onClose, deleteTime, addPost }) {
                 onChange={handleNoteChange}
               />
             </div>
-          </div>
-          <div className="detailActions">
+            <div className="detailActions">
             <button className="delete-button" onClick={handleDelete}>Delete</button>
             <button className="share-button" onClick={handleShare}>Share</button>
           </div>
+          </div>
+          
         </div>
       </div>
     </div>

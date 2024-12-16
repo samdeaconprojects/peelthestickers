@@ -8,16 +8,7 @@
   position: relative; /* Add relative positioning for the container */
 }
 
-.averages-display {
-  display:grid;
-  grid-template-columns: 50% 50%;
-  grid-template-columns: 200px 200px;
-  color: #FDFFFC; /* White text for readability */
-  box-sizing: border-box; /* Include padding in the width calculation */
- 
-  font-family: 'Jost', sans-serif;
-  font-weight: bold;
-}
+
 
 .highlight {
   background-color: #ffff99; /* Or any highlight color you prefer */
