@@ -148,20 +148,34 @@ function App() {
   };
 
   const deleteTime = async (eventKey, index) => {
+    const originalSessions = { ...sessions }; // Backup the current state for potential rollback
+  
+    // Optimistically update the UI
     const updatedTimes = sessions[eventKey].filter((_, idx) => idx !== index);
     setSessions((prevSessions) => ({
       ...prevSessions,
       [eventKey]: updatedTimes,
     }));
-
+  
     if (isSignedIn && user) {
       try {
+        // Perform the database deletion
         await deleteSolveFromDynamoDB(user.UserID, eventKey, index);
+  
+        // Optionally refetch the updated sessions for consistency (not necessary if deleteSolveFromDynamoDB is reliable)
+        // const updatedUserData = await getUserData(user.UserID);
+        // setSessions(updatedUserData.Sessions || {});
       } catch (error) {
         console.error("Error deleting solve:", error);
+  
+        // Revert to the original state if the deletion fails
+        alert("Failed to delete the solve. Please try again.");
+        setSessions(originalSessions);
       }
     }
   };
+  
+  
 
   const addPost = async (newPost) => {
     if (user) {

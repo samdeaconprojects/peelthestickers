@@ -210,7 +210,8 @@
 }
 
 .pb {
-white-space: nowrap;}
+    white-space: nowrap;
+}
 
 .pbTitle {
     font-size: smaller;
@@ -223,3 +224,18 @@ white-space: nowrap;}
     text-align: center;
     color: #FFFFFF;
 }
+
+.edit-events-button {
+    background-color: #2EC4B6;
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-top: 20px;
+  }
+  
+  .edit-events-button:hover {
+    background-color: #1b9d85;
+  }
+  

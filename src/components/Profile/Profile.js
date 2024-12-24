@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import './Profile.css';
 import Post from './Post';
 import ProfileHeader from './ProfileHeader';
+import EventSelectorDetail from '../Detail/EventSelectorDetail';
 import LineChart from '../Stats/LineChart';
 import StatsSummary from '../Stats/StatsSummary';
 import PieChart from '../Stats/PieChart';
@@ -10,11 +11,18 @@ import TimeTable from '../Stats/TimeTable';
 
 function Profile({ user, deletePost, sessions }) {
   const [activeTab, setActiveTab] = useState(0);
+  const [showEventSelector, setShowEventSelector] = useState(false);
+  const [selectedEvents, setSelectedEvents] = useState(["333", "444", "555", "222"]); // Default events
 
   const solves = sessions["333OH"] || [];
 
   const handleTabClick = (index) => {
     setActiveTab(index);
+  };
+
+  const handleEventSave = (newSelectedEvents) => {
+    setSelectedEvents(newSelectedEvents);
+    setShowEventSelector(false);
   };
 
   if (!user) {
@@ -25,7 +33,12 @@ function Profile({ user, deletePost, sessions }) {
 
   return (
     <div className="Page">
-      <ProfileHeader user={user} />
+      <ProfileHeader
+        user={user}
+        sessions={sessions}
+        selectedEvents={selectedEvents}
+        onEditEvents={() => setShowEventSelector(true)}
+      />
 
       <div className="tabContainer">
         <button className={`tabButton ${activeTab === 0 ? 'active' : ''}`} onClick={() => handleTabClick(0)}>Stats</button>
@@ -37,21 +50,21 @@ function Profile({ user, deletePost, sessions }) {
         {activeTab === 0 && (
           <div className="tabPanel">
             <div className="stats-page">
-        <div className="stats-grid">
-          <div className="stats-item">
-            <LineChart solves={solves} title={`Current Avg: $"{3x3 OH"}`}  />
-          </div>
-          <div className="stats-item">
-            <PieChart solves={solves} title="Solves Distribution by Time" />
-          </div>
-          <div className="stats-item">
-            <BarChart solves={solves} />
-          </div>
-          <div className="stats-item">
-            <TimeTable solves={solves}  />
-          </div>
-        </div>
-      </div>
+              <div className="stats-grid">
+                <div className="stats-item">
+                  <LineChart solves={solves} title="3x3 OH" />
+                </div>
+                <div className="stats-item">
+                  <PieChart solves={solves} title="Solves Distribution by Time" />
+                </div>
+                <div className="stats-item">
+                  <BarChart solves={solves} />
+                </div>
+                <div className="stats-item">
+                  <TimeTable solves={solves} />
+                </div>
+              </div>
+            </div>
           </div>
         )}
         {activeTab === 1 && (
@@ -82,6 +95,15 @@ function Profile({ user, deletePost, sessions }) {
           </div>
         )}
       </div>
+
+      {showEventSelector && (
+        <EventSelectorDetail
+          events={["222", "333", "444", "555", "666", "777", "333OH", "333BLD"]} // All available events
+          selectedEvents={selectedEvents}
+          onClose={() => setShowEventSelector(false)}
+          onSave={handleEventSave}
+        />
+      )}
     </div>
   );
 }
