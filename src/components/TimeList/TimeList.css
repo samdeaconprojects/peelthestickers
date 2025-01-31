@@ -3,7 +3,6 @@
   display: flex;
   justify-content: center; /* Center horizontally */
   align-items: flex-start; /* Align to the top */
-  margin-bottom: 50px;
   width: 100%; /* Ensure it takes up the full width */
   position: relative; /* Add relative positioning for the container */
 }

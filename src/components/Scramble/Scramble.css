@@ -1,7 +1,6 @@
 .scramble-container {
     display: flex;
     justify-content: center; /* Centers the scramble text horizontally */
-    padding: 10px;
   }
 
   
