@@ -12,7 +12,8 @@
 }
 
 .detailPopupContent {
-  background: black;
+  background: #1d1d1d;
+  opacity: 97%;
   padding: 20px;
   border: 2px solid #FFFFFF;
   border-radius: 12px;

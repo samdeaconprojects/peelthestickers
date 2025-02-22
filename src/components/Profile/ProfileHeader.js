@@ -69,7 +69,7 @@ function ProfileHeader({ user, sessions }) {
       </div>
       
       <button className="edit-events-button" onClick={handleOpenSelector}>
-        Edit Events
+        Edit
       </button>
 
       <div className='profileStats'>

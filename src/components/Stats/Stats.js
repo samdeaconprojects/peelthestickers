@@ -6,7 +6,7 @@ import './Stats.css';
 import { formatTime, calculateAverage, getOveralls, calculateAverageOfFive, calculateBestAverageOfFive } from '../TimeList/TimeUtils';
 import LineChart from './LineChart';
 import TimeTable from './TimeTable';
-import PieChart from './PieChart';
+import PercentBar from './PercentBar';
 import StatsSummary from './StatsSummary';
 import BarChart from './BarChart';
 
@@ -90,7 +90,7 @@ function Stats({ sessions, deleteTime, addPost }) {
             <StatsSummary solves={solvesToDisplay} />
           </div>
           <div className="stats-item">
-            <PieChart solves={solvesToDisplay} title="Solves Distribution by Time" />
+            <PercentBar solves={solvesToDisplay} title="Solves Distribution by Time" />
           </div>
           <div className="stats-item">
             <BarChart solves={solvesToDisplay} />

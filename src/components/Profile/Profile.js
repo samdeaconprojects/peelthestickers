@@ -5,7 +5,7 @@ import ProfileHeader from './ProfileHeader';
 import EventSelectorDetail from '../Detail/EventSelectorDetail';
 import LineChart from '../Stats/LineChart';
 import StatsSummary from '../Stats/StatsSummary';
-import PieChart from '../Stats/PieChart';
+import EventCountPieChart from '../Stats/EventCountPieChart';
 import BarChart from '../Stats/BarChart';
 import TimeTable from '../Stats/TimeTable';
 
@@ -55,7 +55,8 @@ function Profile({ user, deletePost, sessions }) {
                   <LineChart solves={solves} title="3x3 OH" />
                 </div>
                 <div className="stats-item">
-                  <PieChart solves={solves} title="Solves Distribution by Time" />
+                <EventCountPieChart sessions={sessions} />
+
                 </div>
                 <div className="stats-item">
                   <BarChart solves={solves} />

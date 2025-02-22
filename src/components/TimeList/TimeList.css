@@ -5,6 +5,7 @@
   align-items: flex-start; /* Align to the top */
   width: 100%; /* Ensure it takes up the full width */
   position: relative; /* Add relative positioning for the container */
+  padding-bottom: 2%;
 }
 
 

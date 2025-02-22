@@ -154,7 +154,7 @@ body {
   display: flex;
   flex-direction: row;
 
-
+  max-height: 20%;
   justify-content: space-between;
   width: 100%;
 }
