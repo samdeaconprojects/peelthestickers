@@ -1,7 +1,5 @@
 .tabContainer {
     display: flex;
-    margin-bottom: 20px;
-    margin-top: 20px;
 }
 
 .tabButton {
@@ -64,16 +62,16 @@
 .profilePicture {
     border: 2px solid #2EC4B6;
     border-radius: 12px;
-    width: 130px;
-    height: 130px;
+    width: 90px;
+    height: 90px;
     margin: 35px;
     margin-left: 0px;
 }
 
 .profileCube {
-    margin: 35px;
-    margin-left: 0px;
-    scale: 80%;
+    margin: 10px;
+    margin-left: -10px;
+    scale: 60%;
 }
 
 .post {
@@ -151,9 +149,10 @@
 }
 
 .profileName {
-    font-size: 36pt;
+    font-size: 30pt;
     font-weight: bold;
     margin-top: 50px;
+    white-space: nowrap;
 }
 
 .profileUsername {
@@ -166,6 +165,8 @@
     justify-content: space-between;
     align-items: center;
     color: #c2c2c2;
+    height: 10%;
+    margin: 5px;
 }
 
 .profileAndName {
@@ -189,7 +190,7 @@
 
 .profileStats {
     width: 250px;
-    height: 130px;
+    height: 90px;
     margin: 35px;
     margin-right: 0px;
     background-color: transparent;
@@ -219,7 +220,7 @@
 }
 
 .pbTime {
-    font-size: xx-large;
+    font-size: x-large;
     font-weight: bold;
     text-align: center;
     color: #FFFFFF;

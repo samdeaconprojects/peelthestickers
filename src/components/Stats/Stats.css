@@ -95,10 +95,14 @@ td:nth-child(13) {
     display: flex;
     gap: 10px;
     margin-top: 20px;
+    margin-left: 20px;
     align-items: center;
   }
   
-
+input {
+  height: 25%;
+  width: 50%;
+}
   
   
   @media (max-width: 768px) {

@@ -56,10 +56,14 @@ function Stats({ sessions, deleteTime, addPost }) {
     }
   };
 
+  const handleShowAll = () => {
+    setSolvesPerPage(solves.length); // Set to total solves
+    setCurrentPage(0);
+  };
+
   return (
     <div className="Page">
       <div className="stats-options">
-        <label>Event: </label>
         <select onChange={handleEventChange} value={statsEvent}>
           {Object.keys(sessions).map(eventKey => (
             <option key={eventKey} value={eventKey}>
@@ -68,26 +72,29 @@ function Stats({ sessions, deleteTime, addPost }) {
           ))}
         </select>
         <button onClick={handlePreviousPage} disabled={currentPage >= Math.floor(solves.length / solvesPerPage) - 1}>
-          Older Solves ▲
+          Older ▲
         </button>
         <button onClick={handleNextPage} disabled={currentPage === 0}>
-          Newer Solves ▼
+          Newer ▼
         </button>
         <button onClick={handleZoomIn} disabled={solvesPerPage <= 50}>
-          Zoom In
+          Zoom +
         </button>
         <button onClick={handleZoomOut} disabled={solvesPerPage >= solves.length}>
-          Zoom Out
+          Zoom -
+        </button>
+        <button onClick={handleShowAll} disabled={solvesPerPage === solves.length}>
+          Show All
         </button>
       </div>
 
       <div className="stats-page">
         <div className="stats-grid">
           <div className="stats-item">
-            <LineChart solves={solvesToDisplay} title={`Current Avg: ${statsEvent}`} deleteTime={deleteTime} addPost={addPost} />
+            <StatsSummary solves={solvesToDisplay} />
           </div>
           <div className="stats-item">
-            <StatsSummary solves={solvesToDisplay} />
+            <LineChart solves={solvesToDisplay} title={`Current Avg: ${statsEvent}`} deleteTime={deleteTime} addPost={addPost} />
           </div>
           <div className="stats-item">
             <PercentBar solves={solvesToDisplay} title="Solves Distribution by Time" />

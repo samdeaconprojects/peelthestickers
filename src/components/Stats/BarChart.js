@@ -1,10 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 function BarChart({ solves }) {
   // Tooltip state
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, count: 0 });
 
-  // Check if solves is empty or undefined and return a message
+  // Responsive chart dimensions
+  const [chartWidth, setChartWidth] = useState(window.innerWidth * 0.5);
+  const [chartHeight, setChartHeight] = useState(window.innerHeight * 0.5);
+  const padding = 40;
+
+  useEffect(() => {
+    // Function to update chart size on window resize
+    const handleResize = () => {
+      setChartWidth(window.innerWidth * 0.5); // 80% of window width
+      setChartHeight(window.innerHeight * 0.5); // 50% of window height
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   if (!solves || solves.length === 0) {
     return <div>No data available for this chart.</div>;
   }
@@ -13,54 +28,31 @@ function BarChart({ solves }) {
   const times = solves.map(solve => solve.time);
 
   // Find the min and max time values
-  const minTime = Math.floor(Math.min(...times) / 1000); // convert to seconds
-  const maxTime = Math.ceil(Math.max(...times) / 1000); // convert to seconds
+  const minTime = Math.floor(Math.min(...times) / 1000);
+  const maxTime = Math.ceil(Math.max(...times) / 1000);
 
   // Create an array to count solves in each second
   const counts = Array(maxTime - minTime + 1).fill(0);
+  times.forEach(time => counts[Math.floor(time / 1000) - minTime]++);
 
-  // Populate the counts array
-  times.forEach(time => {
-    const second = Math.floor(time / 1000) - minTime;
-    counts[second] += 1;
-  });
-
-  // Determine chart dimensions
-  const chartWidth = 500;
-  const chartHeight = 300;
-  const padding = 40;
   const barWidth = (chartWidth - 2 * padding) / counts.length;
   const maxCount = Math.max(...counts);
 
   // Function to determine the color of each bar
   const getColor = (index) => {
-    const time = minTime + index; // Calculate the actual second
-    const normalizedValue = (time - minTime) / (maxTime - minTime); // Value between 0 and 1
-
-    // Green (fastest) to Yellow (middle) to Red (slowest)
-    const r = Math.floor(255 * normalizedValue); // Increase red as time increases
-    const g = Math.floor(255 * (1 - normalizedValue)); // Decrease green as time increases
+    const time = minTime + index;
+    const normalizedValue = (time - minTime) / (maxTime - minTime);
+    const r = Math.floor(255 * normalizedValue);
+    const g = Math.floor(255 * (1 - normalizedValue));
     return `rgb(${r}, ${g}, 0)`;
   };
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div style={{ position: 'relative', width: '100%', textAlign: 'center' }}>
       <svg width={chartWidth} height={chartHeight}>
-        {/* Axis lines */}
-        <line
-          x1={padding}
-          y1={chartHeight - padding}
-          x2={chartWidth - padding}
-          y2={chartHeight - padding}
-          stroke="#ccc"
-        />
-        <line
-          x1={padding}
-          y1={padding}
-          x2={padding}
-          y2={chartHeight - padding}
-          stroke="#ccc"
-        />
+        {/* X & Y Axis */}
+        <line x1={padding} y1={chartHeight - padding} x2={chartWidth - padding} y2={chartHeight - padding} stroke="#ccc" />
+        <line x1={padding} y1={padding} x2={padding} y2={chartHeight - padding} stroke="#ccc" />
 
         {/* Bars */}
         {counts.map((count, index) => {
@@ -73,12 +65,10 @@ function BarChart({ solves }) {
               key={index}
               x={barX}
               y={barY}
-              width={barWidth - 2} // Adding a small gap between bars
+              width={barWidth - 2}
               height={barHeight}
               fill={getColor(index)}
-              onMouseOver={(e) => {
-                setTooltip({ visible: true, x: e.clientX, y: e.clientY, count });
-              }}
+              onMouseOver={(e) => setTooltip({ visible: true, x: e.clientX, y: e.clientY, count })}
               onMouseOut={() => setTooltip({ visible: false, x: 0, y: 0, count: 0 })}
             />
           );

@@ -64,7 +64,7 @@ const PieChartBuilder = ({ data, width, height, onSliceClick }) => {
     <svg
       width={width}
       height={height}
-      style={{ overflow: 'visible', marginLeft: '20%', marginTop: '5%'  }}
+      style={{ overflow: 'visible', marginTop: '5%'  }}
     >
       <g transform={`translate(${width / 2},${height / 2})`}>{slices}</g>
 
