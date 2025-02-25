@@ -10,7 +10,7 @@ import PercentBar from './PercentBar';
 import StatsSummary from './StatsSummary';
 import BarChart from './BarChart';
 
-function Stats({ sessions, deleteTime, addPost }) {
+function Stats({ sessions, setSessions, deleteTime, addPost }) {
   const [solvesPerPage, setSolvesPerPage] = useState(300); // Default to showing 300 solves
   const [currentPage, setCurrentPage] = useState(0); // Start on the first page
   const [statsEvent, setStatsEvent] = useState("333"); // Local state for the stats page event
@@ -23,11 +23,27 @@ function Stats({ sessions, deleteTime, addPost }) {
   const endIndex = solves.length - solvesPerPage * currentPage;
 
   // Slice the array to get the subset of solves to display
-  const solvesToDisplay = solves.slice(startIndex, endIndex);
+  //const solvesToDisplay = solves.slice(startIndex, endIndex);
+
+  const solvesToDisplay = solves.slice(startIndex, endIndex).map((solve, i) => ({
+    ...solve,
+    fullIndex: startIndex + i, // Store correct index from full session
+  }));
+  
 
   const handleEventChange = (event) => {
     setStatsEvent(event.target.value);
     setCurrentPage(0); // Reset to the first page when switching events
+  };
+
+  const handleDeleteSolve = (fullIndex) => {
+    const updatedSessions = {
+      ...sessions,
+      [statsEvent]: sessions[statsEvent].filter((_, i) => i !== fullIndex), // ✅ Use fullIndex
+    };
+  
+    setSessions(updatedSessions); // ✅ Updates App.js state
+    deleteTime(statsEvent, fullIndex); // ✅ Calls the backend with correct index
   };
 
   const handlePreviousPage = () => {
@@ -94,7 +110,7 @@ function Stats({ sessions, deleteTime, addPost }) {
             <StatsSummary solves={solvesToDisplay} />
           </div>
           <div className="stats-item">
-            <LineChart solves={solvesToDisplay} title={`Current Avg: ${statsEvent}`} deleteTime={deleteTime} addPost={addPost} />
+            <LineChart solves={solvesToDisplay} title={`Current Avg: ${statsEvent}`} deleteTime={(index) => handleDeleteSolve(index)} addPost={addPost} />
           </div>
           <div className="stats-item">
             <PercentBar solves={solvesToDisplay} title="Solves Distribution by Time" />
@@ -103,7 +119,7 @@ function Stats({ sessions, deleteTime, addPost }) {
             <BarChart solves={solvesToDisplay} />
           </div>
           <div className="stats-item">
-            <TimeTable solves={solvesToDisplay} deleteTime={deleteTime} addPost={addPost} />
+            <TimeTable solves={solvesToDisplay} deleteTime={(index) => handleDeleteSolve(index)} addPost={addPost} />
           </div>
         </div>
       </div>

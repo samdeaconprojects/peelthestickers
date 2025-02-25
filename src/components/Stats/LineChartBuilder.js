@@ -184,7 +184,7 @@ const LineChartBuilder = ({
               fill={element.color} // Color of the circle
               onMouseOver={(e) => handleMouseOver(e, element.time)}
               onMouseOut={handleMouseOut}
-              onClick={() => onDotClick(element.solve, element.solveIndex)} // Trigger the callback when clicked
+              onClick={() => onDotClick(element.solve, element.fullIndex)} // Trigger the callback when clicked
             />
           );
         })}

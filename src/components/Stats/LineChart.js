@@ -26,6 +26,7 @@ function LineChart({ solves, title, deleteTime, addPost }) {
   };
 
   // Pass both the solve object and its index for easy reference
+
   const data = solves.map((solve, index) => ({
     label: `${index + 1}`,
     x: index,
@@ -33,8 +34,10 @@ function LineChart({ solves, title, deleteTime, addPost }) {
     color: getColor(solve.time),
     time: formatTime(solve.time),
     solve: solve,
-    solveIndex: index
+    solveIndex: index,   // This is the displayed index
+    fullIndex: solve.fullIndex, // The correct index in sessions[statsEvent]
   }));
+  
 
   const solveCountText = "Solve Count: " + times.length;
 
@@ -60,12 +63,14 @@ function LineChart({ solves, title, deleteTime, addPost }) {
           precision={2}
           verticalGuides={7}
           onDotClick={(solve, solveIndex) => {
-            console.log("SOLVE INDEX" + solve);
-            console.log(solveIndex);
-
+            console.log("Clicked Solve:", solve);
+            console.log("Displayed Index:", solveIndex);
+            console.log("Actual Full Index:", solve.fullIndex); // Debugging log
+          
             setSelectedSolve(solve);
-            setSelectedSolveIndex(solveIndex);
+            setSelectedSolveIndex(solve.fullIndex); // Set the true index
           }}
+          
         />
       </div>
       <div />

@@ -22,7 +22,7 @@ const TimeTable = ({ solves, deleteTime, addPost }) => {
           {solves.map((solve, index) => (
             <tr key={index} onClick={() => {
               setSelectedSolve(solve);
-              setSelectedSolveIndex(index);
+              setSelectedSolveIndex(solve.fullIndex);
             }}>
               <td>{index + 1}</td>
               <td>{formatTime(solve.time)}</td>

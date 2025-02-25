@@ -289,7 +289,7 @@ function App() {
               <Route path="/profile" element={<Profile user={user} deletePost={deletePost} sessions={sessions} />} />
               <Route
                 path="/stats"
-                element={<Stats sessions={sessions} currentEvent={currentEvent} setCurrentEvent={setCurrentEvent} deleteTime={(eventKey, index) => deleteTime(eventKey, index)} addPost={addPost} />}
+                element={<Stats sessions={sessions} setSessions={setSessions} currentEvent={currentEvent} setCurrentEvent={setCurrentEvent} deleteTime={(eventKey, index) => deleteTime(eventKey, index)} addPost={addPost} />}
               />
               <Route path="/social" element={<Social user={user} deletePost={deletePost} />} />
               <Route path="/settings" element={<Settings />} />
