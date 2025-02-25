@@ -76,7 +76,7 @@ function ProfileHeader({ user, sessions }) {
         <div>10 Followers</div>
         <div>40 Following</div>
         <div>2013DEAC01</div>
-        <div>10,420 Solves</div>
+        <div>10,408 Solves</div>
         <div>CFOP</div>
         <div>May 4 2024</div>
       </div>

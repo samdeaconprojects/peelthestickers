@@ -75,7 +75,7 @@ const PieChartBuilder = ({ data, width, height, onSliceClick }) => {
           y="50%"
           textAnchor="middle"
           dominantBaseline="middle"
-          fontSize="16"
+          fontSize="32"
           fontWeight="bold"
           fill="white"
           style={{

@@ -69,6 +69,7 @@ export const addSolveToDynamoDB = async (userID, event, newSolve) => {
 };
 
 // Function to delete a solve
+/*
 export const deleteSolveFromDynamoDB = async (userID, event, index) => {
   const params = {
     TableName: "PTSDev",
@@ -86,6 +87,44 @@ export const deleteSolveFromDynamoDB = async (userID, event, index) => {
     throw error;
   }
 };
+*/
+export const deleteSolveFromDynamoDB = async (userID, event, index) => {
+  try {
+    // Fetch the current user data
+    const userData = await getUserData(userID);
+    if (!userData || !userData.Sessions || !userData.Sessions[event]) {
+      throw new Error("Event session not found.");
+    }
+
+    // Get the current solves array
+    let solves = userData.Sessions[event];
+
+    // Check if the index is valid
+    if (index < 0 || index >= solves.length) {
+      throw new Error("Invalid index for deletion.");
+    }
+
+    // Remove the selected solve
+    solves.splice(index, 1);
+
+    // Update DynamoDB with the modified array
+    const params = {
+      TableName: "PTSDev",
+      Key: { UserID: userID },
+      UpdateExpression: "SET Sessions.#event = :updatedSolves",
+      ExpressionAttributeNames: { "#event": event },
+      ExpressionAttributeValues: { ":updatedSolves": solves },
+      ReturnValues: "ALL_NEW",
+    };
+
+    await dynamoDB.update(params).promise();
+    console.log(`Successfully deleted solve at index ${index} for event ${event}`);
+  } catch (error) {
+    console.error("Error deleting solve:", error);
+    throw error;
+  }
+};
+
 
 // Function to add a post
 export const addPostToDynamoDB = async (userID, newPost) => {

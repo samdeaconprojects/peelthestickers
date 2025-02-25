@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { calculateAverage, formatTime } from '../TimeList/TimeUtils';
 import './StatsSummary.css';
 
-
 // Helper function to calculate the median
 const calculateMedianTime = (times) => {
   const sortedTimes = times.slice().sort((a, b) => a - b);
@@ -35,7 +34,7 @@ function StatsSummary({ solves }) {
   const [average, setAverage] = useState(null);
   const [median, setMedian] = useState(null);
   const [stdDev, setStdDev] = useState(null);
-
+  const [bestSingle, setBestSingle] = useState(null); // New state for best single time
   const [currentAverages, setCurrentAverages] = useState({});
   const [bestAverages, setBestAverages] = useState({});
 
@@ -47,6 +46,7 @@ function StatsSummary({ solves }) {
       setAverage(times.reduce((sum, t) => sum + t, 0) / times.length);
       setMedian(calculateMedianTime(times));
       setStdDev(calculateStandardDeviation(times));
+      setBestSingle(Math.min(...times)); // Find the fastest single solve
 
       // Define the different AoX values to track
       const aoValues = [5, 12, 50, 100, 1000, 10000, 100000, 1000000];
@@ -74,14 +74,11 @@ function StatsSummary({ solves }) {
   return (
     <div className="stats-summary">
       {/* Top Section */}
-
       <div className="stats-header">
-
         <div className="stat-count">
           <div className="count-value">{solves.length}</div>
           <div className="count-title">solves</div>
         </div>
-
 
         <div className="summary-item">
           <div className="stat-title">MEAN</div>
@@ -95,8 +92,12 @@ function StatsSummary({ solves }) {
           <div className="stat-title">ST. DEV</div>
           <div className="stat-value">{formatTime(stdDev)}</div>
         </div>
+        <div className="summary-item">
+          <div className="stat-title">BEST SINGLE</div>
+          <div className="stat-value">{formatTime(bestSingle)}</div>
+        </div>
       </div>
-  
+
       {/* Bottom Grid */}
       <div className="summary-grid">
         {/* Best Averages */}
@@ -108,7 +109,7 @@ function StatsSummary({ solves }) {
             </div>
           ))}
         </div>
-  
+
         {/* Current Averages */}
         <div className="stats-current">
           <h4>CURRENT</h4>
@@ -121,8 +122,6 @@ function StatsSummary({ solves }) {
       </div>
     </div>
   );
-  
-  
 }
 
 export default StatsSummary;
