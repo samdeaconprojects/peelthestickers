@@ -1,8 +1,10 @@
 .stats-summary {
     display: flex;
     flex-direction: column;
+    justify-content: space-between;
     margin: auto;
     margin-right: 10%;
+    height: 100%;
     padding: 2%;
     color: #fff;
     font-size: x-large;
