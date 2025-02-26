@@ -92,11 +92,11 @@ function StatsSummary({ solves }) {
           <div className="stat-title">ST. DEV</div>
           <div className="stat-value">{formatTime(stdDev)}</div>
         </div>
-        <div className="summary-item">
-          <div className="stat-title">BEST SINGLE</div>
-          <div className="stat-value">{formatTime(bestSingle)}</div>
-        </div>
       </div>
+
+      <div className="best-single">
+          <div className="single-title">BEST SINGLE - {formatTime(bestSingle)}</div>
+        </div>
 
       {/* Bottom Grid */}
       <div className="summary-grid">
