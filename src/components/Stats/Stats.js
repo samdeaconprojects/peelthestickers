@@ -10,10 +10,10 @@ import PercentBar from './PercentBar';
 import StatsSummary from './StatsSummary';
 import BarChart from './BarChart';
 
-function Stats({ sessions, setSessions, deleteTime, addPost }) {
+function Stats({ sessions, setSessions, currentEvent, deleteTime, addPost }) {
   const [solvesPerPage, setSolvesPerPage] = useState(300); // Default to showing 300 solves
   const [currentPage, setCurrentPage] = useState(0); // Start on the first page
-  const [statsEvent, setStatsEvent] = useState("333"); // Local state for the stats page event
+  const [statsEvent, setStatsEvent] = useState(currentEvent); // Local state for the stats page event
 
   // Get the solves for the selected stats event
   const solves = sessions[statsEvent] || [];

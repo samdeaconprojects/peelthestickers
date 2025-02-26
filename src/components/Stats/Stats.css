@@ -50,8 +50,9 @@ td:nth-child(13) {
   }
 
   .stats-item::-webkit-scrollbar { 
-    /*display: none;*/  /* Safari and Chrome */
+    display: none;  /* Safari and Chrome */
   }
+
 
   /*Pie Chart*/
 
