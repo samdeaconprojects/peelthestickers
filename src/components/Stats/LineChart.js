@@ -52,7 +52,7 @@ function LineChart({ solves, title, deleteTime, addPost }) {
     <div className='lineChart'>
       <div style={styles.chartComponentsContainer} />
       <div className='chartTitle'>
-        <ChartTitle text={title} />
+        {/*<ChartTitle text={title} />*/}
       </div>
       <div style={styles.chartWrapper}>
         <LineChartBuilder

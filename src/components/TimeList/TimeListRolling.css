@@ -1,0 +1,41 @@
+.rolling-container {
+    width: 100%;
+    overflow-x: auto;  /* Ensures only this component scrolls */
+    padding-bottom: 10px;
+  }
+  
+  .rolling-table-wrapper {
+    display: inline-block;
+    min-width: fit-content;
+  }
+  
+  .TimeList {
+    border-collapse: collapse;
+    width: auto;
+  }
+  
+  .TimeItem {
+    padding: 8px;
+    border: 1px solid #444;
+    background: #222;
+    text-align: center;
+    min-width: 50px;
+    font-size: 14px;
+    position: relative;
+  }
+  
+  .ao5, .ao12 {
+    font-size: 12px;
+    font-weight: bold;
+    background: #333;
+    color: lightgray;
+  }
+  
+  .delete-icon {
+    position: absolute;
+    top: 2px;
+    right: 5px;
+    cursor: pointer;
+    color: red;
+  }
+  

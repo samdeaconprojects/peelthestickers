@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import "./App.css";
 import Timer from "./components/Timer/Timer";
 import TimeList from "./components/TimeList/TimeList";
+import TimeListRolling from "./components/TimeList/TimeListRolling";
 import Profile from "./components/Profile/Profile";
 import Stats from "./components/Stats/Stats";
 import Social from "./components/Social/Social";
@@ -36,7 +37,16 @@ function App() {
     "666": [],
     "777": [],
     "333OH": [],
+    "PYRAMINX": [],
+    "SKEWB": [],
+    "SQ1": [],
+    "MEGAMINX": [],
+    "CLOCK": [],
     "333BLD": [],
+    "333MULTIBLD": [],
+    "333FEW": [],
+    "444BLD": [],
+    "555BLD": [],
   });
   const [showPlayerBar, setShowPlayerBar] = useState(true);
   const [showDetail, setShowDetail] = useState(false);
@@ -282,7 +292,7 @@ function App() {
                       <p className="averagesTime">{formatTime(bestAvgOfFive)}</p>
                       <p className="averagesTime">{formatTime(bestAvgOfTwelve)}</p>
                     </div>
-                    <TimeList solves={sessions[currentEvent] || []} deleteTime={(index) => deleteTime(currentEvent, index)} addPost={addPost} rowsToShow={3} />
+                    <TimeList solves={sessions[currentEvent] || []} deleteTime={(index) => deleteTime(currentEvent, index)} />
                   </>
                 }
               />

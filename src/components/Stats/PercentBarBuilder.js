@@ -54,7 +54,7 @@ const PercentBarBuilder = ({ solves, width, onSliceClick }) => {
       <div style={{
         display: 'flex',
         alignItems: 'center',
-        width: '50%',
+        //width: '50%',
         height: '100%'
       }}>
         <div style={{

@@ -8,8 +8,8 @@ function PercentBar({ solves, title }) {
   const [selectedSolve, setSelectedSolve] = useState(null);
 
   return (
-    <div className='percentBar' style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      <ChartTitle text={title} />
+    <div className='percentBar' style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: "5%" }}>
+      {/*<ChartTitle text={title} />*/}
 
       <PercentBarBuilder
         width={150}

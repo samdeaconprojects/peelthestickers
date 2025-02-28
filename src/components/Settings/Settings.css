@@ -27,7 +27,6 @@
 }
 
 .setting-item select, .setting-item input {
-  width: 100%;
   padding: 8px;
   border-radius: 4px;
   border: 1px solid #ccc;
