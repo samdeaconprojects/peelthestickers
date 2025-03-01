@@ -1,0 +1,85 @@
+.event-selector-container {
+    position: relative;
+    font-weight: 500;
+    font-size: 16pt;
+    margin-top: 20px;
+    width: 10%;
+  }
+  
+  .event-selector-box {
+    background: transparent;
+    color: white;
+    border: 1px solid white;
+    border-radius: 8px;
+    padding: 10px;
+    text-align: center;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.2s ease;
+  }
+  
+  .event-selector-box:hover {
+    background: #3D3D3D;
+  }
+  
+  .dropdown-arrow {
+    font-size: 16px;
+  }
+  
+  .event-dropdown {
+    position: absolute;
+    width: 30vw;
+    background: #1d1d1d;
+    border: 2px solid white;
+    border-radius: 8px;
+    margin-top: 5px;
+    z-index: 100;
+    max-height: 250px;
+    overflow-y: auto;
+    box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.3);
+  }
+  
+  .event-group {
+    padding: 8px 12px;
+    border-bottom: 1px solid #3D3D3D;
+  }
+  
+  .event-group h4 {
+    margin: 0;
+    padding: 4px 0;
+    font-size: 14px;
+    color: #f1f1f1;
+    text-transform: uppercase;
+    text-align: left;
+  }
+  
+  .event-list {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap; 
+    gap: 5px;
+  }
+  
+  .event-item {
+    background: #3D3D3D;
+    color: white;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 14px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    text-align: left;
+  }
+  
+  .event-item:hover {
+    background: white;
+    color: black;
+  }
+  
+  .event-item.active {
+    background: #2EC4B6;
+    color: white;
+  }
+  
