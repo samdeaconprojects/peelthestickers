@@ -49,6 +49,7 @@ function EventSelectorDetail({ events, selectedEvents, onClose, onSave }) {
               onClick={() => handleToggleEvent(event)}
             >
               <RubiksCubeSVG
+                className={"cubeIcon"}
                 n={event}
                 faces={getScrambledFaces(defaultScramble, event)} // Ensure valid faces
                 isMusicPlayer={false}

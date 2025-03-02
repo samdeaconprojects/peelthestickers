@@ -94,8 +94,10 @@ function StatsSummary({ solves }) {
         </div>
       </div>
 
+      <div className="stats-body">
+
       <div className="best-single">
-          <div className="single-title">BEST SINGLE - {formatTime(bestSingle)}</div>
+          <div className="single-time">{formatTime(bestSingle)} </div> <div className='stat-title'>BEST SINGLE</div>
         </div>
 
       {/* Bottom Grid */}
@@ -119,6 +121,7 @@ function StatsSummary({ solves }) {
             </div>
           ))}
         </div>
+      </div>
       </div>
     </div>
   );

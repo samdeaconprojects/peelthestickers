@@ -32,6 +32,7 @@
 
 .tabPanel {
     width: 100%;
+    margin-top: 3%;
     display: flex;
     flex-direction: column;
     row-gap: 10px;
@@ -69,8 +70,8 @@
 }
 
 .profileCube {
-    margin: 10px;
-    margin-left: -10px;
+    margin: 8px;
+    margin-left: -12px;
     scale: 60%;
 }
 

@@ -6,7 +6,7 @@ import EventSelectorDetail from '../Detail/EventSelectorDetail';
 import { formatTime, calculateAverage } from '../TimeList/TimeUtils'; // Ensure this is the correct path
 
 function ProfileHeader({ user, sessions }) {
-  const [selectedEvents, setSelectedEvents] = useState(['333', '222', '444', '555']); // Default selected events
+  const [selectedEvents, setSelectedEvents] = useState(['333', '222', '444']); // Default selected events
   const [showEventSelector, setShowEventSelector] = useState(false);
 
   const handleOpenSelector = () => {
@@ -44,8 +44,8 @@ function ProfileHeader({ user, sessions }) {
           <div className='profileCube'>
             <RubiksCubeSVG
               className="profileCube"
-              n={"333"}
-              faces={getScrambledFaces("U2 F2 U2 F B D2 U2 L2 B' L F' R F' U' B D F2 U D2 L'", "333")}
+              n={"444"}
+              faces={getScrambledFaces("U2 F2 U2 F B D2 U2 L2 B' L F' R F' U' B D F2 U D2 L'", "444")}
               isMusicPlayer={false}
               isTimerCube={false}
             />

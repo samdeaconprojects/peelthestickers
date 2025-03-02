@@ -23,6 +23,10 @@
     height: auto;
     width: 600px;
   }
+
+  .cubeIcon {
+    scale: .5;
+  }
   
   .closePopup {
     position: absolute;

@@ -30,7 +30,7 @@ function LineChart({ solves, title, deleteTime, addPost }) {
   const data = solves.map((solve, index) => ({
     label: `${index + 1}`,
     x: index,
-    y: parseFloat(formatTime(solve.time).replace(':', '.')),
+    y: solve.time / 1000, // Convert milliseconds to seconds
     color: getColor(solve.time),
     time: formatTime(solve.time),
     solve: solve,

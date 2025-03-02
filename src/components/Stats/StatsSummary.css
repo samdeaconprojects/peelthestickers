@@ -27,14 +27,27 @@
     width: 100%;
   }
   
-  .stats-header .stat-title {
+  .stat-title {
     font-size: small;
+    font-weight: 800;
     color: #aaa;
     margin-bottom: 4px;
+  }
+
+  .single-time {
+    font-size: x-large;
+    font-weight: 800;
+    color: #0add5e;
   }
   
   .stats-header .stat-value .count-value .count-title {
     font-size: larger;
+
+  }
+
+  .stat-value {
+    font-weight: 800;
+    color: yellow;
   }
 
   .count-value {
@@ -44,6 +57,10 @@
   .count-title {
     color: #aaa;
 
+  }
+
+  .stats-body {
+    margin: 2%;
   }
   
   /* Bottom Grid Layout */
@@ -57,9 +74,9 @@
   /* Title Styling */
   h4 {
     margin: 10px 0;
-    font-size: 18px;
+    font-size: 24px;
+    color: #aaa;
     /*border-bottom: 1px solid #555;*/
-    padding-bottom: 5px;
   }
   
   /* Individual Stat */

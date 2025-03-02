@@ -49,6 +49,7 @@
 }
 
 button {
+  height: 35px;
   background-color: transparent;
   border: solid #FFFFFF 2px;
   border-radius: 8px;
@@ -172,8 +173,8 @@ body {
 
 select {
   border: #FDFFFC solid 1px;
-  border-radius: 3px;
-
+  border-radius: 5px;
+  font-size: x-large;
   width: 100px;
   height: 35px;
   background-color: transparent;

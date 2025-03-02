@@ -15,8 +15,9 @@ const LineChartBuilder = ({
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, time: '' });
   const FONT_SIZE = width / 50;
   const maximumXFromData = Math.max(...data.map(e => e.x));
-  const maximumYFromData = Math.max(...data.map(e => e.y));
-
+  const maxY = Math.max(...data.map(e => e.y));
+  const maximumYFromData = Math.ceil(maxY / 10) * 10; // Round up to the nearest 10 seconds
+  
   const digits =
     parseFloat(maximumYFromData.toString()).toFixed(precision).length + 1;
 
@@ -27,8 +28,7 @@ const LineChartBuilder = ({
   const points = data
     .map(element => {
       const x = (element.x / maximumXFromData) * chartWidth + padding;
-      const y =
-        chartHeight - (element.y / maximumYFromData) * chartHeight + padding;
+      const y = chartHeight - ((element.y) / maximumYFromData) * chartHeight + padding;
       return `${x},${y}`;
     })
     .join(" ");
@@ -138,7 +138,7 @@ const LineChartBuilder = ({
             fontFamily: "Helvetica"
           }}
         >
-          {parseFloat(maximumYFromData * (index / PARTS)).toFixed(precision)}
+          {(maximumYFromData * (index / PARTS)).toFixed(1) + "s"}
         </text>
       );
     });
