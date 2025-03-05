@@ -44,8 +44,8 @@ function ProfileHeader({ user, sessions }) {
           <div className='profileCube'>
             <RubiksCubeSVG
               className="profileCube"
-              n={"444"}
-              faces={getScrambledFaces("U2 F2 U2 F B D2 U2 L2 B' L F' R F' U' B D F2 U D2 L'", "444")}
+              n={"333"}
+              faces={getScrambledFaces("U2 F2 U2 F B D2 U2 L2 B' L F' R F' U' B D F2 U D2 L'", "333")}
               isMusicPlayer={false}
               isTimerCube={false}
             />

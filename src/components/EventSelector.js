@@ -18,10 +18,10 @@ function EventSelector({ currentEvent, handleEventChange, customSessions = [] })
     { id: "SQ1", name: "Square-1" },
     { id: "MEGAMINX", name: "Megaminx" },
     { id: "CLOCK", name: "Clock" },
-    { id: "333BLD", name: "3x3 Blindfolded" },
-    { id: "444BLD", name: "4x4 Blindfolded" },
-    { id: "555BLD", name: "5x5 Blindfolded" },
-    { id: "333MULTIBLD", name: "3x3 Multi-Blind" },
+    { id: "333BLD", name: "3x3 BLD" },
+    { id: "444BLD", name: "4x4 BLD" },
+    { id: "555BLD", name: "5x5 BLD" },
+    { id: "333MULTIBLD", name: "3x3 Multi-BLD" },
     { id: "333FEW", name: "3x3 Fewest Moves" }
   ];
 
@@ -60,7 +60,7 @@ function EventSelector({ currentEvent, handleEventChange, customSessions = [] })
           relayEvents.find(e => e.id === currentEvent)?.name ||
           customSessions.find(s => s === currentEvent) ||
           "Select an Event"}
-        <span className="dropdown-arrow">{isOpen ? "▲" : "▼"}</span>
+        <span className="dropdown-arrow" style={{ marginLeft: "8px" }}> {isOpen ? "▲" : "▼"}</span>
       </div>
 
       {isOpen && (
