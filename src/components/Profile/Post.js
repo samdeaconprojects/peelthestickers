@@ -4,6 +4,14 @@ import RubiksCubeSVG from '../RubiksCubeSVG';
 import { getScrambledFaces } from '../cubeStructure';
 import { currentEventToString } from "../../components/scrambleUtils";
 
+/*
+
+<div className='belowPost'>
+              <button className="deletePostButton" onClick={deletePost}>Delete</button>   
+    </div>
+
+*/
+
 function Post({ name, date, event, scramble, singleOrAverage, time, deletePost, postColor }) {
   const eventToString = currentEventToString(event);
 
@@ -39,9 +47,8 @@ function Post({ name, date, event, scramble, singleOrAverage, time, deletePost, 
         </div>       
       </div> 
     </div>
-    <div className='belowPost'>
-              <button className="deletePostButton" onClick={deletePost}>Delete</button>   
-    </div>
+    
+    
     </div>
   );
 }
