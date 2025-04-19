@@ -1,3 +1,5 @@
+//OLDER DYNAMO STRUCTURE DEPRECATED?
+
 import dynamoDB from "../components/SignIn/awsConfig";
 
 // Function to get user data with optional limit

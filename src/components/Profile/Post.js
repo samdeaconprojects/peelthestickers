@@ -26,7 +26,7 @@ function Post({ name, date, event, scramble, singleOrAverage, time, deletePost, 
       <div className='titleAndContent'>
         <div className='postTitle'>
           <div className='postTitleCube'>
-            <RubiksCubeSVG className="postCube" n={event} faces={getScrambledFaces(scramble, event)} isMusicPlayer={false} isTimerCube={false} />
+            <RubiksCubeSVG className="postCube" n={event} faces={getScrambledFaces(scramble || "", event || "333")} isMusicPlayer={false} isTimerCube={false} />
           </div>
           <div className='titleText'>
             {eventToString} {singleOrAverage} - {time}

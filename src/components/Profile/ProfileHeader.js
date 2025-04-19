@@ -3,20 +3,25 @@ import './Profile.css';
 import RubiksCubeSVG from '../RubiksCubeSVG';
 import { getScrambledFaces } from '../cubeStructure';
 import EventSelectorDetail from '../Detail/EventSelectorDetail';
-import { formatTime, calculateAverage } from '../TimeList/TimeUtils'; // Ensure this is the correct path
+import { formatTime, calculateAverage } from '../TimeList/TimeUtils';
 
 function ProfileHeader({ user, sessions }) {
-  const [selectedEvents, setSelectedEvents] = useState(['333', '222', '444']); // Default selected events
+  // Destructure user profile fields
+  const {
+    Name,
+    UserID,
+    Color,
+    WCAID,
+    DateFounded,
+    ProfileEvent,
+    ProfileScramble
+  } = user;
+
+  const [selectedEvents, setSelectedEvents] = useState([ProfileEvent]);
   const [showEventSelector, setShowEventSelector] = useState(false);
 
-  const handleOpenSelector = () => {
-    setShowEventSelector(true);
-  };
-
-  const handleCloseSelector = () => {
-    setShowEventSelector(false);
-  };
-
+  const handleOpenSelector = () => setShowEventSelector(true);
+  const handleCloseSelector = () => setShowEventSelector(false);
   const handleSaveSelectedEvents = (events) => {
     setSelectedEvents(events);
     setShowEventSelector(false);
@@ -25,10 +30,8 @@ function ProfileHeader({ user, sessions }) {
   const getPersonalBest = (event, type) => {
     const times = (sessions[event] || []).map((solve) => solve.time);
     if (!times.length) return 'N/A';
-
-    if (type === 'single') {
-      return Math.min(...times);
-    } else if (type === 'average') {
+    if (type === 'single') return Math.min(...times);
+    if (type === 'average') {
       if (times.length >= 5) {
         const avgData = calculateAverage(times.slice(-5), true);
         return avgData.average.toFixed(2);
@@ -37,23 +40,29 @@ function ProfileHeader({ user, sessions }) {
     }
   };
 
+  // Format date founded
+  const joinedDate = DateFounded
+    ? new Date(DateFounded).toLocaleDateString()
+    : '—';
+
   return (
     <div className='profileHeader'>
       <div className='profileAndName'>
-        <div className='profilePicture'>
+        <div className='profilePicture' style={{ border: `2px solid ${Color}` }}>
           <div className='profileCube'>
             <RubiksCubeSVG
               className="profileCube"
-              n={"333"}
-              faces={getScrambledFaces("U2 F2 U2 F B D2 U2 L2 B' L F' R F' U' B D F2 U D2 L'", "333")}
+              n={ProfileEvent}
+              faces={getScrambledFaces(ProfileScramble, ProfileEvent)}
+              color={Color}
               isMusicPlayer={false}
               isTimerCube={false}
             />
           </div>
         </div>
         <div className='profileNameAndUsername'>
-          <div className='profileName'>{user?.Name || 'Guest'}</div>
-          <div className='profileUsername'>@{user?.UserID || 'guest'}</div>
+          <div className='profileName'>{Name || 'Guest'}</div>
+          <div className='profileUsername'>@{UserID || 'guest'}</div>
         </div>
       </div>
 
@@ -67,23 +76,17 @@ function ProfileHeader({ user, sessions }) {
           </div>
         ))}
       </div>
-      
-      <button className="edit-events-button" onClick={handleOpenSelector}>
-        Edit
-      </button>
 
-      <div className='profileStats'>
-        <div>10 Followers</div>
-        <div>40 Following</div>
-        <div>2013DEAC01</div>
-        <div>10,408 Solves</div>
-        <div>CFOP</div>
-        <div>May 4 2024</div>
+      <button className="edit-events-button" onClick={handleOpenSelector}>Edit Events</button>
+
+      <div className='profileStats' style={{ border: `2px solid ${Color}` }}>
+        <div><strong>WCA ID:</strong> {WCAID || '—'}</div>
+        <div><strong>Joined:</strong> {joinedDate}</div>
       </div>
 
       {showEventSelector && (
         <EventSelectorDetail
-          events={['222', '333', '444', '555', '666', '777', '333OH', '333BLD']}
+          events={['222','333','444','555','666','777','333OH','333BLD']}
           selectedEvents={selectedEvents}
           onClose={handleCloseSelector}
           onSave={handleSaveSelectedEvents}

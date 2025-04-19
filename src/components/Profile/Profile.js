@@ -1,24 +1,47 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './Profile.css';
 import Post from './Post';
 import ProfileHeader from './ProfileHeader';
 import EventSelectorDetail from '../Detail/EventSelectorDetail';
 import LineChart from '../Stats/LineChart';
-import StatsSummary from '../Stats/StatsSummary';
 import EventCountPieChart from '../Stats/EventCountPieChart';
 import BarChart from '../Stats/BarChart';
 import TimeTable from '../Stats/TimeTable';
+import { getPosts } from '../../services/getPosts';
 
-function Profile({ user, deletePost, sessions }) {
+function Profile({ user, deletePost: deletePostProp, sessions }) {
   const [activeTab, setActiveTab] = useState(0);
   const [showEventSelector, setShowEventSelector] = useState(false);
-  const [selectedEvents, setSelectedEvents] = useState(["333", "444", "555", "222"]); // Default events
+  const [selectedEvents, setSelectedEvents] = useState(["333", "444", "555", "222"]);
+  const [posts, setPosts] = useState([]);
 
-  const solves = sessions["333OH"] || [];
+  // Fetch posts on mount and whenever user changes
+  useEffect(() => {
+    const fetch = async () => {
+      if (!user?.UserID) return;
+      try {
+        const fresh = await getPosts(user.UserID);
+        setPosts(fresh);
+      } catch (err) {
+        console.error('Failed to fetch posts:', err);
+      }
+    };
+    fetch();
+  }, [user?.UserID]);
 
-  const handleTabClick = (index) => {
-    setActiveTab(index);
+  // Handler to delete a post and refresh list
+  const handleDeletePost = async (timestamp) => {
+    try {
+      await deletePostProp(timestamp);
+      const fresh = await getPosts(user.UserID);
+      setPosts(fresh);
+    } catch (err) {
+      console.error('Failed to delete post:', err);
+    }
   };
+
+  // Stats data for 3x3
+  const solves = sessions["333"] || [];
 
   const handleEventSave = (newSelectedEvents) => {
     setSelectedEvents(newSelectedEvents);
@@ -29,21 +52,25 @@ function Profile({ user, deletePost, sessions }) {
     return <div>Please sign in to view your profile.</div>;
   }
 
-  const recentPosts = [...user.Posts].reverse(); // Reverse to show the most recent posts first
+  const recentPosts = [...posts].reverse();
 
   return (
     <div className="Page">
-      <ProfileHeader
-        user={user}
-        sessions={sessions}
-        selectedEvents={selectedEvents}
-        onEditEvents={() => setShowEventSelector(true)}
-      />
+      <ProfileHeader user={user} sessions={sessions} />
 
       <div className="tabContainer">
-        <button className={`tabButton ${activeTab === 0 ? 'active' : ''}`} onClick={() => handleTabClick(0)}>Stats</button>
-        <button className={`tabButton ${activeTab === 1 ? 'active' : ''}`} onClick={() => handleTabClick(1)}>Posts</button>
-        <button className={`tabButton ${activeTab === 2 ? 'active' : ''}`} onClick={() => handleTabClick(2)}>Favorites</button>
+        <button
+          className={`tabButton ${activeTab === 0 ? 'active' : ''}`}
+          onClick={() => setActiveTab(0)}
+        >Stats</button>
+        <button
+          className={`tabButton ${activeTab === 1 ? 'active' : ''}`}
+          onClick={() => setActiveTab(1)}
+        >Posts</button>
+        <button
+          className={`tabButton ${activeTab === 2 ? 'active' : ''}`}
+          onClick={() => setActiveTab(2)}
+        >Favorites</button>
       </div>
 
       <div className="profileContent">
@@ -52,11 +79,10 @@ function Profile({ user, deletePost, sessions }) {
             <div className="stats-page">
               <div className="stats-grid">
                 <div className="stats-item">
-                  <LineChart solves={solves} title="3x3 OH" />
+                  <LineChart solves={solves} title="3x3" />
                 </div>
                 <div className="stats-item">
-                <EventCountPieChart sessions={sessions} />
-
+                  <EventCountPieChart sessions={sessions} />
                 </div>
                 <div className="stats-item">
                   <BarChart solves={solves} />
@@ -68,19 +94,20 @@ function Profile({ user, deletePost, sessions }) {
             </div>
           </div>
         )}
+
         {activeTab === 1 && (
           <div className="tabPanel">
             {recentPosts.length > 0 ? (
-              recentPosts.map((post, index) => (
+              recentPosts.map((post, idx) => (
                 <Post
-                  key={index}
+                  key={post.date || idx}
                   name={user.Name}
                   date={post.date}
                   event={post.event}
                   singleOrAverage={post.singleOrAverage}
                   scramble={post.scramble}
                   time={post.time}
-                  deletePost={() => deletePost(user.Posts.length - 1 - index)} // Adjust index to match original order
+                  deletePost={() => handleDeletePost(post.date)}
                   postColor={'#2EC4B6'}
                 />
               ))
@@ -89,17 +116,18 @@ function Profile({ user, deletePost, sessions }) {
             )}
           </div>
         )}
+
         {activeTab === 2 && (
           <div className="tabPanel">
             <h2>Favorites</h2>
-            {/* Add your profile stats content here */}
+            {/* Add your favorites UI here */}
           </div>
         )}
       </div>
 
       {showEventSelector && (
         <EventSelectorDetail
-          events={["222", "333", "444", "555", "666", "777", "333OH", "333BLD"]} // All available events
+          events={["222", "333", "444", "555", "666", "777", "333OH", "333BLD"]}
           selectedEvents={selectedEvents}
           onClose={() => setShowEventSelector(false)}
           onSave={handleEventSave}

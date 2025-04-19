@@ -13,7 +13,7 @@ function Social({ user, deletePost }) {
     return <div>Please sign in to view your feed.</div>;
   }
 
-  const recentPosts = [...user.Posts].reverse(); // Reverse to show the most recent posts first
+  const recentPosts = [...(user.Posts || [])].reverse(); //recent first
 
   return (
     <div className="Page">
