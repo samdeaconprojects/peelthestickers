@@ -1,95 +1,109 @@
-.page {
-  padding: 20px;
-  max-width: 600px;
-  margin: 0 auto;
-  text-align: center;
-  margin-left: 100px;
+/* Overlay background */
+.settingsPopup {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
 }
 
+/* Modal content container */
+.settingsPopupContent {
+  background: #1d1d1d;
+  padding: 20px;
+  border-radius: 12px;
+  border: 2px solid #FFFFFF;
+  max-width: 600px;
+  width: 90%;
+  max-height: 90%;
+  overflow-y: auto;
+  position: relative;
+  /* Hide scrollbar but keep scroll functionality */
+  scrollbar-width: none;       /* Firefox */
+  -ms-overflow-style: none;    /* IE 10+ */
+}
+
+/* Hide scrollbar in WebKit-based browsers */
+.settingsPopupContent::-webkit-scrollbar {
+  display: none;
+}
+
+/* Close button */
+.closeButton {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+/* Headings inside modal */
+.settingsPopupContent h2 {
+  color: white;
+  margin-top: 0;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+/* Profile and theme settings styling */
 .settings-container {
-  margin-top: 20px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  margin: 20px 0;
 }
 
 .setting-item {
-  margin-bottom: 20px;
-  width: 100%;
+  margin: 10px 0;
+  display: flex;
+  align-items: center;
 }
 
 .setting-item label {
-  display: block;
-  margin-bottom: 5px;
-  font-size: 16px;
+  flex: 0 0 140px;
   color: #fff;
+  font-size: 16px;
   text-align: left;
 }
 
-.setting-item select, .setting-item input {
+.setting-item select,
+.setting-item input[type="color"],
+.setting-item input[type="text"] {
+  flex: 1;
   padding: 8px;
   border-radius: 4px;
   border: 1px solid #ccc;
-}
-
-h1 {
-  color: white; /* Green color for headings */
-}
-
-/* Styling for the sliders */
-input[type=range] {
-  -webkit-appearance: none;
-  width: 100%;
-  height: 8px;
-  border-radius: 5px;
-  background: #d3d3d3;
-  outline: none;
-  opacity: 0.7;
-  -webkit-transition: .2s;
-  transition: opacity .2s;
-}
-
-input[type=range]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 23px;
-  height: 23px;
-  border-radius: 50%;
-  background: #4CAF50;
-  cursor: pointer;
-}
-
-input[type=range]::-moz-range-thumb {
-  width: 23px;
-  height: 23px;
-  border-radius: 50%;
-  background: #4CAF50;
-  cursor: pointer;
-}
-
-/* Settings.css */
-.settings-container {
-  display: flex;
-  flex-direction: column;
-  margin: 20px;
-}
-
-.setting-item {
-  margin: 10px;
-  display: flex;
-  align-items: center;
-}
-
-.setting-item label {
-  margin-right: 10px;
-}
-
-.setting-item select, .setting-item input[type="color"] {
   margin-left: 10px;
+  background: #2b2b2b;
+  color: #fff;
+}
+
+/* Save button styling */
+.save-button {
+  margin-top: 20px;
+  padding: 10px 20px;
+  font-size: 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary-color);
+  color: var(--secondary-color);
   cursor: pointer;
 }
 
-select {
-    font-size: medium;
-    width: fit-content;
+.save-button:hover {
+  opacity: 0.9;
+}
+
+/* override the Stats.css rule */
+.settingsPopupContent input {
+  height: auto;          /* or whatever fixed px/em you prefer */
+  /* if you want to enforce it, you can add: */
+  /* height: 2.5em !important;  */
 }

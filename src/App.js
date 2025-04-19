@@ -53,7 +53,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [showSignInPopup, setShowSignInPopup] = useState(false);
-
+  const [showSettingsPopup, setShowSettingsPopup] = useState(false);
   const location = useLocation();
   const isHomePage = location.pathname === "/";
 
@@ -337,7 +337,11 @@ const deletePost = async (timestamp) => {
     <SettingsProvider>
       <div className={`App ${!isHomePage ? "music-player-mode" : ""}`}>
         <div className={`navAndPage ${isHomePage || !showPlayerBar ? "fullHeight" : "reducedHeight"}`}>
-          <Navigation handleSignIn={handleShowSignInPopup} isSignedIn={isSignedIn} />
+        <Navigation
+  handleSignIn={handleShowSignInPopup}
+  isSignedIn={isSignedIn}
+  handleSettingsClick={() => setShowSettingsPopup(true)}
+/>
 
           <div className="main-content">
             <Routes>
@@ -372,17 +376,7 @@ const deletePost = async (timestamp) => {
                 element={<Stats sessions={sessions} setSessions={setSessions} currentEvent={currentEvent} setCurrentEvent={setCurrentEvent} deleteTime={(eventKey, index) => deleteTime(eventKey, index)} addPost={addPost}/>}
               />
               <Route path="/social" element={<Social user={user} deletePost={deletePost} />} />
-              <Route
-                path="/settings"
-                element={
-                <Settings
-                  userID={user?.UserID}
-                  onProfileUpdate={(fresh) =>
-                  setUser(prev => ({ ...prev, ...fresh }))
-                }
-                />
-              }
-              />
+              
             </Routes>
           </div>
         </div>
@@ -412,6 +406,16 @@ const deletePost = async (timestamp) => {
           </div>
         )}
         {showSignInPopup && <SignInPopup onSignIn={handleSignIn} onSignUp={handleSignUp} onClose={handleCloseSignInPopup} />}
+        {showSettingsPopup && (
+  <Settings
+    userID={user?.UserID}
+    onClose={() => setShowSettingsPopup(false)}
+    onProfileUpdate={fresh =>
+      setUser(prev => ({ ...prev, ...fresh }))
+    }
+  />
+)}
+
       </div>
     </SettingsProvider>
   );

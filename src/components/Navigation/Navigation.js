@@ -3,7 +3,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import './Navigation.css';
 
-function Navigation({ onNavClick, onMainLogoClick, handleSignIn, isSignedIn }) {
+function Navigation({ onNavClick, onMainLogoClick, handleSignIn, isSignedIn, handleSettingsClick }) {
   return (
     <nav className="Navigation">
       <Link to="/" onClick={onMainLogoClick}>
@@ -41,11 +41,11 @@ function Navigation({ onNavClick, onMainLogoClick, handleSignIn, isSignedIn }) {
       </ul>
       <div className="bottom-icons">
         
-        <Link to="/settings" onClick={onNavClick}>
-          <i className="nav-icon">
-            <img src={require('../../assets/Settings.png')} alt="Settings" className="settings" />
-          </i>
-        </Link>
+      <button onClick={handleSettingsClick} className="settings-button">
+   <i className="nav-icon">
+     <img src={require('../../assets/Settings.png')} alt="Settings" className="settings" />
+   </i>
+ </button>
       </div>
     </nav>
   );
