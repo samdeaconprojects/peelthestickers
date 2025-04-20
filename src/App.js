@@ -23,6 +23,7 @@ import { deleteSolve } from "./services/deleteSolve";
 import { getPosts } from "./services/getPosts";
 import { createPost } from "./services/createPost";
 import { deletePost as deletePostFromDB } from "./services/deletePost";
+import { updatePostComments } from "./services/updatePostComments";
 import { createSession } from "./services/createSession";
 import { createUser } from "./services/createUser";
 import { updateSolve } from "./services/updateSolve";
@@ -291,6 +292,19 @@ const deletePost = async (timestamp) => {
   }
 };
 
+  const handleUpdateComments = async (timestamp, comments) => {
+     if (!user) return;
+     try {
+       // 1) write to Dynamo
+       await updatePostComments(user.UserID, timestamp, comments);
+       // 2) refresh your local Posts array on `user`
+       const fresh = await getPosts(user.UserID);
+       setUser(prev => ({ ...prev, Posts: fresh }));
+     } catch (err) {
+       console.error("Error updating comments:", err);
+     }
+   };
+
   
 
   const handleEventChange = (event) => {
@@ -370,12 +384,12 @@ const deletePost = async (timestamp) => {
                   </>
                 }
               />
-              <Route path="/profile" element={<Profile user={user} deletePost={deletePost} sessions={sessions} />} />
+              <Route path="/profile" element={<Profile user={user} addPost={addPost} deletePost={deletePost} updateComments={handleUpdateComments} sessions={sessions} />} />
               <Route
                 path="/stats"
                 element={<Stats sessions={sessions} setSessions={setSessions} currentEvent={currentEvent} setCurrentEvent={setCurrentEvent} deleteTime={(eventKey, index) => deleteTime(eventKey, index)} addPost={addPost}/>}
               />
-              <Route path="/social" element={<Social user={user} deletePost={deletePost} />} />
+              <Route path="/social" element={<Social user={user} addPost={addPost} deletePost={deletePost} updateComments={handleUpdateComments} />} />
               
             </Routes>
           </div>

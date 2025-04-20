@@ -49,14 +49,12 @@ function Detail({ solve, onClose, deleteTime, addPost }) {
   };
 
   const handleShare = () => {
-    const newPost = {
-      date: new Date().toLocaleDateString(),
+    addPost({
+      note: notes,
       event: solve.event,
-      scramble: solve.scramble,
-      time: formatTime(solve.time),
-      singleOrAverage: "Single", 
-    };
-    addPost(newPost); 
+      solveList: [solve],
+      comments: []
+    });
     onClose();
   };
 
