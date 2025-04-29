@@ -1,8 +1,9 @@
 // src/components/Profile/Profile.js
 import React, { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import './Profile.css';
 import Post from './Post';
-import PostDetail from './PostDetail';               // popup
+import PostDetail from './PostDetail';
 import ProfileHeader from './ProfileHeader';
 import EventSelectorDetail from '../Detail/EventSelectorDetail';
 import LineChart from '../Stats/LineChart';
@@ -10,34 +11,62 @@ import EventCountPieChart from '../Stats/EventCountPieChart';
 import BarChart from '../Stats/BarChart';
 import TimeTable from '../Stats/TimeTable';
 import { getPosts } from '../../services/getPosts';
-import { updatePostComments } from '../../services/updatePostComments'; // ← new
+import { getUser } from '../../services/getUser';
+import { updateUser } from '../../services/updateUser';
+import { updatePostComments } from '../../services/updatePostComments';
 
-function Profile({ user, deletePost: deletePostProp, sessions }) {
-  const [activeTab, setActiveTab] = useState(0);
-  const [showEventSelector, setShowEventSelector] = useState(false);
-  const [selectedEvents, setSelectedEvents] = useState(["333", "444", "555", "222"]);
+function Profile({
+  user,
+  deletePost: deletePostProp,
+  sessions,
+  updateComments,
+}) {
+  const { userID: paramID } = useParams();
+  const isOwn = !paramID || paramID === user?.UserID;
+  const viewID = isOwn ? user?.UserID : paramID;
+
+  const [viewedProfile, setViewedProfile] = useState(null);
   const [posts, setPosts] = useState([]);
   const [selectedPost, setSelectedPost] = useState(null);
+  const [activeTab, setActiveTab] = useState(0);
+  const [selectedEvents, setSelectedEvents] = useState(["333","444","555","222"]);
+  const [showEventSelector, setShowEventSelector] = useState(false);
 
-  // Fetch posts whenever the user changes
+  // Load profile data
   useEffect(() => {
-    const fetch = async () => {
-      if (!user?.UserID) return;
+    const loadProfile = async () => {
+      if (isOwn) {
+        setViewedProfile(user);
+      } else {
+        try {
+          const prof = await getUser(viewID);
+          setViewedProfile({ ...prof, UserID: viewID });
+        } catch (err) {
+          console.error('Error loading profile:', err);
+        }
+      }
+    };
+    loadProfile();
+  }, [viewID, user, isOwn]);
+
+  // Load posts
+  useEffect(() => {
+    const loadPosts = async () => {
       try {
-        const fresh = await getPosts(user.UserID);
+        const fresh = await getPosts(viewID);
         setPosts(fresh);
       } catch (err) {
         console.error('Failed to fetch posts:', err);
       }
     };
-    fetch();
-  }, [user?.UserID]);
+    if (viewID) loadPosts();
+  }, [viewID]);
 
-  // Delete + refresh
-  const handleDeletePost = async (timestamp) => {
+  // Delete post
+  const handleDeletePost = async (ts) => {
     try {
-      await deletePostProp(timestamp);
-      const fresh = await getPosts(user.UserID);
+      await deletePostProp(ts);
+      const fresh = await getPosts(viewID);
       setPosts(fresh);
       setSelectedPost(null);
     } catch (err) {
@@ -45,52 +74,75 @@ function Profile({ user, deletePost: deletePostProp, sessions }) {
     }
   };
 
-  // Add a new comment locally & persist to DynamoDB
+  // Add comment
   const handleAddComment = async (comment) => {
     if (!selectedPost) return;
     const ts = selectedPost.DateTime || selectedPost.date;
     const updatedComments = [...(selectedPost.Comments || []), comment];
-    const updatedPost = { ...selectedPost, Comments: updatedComments };
+    const updated = { ...selectedPost, Comments: updatedComments };
 
-    // 1) update UI
-    setPosts(ps => ps.map(p => p === selectedPost ? updatedPost : p));
-    setSelectedPost(updatedPost);
+    // UI
+    setPosts(pl => pl.map(p => p === selectedPost ? updated : p));
+    setSelectedPost(updated);
 
-    // 2) persist comments
+    // Persist
+    const ownerID = viewID;
     try {
-      await updatePostComments(user.UserID, ts, updatedComments);
+      if (updateComments) {
+        await updateComments(ts, updatedComments);
+      } else {
+        await updatePostComments(ownerID, ts, updatedComments);
+      }
     } catch (err) {
       console.error('Failed to save comment:', err);
     }
   };
 
-  // stats for 3x3
+  // Add friend
+  const handleAddFriend = async () => {
+    if (!user || isOwn) return;
+    const current = user.Friends || [];
+    if (!current.includes(viewID)) {
+      const updatedList = [...current, viewID];
+      try {
+        await updateUser(user.UserID, { Friends: updatedList });
+      } catch (err) {
+        console.error('Failed to add friend:', err);
+      }
+    }
+  };
+
+  // Stats data
   const solves = sessions["333"] || [];
 
-  if (!user) {
-    return <div>Please sign in to view your profile.</div>;
-  }
+  if (!viewedProfile) return null;
+  if (!viewedProfile.UserID) return <div>Loading profile…</div>;
 
-  // show most recent first
   const recentPosts = [...posts].reverse();
 
   return (
     <div className="Page">
-      <ProfileHeader user={user} sessions={sessions} />
+      <ProfileHeader user={viewedProfile} sessions={sessions} />
+
+      {!isOwn && (
+        <button className="addFriendButton" onClick={handleAddFriend}>
+          Add Friend
+        </button>
+      )}
 
       <div className="tabContainer">
         <button
           className={`tabButton ${activeTab === 0 ? 'active' : ''}`}
           onClick={() => setActiveTab(0)}
-        >Stats</button>
+        >
+          Stats
+        </button>
         <button
           className={`tabButton ${activeTab === 1 ? 'active' : ''}`}
           onClick={() => setActiveTab(1)}
-        >Posts</button>
-        <button
-          className={`tabButton ${activeTab === 2 ? 'active' : ''}`}
-          onClick={() => setActiveTab(2)}
-        >Favorites</button>
+        >
+          Posts
+        </button>
       </div>
 
       <div className="profileContent">
@@ -98,10 +150,18 @@ function Profile({ user, deletePost: deletePostProp, sessions }) {
           <div className="tabPanel">
             <div className="stats-page">
               <div className="stats-grid">
-                <div className="stats-item"><LineChart solves={solves} title="3x3" /></div>
-                <div className="stats-item"><EventCountPieChart sessions={sessions} /></div>
-                <div className="stats-item"><BarChart solves={solves} /></div>
-                <div className="stats-item"><TimeTable solves={solves} /></div>
+                <div className="stats-item">
+                  <LineChart solves={solves} title="3x3" />
+                </div>
+                <div className="stats-item">
+                  <EventCountPieChart sessions={sessions} />
+                </div>
+                <div className="stats-item">
+                  <BarChart solves={solves} />
+                </div>
+                <div className="stats-item">
+                  <TimeTable solves={solves} />
+                </div>
               </div>
             </div>
           </div>
@@ -113,7 +173,7 @@ function Profile({ user, deletePost: deletePostProp, sessions }) {
               recentPosts.map((post, idx) => (
                 <Post
                   key={`${post.DateTime || post.date}-${idx}`}
-                  name={user.Name}
+                  name={viewedProfile.Name || viewedProfile.name}
                   date={
                     post.DateTime
                       ? new Date(post.DateTime).toLocaleString()
@@ -135,30 +195,15 @@ function Profile({ user, deletePost: deletePostProp, sessions }) {
                 />
               ))
             ) : (
-              <p>No posts yet. Start solving to create posts!</p>
+              <p>No posts yet.</p>
             )}
-          </div>
-        )}
-
-        {activeTab === 2 && (
-          <div className="tabPanel">
-            <h2>Favorites</h2>
           </div>
         )}
       </div>
 
-      {showEventSelector && (
-        <EventSelectorDetail
-          events={["222","333","444","555","666","777","333OH","333BLD"]}
-          selectedEvents={selectedEvents}
-          onClose={() => setShowEventSelector(false)}
-          onSave={(e) => { setSelectedEvents(e); setShowEventSelector(false); }}
-        />
-      )}
-
       {selectedPost && (
         <PostDetail
-          author={user.Name}
+          author={viewedProfile.Name || viewedProfile.name}
           date={
             selectedPost.DateTime
               ? new Date(selectedPost.DateTime).toLocaleString()

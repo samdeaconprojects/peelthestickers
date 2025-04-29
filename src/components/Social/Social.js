@@ -1,32 +1,36 @@
-// src/components/Social/Social.js
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import './Social.css';
 import Post from '../Profile/Post';
 import PostDetail from '../Profile/PostDetail';
 import { getPosts } from '../../services/getPosts';
 import { getUser } from '../../services/getUser';
-import { updatePostComments } from '../../services/updatePostComments'; // ← new
+import { updatePostComments } from '../../services/updatePostComments';
 
 function Social({ user, deletePost }) {
-  const [activeTab, setActiveTab] = useState(0);
-  const [feed, setFeed] = useState([]);
+  const [activeTab, setActiveTab]       = useState(0);
+  const [feed, setFeed]                 = useState([]);
   const [selectedPost, setSelectedPost] = useState(null);
+  const [searchTerm, setSearchTerm]     = useState('');
+  const [suggestions, setSuggestions]   = useState([]);
+  const navigate = useNavigate();
 
+  // --- Load activity feed ---
   useEffect(() => {
     const fetchFeed = async () => {
       if (!user?.UserID) return;
       try {
-        // 1) own posts
-        const ownPosts = await getPosts(user.UserID);
-        const ownAnnotated = ownPosts.map(p => ({ ...p, author: user.Name, isOwn: true }));
+        // your own posts
+        const own = await getPosts(user.UserID);
+        const ownAnnotated = own.map(p => ({ ...p, author: user.Name, isOwn: true }));
 
-        // 2) friend “samtest12”
+        // example friend list
         const friendIds = ['samtest12'];
         const profiles = await Promise.all(friendIds.map(id => getUser(id)));
-        const nameById = profiles.reduce((acc, prof) => {
+        const nameById = profiles.reduce((a, prof) => {
           const id = prof.PK.split('#')[1];
-          acc[id] = prof.Name;
-          return acc;
+          a[id] = prof.Name || prof.name;
+          return a;
         }, {});
 
         const friendsArrays = await Promise.all(
@@ -36,7 +40,6 @@ function Social({ user, deletePost }) {
           })
         );
 
-        // 3) merge & sort
         const merged = [...ownAnnotated, ...friendsArrays.flat()];
         merged.sort((a, b) => new Date(b.DateTime || b.date) - new Date(a.DateTime || a.date));
         setFeed(merged);
@@ -47,6 +50,7 @@ function Social({ user, deletePost }) {
     fetchFeed();
   }, [user]);
 
+  // --- Delete your own post ---
   const handleDelete = async post => {
     if (!post.isOwn) return;
     await deletePost(post.DateTime || post.date);
@@ -54,41 +58,91 @@ function Social({ user, deletePost }) {
     setSelectedPost(null);
   };
 
+  // --- Comment on any post (writes under real owner) ---
   const handleAddComment = async (comment) => {
     if (!selectedPost) return;
-    const timestamp = selectedPost.DateTime || selectedPost.date;
+    const ts = selectedPost.DateTime || selectedPost.date;
     const updatedComments = [...(selectedPost.Comments || []), comment];
     const updated = { ...selectedPost, Comments: updatedComments };
 
-    // update UI
+    // Update UI
     setFeed(f => f.map(p => (p === selectedPost ? updated : p)));
     setSelectedPost(updated);
 
-    // persist to DB
+    // Persist under post’s owner
+    const ownerID = selectedPost.PK.split('#')[1];
     try {
-      await updatePostComments(user.UserID, timestamp, updatedComments);
+      await updatePostComments(ownerID, ts, updatedComments);
     } catch (err) {
-      console.error('Failed to update comments:', err);
+      console.error('Failed to save comment:', err);
     }
+  };
+
+  // --- Typeahead search ---
+  useEffect(() => {
+    const fetchSuggestion = async () => {
+      if (!searchTerm) {
+        setSuggestions([]);
+        return;
+      }
+      try {
+        const prof = await getUser(searchTerm);
+        if (prof) {
+          const id = prof.PK.split('#')[1];
+          setSuggestions([{ id, name: prof.Name || prof.name }]);
+        } else {
+          setSuggestions([]);
+        }
+      } catch {
+        setSuggestions([]);
+      }
+    };
+    fetchSuggestion();
+  }, [searchTerm]);
+
+  const handleSearchSelect = (id) => {
+    setSearchTerm('');
+    setSuggestions([]);
+    navigate(`/profile/${id}`);
   };
 
   if (!user) return <div>Please sign in to view your feed.</div>;
 
   return (
     <div className="Page">
-      <div className="tabContainer">
-        <button
-          className={`tabButton ${activeTab === 0 ? 'active' : ''}`}
-          onClick={() => setActiveTab(0)}
-        >
-          Activity
-        </button>
-        <button
-          className={`tabButton ${activeTab === 1 ? 'active' : ''}`}
-          onClick={() => setActiveTab(1)}
-        >
-          Messages
-        </button>
+      <div className="socialHeader">
+        <div className="tabContainer">
+          <button
+            className={`tabButton ${activeTab === 0 ? 'active' : ''}`}
+            onClick={() => setActiveTab(0)}
+          >
+            Activity
+          </button>
+          <button
+            className={`tabButton ${activeTab === 1 ? 'active' : ''}`}
+            onClick={() => setActiveTab(1)}
+          >
+            Messages
+          </button>
+        </div>
+        <div className="searchContainer">
+          <input
+            type="text"
+            placeholder="Search user..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && suggestions.length && handleSearchSelect(suggestions[0].id)}
+          />
+          {suggestions.length > 0 && (
+            <ul className="suggestionsList">
+              {suggestions.map(s => (
+                <li key={s.id} onClick={() => handleSearchSelect(s.id)}>
+                  {s.name} ({s.id})
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       <div className="profileContent">

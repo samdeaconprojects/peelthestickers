@@ -184,8 +184,8 @@ select {
 
 .averages-display {
   display:grid;
-  grid-template-columns: 40% 70% 70%;
-  grid-template-rows: 10% 30% 30%;
+  grid-template-columns: 30% 70% 50%;
+  grid-template-rows: 10% 30% 20%;
   color: #FDFFFC;
   box-sizing: border-box;
   align-items: center;
