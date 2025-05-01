@@ -10,7 +10,12 @@ import Navigation from "./components/Navigation/Navigation";
 import PlayerBar from "./components/PlayerBar/PlayerBar";
 import EventSelector from "./components/EventSelector";
 import Scramble from "./components/Scramble/Scramble";
-import RubiksCubeSVG from "./components/RubiksCubeSVG";
+import RubiksCubeSVG from "./components/PuzzleSVGs/RubiksCubeSVG";
+import SkewbSVG from "./components/PuzzleSVGs/SkewbSVG";
+import Square1SVG from "./components/PuzzleSVGs/Square1SVG";
+import PyraminxSVG from "./components/PuzzleSVGs/PyraminxSVG";
+import MegaminxSVG from "./components/PuzzleSVGs/MegaminxSVG";
+import ClockSVG from "./components/PuzzleSVGs/ClockSVG";
 import SignInPopup from "./components/SignInPopup/SignInPopup";
 import { generateScramble, getScrambledFaces } from "./components/scrambleUtils";
 import { Routes, Route, useLocation } from "react-router-dom";
@@ -95,6 +100,18 @@ function App() {
 
     return nextScramble;
   };
+
+    // map each event code to its SVG component
+    const puzzleMap = {
+      SKEWB:    SkewbSVG,
+      SQ1:      Square1SVG,
+      MEGAMINX: MegaminxSVG,
+      PYRAMINX: PyraminxSVG,
+      CLOCK:    ClockSVG
+    };
+
+    const PuzzleSVG = puzzleMap[currentEvent] || RubiksCubeSVG;
+  
 
    const normalizeSolve = (item) => ({
     time: item.Time,
@@ -348,160 +365,176 @@ const deletePost = async (timestamp) => {
       : "N/A";
 
       return (
-        <SettingsProvider>
-          <div className={`App ${!isHomePage ? "music-player-mode" : ""}`}>
-            <div className={`navAndPage ${isHomePage || !showPlayerBar ? "fullHeight" : "reducedHeight"}`}>
-              <Navigation
-                handleSignIn={handleShowSignInPopup}
-                isSignedIn={isSignedIn}
-                handleSettingsClick={() => setShowSettingsPopup(true)}
-              />
-      
-              <div className="main-content">
-                <Routes>
-                  <Route
-                    path="/"
-                    element={
-                      <>
-                        <div className="scramble-select-container">
-                          <EventSelector
-                            currentEvent={currentEvent}
-                            handleEventChange={handleEventChange}
-                          />
-                          <Scramble
-                            scramble={scrambles[currentEvent]?.[0] || ""}
-                            currentEvent={currentEvent}
-                            onScrambleClick={onScrambleClick}
-                          />
-                          <RubiksCubeSVG
-                            n={currentEvent}
-                            faces={getScrambledFaces(scrambles[currentEvent]?.[0] || "", currentEvent)}
-                            isMusicPlayer={!isHomePage}
-                            isTimerCube={true}
-                          />
-                        </div>
-                        <Timer addTime={addSolve} />
-                        <div className="averages-display">
-                          <p></p>
-                          <p className="averagesTitle">Ao5</p>
-                          <p className="averagesTitle">Ao12</p>
-                          <p className="averagesTitle">Current</p>
-                          <p className="averagesTime">{formatTime(avgOfFive)}</p>
-                          <p className="averagesTime">{formatTime(avgOfTwelve)}</p>
-                          <p className="averagesTitle">Best</p>
-                          <p className="averagesTime">{formatTime(bestAvgOfFive)}</p>
-                          <p className="averagesTime">{formatTime(bestAvgOfTwelve)}</p>
-                        </div>
-                        <TimeList
-                          solves={sessions[currentEvent] || []}
-                          deleteTime={(index) => deleteTime(currentEvent, index)}
-                          addPost={addPost}
-                          rowsToShow={3}
-                        />
-                      </>
-                    }
-                  />
-      
-                  {/* own profile */}
-                  <Route
-                    path="/profile"
-                    element={
-                      <Profile
-                        user={user}
-                        deletePost={deletePost}
-                        updateComments={handleUpdateComments}
-                        sessions={sessions}
+  <SettingsProvider>
+    <div className={`App ${!isHomePage ? "music-player-mode" : ""}`}>
+      <div className={`navAndPage ${isHomePage || !showPlayerBar ? "fullHeight" : "reducedHeight"}`}>
+        <Navigation
+          handleSignIn={handleShowSignInPopup}
+          isSignedIn={isSignedIn}
+          handleSettingsClick={() => setShowSettingsPopup(true)}
+        />
+
+        <div className="main-content">
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <>
+                  <div className="scramble-select-container">
+                    <EventSelector
+                      currentEvent={currentEvent}
+                      handleEventChange={handleEventChange}
+                    />
+                    <Scramble
+                      scramble={scrambles[currentEvent]?.[0] || ""}
+                      currentEvent={currentEvent}
+                      onScrambleClick={onScrambleClick}
+                    />
+
+                    {PuzzleSVG === RubiksCubeSVG ? (
+                      <RubiksCubeSVG
+                        n={currentEvent}
+                        faces={getScrambledFaces(
+                          scrambles[currentEvent]?.[0] || "",
+                          currentEvent
+                        )}
+                        isMusicPlayer={!isHomePage}
+                        isTimerCube={true}
                       />
-                    }
-                  />
-      
-                  {/* any user’s profile */}
-                  <Route
-                    path="/profile/:userID"
-                    element={
-                      <Profile
-                        user={user}
-                        deletePost={deletePost}
-                        updateComments={handleUpdateComments}
-                        sessions={sessions}
+                    ) : (
+                      <PuzzleSVG
+                        scramble={scrambles[currentEvent]?.[0] || ""}
+                        size={50}
+                        gap={2}
                       />
-                    }
+                    )}
+                  </div>
+
+                  <Timer addTime={addSolve} />
+
+                  <div className="averages-display">
+                    <p></p>
+                    <p className="averagesTitle">Ao5</p>
+                    <p className="averagesTitle">Ao12</p>
+                    <p className="averagesTitle">Current</p>
+                    <p className="averagesTime">{formatTime(avgOfFive)}</p>
+                    <p className="averagesTime">{formatTime(avgOfTwelve)}</p>
+                    <p className="averagesTitle">Best</p>
+                    <p className="averagesTime">{formatTime(bestAvgOfFive)}</p>
+                    <p className="averagesTime">{formatTime(bestAvgOfTwelve)}</p>
+                  </div>
+
+                  <TimeList
+                    solves={sessions[currentEvent] || []}
+                    deleteTime={(index) => deleteTime(currentEvent, index)}
+                    addPost={addPost}
+                    rowsToShow={3}
                   />
-      
-                  <Route
-                    path="/stats"
-                    element={
-                      <Stats
-                        sessions={sessions}
-                        setSessions={setSessions}
-                        currentEvent={currentEvent}
-                        setCurrentEvent={setCurrentEvent}
-                        deleteTime={(eventKey, index) => deleteTime(eventKey, index)}
-                        addPost={addPost}
-                      />
-                    }
-                  />
-      
-                  <Route
-                    path="/social"
-                    element={
-                      <Social
-                        user={user}
-                        addPost={addPost}
-                        deletePost={deletePost}
-                        updateComments={handleUpdateComments}
-                      />
-                    }
-                  />
-                </Routes>
-              </div>
-            </div>
-      
-            {!isHomePage && showPlayerBar && (
-              <PlayerBar
-                sessions={sessions}
-                currentEvent={currentEvent}
-                handleEventChange={handleEventChange}
-                deleteTime={deleteTime}
-                addTime={addSolve}
-                scramble={scrambles[currentEvent]?.[0] || ""}
-                onScrambleClick={onScrambleClick}
-                addPost={addPost}
-              />
-            )}
-      
-            {!isHomePage && (
-              <div className="toggle-bar">
-                {showPlayerBar ? (
-                  <button className="toggle-button" onClick={() => setShowPlayerBar(false)}>
-                    &#x25BC;
-                  </button>
-                ) : (
-                  <button className="toggle-button" onClick={() => setShowPlayerBar(true)}>
-                    &#x25B2;
-                  </button>
-                )}
-              </div>
-            )}
-      
-            {showSignInPopup && (
-              <SignInPopup
-                onSignIn={handleSignIn}
-                onSignUp={handleSignUp}
-                onClose={handleCloseSignInPopup}
-              />
-            )}
-      
-            {showSettingsPopup && (
-              <Settings
-                userID={user?.UserID}
-                onClose={() => setShowSettingsPopup(false)}
-                onProfileUpdate={fresh => setUser(prev => ({ ...prev, ...fresh }))}
-              />
-            )}
-          </div>
-        </SettingsProvider>
-      );
+                </>
+              }
+            />
+
+            {/* own profile */}
+            <Route
+              path="/profile"
+              element={
+                <Profile
+                  user={user}
+                  deletePost={deletePost}
+                  updateComments={handleUpdateComments}
+                  sessions={sessions}
+                />
+              }
+            />
+
+            {/* any user’s profile */}
+            <Route
+              path="/profile/:userID"
+              element={
+                <Profile
+                  user={user}
+                  deletePost={deletePost}
+                  updateComments={handleUpdateComments}
+                  sessions={sessions}
+                />
+              }
+            />
+
+            <Route
+              path="/stats"
+              element={
+                <Stats
+                  sessions={sessions}
+                  setSessions={setSessions}
+                  currentEvent={currentEvent}
+                  setCurrentEvent={setCurrentEvent}
+                  deleteTime={(eventKey, index) => deleteTime(eventKey, index)}
+                  addPost={addPost}
+                />
+              }
+            />
+
+            <Route
+              path="/social"
+              element={
+                <Social
+                  user={user}
+                  addPost={addPost}
+                  deletePost={deletePost}
+                  updateComments={handleUpdateComments}
+                />
+              }
+            />
+          </Routes>
+        </div>
+      </div>
+
+      {!isHomePage && showPlayerBar && (
+        <PlayerBar
+          sessions={sessions}
+          currentEvent={currentEvent}
+          handleEventChange={handleEventChange}
+          deleteTime={deleteTime}
+          addTime={addSolve}
+          scramble={scrambles[currentEvent]?.[0] || ""}
+          onScrambleClick={onScrambleClick}
+          addPost={addPost}
+        />
+      )}
+
+      {!isHomePage && (
+        <div className="toggle-bar">
+          {showPlayerBar ? (
+            <button className="toggle-button" onClick={() => setShowPlayerBar(false)}>
+              &#x25BC;
+            </button>
+          ) : (
+            <button className="toggle-button" onClick={() => setShowPlayerBar(true)}>
+              &#x25B2;
+            </button>
+          )}
+        </div>
+      )}
+
+      {showSignInPopup && (
+        <SignInPopup
+          onSignIn={handleSignIn}
+          onSignUp={handleSignUp}
+          onClose={handleCloseSignInPopup}
+        />
+      )}
+
+      {showSettingsPopup && (
+        <Settings
+          userID={user?.UserID}
+          onClose={() => setShowSettingsPopup(false)}
+          onProfileUpdate={(fresh) => setUser((prev) => ({ ...prev, ...fresh }))}
+        />
+      )}
+    </div>
+  </SettingsProvider>
+);
+
       
 }
 

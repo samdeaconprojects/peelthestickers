@@ -40,6 +40,26 @@
     overflow-y: auto;
     box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.3);
   }
+
+  .event-dropdown.open-up {
+    margin-bottom: 45px;
+  }
+
+  .event-dropdown {
+    /* keep your existing rules… */
+    overflow-y: auto;
+  
+    /* Firefox */
+    scrollbar-width: none;
+    /* IE 10+ */
+    -ms-overflow-style: none;
+  }
+  
+  /* Chrome, Safari, Opera */
+  .event-dropdown::-webkit-scrollbar {
+    display: none;
+  }
+  
   
   .event-group {
     padding: 8px 12px;

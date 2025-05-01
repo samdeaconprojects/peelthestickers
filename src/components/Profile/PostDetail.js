@@ -1,7 +1,7 @@
 // src/components/Profile/PostDetail.js
 import React, { useState } from 'react';
 import '../Detail/Detail.css';            // reuse your popup styles
-import RubiksCubeSVG from '../RubiksCubeSVG';
+import RubiksCubeSVG from '../PuzzleSVGs/RubiksCubeSVG';
 import { getScrambledFaces } from '../cubeStructure';
 import { calculateAverage, formatTime } from '../TimeList/TimeUtils';
 import { currentEventToString } from "../../components/scrambleUtils";

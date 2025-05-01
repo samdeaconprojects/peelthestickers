@@ -5,7 +5,7 @@ import Timer from '../Timer/Timer';
 import TimeList from '../TimeList/TimeList';
 import EventSelector from '../EventSelector';
 import Scramble from '../Scramble/Scramble';
-import RubiksCubeSVG from '../RubiksCubeSVG';
+import RubiksCubeSVG from '../PuzzleSVGs/RubiksCubeSVG';
 import { generateScramble, getScrambledFaces } from "../scrambleUtils";
 import { useLocation } from 'react-router-dom';
 
@@ -59,7 +59,7 @@ function PlayerBar({ sessions, currentEvent, handleEventChange, deleteTime, addT
             <Scramble style={{ fontSize: getScrambleFontSize(currentEvent) }} onScrambleClick={onScrambleClick} scramble={scramble} currentEvent={currentEvent} isMusicPlayer={true} />
             <TimeList solves={sessions[currentEvent]} deleteTime={(index) => deleteTime(currentEvent, index)} addPost={addPost} rowsToShow={1}/>
             </div>
-            <EventSelector currentEvent={currentEvent} handleEventChange={handleEventChange}/>
+            <EventSelector currentEvent={currentEvent} handleEventChange={handleEventChange} dropUp={true}/>
             <RubiksCubeSVG n={currentEvent} faces={getScrambledFaces(scramble, currentEvent)} isMusicPlayer={true} isTimerCube={false} />
         </div>
     );

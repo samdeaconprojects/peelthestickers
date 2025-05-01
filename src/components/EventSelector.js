@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import "./EventSelector.css";
 
-function EventSelector({ currentEvent, handleEventChange, customSessions = [] }) {
+function EventSelector({ currentEvent, handleEventChange, customSessions = [] , dropUp}) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -64,7 +64,7 @@ function EventSelector({ currentEvent, handleEventChange, customSessions = [] })
       </div>
 
       {isOpen && (
-        <div className="event-dropdown">
+        <div className={`event-dropdown${dropUp ? " open-up" : ""}`}>
           {allEvents.map((group) => (
             <div key={group.label} className="event-group">
               <h4>{group.label}</h4>

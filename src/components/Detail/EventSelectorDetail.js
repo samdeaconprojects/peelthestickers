@@ -1,7 +1,7 @@
 // EventSelectorDetail.js
 import React, { useState, useEffect } from 'react';
 import './EventSelectorDetail.css';
-import RubiksCubeSVG from '../RubiksCubeSVG';
+import RubiksCubeSVG from '../PuzzleSVGs/RubiksCubeSVG';
 import { getScrambledFaces } from '../scrambleUtils';
 
 function EventSelectorDetail({ events, selectedEvents, onClose, onSave }) {

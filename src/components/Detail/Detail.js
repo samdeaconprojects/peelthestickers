@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import './Detail.css';
-import RubiksCubeSVG from '../RubiksCubeSVG';
+import RubiksCubeSVG from '../PuzzleSVGs/RubiksCubeSVG';
 import { getScrambledFaces } from "../scrambleUtils";
 import { formatTime } from '../TimeList/TimeUtils';
 

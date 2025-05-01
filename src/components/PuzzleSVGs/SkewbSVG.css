@@ -1,0 +1,54 @@
+/* src/components/SkewbSVG/SkewbSVG.css */
+
+.skewbContainer {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  
+  .flipButton {
+    position: absolute;
+    top: -2em;
+    right: 0;
+    padding: 4px 8px;
+    background: #2EC4B6;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  
+  /* Make each face wrapper exactly the size of one sticker square */
+  .skewbFaceContainer {
+    width: 50px;    /* match `size` prop */
+    height: 50px;   /* match `size` prop */
+    position: relative;
+    perspective: 200px; /* for future 3D transforms */
+  }
+  
+  .skewbFaceContainer svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    background: transparent;  /* let the center color show through */
+  }
+  
+  /* placeholder classes for your 3D transforms */
+  .skewbContainer .topFace {  
+    top: -10px;
+    left: 100px;  
+    }
+
+    .skewbContainer .leftFace      {
+     top: 28px;
+     left: 10px;
+    }
+
+  .skewbContainer .rightFace     {
+    top: 28px;
+     right: 8px;
+    }
+
+  
+  

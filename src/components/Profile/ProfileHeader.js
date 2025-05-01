@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import './Profile.css';
-import RubiksCubeSVG from '../RubiksCubeSVG';
+import RubiksCubeSVG from '../PuzzleSVGs/RubiksCubeSVG';
 import { getScrambledFaces } from '../cubeStructure';
 import EventSelectorDetail from '../Detail/EventSelectorDetail';
 import { formatTime, calculateAverage } from '../TimeList/TimeUtils';
@@ -66,6 +66,9 @@ function ProfileHeader({ user, sessions }) {
         </div>
       </div>
 
+      <button className="edit-events-button" onClick={handleOpenSelector}>Edit Events</button>
+
+
       <div className='personalBests'>
         {selectedEvents.map((event, index) => (
           <div className='pb' key={index}>
@@ -77,7 +80,6 @@ function ProfileHeader({ user, sessions }) {
         ))}
       </div>
 
-      <button className="edit-events-button" onClick={handleOpenSelector}>Edit Events</button>
 
       <div className='profileStats' style={{ border: `2px solid ${Color}` }}>
         <div><strong>WCA ID:</strong> {WCAID || '—'}</div>

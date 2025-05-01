@@ -1,7 +1,7 @@
 // src/components/Profile/Post.js
 import React from 'react';
 import './Profile.css';
-import RubiksCubeSVG from '../RubiksCubeSVG';
+import RubiksCubeSVG from '../PuzzleSVGs/RubiksCubeSVG';
 import { getScrambledFaces } from '../cubeStructure';
 import { currentEventToString } from "../../components/scrambleUtils";
 import { formatTime } from '../TimeList/TimeUtils';
