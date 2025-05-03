@@ -41,13 +41,13 @@
     }
 
     .skewbContainer .leftFace      {
-     top: 28px;
-     left: 10px;
+     top: 34px;
+     left: 1px;
     }
 
   .skewbContainer .rightFace     {
-    top: 28px;
-     right: 8px;
+    top: 41px;
+     right: 7px;
     }
 
   

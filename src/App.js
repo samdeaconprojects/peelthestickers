@@ -404,7 +404,7 @@ const deletePost = async (timestamp) => {
                     ) : (
                       <PuzzleSVG
                         scramble={scrambles[currentEvent]?.[0] || ""}
-                        size={50}
+                        size={60}
                         gap={2}
                       />
                     )}

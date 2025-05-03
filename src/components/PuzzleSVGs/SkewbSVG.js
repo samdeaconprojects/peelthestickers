@@ -11,7 +11,7 @@ const colorMap = {
   yellow: '#FFFF00'
 };
 
-export default function SkewbSVG({ scramble = 'U R B L U B L U', size = 50, gap = 0 }) {
+export default function SkewbSVG({ scramble = 'U R B L U B L U', size, gap = 0 }) {
   const cornerTemplates = [
     ['white','orange','blue'],
     ['white','blue','red'],
