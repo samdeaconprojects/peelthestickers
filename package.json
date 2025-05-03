@@ -6,7 +6,7 @@
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",
-    "aws-sdk": "^2.1688.0",
+    "aws-sdk": "^2.1692.0",
     "cubing": "^0.43.8",
     "dotenv": "^16.3.1",
     "mongodb": "^6.2.0",
