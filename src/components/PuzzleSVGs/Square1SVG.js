@@ -8,6 +8,9 @@ export default function Square1SVG({
   size = 50,        // your “x”
   backThickness = 10 // your “y”
 }) {
+
+    scramble = "(-5,0)/ (3,6)/ (5,-4)/ (-3,0)/ (1,-3)/ (0,-3)/ (0,-2)/ (0,-1)/ (-4,0)/ (0,-1)/ (4,0)/ (-3,-5)/";
+
   // four groups + middleEdge
   const square1 = useRef({
     group1: [['yellow','orange','green'], ['yellow','green'], ['yellow','green','red'], ['yellow','red']],
@@ -100,7 +103,7 @@ export default function Square1SVG({
     return all.map((piece,i) => {
       const isEdge = piece.length===2;
       // only edges get +15°
-      const rot = acc + (isEdge ? 15 : 0);
+      const rot = acc + (isEdge ? 30 : 0);
       acc += isEdge ? 30 : 60;
 
       if (isEdge) {
