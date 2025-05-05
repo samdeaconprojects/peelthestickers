@@ -17,6 +17,7 @@ import { updatePostComments } from '../../services/updatePostComments';
 
 function Profile({
   user,
+  setUser,
   deletePost: deletePostProp,
   sessions,
   updateComments,
@@ -24,6 +25,8 @@ function Profile({
   const { userID: paramID } = useParams();
   const isOwn = !paramID || paramID === user?.UserID;
   const viewID = isOwn ? user?.UserID : paramID;
+
+  const isFriend = user?.Friends?.includes(viewID);
 
   const [viewedProfile, setViewedProfile] = useState(null);
   const [posts, setPosts] = useState([]);
@@ -106,6 +109,7 @@ function Profile({
       const updatedList = [...current, viewID];
       try {
         await updateUser(user.UserID, { Friends: updatedList });
+        setUser(prev => ({ ...prev, Friends: updatedList })); //local state button rerender
       } catch (err) {
         console.error('Failed to add friend:', err);
       }
@@ -125,8 +129,12 @@ function Profile({
       <ProfileHeader user={viewedProfile} sessions={sessions} />
 
       {!isOwn && (
-        <button className="addFriendButton" onClick={handleAddFriend}>
-          Add Friend
+        <button
+          className="addFriendButton"
+          onClick={handleAddFriend}
+          disabled={isFriend}
+        >
+          {isFriend ? 'Friend' : 'Add Friend'}
         </button>
       )}
 

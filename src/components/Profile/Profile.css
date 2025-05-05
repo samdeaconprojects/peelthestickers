@@ -249,4 +249,46 @@
 
 
 
+  /* add to Profile.css */
+
+.widgetBar {
+    display: flex;
+    gap: 12px;
+    margin: 16px 0;
+  }
+  
+  .widget {
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: center;
+  }
+  
+  .widgetTitle {
+    font-size: 0.75rem;
+    color: #aaa;
+  }
+  
+  .widgetValue {
+    font-size: 1.1rem;
+    font-weight: bold;
+  }
+  
+  .widgetOverlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 100;
+  }
+  
+  .widgetDetail {
+    position: fixed;
+    top: 20%; left: 50%;
+    transform: translateX(-50%);
+    background: #222;
+    padding: 16px;
+    border-radius: 6px;
+    z-index: 101;
+    max-width: 300px;
+  }
   

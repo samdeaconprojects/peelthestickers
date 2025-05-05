@@ -1,3 +1,4 @@
+// src/components/Social/Social.js
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './Social.css';
@@ -22,21 +23,33 @@ function Social({ user, deletePost }) {
       try {
         // your own posts
         const own = await getPosts(user.UserID);
-        const ownAnnotated = own.map(p => ({ ...p, author: user.Name, isOwn: true }));
+        const ownAnnotated = own.map(p => ({
+          ...p,
+          author: user.Name,
+          isOwn: true,
+          postColor: user.Color || user.color || '#2EC4B6'
+        }));
 
-        // example friend list
-        const friendIds = ['samtest12'];
+        // friend list from user.Friends
+        const friendIds = user.Friends || [];
+
         const profiles = await Promise.all(friendIds.map(id => getUser(id)));
-        const nameById = profiles.reduce((a, prof) => {
-          const id = prof.PK.split('#')[1];
-          a[id] = prof.Name || prof.name;
-          return a;
-        }, {});
+        const nameById = {}, colorById = {};
+        profiles.forEach(prof => {
+          const fid = prof.PK?.split('#')[1] || prof.userID;
+          nameById[fid]  = prof.Name  || prof.name;
+          colorById[fid] = prof.Color || prof.color || '#cccccc';
+        });
 
         const friendsArrays = await Promise.all(
           friendIds.map(async id => {
             const posts = await getPosts(id);
-            return posts.map(p => ({ ...p, author: nameById[id] || id, isOwn: false }));
+            return posts.map(p => ({
+              ...p,
+              author:    nameById[id]  || id,
+              isOwn:     false,
+              postColor: colorById[id] || '#cccccc'
+            }));
           })
         );
 
@@ -70,7 +83,7 @@ function Social({ user, deletePost }) {
     setSelectedPost(updated);
 
     // Persist under post’s owner
-    const ownerID = selectedPost.PK.split('#')[1];
+    const ownerID = selectedPost.PK?.split('#')[1];
     try {
       await updatePostComments(ownerID, ts, updatedComments);
     } catch (err) {
@@ -88,7 +101,7 @@ function Social({ user, deletePost }) {
       try {
         const prof = await getUser(searchTerm);
         if (prof) {
-          const id = prof.PK.split('#')[1];
+          const id = prof.PK?.split('#')[1];
           setSuggestions([{ id, name: prof.Name || prof.name }]);
         } else {
           setSuggestions([]);
@@ -164,7 +177,7 @@ function Social({ user, deletePost }) {
                         comments: post.Comments || []
                       }]
                 }
-                postColor="#2EC4B6"
+                postColor={post.postColor}
                 onClick={() => setSelectedPost(post)}
               />
             ))}

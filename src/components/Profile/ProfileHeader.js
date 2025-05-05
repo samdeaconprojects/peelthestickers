@@ -1,12 +1,13 @@
+// src/components/Profile/ProfileHeader.js
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import './Profile.css';
 import RubiksCubeSVG from '../PuzzleSVGs/RubiksCubeSVG';
 import { getScrambledFaces } from '../cubeStructure';
 import EventSelectorDetail from '../Detail/EventSelectorDetail';
 import { formatTime, calculateAverage } from '../TimeList/TimeUtils';
 
-function ProfileHeader({ user, sessions }) {
-  // Destructure user profile fields
+export default function ProfileHeader({ user, sessions }) {
   const {
     Name,
     UserID,
@@ -14,42 +15,98 @@ function ProfileHeader({ user, sessions }) {
     WCAID,
     DateFounded,
     ProfileEvent,
-    ProfileScramble
+    ProfileScramble,
+    Friends = []
   } = user;
 
   const [selectedEvents, setSelectedEvents] = useState([ProfileEvent]);
   const [showEventSelector, setShowEventSelector] = useState(false);
+  const [openWidget, setOpenWidget] = useState(null);
 
   const handleOpenSelector = () => setShowEventSelector(true);
   const handleCloseSelector = () => setShowEventSelector(false);
-  const handleSaveSelectedEvents = (events) => {
-    setSelectedEvents(events);
+  const handleSaveSelectedEvents = ev => {
+    setSelectedEvents(ev);
     setShowEventSelector(false);
   };
 
-  const getPersonalBest = (event, type) => {
-    const times = (sessions[event] || []).map((solve) => solve.time);
+  // helper to compute PBs
+  const getPB = (event, type) => {
+    const times = (sessions[event] || []).map(s => s.time);
     if (!times.length) return 'N/A';
     if (type === 'single') return Math.min(...times);
     if (type === 'average') {
-      if (times.length >= 5) {
-        const avgData = calculateAverage(times.slice(-5), true);
-        return avgData.average.toFixed(2);
-      }
-      return 'N/A';
+      if (times.length < 5) return 'N/A';
+      return calculateAverage(times.slice(-5), true).average.toFixed(2);
     }
   };
 
-  // Format date founded
   const joinedDate = DateFounded
     ? new Date(DateFounded).toLocaleDateString()
     : '—';
 
+  // build our widgets
+  const widgets = [
+    {
+      key: 'friends',
+      title: 'Friends',
+      value: Friends.length,
+      detail: (
+        Friends.length
+          ? <ul className="friendsList">
+              {Friends.map(fid => (
+                <li key={fid}>
+                  <Link to={`/profile/${fid}`}>@{fid}</Link>
+                </li>
+              ))}
+            </ul>
+          : <div>You have no friends yet.</div>
+      )
+    },
+    ...selectedEvents.flatMap(event => ([
+      {
+        key: `${event}-single`,
+        title: `${event} PB`,
+        value: formatTime(getPB(event, 'single')),
+        detail: (
+          <div>
+            <h4>{event} Best Single</h4>
+            <p>{formatTime(getPB(event, 'single'))}</p>
+          </div>
+        )
+      },
+      {
+        key: `${event}-avg`,
+        title: `${event} Avg5`,
+        value: formatTime(getPB(event, 'average')),
+        detail: (
+          <div>
+            <h4>{event} Best Avg5</h4>
+            <p>{formatTime(getPB(event, 'average'))}</p>
+          </div>
+        )
+      }
+    ])),
+    {
+      key: 'wca',
+      title: 'WCA ID',
+      value: WCAID || '—',
+      detail: <div>Your WCA ID is <strong>{WCAID || '—'}</strong></div>
+    },
+    {
+      key: 'joined',
+      title: 'Joined',
+      value: joinedDate,
+      detail: <div>You joined on <strong>{joinedDate}</strong></div>
+    }
+  ];
+
   return (
-    <div className='profileHeader'>
-      <div className='profileAndName'>
-        <div className='profilePicture' style={{ border: `2px solid ${Color}` }}>
-          <div className='profileCube'>
+    <div className="profileHeader">
+      {/* —— original profile/name/username & cube EXACTLY as before —— */}
+      <div className="profileAndName">
+        <div className="profilePicture" style={{ border: `2px solid ${Color}` }}>
+          <div className="profileCube">
             <RubiksCubeSVG
               className="profileCube"
               n={ProfileEvent}
@@ -60,32 +117,52 @@ function ProfileHeader({ user, sessions }) {
             />
           </div>
         </div>
-        <div className='profileNameAndUsername'>
-          <div className='profileName'>{Name || 'Guest'}</div>
-          <div className='profileUsername'>@{UserID || 'guest'}</div>
+        <div className="profileNameAndUsername">
+          <div className="profileName">{Name || 'Guest'}</div>
+          <div className="profileUsername">@{UserID || 'guest'}</div>
         </div>
       </div>
 
-      <button className="edit-events-button" onClick={handleOpenSelector}>Edit Events</button>
 
+      {/* —— original Edit Events button —— 
+      <button
+        className="edit-events-button"
+        onClick={handleOpenSelector}
+      >
+        Edit Events
+      </button>
 
-      <div className='personalBests'>
-        {selectedEvents.map((event, index) => (
-          <div className='pb' key={index}>
-            <div className='pbTitle'>{event} Single</div>
-            <div className='pbTime'>{formatTime(getPersonalBest(event, 'single'))}</div>
-            <div className='pbTitle'>{event} Average</div>
-            <div className='pbTime'>{formatTime(getPersonalBest(event, 'average'))}</div>
+      */}
+
+      {/* —— new widget bar (friends, PBs, stats) —— */}
+      <div className="widgetBar">
+        {widgets.map(w => (
+          <div
+            key={w.key}
+            className="widget"
+            style={{ border: `2px solid ${Color}` }}
+            onClick={() => setOpenWidget(openWidget === w.key ? null : w.key)}
+          >
+            <div className="widgetTitle">{w.title}</div>
+            <div className="widgetValue">{w.value}</div>
           </div>
         ))}
       </div>
 
+      {/* —— overlay + detail pop‑up —— */}
+      {openWidget && (
+        <>
+          <div
+            className="widgetOverlay"
+            onClick={() => setOpenWidget(null)}
+          />
+          <div className="widgetDetail">
+            {widgets.find(w => w.key === openWidget).detail}
+          </div>
+        </>
+      )}
 
-      <div className='profileStats' style={{ border: `2px solid ${Color}` }}>
-        <div><strong>WCA ID:</strong> {WCAID || '—'}</div>
-        <div><strong>Joined:</strong> {joinedDate}</div>
-      </div>
-
+      {/* —— event selector popup —— */}
       {showEventSelector && (
         <EventSelectorDetail
           events={['222','333','444','555','666','777','333OH','333BLD']}
@@ -97,5 +174,3 @@ function ProfileHeader({ user, sessions }) {
     </div>
   );
 }
-
-export default ProfileHeader;

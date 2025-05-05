@@ -133,9 +133,9 @@ function App() {
       const userID = profile.PK?.split("#")[1] || username;
   
       const posts = await getPosts(userID);
-      const userWithPosts = { ...profile, UserID: userID, Posts: posts };
+      const userWithData = { ...profile, UserID: userID, Posts: posts, Friends: profile.Friends || [] };
   
-      setUser(userWithPosts);
+      setUser(userWithData);
       setIsSignedIn(true);
       setShowSignInPopup(false);
   
@@ -181,7 +181,8 @@ const handleSignUp = async (username, password) => {
         primaryColor: "#0E171D",
         secondaryColor: "#ffffff",
         timerInput: "Keyboard",
-      }
+      },
+      Friends: []
     });
 
     // 2. Create default sessions for each event
@@ -440,6 +441,7 @@ const deletePost = async (timestamp) => {
               element={
                 <Profile
                   user={user}
+                  setUser={setUser}
                   deletePost={deletePost}
                   updateComments={handleUpdateComments}
                   sessions={sessions}
@@ -453,6 +455,7 @@ const deletePost = async (timestamp) => {
               element={
                 <Profile
                   user={user}
+                  setUser={setUser}
                   deletePost={deletePost}
                   updateComments={handleUpdateComments}
                   sessions={sessions}
