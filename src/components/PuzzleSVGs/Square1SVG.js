@@ -9,7 +9,7 @@ export default function Square1SVG({
   backThickness = 10 // your “y”
 }) {
 
-    scramble = "(-5,0)/ (3,6)/ (5,-4)/ (-3,0)/ (1,-3)/ (0,-3)/ (0,-2)/ (0,-1)/ (-4,0)/ (0,-1)/ (4,0)/ (-3,-5)/";
+    //scramble = "(-5,0)/ (3,6)/ (5,-4)/ (-3,0)/ (1,-3)/ (0,-3)/ (0,-2)/ (0,-1)/ (-4,0)/ (0,-1)/ (4,0)/ (-3,-5)/";
 
   // four groups + middleEdge
   const square1 = useRef({

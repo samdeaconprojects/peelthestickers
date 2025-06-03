@@ -36,21 +36,22 @@ function PostDetail({
         <h2>{currentEventToString(solveList[0]?.event)} {solveList.length>1?'Average':'Single'}</h2>
         {avg != null && (
           <div style={{ marginBottom: '1em' }}>
-            <strong>Avg:</strong> {formatTime(avg)}
+            <strong>{formatTime(avg)}</strong> 
           </div>
         )}
 
         <div className="solvesList" style={{ marginBottom:'1em' }}>
           {solveList.map((s, i) => (
-            <div key={i} style={{ display:'flex', alignItems:'center', marginBottom:'0.5em' }}>
-              <div style={{ width: '4em' }}>{formatTime(s.time)}</div>
+            <div key={i} style={{ display:'flex', alignItems:'center', marginBottom:'0.5em', border: '2px solid #fff', borderRadius: '8px' }}>
               <RubiksCubeSVG
                 n={s.event}
                 faces={getScrambledFaces(s.scramble, s.event)}
-                isMusicPlayer={false}
+                isMusicPlayer={true}
                 isTimerCube={false}
                 style={{ width: '40px', height: '40px', marginRight: '0.5em' }}
               />
+              <div style={{ width: '4em' }}> <strong>{formatTime(s.time)}</strong> </div>
+
               <code style={{ fontSize: '0.8em', wordBreak:'break-all' }}>
                 {s.scramble}
               </code>

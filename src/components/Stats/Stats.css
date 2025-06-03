@@ -41,14 +41,21 @@ td:nth-child(13) {
   }
   
   .stats-item {
-    border: 2px solid #B4B4B4;
-    border-radius: 8px;
+    border: 2px solid rgba(200, 200, 200,0.3);
+    border-radius: 10px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     width: 100%;
     max-height: 550px;
     overflow-y: scroll;
   }
 
+  /*
+  .stats-item:hover {
+    background: rgba(200, 200, 200,0.05);
+    scale: 1.01;
+    transition: 200ms;
+  }
+*/ 
   .stats-item::-webkit-scrollbar { 
     display: none;  /* Safari and Chrome */
   }

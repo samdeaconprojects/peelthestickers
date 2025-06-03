@@ -291,4 +291,8 @@
     z-index: 101;
     max-width: 300px;
   }
+
+  .friendsList a {
+    color: white;
+  }
   

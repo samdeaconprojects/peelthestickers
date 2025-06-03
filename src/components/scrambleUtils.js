@@ -72,8 +72,7 @@ export function currentEventToString(currentEvent) {
 
 
 export function generateScramble(currentEvent) {
-    let n = currentEventToN(currentEvent); // Assuming currentEventToN is a function that converts event to a numeric size
-
+    let n = currentEventToN(currentEvent);
     console.log("n: " + n);
 
     let faceArray = ["U", "D", "R", "L", "B", "F"];
@@ -94,40 +93,51 @@ export function generateScramble(currentEvent) {
 
     let randomScramble = "";
     let faceTemp = "";
+    let prevLayers = 1; // track layer width of previous move
     let secondFaceTemp = "";
 
     for (let i = 0; i < moves; i++) {
         let move = "";
 
         if (n > 3) {
-            const layers = Math.floor(Math.random() * (Math.floor(n / 2) + 1 - 1) + 1);
+            let layers = Math.floor(Math.random() * (Math.floor(n / 2) + 1 - 1) + 1);
+
+            // Prevent consecutive opposite-face max-layer moves on even cubes
+            if (i > 0 && n % 2 === 0 && layers > 1 && prevLayers > 1) {
+                // if current face is opposite of previous face
+                let isOpposite = (faceTemp === "U" && faceArray.includes("D")) || (faceTemp === "D" && faceArray.includes("U")) ||
+                                 (faceTemp === "R" && faceArray.includes("L")) || (faceTemp === "L" && faceArray.includes("R")) ||
+                                 (faceTemp === "F" && faceArray.includes("B")) || (faceTemp === "B" && faceArray.includes("F"));
+
+                if (isOpposite) {
+                    // Remove opposite face temporarily
+                    faceArray = faceArray.filter(face => {
+                        return !((faceTemp === "U" && face === "D") || (faceTemp === "D" && face === "U") ||
+                                 (faceTemp === "R" && face === "L") || (faceTemp === "L" && face === "R") ||
+                                 (faceTemp === "F" && face === "B") || (faceTemp === "B" && face === "F"));
+                    });
+                }
+            }
 
             if (layers === 1) {
                 const faceIndex = Math.floor(Math.random() * faceArray.length);
-                if (i > 0) {
-                    faceArray.push(faceTemp);
-                }
+                if (i > 0) faceArray.push(faceTemp);
                 move += faceArray[faceIndex];
                 faceTemp = faceArray[faceIndex];
                 faceArray.splice(faceIndex, 1);
             } else {
-                if (layers > 2) {
-                    move += layers.toString();
-                }
+                if (layers > 2) move += layers.toString();
 
                 const faceIndex = Math.floor(Math.random() * faceArray.length);
-                if (i > 0) {
-                    faceArray.push(faceTemp);
-                }
+                if (i > 0) faceArray.push(faceTemp);
                 move += faceArray[faceIndex];
                 faceTemp = faceArray[faceIndex];
                 faceArray.splice(faceIndex, 1);
 
-                if (layers > 1) {
-                    move += "w";
-                }
+                move += "w";
             }
 
+            prevLayers = layers; // track for next loop
             move += modArray[Math.floor(Math.random() * modArray.length)];
         } else {
             const faceIndex = Math.floor(Math.random() * faceArray.length);
@@ -150,7 +160,7 @@ export function generateScramble(currentEvent) {
                         faceTemp = faceArray[faceIndex];
                     }
                 }
-            } else { // i === 0
+            } else {
                 faceTemp = faceArray[faceIndex];
             }
 
@@ -166,6 +176,7 @@ export function generateScramble(currentEvent) {
 
     return randomScramble;
 }
+
 
 
   // ************ Cube Structure for face arrays ************
