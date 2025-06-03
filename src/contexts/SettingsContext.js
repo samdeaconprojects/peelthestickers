@@ -9,7 +9,9 @@ export const SettingsProvider = ({ children }) => {
     const [settings, setSettings] = useState({
         primaryColor: '#0E171D',  // Default primary color
         secondaryColor: '#ffffff', // Default secondary color
-        timerInput: 'Keyboard'
+        timerInput: 'Keyboard',
+        horizontalTimeList: false
+
     });
 
     const updateSettings = (newSettings) => {

@@ -130,6 +130,14 @@ function Settings({ userID, onClose, onProfileUpdate }) {
                             <option value="Stackmat">Stackmat</option>
                         </select>
                     </div>
+                    <div className="setting-item">
+                        <label>Horizontal Time List</label>
+                        <input
+                            type="checkbox"
+                            checked={settings.horizontalTimeList}
+                            onChange={(e) => updateSettings({ horizontalTimeList: e.target.checked })}
+                        />
+                    </div>
                 </div>
                 <h2>Profile Settings</h2>
                 <div className="settings-container">

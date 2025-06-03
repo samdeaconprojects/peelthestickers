@@ -46,6 +46,59 @@
   background-color: #2EC4B6; /* Different background for the average column */
 }
 
+
+.horizontal-time-list {
+  display: flex;
+  flex-direction: column;
+  overflow-x: auto;
+  max-width: 100%;
+  padding: 4px 0; /* Optional: add a bit of vertical padding */
+}
+
+.horizontal-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  margin-bottom: 4px;
+}
+
+.horizontal-row > .TimeItem {
+  flex: 0 0 auto;
+  min-width: 50px; /* Matches .TimeItem min size */
+  text-align: center;
+  border: 1px solid #50B6FF;
+  border-radius: 5px;
+  margin-right: 4px;
+  padding: 3px;
+  cursor: pointer;
+}
+
+.horizontal-row > .ao12,
+.horizontal-row > .ao5,
+.horizontal-row > .solve-count {
+  font-size: 0.8em;
+}
+
+.horizontal-row > .empty {
+  visibility: hidden;
+}
+
+
+.ao12, .ao5 {
+  font-size: 0.8em;
+}
+
+.ao12.empty, .ao5.empty {
+  visibility: hidden;
+}
+
+.solve-count {
+  font-size: 0.7em;
+  color: #999;
+}
+
+
+
 .scramble-popup {
   position: fixed;
   top: 0;
