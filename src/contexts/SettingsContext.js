@@ -16,6 +16,7 @@ const defaultEventBindings = {
   "SKEWB": "Alt+S",
   "333OH": "Alt+O",
   "MEGAMINX": "Alt+M",
+   "PYRAMINX": "Alt+P",
   "333BLD": "Alt+B",
 };
 

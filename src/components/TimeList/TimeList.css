@@ -71,7 +71,8 @@
   margin-right: 4px;
   padding: 3px;
   cursor: pointer;
-    border: 1px solid transparent;
+  border: 1px solid transparent;
+  opacity: 100%;
 
 }
 
@@ -80,6 +81,7 @@
   border: 1px solid #50B6FF;
 
 }
+
 
 .horizontal-row > .ao12,
 .horizontal-row > .ao5,
@@ -101,7 +103,7 @@
   border: 1px solid transparent; /* keeps spacing consistent */
   background-color: transparent; /* or use a subtle color like #f8f8f8 */
   pointer-events: none;
-
+  color: #50B6FF;
 }
 
 .row-label.time-label {
