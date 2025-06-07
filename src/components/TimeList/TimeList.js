@@ -102,61 +102,70 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar = false
     <div className="time-list-container">
       {isHorizontal ? (
         <div className="horizontal-time-list">
-          <div className="horizontal-row ao12-row">
-            {horizontalSolves.map((_, index, arr) => {
-              const actualIndex = solves.length - arr.length + index;
-              const ao12Slice = solves.slice(actualIndex - 11, actualIndex + 1);
-              if (ao12Slice.length === 12) {
-                const ao12 = calculateAverage(ao12Slice.map(s => s.time), true).average;
-                return <div key={index} className="ao12 TimeItem">{formatTime(ao12)}</div>;
-              }
-              return <div key={index} className="ao12 empty TimeItem"></div>;
-            })}
-          </div>
-          <div className="horizontal-row ao5-row">
-            {horizontalSolves.map((_, index, arr) => {
-              const actualIndex = solves.length - arr.length + index;
-              const ao5Slice = solves.slice(actualIndex - 4, actualIndex + 1);
-              if (ao5Slice.length === 5) {
-                const ao5 = calculateAverage(ao5Slice.map(s => s.time), true).average;
-                return <div key={index} className="ao5 TimeItem">{formatTime(ao5)}</div>;
-              }
-              return <div key={index} className="ao5 empty TimeItem"></div>;
-            })}
-          </div>
-          <div className="horizontal-row times-row">
-            {horizontalSolves.map((solve, index, arr) => {
-              const actualIndex = solves.length - arr.length + index;
-              return (
-                <div
-                  key={index}
-                  className="TimeItem"
-                  onClick={() => {
-                    setSelectedSolve(solve);
-                    setSelectedSolveIndex(actualIndex);
-                  }}
-                >
-                  {formatTime(solve.time)}
-                  <span className="delete-icon" onClick={(e) => { e.stopPropagation(); deleteTime(actualIndex); }}>x</span>
-                </div>
-              );
-            })}
-          </div>
-          <div className="horizontal-row count-row">
-            {horizontalSolves.map((_, index, arr) => {
-              const actualIndex = solves.length - arr.length + index + 1;
-              return <div key={index} className="solve-count TimeItem">{actualIndex}</div>;
-            })}
-          </div>
-          {selectedSolve && (
-            <Detail
-              solve={selectedSolve}
-              onClose={() => setSelectedSolve(null)}
-              deleteTime={() => deleteTime(selectedSolveIndex)}
-              addPost={addPost}
-            />
-          )}
+  <div className="horizontal-row ao12-row">
+    {horizontalSolves.map((_, index, arr) => {
+      const actualIndex = solves.length - arr.length + index;
+      const ao12Slice = solves.slice(actualIndex - 11, actualIndex + 1);
+      if (ao12Slice.length === 12) {
+        const ao12 = calculateAverage(ao12Slice.map(s => s.time), true).average;
+        return <div key={index} className="ao12 TimeItem">{formatTime(ao12)}</div>;
+      }
+      return <div key={index} className="ao12 empty TimeItem"></div>;
+    })}
+    <div className="TimeItem row-label">Ao12</div> {/* Label */}
+  </div>
+
+  <div className="horizontal-row ao5-row">
+    {horizontalSolves.map((_, index, arr) => {
+      const actualIndex = solves.length - arr.length + index;
+      const ao5Slice = solves.slice(actualIndex - 4, actualIndex + 1);
+      if (ao5Slice.length === 5) {
+        const ao5 = calculateAverage(ao5Slice.map(s => s.time), true).average;
+        return <div key={index} className="ao5 TimeItem">{formatTime(ao5)}</div>;
+      }
+      return <div key={index} className="ao5 empty TimeItem"></div>;
+    })}
+    <div className="TimeItem row-label">Ao5</div> {/* Label */}
+  </div>
+
+  <div className="horizontal-row times-row">
+    {horizontalSolves.map((solve, index, arr) => {
+      const actualIndex = solves.length - arr.length + index;
+      return (
+        <div
+          key={index}
+          className="TimeItem"
+          onClick={() => {
+            setSelectedSolve(solve);
+            setSelectedSolveIndex(actualIndex);
+          }}
+        >
+          {formatTime(solve.time)}
+          <span className="delete-icon" onClick={(e) => { e.stopPropagation(); deleteTime(actualIndex); }}>x</span>
         </div>
+      );
+    })}
+    <div className="TimeItem row-label time-label">Time</div> {/* Optional time row label */}
+  </div>
+
+  <div className="horizontal-row count-row">
+    {horizontalSolves.map((_, index, arr) => {
+      const actualIndex = solves.length - arr.length + index + 1;
+      return <div key={index} className="solve-count TimeItem">{actualIndex}</div>;
+    })}
+    <div className="TimeItem row-label">Count</div> {/* Label */}
+  </div>
+
+  {selectedSolve && (
+    <Detail
+      solve={selectedSolve}
+      onClose={() => setSelectedSolve(null)}
+      deleteTime={() => deleteTime(selectedSolveIndex)}
+      addPost={addPost}
+    />
+  )}
+</div>
+
       ) : (
         <div className="time-list-content">
           <table className="TimeList">

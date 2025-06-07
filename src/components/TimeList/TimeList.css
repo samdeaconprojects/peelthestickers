@@ -34,7 +34,7 @@
   width: 100%;
 }
 
-.TimeList td {
+.TimeList td  {
   padding: 5px;
   text-align: center;
   border: 1px solid #50B6FF;
@@ -64,13 +64,21 @@
 
 .horizontal-row > .TimeItem {
   flex: 0 0 auto;
-  min-width: 50px; /* Matches .TimeItem min size */
+  min-width: 70px;
+  padding: 3px;
   text-align: center;
-  border: 1px solid #50B6FF;
   border-radius: 5px;
   margin-right: 4px;
   padding: 3px;
   cursor: pointer;
+    border: 1px solid transparent;
+
+}
+
+.times-row > .TimeItem {
+
+  border: 1px solid #50B6FF;
+
 }
 
 .horizontal-row > .ao12,
@@ -83,9 +91,28 @@
   visibility: hidden;
 }
 
+.row-label {
+  font-weight: bold;
+  text-align: center;
+  min-width: 70px;
+  padding: 3px;
+  border-radius: 5px;
+  margin-left: 4px;
+  border: 1px solid transparent; /* keeps spacing consistent */
+  background-color: transparent; /* or use a subtle color like #f8f8f8 */
+  pointer-events: none;
+
+}
+
+.row-label.time-label {
+  border: none;
+}
+
 
 .ao12, .ao5 {
   font-size: 0.8em;
+  border: transparent;
+
 }
 
 .ao12.empty, .ao5.empty {
