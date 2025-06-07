@@ -245,7 +245,6 @@ select {
 .music-player-mode .TimeList {
   width: 100%; /* Adjust width as needed */
   /* Add any additional styles for TimeList in music player mode */
-  margin-right: 50px;
 }
 
 .music-player-mode .time-list-container {
