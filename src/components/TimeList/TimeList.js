@@ -118,7 +118,7 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar = false
               const actualIndex = solves.length - arr.length + index;
               const ao5Slice = solves.slice(actualIndex - 4, actualIndex + 1);
               if (ao5Slice.length === 5) {
-                const ao5 = calculateAverageOfFive(ao5Slice.map(s => s.time));
+                const ao5 = calculateAverage(ao5Slice.map(s => s.time), true).average;
                 return <div key={index} className="ao5 TimeItem">{formatTime(ao5)}</div>;
               }
               return <div key={index} className="ao5 empty TimeItem"></div>;
