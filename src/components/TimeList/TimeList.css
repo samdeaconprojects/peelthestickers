@@ -104,6 +104,8 @@
   background-color: transparent; /* or use a subtle color like #f8f8f8 */
   pointer-events: none;
   color: #50B6FF;
+  opacity: 70%;
+  font-size: small;
 }
 
 .row-label.time-label {

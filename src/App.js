@@ -440,12 +440,12 @@ const deletePost = async (timestamp) => {
 
                   <div className="averages-display">
                     <p></p>
-                    <p className="averagesTitle">Ao5</p>
-                    <p className="averagesTitle">Ao12</p>
-                    <p className="averagesTitle">Current</p>
+                    <p className="averagesTitle">AO5</p>
+                    <p className="averagesTitle">AO12</p>
+                    <p className="averagesTitle">CURRENT</p>
                     <p className="averagesTime">{formatTime(avgOfFive)}</p>
                     <p className="averagesTime">{formatTime(avgOfTwelve)}</p>
-                    <p className="averagesTitle">Best</p>
+                    <p className="averagesTitle">BEST</p>
                     <p className="averagesTime">{formatTime(bestAvgOfFive)}</p>
                     <p className="averagesTime">{formatTime(bestAvgOfTwelve)}</p>
                   </div>

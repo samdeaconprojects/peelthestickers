@@ -112,7 +112,7 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar = false
       }
       return <div key={index} className="ao12 empty TimeItem"></div>;
     })}
-    <div className="TimeItem row-label">Ao12</div> {/* Label */}
+    <div className="TimeItem row-label">AO12</div> {/* Label */}
   </div>
 
   <div className="horizontal-row ao5-row">
@@ -125,7 +125,7 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar = false
       }
       return <div key={index} className="ao5 empty TimeItem"></div>;
     })}
-    <div className="TimeItem row-label">Ao5</div> {/* Label */}
+    <div className="TimeItem row-label">AO5</div> {/* Label */}
   </div>
 
   <div className="horizontal-row times-row">
@@ -145,7 +145,7 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar = false
         </div>
       );
     })}
-    <div className="TimeItem row-label time-label">Time</div> {/* Optional time row label */}
+    <div className="TimeItem row-label time-label">TIME</div> {/* Optional time row label */}
   </div>
 
   <div className="horizontal-row count-row">
@@ -153,7 +153,7 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar = false
       const actualIndex = solves.length - arr.length + index + 1;
       return <div key={index} className="solve-count TimeItem">{actualIndex}</div>;
     })}
-    <div className="TimeItem row-label">Count</div> {/* Label */}
+    <div className="TimeItem row-label">SOLVE #</div> {/* Label */}
   </div>
 
   {selectedSolve && (

@@ -193,6 +193,7 @@ select {
   font-family: 'Jost', sans-serif;
   font-weight: bold;
   text-align: center;
+  margin-right: 70px;
 }
 
 .averagesTime {
@@ -201,6 +202,8 @@ select {
 
 .averagesTitle {
   opacity: 70%;
+  color: #50B6FF;
+  font-size: small;
 }
 
 .TimeList {

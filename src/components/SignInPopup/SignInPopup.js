@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import "./SignInPopup.css";
+import ptsLogo from '../../assets/ptsyrg.svg';
+
 
 function SignInPopup({ onSignIn, onSignUp, onClose }) {
   const [username, setUsername] = useState("");
@@ -32,7 +34,7 @@ function SignInPopup({ onSignIn, onSignUp, onClose }) {
       <div className="signInPopupContent">
         <span className="closePopup" onClick={onClose}>x</span>
         <div>
-          <img src={require('../../assets/PTS.png')} alt="logo" className="logo" />
+          <img src={ptsLogo} alt="logo" className="logo" />
         </div>
         <input
           type="text"
