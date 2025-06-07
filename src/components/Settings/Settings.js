@@ -138,6 +138,24 @@ function Settings({ userID, onClose, onProfileUpdate }) {
                             onChange={(e) => updateSettings({ horizontalTimeList: e.target.checked })}
                         />
                     </div>
+                    <h2>Key Bindings</h2>
+<div className="settings-container">
+  {Object.entries(settings.eventKeyBindings).map(([event, combo]) => (
+    <div className="setting-item" key={event}>
+      <label>{event}:</label>
+      <input
+        value={combo}
+        onChange={e => updateSettings({
+          eventKeyBindings: {
+            ...settings.eventKeyBindings,
+            [event]: e.target.value
+          }
+        })}
+      />
+    </div>
+  ))}
+</div>
+
                 </div>
                 <h2>Profile Settings</h2>
                 <div className="settings-container">

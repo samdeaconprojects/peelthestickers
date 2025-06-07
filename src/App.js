@@ -17,6 +17,8 @@ import PyraminxSVG from "./components/PuzzleSVGs/PyraminxSVG";
 import MegaminxSVG from "./components/PuzzleSVGs/MegaminxSVG";
 import ClockSVG from "./components/PuzzleSVGs/ClockSVG";
 import SignInPopup from "./components/SignInPopup/SignInPopup";
+import { useSettings } from "./contexts/SettingsContext";
+
 import { generateScramble, getScrambledFaces } from "./components/scrambleUtils";
 import { Routes, Route, useLocation } from "react-router-dom";
 import { SettingsProvider } from "./contexts/SettingsContext";
@@ -62,12 +64,35 @@ function App() {
   const [showSettingsPopup, setShowSettingsPopup] = useState(false);
   const location = useLocation();
   const isHomePage = location.pathname === "/";
+  const { settings } = useSettings();
+
 
   useEffect(() => {
     if (!scrambles[currentEvent]) {
       preloadScrambles(currentEvent);
     }
   }, [currentEvent]);
+
+  useEffect(() => {
+  const handleKeyDown = (e) => {
+    if (!e.altKey) return;
+
+    const key = e.key.toUpperCase();
+    const bindings = settings.eventKeyBindings;
+
+    for (const [eventCode, combo] of Object.entries(bindings)) {
+      const [modifier, boundKey] = combo.split('+');
+      if (modifier === "Alt" && boundKey.toUpperCase() === key) {
+        setCurrentEvent(eventCode);
+        break;
+      }
+    }
+  };
+
+  window.addEventListener("keydown", handleKeyDown);
+  return () => window.removeEventListener("keydown", handleKeyDown);
+}, [settings.eventKeyBindings]);
+
 
   const preloadScrambles = (event) => {
     const newScrambles = Array.from({ length: 10 }, () => generateScramble(event));
@@ -366,7 +391,7 @@ const deletePost = async (timestamp) => {
       : "N/A";
 
       return (
-  <SettingsProvider>
+
     <div className={`App ${!isHomePage ? "music-player-mode" : ""}`}>
       <div className={`navAndPage ${isHomePage || !showPlayerBar ? "fullHeight" : "reducedHeight"}`}>
         <Navigation
@@ -535,7 +560,7 @@ const deletePost = async (timestamp) => {
         />
       )}
     </div>
-  </SettingsProvider>
+
 );
 
       
