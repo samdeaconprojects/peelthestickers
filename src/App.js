@@ -390,7 +390,7 @@ const deletePost = async (timestamp) => {
         )
       : "N/A";
 
-      return (
+  return (
 
     <div className={`App ${!isHomePage ? "music-player-mode" : ""}`}>
       <div className={`navAndPage ${isHomePage || !showPlayerBar ? "fullHeight" : "reducedHeight"}`}>

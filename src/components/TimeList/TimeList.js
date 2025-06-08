@@ -6,14 +6,12 @@ import { useSettings } from '../../contexts/SettingsContext';
 import {
   formatTime,
   calculateAverage,
-  getOveralls,
-  calculateAverageOfFive,
-  calculateBestAverageOfFive
+  getOveralls
 } from './TimeUtils';
 
-function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar = false, addPost }) {
+function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPost }) {
   const { settings } = useSettings();
-  const isHorizontal = settings.horizontalTimeList;
+  const isHorizontal = inPlayerBar ? false : settings.horizontalTimeList;
 
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const [selectedSolve, setSelectedSolve] = useState(null);
@@ -95,83 +93,106 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar = false
     if ((validCurrentPage + 1) * rowsToDisplay * colsPerRow < solves.length) setCurrentPage(validCurrentPage + 1);
   };
 
-  const horizontalCount = windowWidth > 1100 ? 12 : 5;
+  const horizontalCount = windowWidth > 1250 ? 12 : 5;
   const horizontalSolves = solves.slice(-horizontalCount);
+  const horizontalTimes = horizontalSolves.map(s => s.time);
+  const bestTime = Math.min(...horizontalTimes);
+  const worstTime = Math.max(...horizontalTimes);
+
+  // ---- Precompute AO5 and AO12 arrays ----
+  const ao5s = horizontalSolves.map((_, index, arr) => {
+    const actualIndex = solves.length - arr.length + index;
+    const slice = solves.slice(actualIndex - 4, actualIndex + 1);
+    return slice.length === 5 ? calculateAverage(slice.map(s => s.time), true).average : null;
+  }).filter(a => a !== null);
+
+  const ao12s = horizontalSolves.map((_, index, arr) => {
+    const actualIndex = solves.length - arr.length + index;
+    const slice = solves.slice(actualIndex - 11, actualIndex + 1);
+    return slice.length === 12 ? calculateAverage(slice.map(s => s.time), true).average : null;
+  }).filter(a => a !== null);
+
+  const bestAo5 = Math.min(...ao5s);
+  const worstAo5 = Math.max(...ao5s);
+  const bestAo12 = Math.min(...ao12s);
+  const worstAo12 = Math.max(...ao12s);
 
   return (
     <div className="time-list-container">
       {isHorizontal ? (
         <div className="horizontal-time-list">
-  <div className="horizontal-row ao12-row">
-    {horizontalSolves.map((_, index, arr) => {
-      const actualIndex = solves.length - arr.length + index;
-      const ao12Slice = solves.slice(actualIndex - 11, actualIndex + 1);
-      if (ao12Slice.length === 12) {
-        const ao12 = calculateAverage(ao12Slice.map(s => s.time), true).average;
-        return <div key={index} className="ao12 TimeItem">{formatTime(ao12)}</div>;
-      }
-      return <div key={index} className="ao12 empty TimeItem"></div>;
-    })}
-    <div className="TimeItem row-label">AO12</div> {/* Label */}
-  </div>
+          <div className="horizontal-row ao12-row">
+            {horizontalSolves.map((_, index, arr) => {
+              const actualIndex = solves.length - arr.length + index;
+              const slice = solves.slice(actualIndex - 11, actualIndex + 1);
+              if (slice.length === 12) {
+                const avg = calculateAverage(slice.map(s => s.time), true).average;
+                const textClass = avg === bestAo12 ? 'best-time' : avg === worstAo12 ? 'worst-time' : '';
+                return <div key={index} className={`ao12 TimeItem ${textClass}`}>{formatTime(avg)}</div>;
+              }
+              return <div key={index} className="ao12 empty TimeItem"></div>;
+            })}
+            <div className="TimeItem row-label">AO12</div>
+          </div>
 
-  <div className="horizontal-row ao5-row">
-    {horizontalSolves.map((_, index, arr) => {
-      const actualIndex = solves.length - arr.length + index;
-      const ao5Slice = solves.slice(actualIndex - 4, actualIndex + 1);
-      if (ao5Slice.length === 5) {
-        const ao5 = calculateAverage(ao5Slice.map(s => s.time), true).average;
-        return <div key={index} className="ao5 TimeItem">{formatTime(ao5)}</div>;
-      }
-      return <div key={index} className="ao5 empty TimeItem"></div>;
-    })}
-    <div className="TimeItem row-label">AO5</div> {/* Label */}
-  </div>
+          <div className="horizontal-row ao5-row">
+            {horizontalSolves.map((_, index, arr) => {
+              const actualIndex = solves.length - arr.length + index;
+              const slice = solves.slice(actualIndex - 4, actualIndex + 1);
+              if (slice.length === 5) {
+                const avg = calculateAverage(slice.map(s => s.time), true).average;
+                const textClass = avg === bestAo5 ? 'best-time' : avg === worstAo5 ? 'worst-time' : '';
+                return <div key={index} className={`ao5 TimeItem ${textClass}`}>{formatTime(avg)}</div>;
+              }
+              return <div key={index} className="ao5 empty TimeItem"></div>;
+            })}
+            <div className="TimeItem row-label">AO5</div>
+          </div>
 
-  <div className="horizontal-row times-row">
-    {horizontalSolves.map((solve, index, arr) => {
-      const actualIndex = solves.length - arr.length + index;
-      return (
-        <div
-          key={index}
-          className="TimeItem"
-          onClick={() => {
-            setSelectedSolve(solve);
-            setSelectedSolveIndex(actualIndex);
-          }}
-        >
-          {formatTime(solve.time)}
-          <span className="delete-icon" onClick={(e) => { e.stopPropagation(); deleteTime(actualIndex); }}>x</span>
+          <div className="horizontal-row times-row">
+            {horizontalSolves.map((solve, index, arr) => {
+              const actualIndex = solves.length - arr.length + index;
+              const isBest = solve.time === bestTime;
+              const isWorst = solve.time === worstTime;
+
+              return (
+                <div
+                  key={index}
+                  className={`TimeItem ${isBest ? 'overall-border-min' : ''} ${isWorst ? 'overall-border-max' : ''}`}
+                  onClick={() => {
+                    setSelectedSolve(solve);
+                    setSelectedSolveIndex(actualIndex);
+                  }}
+                >
+                  {formatTime(solve.time)}
+                  <span className="delete-icon" onClick={(e) => { e.stopPropagation(); deleteTime(actualIndex); }}>x</span>
+                </div>
+              );
+            })}
+            <div className="TimeItem row-label time-label">TIME</div>
+          </div>
+
+          <div className="horizontal-row count-row">
+            {horizontalSolves.map((_, index, arr) => {
+              const actualIndex = solves.length - arr.length + index + 1;
+              return <div key={index} className="solve-count TimeItem">{actualIndex}</div>;
+            })}
+            <div className="TimeItem row-label">SOLVE #</div>
+          </div>
+
+          {selectedSolve && (
+            <Detail
+              solve={selectedSolve}
+              onClose={() => setSelectedSolve(null)}
+              deleteTime={() => deleteTime(selectedSolveIndex)}
+              addPost={addPost}
+            />
+          )}
         </div>
-      );
-    })}
-    <div className="TimeItem row-label time-label">TIME</div> {/* Optional time row label */}
-  </div>
-
-  <div className="horizontal-row count-row">
-    {horizontalSolves.map((_, index, arr) => {
-      const actualIndex = solves.length - arr.length + index + 1;
-      return <div key={index} className="solve-count TimeItem">{actualIndex}</div>;
-    })}
-    <div className="TimeItem row-label">SOLVE #</div> {/* Label */}
-  </div>
-
-  {selectedSolve && (
-    <Detail
-      solve={selectedSolve}
-      onClose={() => setSelectedSolve(null)}
-      deleteTime={() => deleteTime(selectedSolveIndex)}
-      addPost={addPost}
-    />
-  )}
-</div>
-
       ) : (
         <div className="time-list-content">
           <table className="TimeList">
-            <tbody>
-              {rows}
-            </tbody>
+            <tbody>{rows}</tbody>
           </table>
           {selectedSolve && (
             <Detail

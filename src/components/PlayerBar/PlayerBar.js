@@ -57,7 +57,7 @@ function PlayerBar({ sessions, currentEvent, handleEventChange, deleteTime, addT
             <Timer addTime={addTime} />
             <div className='scramble-timelist'>
             <Scramble style={{ fontSize: getScrambleFontSize(currentEvent) }} onScrambleClick={onScrambleClick} scramble={scramble} currentEvent={currentEvent} isMusicPlayer={true} />
-            <TimeList solves={sessions[currentEvent]} deleteTime={(index) => deleteTime(currentEvent, index)} addPost={addPost} rowsToShow={1}/>
+            <TimeList solves={sessions[currentEvent]} deleteTime={(index) => deleteTime(currentEvent, index)} inPlayerBar={true} addPost={addPost} rowsToShow={1}/>
             </div>
             <EventSelector currentEvent={currentEvent} handleEventChange={handleEventChange} dropUp={true}/>
             <RubiksCubeSVG n={currentEvent} faces={getScrambledFaces(scramble, currentEvent)} isMusicPlayer={true} isTimerCube={false} />

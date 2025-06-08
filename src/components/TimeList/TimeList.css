@@ -89,6 +89,10 @@
   font-size: 0.8em;
 }
 
+.horizontal-row > .ao5 {
+  font-size: 1em;
+}
+
 .horizontal-row > .empty {
   visibility: hidden;
 }
@@ -122,6 +126,19 @@
 .ao12.empty, .ao5.empty {
   visibility: hidden;
 }
+
+.ao5.best-time, .ao12.best-time {
+  color: green;
+}
+
+.ao5.worst-time, .ao12.worst-time {
+  color: red;
+}
+
+.ao5, .ao12 {
+  border: transparent;
+}
+
 
 .solve-count {
   font-size: 0.7em;
