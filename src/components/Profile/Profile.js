@@ -117,7 +117,7 @@ function Profile({
   };
 
   // Stats data
-  const solves = sessions["333"] || [];
+  const solves = sessions["333OH"] || [];
 
   if (!viewedProfile) return null;
   if (!viewedProfile.UserID) return <div>Loading profile…</div>;

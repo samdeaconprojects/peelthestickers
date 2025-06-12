@@ -1,3 +1,6 @@
+// © 2025 Peel The Stickers LLC. All rights reserved.
+
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';

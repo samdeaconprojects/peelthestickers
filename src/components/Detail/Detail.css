@@ -91,3 +91,9 @@
 .delete-button:hover {
   cursor: pointer;
 }
+
+.detailSolveCard {
+  border-bottom: 1px solid #ccc;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+}

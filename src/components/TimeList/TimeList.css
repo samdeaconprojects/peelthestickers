@@ -221,6 +221,16 @@
   opacity: 1;
 }
 
+.times-row > .TimeItem.dashed-border-min {
+  border: 2px dashed green;
+}
+
+.times-row > .TimeItem.dashed-border-max {
+  border: 2px dashed red;
+}
+
+
+
 .current-five {
   opacity: 0.8;
 }

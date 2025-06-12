@@ -9,19 +9,20 @@ import { getUser } from '../../services/getUser';
 import { updatePostComments } from '../../services/updatePostComments';
 
 function Social({ user, deletePost }) {
-  const [activeTab, setActiveTab]       = useState(0);
-  const [feed, setFeed]                 = useState([]);
+  const [activeTab, setActiveTab] = useState(0);
+  const [feed, setFeed] = useState([]);
   const [selectedPost, setSelectedPost] = useState(null);
-  const [searchTerm, setSearchTerm]     = useState('');
-  const [suggestions, setSuggestions]   = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [conversations, setConversations] = useState([]);
+  const [selectedConversation, setSelectedConversation] = useState(null);
+  const [messageInput, setMessageInput] = useState('');
   const navigate = useNavigate();
 
-  // --- Load activity feed ---
   useEffect(() => {
     const fetchFeed = async () => {
       if (!user?.UserID) return;
       try {
-        // your own posts
         const own = await getPosts(user.UserID);
         const ownAnnotated = own.map(p => ({
           ...p,
@@ -30,14 +31,13 @@ function Social({ user, deletePost }) {
           postColor: user.Color || user.color || '#2EC4B6'
         }));
 
-        // friend list from user.Friends
         const friendIds = user.Friends || [];
-
         const profiles = await Promise.all(friendIds.map(id => getUser(id)));
+
         const nameById = {}, colorById = {};
         profiles.forEach(prof => {
           const fid = prof.PK?.split('#')[1] || prof.userID;
-          nameById[fid]  = prof.Name  || prof.name;
+          nameById[fid] = prof.Name || prof.name;
           colorById[fid] = prof.Color || prof.color || '#cccccc';
         });
 
@@ -46,8 +46,8 @@ function Social({ user, deletePost }) {
             const posts = await getPosts(id);
             return posts.map(p => ({
               ...p,
-              author:    nameById[id]  || id,
-              isOwn:     false,
+              author: nameById[id] || id,
+              isOwn: false,
               postColor: colorById[id] || '#cccccc'
             }));
           })
@@ -56,14 +56,24 @@ function Social({ user, deletePost }) {
         const merged = [...ownAnnotated, ...friendsArrays.flat()];
         merged.sort((a, b) => new Date(b.DateTime || b.date) - new Date(a.DateTime || a.date));
         setFeed(merged);
+
+        // Simulated messages
+        const dummyConversations = friendIds.map(fid => ({
+          id: fid,
+          name: nameById[fid] || fid,
+          messages: [
+            { sender: fid, text: 'Hey' },
+            { sender: user.UserID, text: 'Hi' }
+          ]
+        }));
+        setConversations(dummyConversations);
       } catch (err) {
-        console.error('Error fetching social feed:', err);
+        console.error('Error fetching feed:', err);
       }
     };
     fetchFeed();
   }, [user]);
 
-  // --- Delete your own post ---
   const handleDelete = async post => {
     if (!post.isOwn) return;
     await deletePost(post.DateTime || post.date);
@@ -71,18 +81,15 @@ function Social({ user, deletePost }) {
     setSelectedPost(null);
   };
 
-  // --- Comment on any post (writes under real owner) ---
   const handleAddComment = async (comment) => {
     if (!selectedPost) return;
     const ts = selectedPost.DateTime || selectedPost.date;
     const updatedComments = [...(selectedPost.Comments || []), comment];
     const updated = { ...selectedPost, Comments: updatedComments };
 
-    // Update UI
     setFeed(f => f.map(p => (p === selectedPost ? updated : p)));
     setSelectedPost(updated);
 
-    // Persist under post’s owner
     const ownerID = selectedPost.PK?.split('#')[1];
     try {
       await updatePostComments(ownerID, ts, updatedComments);
@@ -91,7 +98,6 @@ function Social({ user, deletePost }) {
     }
   };
 
-  // --- Typeahead search ---
   useEffect(() => {
     const fetchSuggestion = async () => {
       if (!searchTerm) {
@@ -119,24 +125,31 @@ function Social({ user, deletePost }) {
     navigate(`/profile/${id}`);
   };
 
+  const handleSendMessage = () => {
+    if (!selectedConversation || !messageInput.trim()) return;
+
+    const updated = conversations.map(conv => {
+      if (conv.id === selectedConversation.id) {
+        return {
+          ...conv,
+          messages: [...conv.messages, { sender: user.UserID, text: messageInput }]
+        };
+      }
+      return conv;
+    });
+
+    setConversations(updated);
+    setMessageInput('');
+  };
+
   if (!user) return <div>Please sign in to view your feed.</div>;
 
   return (
     <div className="Page">
       <div className="socialHeader">
         <div className="tabContainer">
-          <button
-            className={`tabButton ${activeTab === 0 ? 'active' : ''}`}
-            onClick={() => setActiveTab(0)}
-          >
-            Activity
-          </button>
-          <button
-            className={`tabButton ${activeTab === 1 ? 'active' : ''}`}
-            onClick={() => setActiveTab(1)}
-          >
-            Messages
-          </button>
+          <button className={`tabButton ${activeTab === 0 ? 'active' : ''}`} onClick={() => setActiveTab(0)}>Activity</button>
+          <button className={`tabButton ${activeTab === 1 ? 'active' : ''}`} onClick={() => setActiveTab(1)}>Messages</button>
         </div>
         <div className="searchContainer">
           <input
@@ -160,32 +173,74 @@ function Social({ user, deletePost }) {
 
       <div className="profileContent">
         {activeTab === 0 && (
-          <div className="tabPanel">
+          <div className="tabPanel activityPanel">
             {feed.map((post, idx) => (
-              <Post
+              <div
                 key={`${post.DateTime || post.date}-${idx}`}
-                name={post.author}
-                date={new Date(post.DateTime || post.date).toLocaleString()}
-                solveList={
-                  post.SolveList && post.SolveList.length
-                    ? post.SolveList
-                    : [{
-                        event:    post.Event,
-                        scramble: post.Scramble,
-                        time:     post.Time,
-                        note:     post.Note,
-                        comments: post.Comments || []
-                      }]
-                }
-                postColor={post.postColor}
-                onClick={() => setSelectedPost(post)}
-              />
+                className={`chatBubble ${post.isOwn ? 'ownBubble' : 'otherBubble'}`}
+              >
+                <Post
+                  name={post.author}
+                  date={new Date(post.DateTime || post.date).toLocaleString()}
+                  solveList={
+                    post.SolveList && post.SolveList.length
+                      ? post.SolveList
+                      : [{
+                          event: post.Event,
+                          scramble: post.Scramble,
+                          time: post.Time,
+                          note: post.Note,
+                          comments: post.Comments || []
+                        }]
+                  }
+                  postColor={post.postColor}
+                  onClick={() => setSelectedPost(post)}
+                />
+              </div>
             ))}
           </div>
         )}
+
         {activeTab === 1 && (
-          <div className="tabPanel">
-            <h2>Messages</h2>
+          <div className="tabPanel messagesPanel">
+            <div className="conversationList">
+              {conversations.map(conv => (
+                <div
+                  key={conv.id}
+                  className={`conversationPreview ${selectedConversation?.id === conv.id ? 'selected' : ''}`}
+                  onClick={() => setSelectedConversation(conv)}
+                >
+                  {conv.name}
+                </div>
+              ))}
+            </div>
+            <div className="conversationView">
+              {selectedConversation ? (
+                <>
+                  <div className="messages">
+                    {selectedConversation.messages.map((msg, idx) => (
+                      <div
+                        key={idx}
+                        className={`chatMessage ${msg.sender === user.UserID ? 'sent' : 'received'}`}
+                      >
+                        {msg.text}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="messageInput">
+                    <input
+                      type="text"
+                      value={messageInput}
+                      onChange={(e) => setMessageInput(e.target.value)}
+                      placeholder="Type a message..."
+                    />
+                    <button onClick={handleSendMessage}>Send</button>
+                  </div>
+                </>
+              ) : (
+                <div className="noConversation">Select a conversation</div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -198,10 +253,10 @@ function Social({ user, deletePost }) {
             selectedPost.SolveList && selectedPost.SolveList.length
               ? selectedPost.SolveList
               : [{
-                  event:    selectedPost.Event,
+                  event: selectedPost.Event,
                   scramble: selectedPost.Scramble,
-                  time:     selectedPost.Time,
-                  note:     selectedPost.Note,
+                  time: selectedPost.Time,
+                  note: selectedPost.Note,
                   comments: selectedPost.Comments || []
                 }]
           }

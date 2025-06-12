@@ -1,21 +1,192 @@
-.socialHeader {
-    display: flex;
-    justify-content: space-between;
-    margin-right: 10px;
+/* src/components/Social/Social.css */
 
+.socialHeader {
+  display: flex;
+  justify-content: space-between;
+  margin-right: 10px;
+  align-items: center;
 }
 
 .socialHeader input {
-    font-size: 24pt;
-    background-color: transparent;
-    border-radius: 8px;
-    border: 2px solid #B4B4B4;
-    width: 100%;
-    height: 34px;
-    margin: 10px;
-    color: white;
+  font-size: 16pt;
+  background-color: transparent;
+  border-radius: 8px;
+  border: 2px solid #B4B4B4;
+  width: 100%;
+  height: 34px;
+  margin: 10px;
+  padding: 0 10px;
+  color: white;
 }
 
 .searchContainer {
-    width: 25%;
+  width: 25%;
+  position: relative;
+}
+
+.suggestionsList {
+  position: absolute;
+  top: 48px;
+  background: #1a1a1a;
+  border: 1px solid #ccc;
+  width: 100%;
+  z-index: 2;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  color: white;
+}
+
+.suggestionsList li {
+  padding: 8px;
+  cursor: pointer;
+}
+
+.suggestionsList li:hover {
+  background-color: #333;
+}
+
+.tabContainer {
+  display: flex;
+}
+
+.tabButton {
+  background-color: transparent;
+  color: #aaa;
+  border: none;
+  font-size: 16pt;
+  margin-right: 20px;
+  cursor: pointer;
+}
+
+.tabButton.active {
+  color: white;
+  font-weight: bold;
+  border-bottom: 2px solid white;
+}
+
+.profileContent {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tabPanel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+/* Chat-style posts in activity tab */
+.activityPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chatBubble {
+  width: 90%;
+}
+
+.ownBubble {
+  align-self: flex-end;
+}
+
+.otherBubble {
+  align-self: flex-start;
+}
+
+/* Messages tab layout */
+.messagesPanel {
+  display: flex;
+  height: 100%;
+}
+
+.conversationList {
+  width: 200px;
+  border-right: 1px solid #444;
+  overflow-y: auto;
+}
+
+.conversationPreview {
+  padding: 10px;
+  cursor: pointer;
+  border-bottom: 1px solid #333;
+  color: white;
+}
+
+.conversationPreview:hover,
+.conversationPreview.selected {
+  background-color: #2EC4B6;
+  color: black;
+  font-weight: bold;
+}
+
+.conversationView {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 10px;
+}
+
+.messages {
+  flex-grow: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+}
+
+.chatMessage {
+  max-width: 60%;
+  padding: 8px 12px;
+  border-radius: 16px;
+  font-size: 14pt;
+  line-height: 1.4;
+}
+
+.sent {
+  align-self: flex-end;
+  background-color: #2EC4B6;
+  color: black;
+}
+
+.received {
+  align-self: flex-start;
+  background-color: #444;
+  color: white;
+}
+
+.messageInput {
+  display: flex;
+  gap: 10px;
+  padding-top: 10px;
+}
+
+.messageInput input {
+  flex: 1;
+  padding: 10px;
+  font-size: 14pt;
+  border-radius: 8px;
+  border: 2px solid #ccc;
+  background-color: #222;
+  color: white;
+}
+
+.messageInput button {
+  padding: 10px 20px;
+  font-size: 14pt;
+  border-radius: 8px;
+  border: none;
+  background-color: #2EC4B6;
+  color: black;
+  cursor: pointer;
+}
+
+.noConversation {
+  color: #aaa;
+  font-size: 14pt;
+  padding: 20px;
 }
