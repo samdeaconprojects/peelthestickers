@@ -7,6 +7,8 @@ import PostDetail from '../Profile/PostDetail';
 import { getPosts } from '../../services/getPosts';
 import { getUser } from '../../services/getUser';
 import { updatePostComments } from '../../services/updatePostComments';
+import { getMessages } from '../../services/getMessages';
+import { sendMessage } from '../../services/sendMessage';
 
 function Social({ user, deletePost }) {
   const [activeTab, setActiveTab] = useState(0);
@@ -57,22 +59,24 @@ function Social({ user, deletePost }) {
         merged.sort((a, b) => new Date(b.DateTime || b.date) - new Date(a.DateTime || a.date));
         setFeed(merged);
 
-        // Simulated messages
-        const dummyConversations = friendIds.map(fid => ({
-          id: fid,
-          name: nameById[fid] || fid,
-          messages: [
-            { sender: fid, text: 'Hey' },
-            { sender: user.UserID, text: 'Hi' }
-          ]
+        const convos = await Promise.all(friendIds.map(async fid => {
+          const id = [user.UserID, fid].sort().join('#');
+          const messages = await getMessages(id);
+          return {
+            id: fid,
+            name: nameById[fid] || fid,
+            messages
+          };
         }));
-        setConversations(dummyConversations);
+        setConversations(convos);
       } catch (err) {
         console.error('Error fetching feed:', err);
       }
     };
     fetchFeed();
   }, [user]);
+
+  
 
   const handleDelete = async post => {
     if (!post.isOwn) return;
@@ -125,21 +129,36 @@ function Social({ user, deletePost }) {
     navigate(`/profile/${id}`);
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!selectedConversation || !messageInput.trim()) return;
 
-    const updated = conversations.map(conv => {
-      if (conv.id === selectedConversation.id) {
-        return {
-          ...conv,
-          messages: [...conv.messages, { sender: user.UserID, text: messageInput }]
-        };
-      }
-      return conv;
-    });
+    const text = messageInput.trim();
+    const fid = selectedConversation.id;
+    const conversationID = [user.UserID, fid].sort().join('#');
 
-    setConversations(updated);
+    const newMessage = {
+      sender: user.UserID,
+      text,
+      timestamp: new Date().toISOString()
+    };
+
+    const updatedConversation = {
+      ...selectedConversation,
+      messages: [...(selectedConversation.messages || []), newMessage]
+    };
+    setSelectedConversation(updatedConversation);
+    setConversations(prev =>
+      prev.map(conv =>
+        conv.id === fid ? updatedConversation : conv
+      )
+    );
     setMessageInput('');
+
+    try {
+      await sendMessage(conversationID, user.UserID, text);
+    } catch (err) {
+      console.error("Failed to send message:", err);
+    }
   };
 
   if (!user) return <div>Please sign in to view your feed.</div>;
@@ -215,6 +234,22 @@ function Social({ user, deletePost }) {
               ))}
             </div>
             <div className="conversationView">
+  <button className="refreshButton" onClick={async () => {
+  if (!selectedConversation) return;
+  const fid = selectedConversation.id;
+  const conversationID = [user.UserID, fid].sort().join('#');
+  const messages = await getMessages(conversationID);
+
+  setSelectedConversation(prev => ({ ...prev, messages }));
+  setConversations(prev =>
+    prev.map(conv =>
+      conv.id === fid ? { ...conv, messages } : conv
+    )
+  );
+}}>
+  Refresh
+</button>
+
               {selectedConversation ? (
                 <>
                   <div className="messages">
@@ -223,7 +258,7 @@ function Social({ user, deletePost }) {
                         key={idx}
                         className={`chatMessage ${msg.sender === user.UserID ? 'sent' : 'received'}`}
                       >
-                        {msg.text}
+                        {msg.text || '[no text]'}
                       </div>
                     ))}
                   </div>
