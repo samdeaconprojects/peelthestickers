@@ -73,7 +73,7 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPos
                 setSelectedSolveIndex(solveIndex);
               }}
             >
-              {formatTime(solve.time)}
+              {formatTime(solve.time, false, solve.penalty)}
               <span className="delete-icon" onClick={(e) => { e.stopPropagation(); deleteTime(solveIndex); }}>x</span>
             </td>
           );
@@ -181,7 +181,7 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPos
                     setSelectedSolveIndex(actualIndex);
                   }}
                 >
-                  {formatTime(solve.time)}
+                  {formatTime(solve.time, false, solve.penalty)}
                   <span className="delete-icon" onClick={(e) => { e.stopPropagation(); deleteTime(actualIndex); }}>x</span>
                 </div>
               );

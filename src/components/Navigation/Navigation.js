@@ -12,16 +12,14 @@ import settingsIcon from '../../assets/Settings.svg';
 
 
 
-function Navigation({ onNavClick, onMainLogoClick, handleSignIn, isSignedIn, handleSettingsClick }) {
+function Navigation({ onNavClick, onMainLogoClick, handleSignIn, isSignedIn, handleSettingsClick, name }) {
   return (
     <nav className="Navigation">
       <Link to="/" onClick={onMainLogoClick}>
         <img src={ptsLogo} alt="logo" className="logo" />
       </Link>
 
-      <button onClick={handleSignIn} className="sign-in-button">
-          {isSignedIn ? 'Signed In' : 'Sign In'}
-        </button>
+      
       <ul>
    
         
@@ -55,6 +53,9 @@ function Navigation({ onNavClick, onMainLogoClick, handleSignIn, isSignedIn, han
      <img src={settingsIcon} alt="Settings" className="settings" />
    </i>
  </button>
+ <button onClick={handleSignIn} className="sign-in-button">
+          {isSignedIn ? "@" + name : 'Sign In'}
+        </button>
       </div>
     </nav>
   );

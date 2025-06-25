@@ -63,6 +63,7 @@
 
 
 .profilePicture {
+    background-color: rgba(100, 100, 100, 0.1);
     border-radius: 12px;
     width: 90px;
     height: 90px;
@@ -258,6 +259,7 @@
   }
   
   .widget {
+    background-color: rgba(100, 100, 100, 0.1);
     padding: 8px 12px;
     border-radius: 8px;
     cursor: pointer;

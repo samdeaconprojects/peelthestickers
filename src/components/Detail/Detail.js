@@ -3,6 +3,7 @@ import './Detail.css';
 import RubiksCubeSVG from '../PuzzleSVGs/RubiksCubeSVG';
 import { getScrambledFaces } from "../scrambleUtils";
 import { formatTime } from '../TimeList/TimeUtils';
+import { updateSolvePenalty } from '../../services/updateSolvePenalty';
 
 function Detail({ solve, onClose, deleteTime, addPost, showNavButtons, onPrev, onNext }) {
   const isArray = Array.isArray(solve);
@@ -53,6 +54,42 @@ function Detail({ solve, onClose, deleteTime, addPost, showNavButtons, onPrev, o
     onClose();
   };
 
+  const handlePenaltyChange = async (penalty, index = null) => {
+  const solveToUpdate = isArray ? solve[index] : solve;
+  const originalTime = solveToUpdate.originalTime || solveToUpdate.time;
+  const timestamp =
+  solveToUpdate?.SK?.startsWith("SOLVE#")
+    ? solveToUpdate.SK.split("SOLVE#")[1]
+    : solveToUpdate.DateTime;
+
+
+
+  const userID = solveToUpdate.PK?.split('USER#')[1] || solveToUpdate.userID;
+
+  if (!userID || !timestamp) {
+    console.error('Missing userID or timestamp in solve:', solveToUpdate);
+    return;
+  }
+
+  const newTime = penalty === '+2' ? originalTime + 2000
+                : penalty === 'DNF' ? Number.MAX_SAFE_INTEGER
+                : originalTime;
+
+  await updateSolvePenalty(userID, timestamp, originalTime, penalty);
+
+  if (isArray) {
+    const updated = [...solve];
+    updated[index].penalty = penalty;
+    updated[index].time = newTime;
+    setNotes(updated.map(s => s.note || ''));
+  } else {
+    solve.penalty = penalty;
+    solve.time = newTime;
+    setNotes(solve.note || '');
+  }
+};
+
+
   const renderSolveCard = (item, index) => (
     <div key={index} className="detailSolveCard">
       <div className='detailTopRow'>
@@ -87,6 +124,11 @@ function Detail({ solve, onClose, deleteTime, addPost, showNavButtons, onPrev, o
         <div className="detailActions">
           <button className="delete-button" onClick={() => handleDelete(index)}>Delete</button>
           <button className="share-button" onClick={() => handleShare(index)}>Share</button>
+          <div className="penalty-buttons">
+            <button onClick={() => handlePenaltyChange('+2', index)}>+2</button>
+            <button onClick={() => handlePenaltyChange('DNF', index)}>DNF</button>
+            <button onClick={() => handlePenaltyChange(null, index)}>Clear</button>
+          </div>
         </div>
       </div>
     </div>
@@ -127,6 +169,11 @@ function Detail({ solve, onClose, deleteTime, addPost, showNavButtons, onPrev, o
               <div className="detailActions">
                 <button className="delete-button" onClick={() => handleDelete()}>Delete</button>
                 <button className="share-button" onClick={() => handleShare()}>Share</button>
+                <div className="penalty-buttons">
+                  <button onClick={() => handlePenaltyChange('+2')}>+2</button>
+                  <button onClick={() => handlePenaltyChange('DNF')}>DNF</button>
+                  <button onClick={() => handlePenaltyChange(null)}>Clear</button>
+                </div>
               </div>
             </div>
             {showNavButtons && (

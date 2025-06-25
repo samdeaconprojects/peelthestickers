@@ -72,6 +72,10 @@ export function currentEventToString(currentEvent) {
 
 
 export function generateScramble(currentEvent) {
+  if (currentEvent === "CLOCK") {
+    return generateClockScramble();
+  }
+  
     let n = currentEventToN(currentEvent);
     console.log("n: " + n);
 
@@ -83,6 +87,8 @@ export function generateScramble(currentEvent) {
     if (n === 2) {
         moves = 10;
         faceArray = ["U", "R", "F"];
+    } else if (n === 3) {
+        moves = 24;
     } else if (n === 4) {
         moves = 45;
     } else {
@@ -176,6 +182,58 @@ export function generateScramble(currentEvent) {
 
     return randomScramble;
 }
+
+function generateClockScramble() {
+  const pins = ["UR", "DR", "DL", "UL"];
+  const faces = ["U", "R", "D", "L"];
+  const pinMoves = [];
+  const faceMoves = [];
+
+  // Phase 1: Pin turns
+  for (const pin of pins) {
+    const amount = getRandomInt(0, 5); // Valid range: 0 to 5
+    const sign = Math.random() < 0.5 ? '+' : '-';
+    pinMoves.push(`${pin}${amount}${sign}`);
+  }
+
+  // Phase 2: Face turns
+  for (const face of faces) {
+    const amount = getRandomInt(0, 5);
+    const sign = Math.random() < 0.5 ? '+' : '-';
+    faceMoves.push(`${face}${amount}${sign}`);
+  }
+
+  // Phase 3: ALL turn
+  const allAmount = getRandomInt(0, 5);
+  const allSign = Math.random() < 0.5 ? '+' : '-';
+  const allMove = `ALL${allAmount}${allSign}`;
+
+  // Phase 4: y2 rotation
+  const rotation = "y2";
+
+  // Phase 5: second round of face turns
+  const secondFaceMoves = [];
+  for (const face of faces) {
+    const amount = getRandomInt(0, 5);
+    const sign = Math.random() < 0.5 ? '+' : '-';
+    secondFaceMoves.push(`${face}${amount}${sign}`);
+  }
+
+  const finalAllAmount = getRandomInt(0, 5);
+  const finalAllSign = Math.random() < 0.5 ? '+' : '-';
+  const finalAllMove = `ALL${finalAllAmount}${finalAllSign}`;
+
+  return [
+    ...pinMoves,
+    ...faceMoves,
+    allMove,
+    rotation,
+    ...secondFaceMoves,
+    finalAllMove
+  ].join(' ');
+}
+
+
 
 
 

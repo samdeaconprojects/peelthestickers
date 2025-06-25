@@ -1,28 +1,30 @@
-export const formatTime = (timeToDisplay, isAverage = false) => {
-  // Calculate total time components
-  let totalSeconds = timeToDisplay / 1000; // Keep as float for calculation
+export const formatTime = (timeToDisplay, isAverage = false, penalty = null) => {
+  if (timeToDisplay === Number.MAX_SAFE_INTEGER || penalty === 'DNF') return 'DNF';
+
+  let totalSeconds = timeToDisplay / 1000;
   let minutes = Math.floor(totalSeconds / 60);
   let seconds = Math.floor(totalSeconds % 60);
 
   let milliseconds;
 
   if (isAverage) {
-      // Round for averages
-      milliseconds = (totalSeconds % 1).toFixed(2).slice(2); // Properly rounded
+    milliseconds = (totalSeconds % 1).toFixed(2).slice(2); // Properly rounded
   } else {
-      // Truncate for individual times
-      milliseconds = Math.floor((totalSeconds % 1) * 100).toString().padStart(2, '0');
+    milliseconds = Math.round((totalSeconds % 1) * 100).toString().padStart(2, '0');
   }
 
-  // Format seconds and milliseconds to ensure padding
   let formattedSeconds = seconds.toString().padStart(2, '0');
 
   let formattedTime = minutes > 0
-      ? `${minutes}:${formattedSeconds}.${milliseconds}`
-      : `${seconds}.${milliseconds}`;
+    ? `${minutes}:${formattedSeconds}.${milliseconds}`
+    : `${seconds}.${milliseconds}`;
+
+  // Add + for +2 penalty
+  if (penalty === '+2') formattedTime += '+';
 
   return formattedTime;
 };
+
 
 
   // TimeUtils.js

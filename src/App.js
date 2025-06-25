@@ -10,12 +10,8 @@ import Navigation from "./components/Navigation/Navigation";
 import PlayerBar from "./components/PlayerBar/PlayerBar";
 import EventSelector from "./components/EventSelector";
 import Scramble from "./components/Scramble/Scramble";
-import RubiksCubeSVG from "./components/PuzzleSVGs/RubiksCubeSVG";
-import SkewbSVG from "./components/PuzzleSVGs/SkewbSVG";
-import Square1SVG from "./components/PuzzleSVGs/Square1SVG";
-import PyraminxSVG from "./components/PuzzleSVGs/PyraminxSVG";
-import MegaminxSVG from "./components/PuzzleSVGs/MegaminxSVG";
-import ClockSVG from "./components/PuzzleSVGs/ClockSVG";
+import PuzzleSVG from "./components/PuzzleSVGs/PuzzleSVG";
+
 import SignInPopup from "./components/SignInPopup/SignInPopup";
 import { useSettings } from "./contexts/SettingsContext";
 import Detail from "./components/Detail/Detail";
@@ -129,6 +125,7 @@ function App() {
   };
 
     // map each event code to its SVG component
+    /*
     const puzzleMap = {
       SKEWB:    SkewbSVG,
       SQ1:      Square1SVG,
@@ -136,8 +133,8 @@ function App() {
       PYRAMINX: PyraminxSVG,
       CLOCK:    ClockSVG
     };
-
-    const PuzzleSVG = puzzleMap[currentEvent] || RubiksCubeSVG;
+*/
+    //const PuzzleSVG = puzzleMap[currentEvent] || RubiksCubeSVG;
   
 
    const normalizeSolve = (item) => ({
@@ -399,6 +396,7 @@ const deletePost = async (timestamp) => {
         handleSignIn={handleShowSignInPopup}
         isSignedIn={isSignedIn}
         handleSettingsClick={() => setShowSettingsPopup(true)}
+        name={user?.Name || ''}
       />
 
       <div className="main-content">
@@ -418,23 +416,13 @@ const deletePost = async (timestamp) => {
                     onScrambleClick={onScrambleClick}
                   />
 
-                  {PuzzleSVG === RubiksCubeSVG ? (
-                    <RubiksCubeSVG
-                      n={currentEvent}
-                      faces={getScrambledFaces(
-                        scrambles[currentEvent]?.[0] || "",
-                        currentEvent
-                      )}
-                      isMusicPlayer={!isHomePage}
-                      isTimerCube={true}
-                    />
-                  ) : (
-                    <PuzzleSVG
-                      scramble={scrambles[currentEvent]?.[0] || ""}
-                      size={60}
-                      gap={2}
-                    />
-                  )}
+                  <PuzzleSVG
+  event={currentEvent}
+  scramble={scrambles[currentEvent]?.[0] || ""}
+  isMusicPlayer={!isHomePage}
+  isTimerCube={true}
+/>
+
                 </div>
 
                 <Timer addTime={addSolve} />

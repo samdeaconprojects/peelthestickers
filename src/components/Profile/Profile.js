@@ -198,7 +198,7 @@ function Profile({
                           comments: post.Comments || []
                         }]
                   }
-                  postColor={'#2EC4B6'}
+                  postColor={viewedProfile.Color}
                   onClick={() => setSelectedPost(post)}
                 />
               ))
