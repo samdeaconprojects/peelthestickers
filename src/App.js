@@ -417,15 +417,15 @@ const deletePost = async (timestamp) => {
                   />
 
                   <PuzzleSVG
-  event={currentEvent}
-  scramble={scrambles[currentEvent]?.[0] || ""}
-  isMusicPlayer={!isHomePage}
-  isTimerCube={true}
-/>
+                    event={currentEvent}
+                    scramble={scrambles[currentEvent]?.[0] || ""}
+                    isMusicPlayer={!isHomePage}
+                    isTimerCube={true}
+                  />
 
                 </div>
 
-                <Timer addTime={addSolve} />
+                <Timer addTime={addSolve}/>
 
                 <div className="averages-display">
   <p></p>

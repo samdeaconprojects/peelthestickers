@@ -16,6 +16,8 @@ function Timer({ addTime }) {
 
 
   const keypadButtons = ['7','8','9','4','5','6','1','2','3','0','.','⌫',':','Enter'];
+  //const keypadButtons = ['7','8','9','4','5','6','1','2','3','0','.','⌫',':','Enter'];
+
 
   const startTimer = () => {
     if (canStart && !timerOn) {
@@ -54,7 +56,8 @@ function Timer({ addTime }) {
       const decimal = input.slice(-2);
       return parseFloat(`${base}.${decimal}`) * 1000;
     }
-    return parseFloat(input) * 1000;
+    return Math.round(parseFloat(input) * 1000);
+
   };
 
   const handleSubmitManualTime = () => {
@@ -64,22 +67,40 @@ function Timer({ addTime }) {
   };
 
   const handleKeyDown = (event) => {
-    if (settings.timerInput === 'Keyboard') {
-      if (event.code === 'Space') {
-        event.preventDefault();
-        if (timerOn) stopTimer();
-        setIsSpacebarHeld(true);
-      }
-    } else {
-      if (/^[0-9.]$/.test(event.key)) setManualTime(prev => prev + event.key);
-      if (event.key === 'Backspace') setManualTime(prev => prev.slice(0, -1));
-      if (event.key === 'Enter') handleSubmitManualTime();
-      if (event.key === ':') setManualTime(prev => prev + ':');
+  const target = event.target;
+  const isTyping =
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.isContentEditable;
+
+  if (isTyping) return; // Skip timer controls while typing
+
+  if (settings.timerInput === 'Keyboard') {
+    if (event.code === 'Space') {
+      event.preventDefault();
+      if (timerOn) stopTimer();
+      setIsSpacebarHeld(true);
     }
-  };
+  } else {
+    if (/^[0-9.]$/.test(event.key)) setManualTime(prev => prev + event.key);
+    if (event.key === 'Backspace') setManualTime(prev => prev.slice(0, -1));
+    if (event.key === 'Enter') handleSubmitManualTime();
+    if (event.key === ':') setManualTime(prev => prev + ':');
+  }
+};
+
+
 
   const handleKeyUp = (event) => {
-  if (event.code === "Space") {
+  const target = event.target;
+  const isTyping =
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.isContentEditable;
+
+  if (isTyping || settings.timerInput !== 'Keyboard') return;
+
+  if (event.code === 'Space') {
     event.preventDefault();
     setIsSpacebarHeld(false);
 
@@ -95,6 +116,7 @@ function Timer({ addTime }) {
     setTimeout(() => setCanStart(true), 200);
   }
 };
+
 
 
   const handlePadClick = (val) => {

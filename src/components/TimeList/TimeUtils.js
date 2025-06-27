@@ -1,29 +1,27 @@
 export const formatTime = (timeToDisplay, isAverage = false, penalty = null) => {
   if (timeToDisplay === Number.MAX_SAFE_INTEGER || penalty === 'DNF') return 'DNF';
 
-  let totalSeconds = timeToDisplay / 1000;
-  let minutes = Math.floor(totalSeconds / 60);
-  let seconds = Math.floor(totalSeconds % 60);
+  let minutes = Math.floor(timeToDisplay / 60000);
+  let seconds = Math.floor((timeToDisplay % 60000) / 1000);
 
   let milliseconds;
-
   if (isAverage) {
-    milliseconds = (totalSeconds % 1).toFixed(2).slice(2); // Properly rounded
+    milliseconds = ((timeToDisplay % 1000) / 1000).toFixed(2).slice(2);
   } else {
-    milliseconds = Math.round((totalSeconds % 1) * 100).toString().padStart(2, '0');
+    milliseconds = Math.floor((timeToDisplay % 1000) / 10).toString().padStart(2, '0');
   }
 
-  let formattedSeconds = seconds.toString().padStart(2, '0');
+  const formattedSeconds = seconds.toString().padStart(2, '0');
 
   let formattedTime = minutes > 0
     ? `${minutes}:${formattedSeconds}.${milliseconds}`
     : `${seconds}.${milliseconds}`;
 
-  // Add + for +2 penalty
   if (penalty === '+2') formattedTime += '+';
 
   return formattedTime;
 };
+
 
 
 

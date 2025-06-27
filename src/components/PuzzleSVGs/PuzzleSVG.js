@@ -11,7 +11,7 @@ import { getScrambledFaces } from '../scrambleUtils';
 const PuzzleSVG = ({ event, scramble, isMusicPlayer, isTimerCube }) => {
   const faceBasedEvents = ["222", "333", "444", "555", "666", "777", "333OH", "333BLD"];
   const isRubikEvent = faceBasedEvents.includes(event);
-  const size = 60;
+  const size = 45;
   const gap = 2;
 
   if (isRubikEvent) {
