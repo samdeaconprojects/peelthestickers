@@ -107,3 +107,14 @@
   /* if you want to enforce it, you can add: */
   /* height: 2.5em !important;  */
 }
+
+.status-message {
+  position: fixed;
+  margin-top: 10px;
+  padding: 10px;
+  background-color: #222;
+  color: #fff;
+  border-radius: 4px;
+  text-align: center;
+  font-size: 0.9rem;
+}

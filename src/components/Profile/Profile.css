@@ -74,7 +74,7 @@
 .profileCube {
     margin: 8px;
     margin-left: -12px;
-    scale: 60%;
+    
 }
 
 .post {
@@ -122,12 +122,13 @@
     margin: 8px;
 }
 
+/*
 .postNameCube {
     scale: 25%;
     margin-right: 31px;
     margin-top: -42px;
 }
-
+*/
 .postCube {
     scale: 50%;
 }

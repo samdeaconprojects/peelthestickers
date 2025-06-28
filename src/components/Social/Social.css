@@ -77,7 +77,6 @@
   padding: 10px;
 }
 
-/* Chat-style posts in activity tab */
 .activityPanel {
   display: flex;
   flex-direction: column;
@@ -96,30 +95,69 @@
   align-self: flex-start;
 }
 
-/* Messages tab layout */
 .messagesPanel {
   display: flex;
   height: 100%;
+  flex-direction: column;
 }
 
-.conversationList {
-  width: 200px;
-  border-right: 1px solid #444;
-  overflow-y: auto;
+.conversationStrip {
+  display: flex;
+  flex-direction: row; /* restore to normal left-to-right */
+  overflow-x: auto;
+  gap: 12px;
+  padding: 10px;
+  border-bottom: 1px solid #444;
+}
+
+.avatarContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+}
+
+.profilePicturePost {
+  width: 90px;
+  height: 90px;
+  background-color: rgba(100, 100, 100, 0.1);
+  border-radius: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 6px;
+  border: 2px solid #2EC4B6;
+  overflow: hidden;
+}
+
+
+.postNameCube {
+  transform: scale(.75) translate(0, 0); /* Make the cube SVG reasonably sized */
+}
+
+.avatarName {
+  font-size: 12px;
+  color: white;
+  margin-top: 4px;
+  text-align: center;
+  width: 60px;
+  overflow-wrap: break-word;
 }
 
 .conversationPreview {
-  padding: 10px;
-  cursor: pointer;
-  border-bottom: 1px solid #333;
+  padding: 6px;
+  border-radius: 12px;
+  border: 2px solid transparent;
   color: white;
+  transition: border 0.2s ease;
 }
 
-.conversationPreview:hover,
+.conversationPreview:hover {
+  border: 2px solid #2EC4B6;
+}
+
 .conversationPreview.selected {
-  background-color: #2EC4B6;
-  color: black;
-  font-weight: bold;
+  border: 2px solid #2EC4B6;
 }
 
 .conversationView {

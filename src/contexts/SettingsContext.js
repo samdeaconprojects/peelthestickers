@@ -2,7 +2,6 @@
 import React, { createContext, useContext, useState } from 'react';
 
 const SettingsContext = createContext();
-
 export const useSettings = () => useContext(SettingsContext);
 
 const defaultEventBindings = {
@@ -14,10 +13,11 @@ const defaultEventBindings = {
   "777": "Alt+7",
   "SQ1": "Alt+Q",
   "SKEWB": "Alt+S",
+  "CLOCK": "Alt+C",
   "333OH": "Alt+O",
   "MEGAMINX": "Alt+M",
-   "PYRAMINX": "Alt+P",
-  "333BLD": "Alt+B",
+  "PYRAMINX": "Alt+P",
+  "333BLD": "Alt+B"
 };
 
 export const SettingsProvider = ({ children }) => {
@@ -25,7 +25,7 @@ export const SettingsProvider = ({ children }) => {
     primaryColor: '#0E171D',
     secondaryColor: '#ffffff',
     timerInput: 'Keyboard',
-    horizontalTimeList: false,
+    horizontalTimeList: true, // default to horizontal
     eventKeyBindings: defaultEventBindings
   });
 
@@ -39,4 +39,3 @@ export const SettingsProvider = ({ children }) => {
     </SettingsContext.Provider>
   );
 };
-

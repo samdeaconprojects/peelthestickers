@@ -9,6 +9,7 @@ import { getUser } from '../../services/getUser';
 import { updatePostComments } from '../../services/updatePostComments';
 import { getMessages } from '../../services/getMessages';
 import { sendMessage } from '../../services/sendMessage';
+import PuzzleSVG from '../PuzzleSVGs/PuzzleSVG';
 
 function Social({ user, deletePost }) {
   const [activeTab, setActiveTab] = useState(0);
@@ -20,6 +21,22 @@ function Social({ user, deletePost }) {
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [messageInput, setMessageInput] = useState('');
   const navigate = useNavigate();
+
+  const getTransform = (event) => {
+    const transforms = {
+      '222': 'translate(23px, 58px) scale(0.7)',
+      '333': 'translate(6px, 38px)scale(0.6)',
+      '444': 'translate(3px, 34px) scale(0.55)',
+      '555': 'translate(-1px, 26px) scale(0.55)',
+      '666': 'translate(0px, 32px) scale(0.54)',
+      '777': 'translate(0px, 31px) scale(0.54)',
+      'CLOCK': 'translate(6px, 12px) scale(0.55)',
+      'SKEWB': 'translate(16px, 25px) scale(0.80)',
+      'MEGAMINX': 'translate(-4px, -16px) scale(0.8)',
+      'PYRAMINX': 'translate(0px, -18px) scale(0.88)',
+    };
+    return transforms[event] || 'scale(0.6)';
+  };
 
   useEffect(() => {
     const fetchFeed = async () => {
@@ -62,9 +79,13 @@ function Social({ user, deletePost }) {
         const convos = await Promise.all(friendIds.map(async fid => {
           const id = [user.UserID, fid].sort().join('#');
           const messages = await getMessages(id);
+          const prof = profiles.find(p => p.PK?.endsWith(`#${fid}`));
           return {
             id: fid,
             name: nameById[fid] || fid,
+            color: colorById[fid] || '#cccccc',
+            profileEvent: prof?.ProfileEvent || '333',
+            profileScramble: prof?.ProfileScramble || '',
             messages
           };
         }));
@@ -75,8 +96,6 @@ function Social({ user, deletePost }) {
     };
     fetchFeed();
   }, [user]);
-
-  
 
   const handleDelete = async post => {
     if (!post.isOwn) return;
@@ -128,6 +147,13 @@ function Social({ user, deletePost }) {
     setSuggestions([]);
     navigate(`/profile/${id}`);
   };
+
+  const sortedConversations = [...conversations].sort((a, b) => {
+  const aTime = new Date(a.messages?.[a.messages.length - 1]?.timestamp || 0);
+  const bTime = new Date(b.messages?.[b.messages.length - 1]?.timestamp || 0);
+  return bTime - aTime;
+});
+
 
   const handleSendMessage = async () => {
     if (!selectedConversation || !messageInput.trim()) return;
@@ -222,33 +248,51 @@ function Social({ user, deletePost }) {
 
         {activeTab === 1 && (
           <div className="tabPanel messagesPanel">
-            <div className="conversationList">
-              {conversations.map(conv => (
+            <div className="conversationStrip">
+              {sortedConversations.map(conv => (
                 <div
                   key={conv.id}
                   className={`conversationPreview ${selectedConversation?.id === conv.id ? 'selected' : ''}`}
                   onClick={() => setSelectedConversation(conv)}
                 >
-                  {conv.name}
+                  <div className="avatarContainer">
+                    <div
+                      className="profilePicturePost"
+                      style={{ borderColor: conv.color || '#2EC4B6' }}
+                    >
+                      <div
+                        className="postNameCube"
+                        style={{ transform: getTransform(conv.profileEvent) }}
+                      >
+                        <PuzzleSVG
+                          event={conv.profileEvent || '333'}
+                          scramble={conv.profileScramble || ''}
+                          isMusicPlayer={false}
+                          isTimerCube={false}
+                        />
+                      </div>
+                    </div>
+                    <div className="avatarName">{conv.name}</div>
+                  </div>
                 </div>
               ))}
             </div>
-            <div className="conversationView">
-  <button className="refreshButton" onClick={async () => {
-  if (!selectedConversation) return;
-  const fid = selectedConversation.id;
-  const conversationID = [user.UserID, fid].sort().join('#');
-  const messages = await getMessages(conversationID);
 
-  setSelectedConversation(prev => ({ ...prev, messages }));
-  setConversations(prev =>
-    prev.map(conv =>
-      conv.id === fid ? { ...conv, messages } : conv
-    )
-  );
-}}>
-  Refresh
-</button>
+            <div className="conversationView">
+              <button className="refreshButton" onClick={async () => {
+                if (!selectedConversation) return;
+                const fid = selectedConversation.id;
+                const conversationID = [user.UserID, fid].sort().join('#');
+                const messages = await getMessages(conversationID);
+                setSelectedConversation(prev => ({ ...prev, messages }));
+                setConversations(prev =>
+                  prev.map(conv =>
+                    conv.id === fid ? { ...conv, messages } : conv
+                  )
+                );
+              }}>
+                Refresh
+              </button>
 
               {selectedConversation ? (
                 <>

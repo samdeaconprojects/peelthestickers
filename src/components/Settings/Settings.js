@@ -1,18 +1,14 @@
+// src/components/Settings/Settings.js
 import React, { useEffect, useState } from 'react';
 import './Settings.css';
 import { useSettings } from '../../contexts/SettingsContext';
 import { getUser } from '../../services/getUser';
 import { updateUser } from '../../services/updateUser';
 
-/**
- * Render settings as a modal popup overlay
- * Props:
- * - userID: string
- * - onClose: () => void
- * - onProfileUpdate: (freshProfile) => void
- */
 function Settings({ userID, onClose, onProfileUpdate }) {
     const { settings, updateSettings } = useSettings();
+    const [statusMessage, setStatusMessage] = useState('');
+
     const [profileData, setProfileData] = useState({
         Name: '',
         Color: '',
@@ -24,13 +20,11 @@ function Settings({ userID, onClose, onProfileUpdate }) {
         WCAID: ''
     });
 
-    // Apply theme colors to document
     useEffect(() => {
         document.documentElement.style.setProperty('--primary-color', settings.primaryColor);
         document.documentElement.style.setProperty('--secondary-color', settings.secondaryColor);
     }, [settings.primaryColor, settings.secondaryColor]);
 
-    // Fetch profile data
     useEffect(() => {
         const fetchProfile = async () => {
             if (!userID) return;
@@ -78,14 +72,17 @@ function Settings({ userID, onClose, onProfileUpdate }) {
                 WCAID:           fresh.WCAID
             });
             if (onProfileUpdate) onProfileUpdate(fresh);
-            alert('✅ Profile updated.');
+            setStatusMessage('✅ Profile updated.');
+            setTimeout(() => setStatusMessage(''), 2000); // Hide after 3 seconds
+
         } catch (err) {
             console.error('❌ Error updating profile:', err);
-            alert('❌ Failed to update profile.');
+            setStatusMessage('❌ Failed to update profile.');
+            setTimeout(() => setStatusMessage(''), 2000);
+
         }
     };
 
-    // Close on Escape key
     useEffect(() => {
         const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
         window.addEventListener('keydown', handleKey);
@@ -131,32 +128,35 @@ function Settings({ userID, onClose, onProfileUpdate }) {
                         </select>
                     </div>
                     <div className="setting-item">
-                        <label>Horizontal Time List</label>
-                        <input
-                            type="checkbox"
-                            checked={settings.horizontalTimeList}
-                            onChange={(e) => updateSettings({ horizontalTimeList: e.target.checked })}
-                        />
-                    </div>
-                    <h2>Key Bindings</h2>
-<div className="settings-container">
-  {Object.entries(settings.eventKeyBindings).map(([event, combo]) => (
-    <div className="setting-item" key={event}>
-      <label>{event}:</label>
-      <input
-        value={combo}
-        onChange={e => updateSettings({
-          eventKeyBindings: {
-            ...settings.eventKeyBindings,
-            [event]: e.target.value
-          }
-        })}
-      />
-    </div>
-  ))}
+  <label>Strict Timer Mode</label>
+  <input
+    type="checkbox"
+    checked={!settings.horizontalTimeList}
+    onChange={(e) =>
+      updateSettings({ horizontalTimeList: !e.target.checked })
+    }
+  />
 </div>
 
+                    <h2>Key Bindings</h2>
+                    <div className="settings-container">
+                        {Object.entries(settings.eventKeyBindings).map(([event, combo]) => (
+                            <div className="setting-item" key={event}>
+                                <label>{event}:</label>
+                                <input
+                                    value={combo}
+                                    onChange={e => updateSettings({
+                                        eventKeyBindings: {
+                                            ...settings.eventKeyBindings,
+                                            [event]: e.target.value
+                                        }
+                                    })}
+                                />
+                            </div>
+                        ))}
+                    </div>
                 </div>
+
                 <h2>Profile Settings</h2>
                 <div className="settings-container">
                     <div className="setting-item"><label>Name:</label><input value={profileData.Name} onChange={e => handleProfileChange('Name', e.target.value)} /></div>
@@ -170,7 +170,14 @@ function Settings({ userID, onClose, onProfileUpdate }) {
                 </div>
                 <button className="save-button" onClick={saveProfileChanges}>Save Profile</button>
             </div>
+            {statusMessage && (
+  <div className="status-message">
+    {statusMessage}
+  </div>
+)}
+
         </div>
+        
     );
 }
 

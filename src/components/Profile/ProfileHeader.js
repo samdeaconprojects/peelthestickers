@@ -2,10 +2,11 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import './Profile.css';
-import RubiksCubeSVG from '../PuzzleSVGs/RubiksCubeSVG';
+import RubiksCubeSVG from '../PuzzleSVGs/PuzzleSVG';
 import { getScrambledFaces } from '../cubeStructure';
 import EventSelectorDetail from '../Detail/EventSelectorDetail';
 import { formatTime, calculateAverage } from '../TimeList/TimeUtils';
+import PuzzleSVG from '../PuzzleSVGs/PuzzleSVG';
 
 export default function ProfileHeader({ user, sessions }) {
   const {
@@ -39,6 +40,19 @@ export default function ProfileHeader({ user, sessions }) {
       if (times.length < 5) return 'N/A';
       return calculateAverage(times.slice(-5), true).average.toFixed(2);
     }
+  };
+
+  const cubeTransforms = {
+    222: 'translate(15px, 18px) scale(0.7)',
+    333: 'scale(0.6)',
+    444: 'translate(-1px, -5px) scale(0.55)',
+    555: 'translate(-7px, -10px) scale(0.55)',
+    666: 'translate(-4px, -7px) scale(0.54)',
+    777: 'translate(-4px, -6px) scale(0.54)',
+    CLOCK: 'translate(-7px, -44px) scale(0.55)',
+    SKEWB: 'translate(-9px, -12px) scale(0.85)',
+    MEGAMINX: 'translate(-4px, -16px) scale(0.8)',
+    PYRAMINX: 'translate(0px, -18px) scale(0.88)',
   };
 
   const joinedDate = DateFounded
@@ -103,19 +117,23 @@ export default function ProfileHeader({ user, sessions }) {
 
   return (
     <div className="profileHeader">
-      {/* —— original profile/name/username & cube EXACTLY as before —— */}
       <div className="profileAndName">
         <div className="profilePicture" style={{ border: `2px solid ${Color}` }}>
-          <div className="profileCube">
-            <RubiksCubeSVG
-              className="profileCube"
-              n={ProfileEvent}
-              faces={getScrambledFaces(ProfileScramble, ProfileEvent)}
-              color={Color}
-              isMusicPlayer={false}
-              isTimerCube={false}
+          <div
+            className="profileCube"
+            style={{
+              transform: cubeTransforms[ProfileEvent] || 'scale(0.6)'
+            }}
+          >
+            <PuzzleSVG
+            className="profileCube"
+            event={ProfileEvent}
+            scramble={ProfileScramble}
+            isMusicPlayer={false}
+            isTimerCube={false}
             />
-          </div>
+         </div>
+
         </div>
         <div className="profileNameAndUsername">
           <div className="profileName">{Name || 'Guest'}</div>
@@ -134,7 +152,6 @@ export default function ProfileHeader({ user, sessions }) {
 
       */}
 
-      {/* —— new widget bar (friends, PBs, stats) —— */}
       <div className="widgetBar">
         {widgets.map(w => (
           <div
@@ -162,7 +179,6 @@ export default function ProfileHeader({ user, sessions }) {
         </>
       )}
 
-      {/* —— event selector popup —— */}
       {showEventSelector && (
         <EventSelectorDetail
           events={['222','333','444','555','666','777','333OH','333BLD']}

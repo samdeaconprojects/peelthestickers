@@ -82,10 +82,31 @@ function Timer({ addTime }) {
       setIsSpacebarHeld(true);
     }
   } else {
-    if (/^[0-9.]$/.test(event.key)) setManualTime(prev => prev + event.key);
-    if (event.key === 'Backspace') setManualTime(prev => prev.slice(0, -1));
-    if (event.key === 'Enter') handleSubmitManualTime();
-    if (event.key === ':') setManualTime(prev => prev + ':');
+    const flashKeypadButton = (val) => {
+  const btn = document.getElementById(`keypad-${val}`);
+  if (btn) {
+    btn.classList.add('keypad-flash');
+    setTimeout(() => btn.classList.remove('keypad-flash'), 150);
+  }
+};
+
+if (/^[0-9.]$/.test(event.key)) {
+  setManualTime(prev => prev + event.key);
+  flashKeypadButton(event.key);
+}
+if (event.key === 'Backspace') {
+  setManualTime(prev => prev.slice(0, -1));
+  flashKeypadButton('⌫');
+}
+if (event.key === 'Enter') {
+  handleSubmitManualTime();
+  flashKeypadButton('Enter');
+}
+if (event.key === ':') {
+  setManualTime(prev => prev + ':');
+  flashKeypadButton(':');
+}
+
   }
 };
 
@@ -118,7 +139,7 @@ function Timer({ addTime }) {
 };
 
 
-
+/*
   const handlePadClick = (val) => {
     if (val === '⌫') {
       setManualTime(prev => prev.slice(0, -1));
@@ -128,6 +149,24 @@ function Timer({ addTime }) {
       setManualTime(prev => prev + val);
     }
   };
+*/
+
+  const handlePadClick = (val) => {
+  const button = document.getElementById(`keypad-${val}`);
+  if (button) {
+    button.classList.add('keypad-flash');
+    setTimeout(() => button.classList.remove('keypad-flash'), 150);
+  }
+
+  if (val === '⌫') {
+    setManualTime(prev => prev.slice(0, -1));
+  } else if (val === 'Enter') {
+    handleSubmitManualTime();
+  } else {
+    setManualTime(prev => prev + val);
+  }
+};
+
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
@@ -164,7 +203,7 @@ function Timer({ addTime }) {
           <div className="manual-display">{manualTime || '0.00'}</div>
           <div className="keypad-grid">
             {keypadButtons.map((val, i) => (
-              <button key={i} onClick={() => handlePadClick(val)}>
+              <button id={`keypad-${val}`} key={i} onClick={() => handlePadClick(val)}>
                 {val}
               </button>
             ))}

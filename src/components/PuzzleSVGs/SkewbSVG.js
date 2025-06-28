@@ -11,8 +11,7 @@ const colorMap = {
   yellow: '#FFFF00'
 };
 
-export default function SkewbSVG({ scramble = 'U R B L U B L U', size, gap = 0 }) {
-  size = 60;
+export default function SkewbSVG({ scramble = 'U R B L U B L U', size = 60, gap = 0 }) {
   const cornerTemplates = [
     ['white','orange','blue'],
     ['white','blue','red'],
@@ -136,8 +135,7 @@ export default function SkewbSVG({ scramble = 'U R B L U B L U', size, gap = 0 }
 
   useEffect(() => {
     if (scramble) applyAlg(scramble);
-  // only once after reset
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [corners.length]);
 
   const drawFace = (faceCols, idx) => {
@@ -159,7 +157,7 @@ export default function SkewbSVG({ scramble = 'U R B L U B L U', size, gap = 0 }
         <polygon points={centerPts}
           fill={colorMap[faceCols[0]]}
           stroke="#000" strokeWidth="1" />
-        {triPts.map((pts,i)=>(
+        {triPts.map((pts,i)=>( 
           <polygon key={i}
             points={pts.join(' ')}
             fill={colorMap[faceCols[i+1]]}
@@ -179,7 +177,6 @@ export default function SkewbSVG({ scramble = 'U R B L U B L U', size, gap = 0 }
       <button className="flipButton" onClick={()=>setShowFront(f=>!f)}>
         {showFront?'Show Back':'Show Front'}
       </button>
-
       {(showFront ? frontIdxs : backIdxs).map((idx,i) => (
         <div
           key={idx}

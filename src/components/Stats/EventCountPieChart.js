@@ -7,7 +7,7 @@ function EventCountPieChart({ sessions }) {
     solves.map(solve => ({ ...solve, event })) // Ensure each solve has an event property
   );
 
-  return <PieChart solves={allSolves} title="Solve Counts per Event" />;
+  return <PieChart solves={allSolves} title="Event Breakdown" />;
 }
 
 export default EventCountPieChart;

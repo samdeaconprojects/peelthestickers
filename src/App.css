@@ -194,6 +194,8 @@ select {
   font-weight: bold;
   text-align: center;
   margin-right: 70px;
+  margin-top: auto;
+  max-height: 25%;
 }
 
 .averagesTime {
