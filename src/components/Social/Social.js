@@ -10,6 +10,7 @@ import { updatePostComments } from '../../services/updatePostComments';
 import { getMessages } from '../../services/getMessages';
 import { sendMessage } from '../../services/sendMessage';
 import PuzzleSVG from '../PuzzleSVGs/PuzzleSVG';
+import { generateScramble } from '../scrambleUtils';
 
 function Social({ user, deletePost }) {
   const [activeTab, setActiveTab] = useState(0);
@@ -187,6 +188,40 @@ function Social({ user, deletePost }) {
     }
   };
 
+  const sendSharedAo5Session = async () => {
+  if (!selectedConversation || !user?.UserID) return;
+
+  const event = selectedConversation.profileEvent || '333'; // or default fallback
+  const scrambles = Array.from({ length: 5 }, () => generateScramble(event));
+
+  const scrambleText = `[sharedAo5]${event}|${scrambles.join('||')}`;
+
+  const message = {
+    sender: user.UserID,
+    text: scrambleText,
+    timestamp: new Date().toISOString()
+  };
+
+  const fid = selectedConversation.id;
+  const conversationID = [user.UserID, fid].sort().join('#');
+
+  // Locally update
+  const updatedConversation = {
+    ...selectedConversation,
+    messages: [...(selectedConversation.messages || []), message]
+  };
+  setSelectedConversation(updatedConversation);
+  setConversations(prev =>
+    prev.map(conv => (conv.id === fid ? updatedConversation : conv))
+  );
+
+  try {
+    await sendMessage(conversationID, user.UserID, message.text);
+  } catch (err) {
+    console.error("Failed to send shared Ao5:", err);
+  }
+};
+
   if (!user) return <div>Please sign in to view your feed.</div>;
 
   return (
@@ -313,6 +348,8 @@ function Social({ user, deletePost }) {
                       onChange={(e) => setMessageInput(e.target.value)}
                       placeholder="Type a message..."
                     />
+                    <button onClick={sendSharedAo5Session}>Shared Ao5</button>
+
                     <button onClick={handleSendMessage}>Send</button>
                   </div>
                 </>
