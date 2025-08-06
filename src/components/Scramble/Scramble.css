@@ -3,4 +3,19 @@
     justify-content: center; /* Centers the scramble text horizontally */
   }
 
-  
+  .scramble-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.scramble-next-button {
+  font-size: 1.2em;
+  padding: 2px 8px;
+  cursor: pointer;
+  background-color: var(--primary-color, #0E171D);
+  color: white;
+  border: none;
+  border-radius: 4px;
+}

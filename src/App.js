@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import "./App.css";
 import Timer from "./components/Timer/Timer";
 import TimeList from "./components/TimeList/TimeList";
+import AveragesDisplay from "./components/AveragesDisplay/AveragesDisplay";
 import Profile from "./components/Profile/Profile";
 import Stats from "./components/Stats/Stats";
 import Social from "./components/Social/Social";
@@ -11,7 +12,6 @@ import PlayerBar from "./components/PlayerBar/PlayerBar";
 import EventSelector from "./components/EventSelector";
 import Scramble from "./components/Scramble/Scramble";
 import PuzzleSVG from "./components/PuzzleSVGs/PuzzleSVG";
-
 import SignInPopup from "./components/SignInPopup/SignInPopup";
 import { useSettings } from "./contexts/SettingsContext";
 import Detail from "./components/Detail/Detail";
@@ -123,6 +123,18 @@ function App() {
 
     return nextScramble;
   };
+
+  const skipToNextScramble = () => {
+  const eventScrambles = scrambles[currentEvent] || [];
+  const nextScramble = eventScrambles[1] || generateScramble(currentEvent);
+
+  setScrambles((prevScrambles) => {
+    const updatedScrambles = { ...prevScrambles };
+    updatedScrambles[currentEvent] = [...eventScrambles.slice(1), generateScramble(currentEvent)];
+    return updatedScrambles;
+  });
+};
+
 
     // map each event code to its SVG component
     /*
@@ -414,6 +426,7 @@ const deletePost = async (timestamp) => {
                     scramble={scrambles[currentEvent]?.[0] || ""}
                     currentEvent={currentEvent}
                     onScrambleClick={onScrambleClick}
+                    onForwardScramble={skipToNextScramble}
                   />
 
                   <PuzzleSVG
@@ -427,62 +440,10 @@ const deletePost = async (timestamp) => {
 
                 <Timer addTime={addSolve}/>
 
-                <div className="averages-display">
-  <p></p>
-  <p className="averagesTitle" onClick={() => setSelectedAverageSolves(currentSolves.slice(-5))}>AO5</p>
-  <p className="averagesTitle" onClick={() => setSelectedAverageSolves(currentSolves.slice(-12))}>AO12</p>
-  <p className="averagesTitle">CURRENT</p>
-
-  <p className="averagesTime" onClick={() => setSelectedAverageSolves(currentSolves.slice(-5))}>
-    {formatTime(avgOfFive)}
-  </p>
-  <p className="averagesTime" onClick={() => setSelectedAverageSolves(currentSolves.slice(-12))}>
-    {formatTime(avgOfTwelve)}
-  </p>
-
-  <p className="averagesTitle">BEST</p>
-  <p
-    className="averagesTime"
-    onClick={() => {
-      if (currentSolves.length >= 5) {
-        let bestSlice = [];
-        let best = Infinity;
-        for (let i = 0; i <= currentSolves.length - 5; i++) {
-          const slice = currentSolves.slice(i, i + 5);
-          const avg = calculateAverage(slice.map(s => s.time), true).average;
-          if (avg < best) {
-            best = avg;
-            bestSlice = slice;
-          }
-        }
-        setSelectedAverageSolves(bestSlice);
-      }
-    }}
-  >
-    {formatTime(bestAvgOfFive)}
-  </p>
-
-  <p
-    className="averagesTime"
-    onClick={() => {
-      if (currentSolves.length >= 12) {
-        let bestSlice = [];
-        let best = Infinity;
-        for (let i = 0; i <= currentSolves.length - 12; i++) {
-          const slice = currentSolves.slice(i, i + 12);
-          const avg = calculateAverage(slice.map(s => s.time), true).average;
-          if (avg < best) {
-            best = avg;
-            bestSlice = slice;
-          }
-        }
-        setSelectedAverageSolves(bestSlice);
-      }
-    }}
-  >
-    {formatTime(bestAvgOfTwelve)}
-  </p>
-</div>
+                <AveragesDisplay
+  currentSolves={currentSolves}
+  setSelectedAverageSolves={setSelectedAverageSolves}
+/>
 
 
 

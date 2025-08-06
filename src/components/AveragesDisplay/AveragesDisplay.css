@@ -1,0 +1,73 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-around;
+  height: 100%; /* assumes it's within a sized parent */
+  box-sizing: border-box;
+  padding: 0 20px;
+      right: 30px;
+    position: relative;
+}
+
+/* BPA/WPA row */
+.possible-averages {
+  display: flex;
+  justify-content: center;
+  gap: 80px;
+  margin-bottom: 8px;
+  font-size: 16px;
+  font-weight: bold;
+  color: #FDFFFC;
+  opacity: 0.9;
+  left: 20px;
+  position: relative;
+}
+
+.bpa {
+  color: #00FF00; /* light green */
+}
+
+.wpa {
+  color: #FF7D7D; /* light red */
+}
+
+/* Main averages grid */
+.averages-display {
+  display: grid;
+   grid-template-columns: 20% 70% 50%;
+  grid-template-rows: 10% 30% 20%;
+  gap: 6px;
+  color: #FDFFFC;
+  font-family: 'Jost', sans-serif;
+  font-weight: bold;
+  text-align: center;
+  margin-right: 20px;
+  margin-bottom: 20px;
+ 
+  width: 100%;
+  max-width: 500px;
+  align-items: center;
+      right: 60px;
+    position: relative;
+}
+
+.averagesTitle {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  color: #50B6FF;
+}
+
+.averagesTime {
+  font-size: 24pt;
+}
+
+.averagesTitle.best,
+.averagesTime.best {
+  font-size: 11pt;
+  opacity: 0.6;
+  color: #00FF00;
+}
+
+
+

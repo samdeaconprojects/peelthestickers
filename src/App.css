@@ -117,7 +117,7 @@ body {
 
 .Timer {
   z-index: 10;
-  font-size: 96pt;
+  font-size: 108pt;
   justify-content: center;
   align-items: center;
   display: flex;
@@ -168,6 +168,7 @@ body {
   word-wrap: break-word;
   overflow-wrap: break-word;
   text-align: center;
+  margin-left: 70px;
 
 }
 
@@ -180,32 +181,6 @@ select {
   background-color: transparent;
   color: #FDFFFC;
 
-}
-
-.averages-display {
-  display:grid;
-  grid-template-columns: 30% 70% 50%;
-  grid-template-rows: 10% 30% 20%;
-  color: #FDFFFC;
-  box-sizing: border-box;
-  align-items: center;
-  justify-content: center;
-  font-family: 'Jost', sans-serif;
-  font-weight: bold;
-  text-align: center;
-  margin-right: 70px;
-  margin-top: auto;
-  max-height: 25%;
-}
-
-.averagesTime {
-  font-size: 20pt;
-}
-
-.averagesTitle {
-  opacity: 70%;
-  color: #50B6FF;
-  font-size: small;
 }
 
 .TimeList {
