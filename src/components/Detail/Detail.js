@@ -5,7 +5,7 @@ import { getScrambledFaces } from "../scrambleUtils";
 import { formatTime } from '../TimeList/TimeUtils';
 import { updateSolvePenalty } from '../../services/updateSolvePenalty';
 
-function Detail({ solve, onClose, deleteTime, addPost, showNavButtons, onPrev, onNext }) {
+function Detail({ solve, onClose, deleteTime, addPost, showNavButtons, onPrev, onNext, applyPenalty }) {
   const isArray = Array.isArray(solve);
   const [notes, setNotes] = useState(
     isArray ? solve.map(s => s.note || '') : solve.note || 'double x-cross'
@@ -34,6 +34,32 @@ function Detail({ solve, onClose, deleteTime, addPost, showNavButtons, onPrev, o
     }
   };
 
+  const handlePenaltyChange = async (penalty, index = null) => {
+    const s = isArray ? solve[index] : solve;
+    const originalTime = s.originalTime || s.time;
+    const timestamp = s.datetime;
+    const userID = s.PK?.split('USER#')[1] || s.userID;
+
+    if (!userID || !timestamp) {
+      console.error('❌ Missing userID or timestamp:', s);
+      return;
+    }
+
+    const newTime =
+      penalty === '+2' ? originalTime + 2000 :
+      penalty === 'DNF' ? Number.MAX_SAFE_INTEGER :
+      originalTime;
+
+    try {
+      await updateSolvePenalty(userID, timestamp, originalTime, penalty);
+      if (typeof applyPenalty === "function") {
+        applyPenalty(timestamp, penalty, newTime);
+      }
+    } catch (err) {
+      console.error("❌ Penalty update failed:", err);
+    }
+  };
+
   const handleDelete = (index) => {
     if (!isArray) {
       deleteTime();
@@ -54,50 +80,11 @@ function Detail({ solve, onClose, deleteTime, addPost, showNavButtons, onPrev, o
     onClose();
   };
 
-  const handlePenaltyChange = async (penalty, index = null) => {
-  const solveToUpdate = isArray ? solve[index] : solve;
-  const originalTime = solveToUpdate.originalTime || solveToUpdate.time;
-  const timestamp =
-  solveToUpdate?.SK?.startsWith("SOLVE#")
-    ? solveToUpdate.SK.split("SOLVE#")[1]
-    : solveToUpdate.DateTime;
-
-
-
-  const userID = solveToUpdate.PK?.split('USER#')[1] || solveToUpdate.userID;
-
-  if (!userID || !timestamp) {
-    console.error('Missing userID or timestamp in solve:', solveToUpdate);
-    return;
-  }
-
-  const newTime = penalty === '+2' ? originalTime + 2000
-                : penalty === 'DNF' ? Number.MAX_SAFE_INTEGER
-                : originalTime;
-
-  await updateSolvePenalty(userID, timestamp, originalTime, penalty);
-
-  if (isArray) {
-    const updated = [...solve];
-    updated[index].penalty = penalty;
-    updated[index].time = newTime;
-    setNotes(updated.map(s => s.note || ''));
-  } else {
-    solve.penalty = penalty;
-    solve.time = newTime;
-    setNotes(solve.note || '');
-  }
-};
-
-
   const renderSolveCard = (item, index) => (
     <div key={index} className="detailSolveCard">
       <div className='detailTopRow'>
-        <div className='detailTime'>{formatTime(item.time)}</div>
-        <div
-          className='detailScramble'
-          style={{ fontSize: getScrambleFontSize(item.event) }}
-        >
+        <div className='detailTime'>{formatTime(item.time, false, item.penalty)}</div>
+        <div className='detailScramble' style={{ fontSize: getScrambleFontSize(item.event) }}>
           {item.scramble}
         </div>
       </div>
@@ -142,11 +129,8 @@ function Detail({ solve, onClose, deleteTime, addPost, showNavButtons, onPrev, o
         {!isArray ? (
           <div className='detailFlexCol'>
             <div className='detailTopRow'>
-              <div className='detailTime'>{formatTime(solve.time)}</div>
-              <div
-                className='detailScramble'
-                style={{ fontSize: getScrambleFontSize(solve.event) }}
-              >
+              <div className='detailTime'>{formatTime(solve.time, false, solve.penalty)}</div>
+              <div className='detailScramble' style={{ fontSize: getScrambleFontSize(solve.event) }}>
                 {solve.scramble}
               </div>
             </div>

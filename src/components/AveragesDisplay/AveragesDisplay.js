@@ -39,8 +39,8 @@ if (lastFour.length === 4) {
     
     <div className="container">
     <div className="possible-averages">
-  <span className="bpa">BPA: {bpa}</span>
-  <span className="wpa">WPA: {wpa}</span>
+  <span className="bpa">BPA  {bpa}</span>
+  <span className="wpa">WPA  {wpa}</span>
 </div>
 
     <div className="averages-display">
@@ -49,7 +49,7 @@ if (lastFour.length === 4) {
       <p></p>
       <p className="averagesTitle" onClick={() => setSelectedAverageSolves(currentSolves.slice(-5))}>AO5</p>
       <p className="averagesTitle" onClick={() => setSelectedAverageSolves(currentSolves.slice(-12))}>AO12</p>
-      <p className="averagesTitle">CURRENT</p>
+      <p className="averagesTitle" style={{ opacity: 0.5 }}>CURRENT</p>
 
       <p className="averagesTime" onClick={() => setSelectedAverageSolves(currentSolves.slice(-5))}>
         {formatTime(avgOfFive)}

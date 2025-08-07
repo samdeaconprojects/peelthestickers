@@ -292,6 +292,22 @@ const handleSignUp = async (username, password) => {
       }
     }
   };
+
+  const applyPenalty = (timestamp, penalty, updatedTime) => {
+  const updatedSessions = { ...sessions };
+  const eventSolves = updatedSessions[currentEvent] || [];
+
+  const updatedSolves = eventSolves.map(solve => {
+    if (solve.datetime === timestamp) {
+      return { ...solve, penalty, time: updatedTime };
+    }
+    return solve;
+  });
+
+  updatedSessions[currentEvent] = updatedSolves;
+  setSessions(updatedSessions);
+};
+
   
 
   const deleteTime = async (eventKey, index) => {
@@ -483,6 +499,7 @@ const deletePost = async (timestamp) => {
                         Math.min(selectedAverageSolves.length - 1, i + 1)
                       )
                     }
+                    applyPenalty={applyPenalty}
                   />
                 )}
               </>

@@ -2,12 +2,12 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-around;
+  justify-content: space-between;
   height: 100%; /* assumes it's within a sized parent */
   box-sizing: border-box;
   padding: 0 20px;
-      right: 30px;
-    position: relative;
+  right: 40px;
+  position: relative;
 }
 
 /* BPA/WPA row */
@@ -16,10 +16,10 @@
   justify-content: center;
   gap: 80px;
   margin-bottom: 8px;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: bold;
   color: #FDFFFC;
-  opacity: 0.9;
+  opacity: 0.85;
   left: 20px;
   position: relative;
 }
@@ -53,7 +53,7 @@
 }
 
 .averagesTitle {
-  font-size: 0.75rem;
+  font-size: 12pt;
   opacity: 0.7;
   color: #50B6FF;
 }
