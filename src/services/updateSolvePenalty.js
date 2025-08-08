@@ -13,9 +13,12 @@ export const updateSolvePenalty = async (userID, solveTimestamp, originalTime, p
     },
     UpdateExpression: `
       SET Penalty = :penalty,
-          Time = :updatedTime,
+          #Time = :updatedTime,
           OriginalTime = if_not_exists(OriginalTime, :originalTime)
     `,
+    ExpressionAttributeNames: {
+      "#Time": "Time",
+    },
     ExpressionAttributeValues: {
       ":penalty": penalty,
       ":updatedTime": updatedTime,
@@ -27,7 +30,7 @@ export const updateSolvePenalty = async (userID, solveTimestamp, originalTime, p
     await dynamoDB.update(params).promise();
     console.log("✅ Solve penalty updated:", { userID, solveTimestamp, penalty });
   } catch (err) {
-    console.error("❌ Error updating penalty:", err);
+    console.error("❌ Penalty update failed:", err);
     throw err;
   }
 };

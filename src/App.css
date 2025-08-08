@@ -243,3 +243,23 @@ select {
 .Page {
   width: 100%;
 }
+
+
+
+
+/* Put under your existing rules if needed */
+.cube-and-event {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.left-slot-auth .auth-button {
+  height: 35px;
+  background-color: transparent;
+  border: solid #FFFFFF 2px;
+  border-radius: 8px;
+  color: #FFFFFF;
+  opacity: 50%;
+}
+.left-slot-auth .auth-button:hover { opacity: 100%; cursor: pointer; }

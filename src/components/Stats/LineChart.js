@@ -10,7 +10,17 @@ function LineChart({ solves, title, deleteTime, addPost }) {
   const [selectedSolve, setSelectedSolve] = useState(null);
   const [selectedSolveIndex, setSelectedSolveIndex] = useState(null);
 
-  const times = solves.map(solve => solve.time);
+  // Only use originalTime for DNFs. Skip DNFs with no originalTime.
+  const validSolves = solves.filter(solve => {
+    if (solve.penalty === "DNF") {
+      return typeof solve.originalTime === "number" && isFinite(solve.originalTime);
+    }
+    return typeof solve.time === "number" && isFinite(solve.time);
+  });
+
+  const times = validSolves.map(solve =>
+    solve.penalty === "DNF" ? solve.originalTime : solve.time
+  );
 
   const minTime = Math.min(...times);
   const maxTime = Math.max(...times);
@@ -25,27 +35,32 @@ function LineChart({ solves, title, deleteTime, addPost }) {
     }
   };
 
-  // Pass both the solve object and its index for easy reference
+  const data = validSolves.map((solve, index) => {
+    const baseTime = solve.penalty === "DNF" ? solve.originalTime : solve.time;
 
-  const data = solves.map((solve, index) => ({
-    label: `${index + 1}`,
-    x: index,
-    y: solve.time / 1000, // Convert milliseconds to seconds
-    color: getColor(solve.time),
-    time: formatTime(solve.time),
-    solve: solve,
-    solveIndex: index,   // This is the displayed index
-    fullIndex: solve.fullIndex, // The correct index in sessions[statsEvent]
-  }));
-  
+    return {
+      label: `${index + 1}`,
+      x: index,
+      y: baseTime / 1000,
+      color: getColor(baseTime),
+      time: formatTime(baseTime),
+      solve,
+      solveIndex: index,
+      fullIndex: solve.fullIndex,
+      isDNF: solve.penalty === "DNF"
+    };
+  });
 
-  const solveCountText = "Solve Count: " + times.length;
+  const solveCountText = "Solve Count: " + data.length;
 
   const styles = {
     chartComponentsContainer: {
-      display: 'grid',  alignItems: 'center'
+      display: 'grid',
+      alignItems: 'center'
     },
-    chartWrapper: {  alignSelf: 'flex-start' }
+    chartWrapper: {
+      alignSelf: 'flex-start'
+    }
   };
 
   return (
@@ -65,12 +80,11 @@ function LineChart({ solves, title, deleteTime, addPost }) {
           onDotClick={(solve, solveIndex) => {
             console.log("Clicked Solve:", solve);
             console.log("Displayed Index:", solveIndex);
-            console.log("Actual Full Index:", solve.fullIndex); // Debugging log
-          
+            console.log("Actual Full Index:", solve.fullIndex);
+
             setSelectedSolve(solve);
-            setSelectedSolveIndex(solve.fullIndex); // Set the true index
+            setSelectedSolveIndex(solve.fullIndex);
           }}
-          
         />
       </div>
       <div />

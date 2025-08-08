@@ -6,9 +6,11 @@ export const updateSolve = async (userID, timestamp, updates) => {
   const expressionAttributeValues = {};
 
   for (const [key, value] of Object.entries(updates)) {
-    updateExpressions.push(`#${key} = :${key}`);
-    expressionAttributeNames[`#${key}`] = key;
-    expressionAttributeValues[`:${key}`] = value;
+    const attrName = key === "Time" ? "#Time" : `#${key}`;
+    const attrValue = key === "Time" ? ":Time" : `:${key}`;
+    updateExpressions.push(`${attrName} = ${attrValue}`);
+    expressionAttributeNames[attrName] = key;
+    expressionAttributeValues[attrValue] = value;
   }
 
   const params = {
@@ -24,9 +26,9 @@ export const updateSolve = async (userID, timestamp, updates) => {
 
   try {
     await dynamoDB.update(params).promise();
-    console.log("Solve updated.");
+    console.log("✅ Solve updated in DynamoDB.");
   } catch (err) {
-    console.error("Error updating solve:", err);
+    console.error("❌ Error updating solve:", err);
     throw err;
   }
 };

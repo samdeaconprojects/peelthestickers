@@ -1,5 +1,7 @@
 .event-selector-container {
     position: relative;
+    right: 10px;
+    bottom: 80px;
     font-weight: 500;
     font-size: 16pt;
     margin-top: 20px;

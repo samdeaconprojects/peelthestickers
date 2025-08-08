@@ -176,16 +176,32 @@ const LineChartBuilder = ({
           const y =
             chartHeight - (element.y / maximumYFromData) * chartHeight + padding;
           return (
-            <circle
-              key={index}
-              cx={x}
-              cy={y}
-              r={5} // Radius of the circle
-              fill={element.color} // Color of the circle
-              onMouseOver={(e) => handleMouseOver(e, element.time)}
-              onMouseOut={handleMouseOut}
-              onClick={() => onDotClick(element.solve, element.fullIndex)} // Trigger the callback when clicked
-            />
+            element.isDNF ? (
+  <circle
+    key={index}
+    cx={x}
+    cy={y}
+    r={6}
+    fill="none"
+    stroke="red"
+    strokeWidth={2}
+    onMouseOver={(e) => handleMouseOver(e, element.time)}
+    onMouseOut={handleMouseOut}
+    onClick={() => onDotClick(element.solve, element.fullIndex)}
+  />
+) : (
+  <circle
+    key={index}
+    cx={x}
+    cy={y}
+    r={5}
+    fill={element.color}
+    onMouseOver={(e) => handleMouseOver(e, element.time)}
+    onMouseOut={handleMouseOut}
+    onClick={() => onDotClick(element.solve, element.fullIndex)}
+  />
+)
+
           );
         })}
       </svg>

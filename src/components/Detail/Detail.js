@@ -5,7 +5,7 @@ import { getScrambledFaces } from "../scrambleUtils";
 import { formatTime } from '../TimeList/TimeUtils';
 import { updateSolvePenalty } from '../../services/updateSolvePenalty';
 
-function Detail({ solve, onClose, deleteTime, addPost, showNavButtons, onPrev, onNext, applyPenalty }) {
+function Detail({ solve, userID, onClose, deleteTime, addPost, showNavButtons, onPrev, onNext, applyPenalty, setSessions }) {
   const isArray = Array.isArray(solve);
   const [notes, setNotes] = useState(
     isArray ? solve.map(s => s.note || '') : solve.note || 'double x-cross'
@@ -35,13 +35,15 @@ function Detail({ solve, onClose, deleteTime, addPost, showNavButtons, onPrev, o
   };
 
   const handlePenaltyChange = async (penalty, index = null) => {
+    console.log("🧠 Resolved userID:", userID);
+    
     const s = isArray ? solve[index] : solve;
     const originalTime = s.originalTime || s.time;
     const timestamp = s.datetime;
-    const userID = s.PK?.split('USER#')[1] || s.userID;
+    const resolvedUserID = userID || s.PK?.split('USER#')[1] || s.userID;
 
-    if (!userID || !timestamp) {
-      console.error('❌ Missing userID or timestamp:', s);
+    if (!resolvedUserID || !timestamp) {
+      console.error('❌ Missing userID or timestamp:', { resolvedUserID, timestamp, s });
       return;
     }
 
@@ -51,7 +53,29 @@ function Detail({ solve, onClose, deleteTime, addPost, showNavButtons, onPrev, o
       originalTime;
 
     try {
-      await updateSolvePenalty(userID, timestamp, originalTime, penalty);
+      await updateSolvePenalty(resolvedUserID, timestamp, originalTime, penalty);
+
+      const updatedSolve = {
+        ...s,
+        penalty,
+        time: newTime,
+        originalTime,
+      };
+
+      if (typeof setSessions === "function") {
+        setSessions(prev => {
+          const updated = { ...prev };
+          const session = updated[s.event] || [];
+          const i = session.findIndex(sol => sol.datetime === s.datetime);
+          if (i !== -1) session[i] = updatedSolve;
+          return updated;
+        });
+      }
+
+      if (!isArray) {
+        Object.assign(s, updatedSolve); // In-place update
+      }
+
       if (typeof applyPenalty === "function") {
         applyPenalty(timestamp, penalty, newTime);
       }

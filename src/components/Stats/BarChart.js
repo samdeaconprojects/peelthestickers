@@ -3,20 +3,16 @@ import React, { useState, useEffect, useRef } from "react";
 function BarChart({ solves }) {
   const containerRef = useRef(null);
 
-  // Tooltip state
-  const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, count: 0 });
-
-  // Chart size based on parent container
+  const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, count: 0, label: "" });
   const [chartWidth, setChartWidth] = useState(0);
-  const [chartHeight, setChartHeight] = useState(250);
-  const margin = 0.05; // 5% margin
-  const padding = chartWidth * margin; // Dynamic padding
+  const [chartHeight] = useState(250);
+  const margin = 0.05;
+  const padding = chartWidth * margin;
 
   useEffect(() => {
-    // Dynamically get container width
     const updateSize = () => {
       if (containerRef.current) {
-        setChartWidth(containerRef.current.clientWidth * 0.95); // 95% of container width
+        setChartWidth(containerRef.current.clientWidth * 0.95);
       }
     };
     updateSize();
@@ -28,31 +24,47 @@ function BarChart({ solves }) {
     return <div ref={containerRef}>No data available for this chart.</div>;
   }
 
-  // Extract solve times and normalize to seconds
-  const times = solves.map((solve) => solve.time);
-  const minTime = Math.floor(Math.min(...times) / 1000);
-  const maxTime = Math.ceil(Math.max(...times) / 1000);
+  // Convert solve times
+  const times = solves.map((solve) => {
+    if (solve.penalty === "+2") return (solve.originalTime || solve.time) + 2000;
+    if (solve.penalty === "DNF") return "DNF";
+    return solve.time;
+  });
 
-  // Count the number of solves per second range
-  const counts = Array(maxTime - minTime + 1).fill(0);
-  times.forEach((time) => counts[Math.floor(time / 1000) - minTime]++);
+  const numericTimes = times.filter((t) => typeof t === "number");
+  const dnfCount = times.filter((t) => t === "DNF").length;
+
+  const minTime = Math.floor(Math.min(...numericTimes) / 1000);
+  const maxTime = Math.ceil(Math.max(...numericTimes) / 1000);
+
+  const bucketCount = Math.max(1, maxTime - minTime + 1);
+  const counts = Array(bucketCount + (dnfCount > 0 ? 1 : 0)).fill(0);
+
+  numericTimes.forEach((time) => {
+    const bucketIndex = Math.floor(time / 1000) - minTime;
+    counts[bucketIndex]++;
+  });
+
+  if (dnfCount > 0) {
+    counts[counts.length - 1] = dnfCount;
+  }
 
   const barWidth = (chartWidth - 2 * padding) / counts.length;
   const maxCount = Math.max(...counts);
 
-  // Function to determine color gradient
   const getColor = (index) => {
+    if (dnfCount > 0 && index === counts.length - 1) return "crimson";
     const time = minTime + index;
-    const normalizedValue = (time - minTime) / (maxTime - minTime);
-    const r = Math.floor(255 * normalizedValue);
-    const g = Math.floor(255 * (1 - normalizedValue));
+    const normalized = (time - minTime) / (maxTime - minTime);
+    const r = Math.floor(255 * normalized);
+    const g = Math.floor(255 * (1 - normalized));
     return `rgb(${r}, ${g}, 100)`;
   };
 
   return (
     <div ref={containerRef} style={{ position: "relative", width: "80%", textAlign: "center", padding: "5%" }}>
       <svg width={chartWidth} height={chartHeight}>
-        {/* X & Y Axes */}
+        {/* Axes */}
         <line x1={padding} y1={chartHeight - padding} x2={chartWidth - padding} y2={chartHeight - padding} stroke="#ccc" />
         <line x1={padding} y1={padding} x2={padding} y2={chartHeight - padding} stroke="#ccc" />
 
@@ -61,47 +73,36 @@ function BarChart({ solves }) {
           const barHeight = (count / maxCount) * (chartHeight - 2 * padding);
           const barX = padding + index * barWidth;
           const barY = chartHeight - padding - barHeight;
+          const label = dnfCount > 0 && index === counts.length - 1 ? "DNF" : `${minTime + index}`;
 
           return (
-            <rect
-              key={index}
-              x={barX}
-              y={barY}
-              width={barWidth - 2}
-              height={barHeight}
-              rx={5} // Rounded corners
-              ry={5}
-              fill={getColor(index)}
-              style={{
-                transition: "all 0.2s ease-in-out",
-                transformOrigin: "bottom",
-              }}
-              onMouseOver={(e) => {
-                setTooltip({
-                  visible: true,
-                  x: barX + barWidth / 2,
-                  y: barY - 10,
-                  count,
-                });
-              }}
-              onMouseOut={() => setTooltip({ visible: false, x: 0, y: 0, count: 0 })}
-            />
+            <g key={index}>
+              <rect
+                x={barX}
+                y={barY}
+                width={barWidth - 2}
+                height={barHeight}
+                rx={5}
+                ry={5}
+                fill={getColor(index)}
+                style={{ transition: "all 0.2s ease-in-out", transformOrigin: "bottom" }}
+                onMouseOver={() =>
+                  setTooltip({ visible: true, x: barX + barWidth / 2, y: barY - 10, count, label })
+                }
+                onMouseOut={() => setTooltip({ visible: false, x: 0, y: 0, count: 0, label: "" })}
+              />
+              <text
+                x={barX + barWidth / 2}
+                y={chartHeight - padding + 15}
+                textAnchor="middle"
+                fontSize="10px"
+                fill="white"
+              >
+                {label}
+              </text>
+            </g>
           );
         })}
-
-        {/* X-axis labels */}
-        {counts.map((_, index) => (
-          <text
-            key={index}
-            x={padding + index * barWidth + barWidth / 2}
-            y={chartHeight - padding + 15}
-            textAnchor="middle"
-            fontSize="10px"
-            fill="white"
-          >
-            {minTime + index}
-          </text>
-        ))}
 
         {/* Y-axis labels */}
         {[0, maxCount].map((count, index) => (
@@ -135,7 +136,7 @@ function BarChart({ solves }) {
             whiteSpace: "nowrap",
           }}
         >
-          Count: {tooltip.count}
+          {tooltip.label}: {tooltip.count}
         </div>
       )}
     </div>

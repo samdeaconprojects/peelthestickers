@@ -39,33 +39,45 @@ function StatsSummary({ solves }) {
   const [bestAverages, setBestAverages] = useState({});
 
   useEffect(() => {
-    if (solves && solves.length > 0) {
-      const times = solves.map(solve => solve.time);
+  if (solves && solves.length > 0) {
+    // Only include solves that are NOT DNFs for numeric stats
+    const filteredSolves = solves.filter(s => s.penalty !== 'DNF');
+    const times = filteredSolves.map(s => s.time);
 
-      // Calculate basic stats
-      setAverage(times.reduce((sum, t) => sum + t, 0) / times.length);
-      setMedian(calculateMedianTime(times));
-      setStdDev(calculateStandardDeviation(times));
-      setBestSingle(Math.min(...times)); // Find the fastest single solve
-
-      // Define the different AoX values to track
-      const aoValues = [5, 12, 50, 100, 1000, 10000, 100000, 1000000];
-
-      // Compute current and best averages
-      let newCurrentAverages = {};
-      let newBestAverages = {};
-
-      aoValues.forEach(n => {
-        if (times.length >= n) {
-          newCurrentAverages[n] = calculateAverage(times.slice(-n), true).average || "N/A";
-          newBestAverages[n] = calculateBestAverage(times, n) || "N/A";
-        }
-      });
-
-      setCurrentAverages(newCurrentAverages);
-      setBestAverages(newBestAverages);
+    if (times.length === 0) {
+      setAverage(null);
+      setMedian(null);
+      setStdDev(null);
+      setBestSingle(null);
+      setCurrentAverages({});
+      setBestAverages({});
+      return;
     }
-  }, [solves]);
+
+    // Calculate basic stats
+    setAverage(times.reduce((sum, t) => sum + t, 0) / times.length);
+    setMedian(calculateMedianTime(times));
+    setStdDev(calculateStandardDeviation(times));
+    setBestSingle(Math.min(...times)); // Find the fastest single solve
+
+    // Define the different AoX values to track
+    const aoValues = [5, 12, 50, 100, 1000, 10000, 100000, 1000000];
+
+    let newCurrentAverages = {};
+    let newBestAverages = {};
+
+    aoValues.forEach(n => {
+      if (times.length >= n) {
+        newCurrentAverages[n] = calculateAverage(times.slice(-n), true).average || "N/A";
+        newBestAverages[n] = calculateBestAverage(times, n) || "N/A";
+      }
+    });
+
+    setCurrentAverages(newCurrentAverages);
+    setBestAverages(newBestAverages);
+  }
+}, [solves]);
+
 
   if (!solves || solves.length === 0) {
     return <div>No solves available</div>;

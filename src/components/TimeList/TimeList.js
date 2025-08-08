@@ -9,7 +9,7 @@ import {
   getOveralls
 } from './TimeUtils';
 
-function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPost }) {
+function TimeList({ user, applyPenalty, solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPost }) {
   const { settings } = useSettings();
   const isHorizontal = inPlayerBar ? false : settings.horizontalTimeList;
 
@@ -37,6 +37,8 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPos
       </div>
     );
   }
+console.log("USER ID TIMELIST");
+              console.log(user);
 
   const times = solves.map(solve => solve.time);
   const overallData = getOveralls(times);
@@ -69,7 +71,7 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPos
               className={`TimeItem ${isBest ? 'overall-border-min' : ''} ${isWorst ? 'overall-border-max' : ''} ${isCurrentFive ? 'current-five' : ''}`}
               key={index}
               onClick={() => {
-                setSelectedSolve(solve);
+                setSelectedSolve({ ...solve, userID: user?.UserID });
                 setSelectedSolveIndex(solveIndex);
               }}
             >
@@ -100,7 +102,6 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPos
   const bestTime = Math.min(...horizontalTimes);
   const worstTime = Math.max(...horizontalTimes);
 
-  // ---- Precompute AO5 and AO12 arrays ----
   const ao5s = horizontalSolves.map((_, index, arr) => {
     const actualIndex = solves.length - arr.length + index;
     const slice = solves.slice(actualIndex - 4, actualIndex + 1);
@@ -122,50 +123,54 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPos
     <div className="time-list-container">
       {isHorizontal ? (
         <div className="horizontal-time-list">
+          {/* AO12 */}
           <div className="horizontal-row ao12-row">
-  {horizontalSolves.map((_, index, arr) => {
-    const actualIndex = solves.length - arr.length + index;
-    const slice = solves.slice(actualIndex - 11, actualIndex + 1);
-    if (slice.length === 12) {
-      const avg = calculateAverage(slice.map(s => s.time), true).average;
-      const textClass = avg === bestAo12 ? 'best-time' : avg === worstAo12 ? 'worst-time' : '';
-      return (
-        <div
-          key={index}
-          className={`ao12 TimeItem ${textClass}`}
-          onClick={() => setSelectedSolveList(slice)}
-        >
-          {formatTime(avg)}
-        </div>
-      );
-    }
-    return <div key={index} className="ao12 empty TimeItem"></div>;
-  })}
-  <div className="TimeItem row-label">AO12</div>
-</div>
+            {horizontalSolves.map((_, index, arr) => {
+              
+              const actualIndex = solves.length - arr.length + index;
+              const slice = solves.slice(actualIndex - 11, actualIndex + 1);
+              if (slice.length === 12) {
+                const avg = calculateAverage(slice.map(s => s.time), true).average;
+                const textClass = avg === bestAo12 ? 'best-time' : avg === worstAo12 ? 'worst-time' : '';
+                return (
+                  <div
+                    key={index}
+                    className={`ao12 TimeItem ${textClass}`}
+                    onClick={() => setSelectedSolveList(slice.map(s => ({ ...s, userID: user?.UserID })))}
+                  >
+                    {formatTime(avg)}
+                  </div>
+                );
+              }
+              return <div key={index} className="ao12 empty TimeItem"></div>;
+            })}
+            <div className="TimeItem row-label">AO12</div>
+          </div>
 
+          {/* AO5 */}
           <div className="horizontal-row ao5-row">
-  {horizontalSolves.map((_, index, arr) => {
-    const actualIndex = solves.length - arr.length + index;
-    const slice = solves.slice(actualIndex - 4, actualIndex + 1);
-    if (slice.length === 5) {
-      const avg = calculateAverage(slice.map(s => s.time), true).average;
-      const textClass = avg === bestAo5 ? 'best-time' : avg === worstAo5 ? 'worst-time' : '';
-      return (
-        <div
-          key={index}
-          className={`ao5 TimeItem ${textClass}`}
-          onClick={() => setSelectedSolveList(slice)}
-        >
-          {formatTime(avg)}
-        </div>
-      );
-    }
-    return <div key={index} className="ao5 empty TimeItem"></div>;
-  })}
-  <div className="TimeItem row-label">AO5</div>
-</div>
+            {horizontalSolves.map((_, index, arr) => {
+              const actualIndex = solves.length - arr.length + index;
+              const slice = solves.slice(actualIndex - 4, actualIndex + 1);
+              if (slice.length === 5) {
+                const avg = calculateAverage(slice.map(s => s.time), true).average;
+                const textClass = avg === bestAo5 ? 'best-time' : avg === worstAo5 ? 'worst-time' : '';
+                return (
+                  <div
+                    key={index}
+                    className={`ao5 TimeItem ${textClass}`}
+                    onClick={() => setSelectedSolveList(slice.map(s => ({ ...s, userID: user?.UserID })))}
+                  >
+                    {formatTime(avg)}
+                  </div>
+                );
+              }
+              return <div key={index} className="ao5 empty TimeItem"></div>;
+            })}
+            <div className="TimeItem row-label">AO5</div>
+          </div>
 
+          {/* Times */}
           <div className="horizontal-row times-row">
             {horizontalSolves.map((solve, index, arr) => {
               const actualIndex = solves.length - arr.length + index;
@@ -177,7 +182,7 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPos
                   key={index}
                   className={`TimeItem ${isBest ? 'dashed-border-min' : ''} ${isWorst ? 'dashed-border-max' : ''}`}
                   onClick={() => {
-                    setSelectedSolve(solve);
+                    setSelectedSolve({ ...solve, userID: user?.UserID });
                     setSelectedSolveIndex(actualIndex);
                   }}
                 >
@@ -189,6 +194,7 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPos
             <div className="TimeItem row-label time-label">TIME</div>
           </div>
 
+          {/* Solve count */}
           <div className="horizontal-row count-row">
             {horizontalSolves.map((_, index, arr) => {
               const actualIndex = solves.length - arr.length + index + 1;
@@ -200,27 +206,30 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPos
           {selectedSolve && (
             <Detail
               solve={selectedSolve}
+              userID={user?.UserID}
               onClose={() => setSelectedSolve(null)}
               deleteTime={() => deleteTime(selectedSolveIndex)}
               addPost={addPost}
+              applyPenalty={applyPenalty}
             />
           )}
           {selectedSolveList && (
-  <Detail
-    solve={selectedSolveList[0]}
-    onClose={() => setSelectedSolveList(null)}
-    deleteTime={() => {}}
-    addPost={() =>
-      addPost({
-        note: 'Average solve group',
-        event: selectedSolveList[0]?.event,
-        solveList: selectedSolveList,
-        comments: [],
-      })
-    }
-  />
-)}
-
+            <Detail
+              solve={selectedSolveList}
+              userID={user?.UserID}
+              onClose={() => setSelectedSolveList(null)}
+              deleteTime={() => {}}
+              applyPenalty={applyPenalty}
+              addPost={() =>
+                addPost({
+                  note: 'Average solve group',
+                  event: selectedSolveList[0]?.event,
+                  solveList: selectedSolveList,
+                  comments: [],
+                })
+              }
+            />
+          )}
         </div>
       ) : (
         <div className="time-list-content">
@@ -230,9 +239,11 @@ function TimeList({ solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPos
           {selectedSolve && (
             <Detail
               solve={selectedSolve}
+              userID={user?.UserID}
               onClose={() => setSelectedSolve(null)}
               deleteTime={() => deleteTime(selectedSolveIndex)}
               addPost={addPost}
+              applyPenalty={applyPenalty}
             />
           )}
         </div>
