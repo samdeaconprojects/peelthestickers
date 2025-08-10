@@ -75,113 +75,80 @@ export function generateScramble(currentEvent) {
   if (currentEvent === "CLOCK") {
     return generateClockScramble();
   }
-  
-    let n = currentEventToN(currentEvent);
-    console.log("n: " + n);
 
-    let faceArray = ["U", "D", "R", "L", "B", "F"];
-    const modArray = ["'", "", "2"];
-    const nudgeArray = [-1, 0, 1];
-    let moves = 0;
+  const n = currentEventToN(currentEvent);
 
-    if (n === 2) {
-        moves = 10;
-        faceArray = ["U", "R", "F"];
-    } else if (n === 3) {
-        moves = 24;
-    } else if (n === 4) {
-        moves = 45;
+  const ALL_FACES = n === 2 ? ["U", "R", "F"] : ["U", "D", "R", "L", "F", "B"];
+  const MODS = ["'", "", "2"];
+  const NUDGE = [-1, 0, 1];
+  const OPP = { U: "D", D: "U", R: "L", L: "R", F: "B", B: "F" };
+
+  let moves =
+    n === 2 ? 10 :
+    n === 3 ? 24 :
+    n === 4 ? 45 :
+    (n - 2) * 20;
+
+  moves += NUDGE[Math.floor(Math.random() * NUDGE.length)];
+
+  const parts = [];
+  let prevFace = null;        // last face used (e.g. 'U')
+  let prevPrevFace = null;    // face from two moves ago
+  let prevLayers = 1;         // last move layers
+
+  for (let i = 0; i < moves; i++) {
+    // how many layers this move?
+    const maxLayers = n > 3 ? Math.floor(n / 2) : 1;
+    const layers = maxLayers > 1 ? (1 + Math.floor(Math.random() * maxLayers)) : 1;
+
+    // start with all faces each time
+    let candidates = ALL_FACES.slice();
+
+    // 1) never repeat the exact same face immediately (no A A)
+    if (prevFace) {
+      candidates = candidates.filter(f => f !== prevFace);
+    }
+
+    // 2) even cubes: if previous was wide and this is wide, forbid the opposite face (no wide A then wide opp(A))
+    if (n % 2 === 0 && layers > 1 && prevLayers > 1 && prevFace) {
+      const oppPrev = OPP[prevFace];
+      candidates = candidates.filter(f => f !== oppPrev);
+    }
+
+    // 3) block the A, opp(A), A bounce (allow U→D, but forbid U→D→U)
+    if (prevPrevFace && prevFace === OPP[prevPrevFace]) {
+      candidates = candidates.filter(f => f !== prevPrevFace);
+    }
+
+    // safety fallback (very rare)
+    if (candidates.length === 0) {
+      candidates = ALL_FACES.filter(f => f !== prevFace);
+    }
+
+    // pick a face
+    const face = candidates[Math.floor(Math.random() * candidates.length)];
+
+    // build the move token
+    let move = "";
+    if (n > 3 && layers > 1) {
+      if (layers > 2) move += String(layers);
+      move += face + "w";
     } else {
-        moves = (n - 2) * 20;
+      move += face;
     }
+    move += MODS[Math.floor(Math.random() * MODS.length)];
 
-    moves += nudgeArray[Math.floor(Math.random() * nudgeArray.length)];
+    parts.push(move);
 
-    let randomScramble = "";
-    let faceTemp = "";
-    let prevLayers = 1; // track layer width of previous move
-    let secondFaceTemp = "";
+    // roll state
+    prevPrevFace = prevFace;
+    prevFace = face;
+    prevLayers = layers;
+  }
 
-    for (let i = 0; i < moves; i++) {
-        let move = "";
-
-        if (n > 3) {
-            let layers = Math.floor(Math.random() * (Math.floor(n / 2) + 1 - 1) + 1);
-
-            // Prevent consecutive opposite-face max-layer moves on even cubes
-            if (i > 0 && n % 2 === 0 && layers > 1 && prevLayers > 1) {
-                // if current face is opposite of previous face
-                let isOpposite = (faceTemp === "U" && faceArray.includes("D")) || (faceTemp === "D" && faceArray.includes("U")) ||
-                                 (faceTemp === "R" && faceArray.includes("L")) || (faceTemp === "L" && faceArray.includes("R")) ||
-                                 (faceTemp === "F" && faceArray.includes("B")) || (faceTemp === "B" && faceArray.includes("F"));
-
-                if (isOpposite) {
-                    // Remove opposite face temporarily
-                    faceArray = faceArray.filter(face => {
-                        return !((faceTemp === "U" && face === "D") || (faceTemp === "D" && face === "U") ||
-                                 (faceTemp === "R" && face === "L") || (faceTemp === "L" && face === "R") ||
-                                 (faceTemp === "F" && face === "B") || (faceTemp === "B" && face === "F"));
-                    });
-                }
-            }
-
-            if (layers === 1) {
-                const faceIndex = Math.floor(Math.random() * faceArray.length);
-                if (i > 0) faceArray.push(faceTemp);
-                move += faceArray[faceIndex];
-                faceTemp = faceArray[faceIndex];
-                faceArray.splice(faceIndex, 1);
-            } else {
-                if (layers > 2) move += layers.toString();
-
-                const faceIndex = Math.floor(Math.random() * faceArray.length);
-                if (i > 0) faceArray.push(faceTemp);
-                move += faceArray[faceIndex];
-                faceTemp = faceArray[faceIndex];
-                faceArray.splice(faceIndex, 1);
-
-                move += "w";
-            }
-
-            prevLayers = layers; // track for next loop
-            move += modArray[Math.floor(Math.random() * modArray.length)];
-        } else {
-            const faceIndex = Math.floor(Math.random() * faceArray.length);
-            move += faceArray[faceIndex];
-            
-            if (i > 0) {
-                if (secondFaceTemp !== "") {
-                    faceArray.push(faceTemp);
-                    faceArray.push(secondFaceTemp);
-                    faceTemp = faceArray[faceIndex];
-                    secondFaceTemp = "";
-                } else {
-                    if ((faceArray[faceIndex] === "U" && faceTemp === "D") || (faceArray[faceIndex] === "D" && faceTemp === "U") ||
-                        (faceArray[faceIndex] === "R" && faceTemp === "L") || (faceArray[faceIndex] === "L" && faceTemp === "R") ||
-                        (faceArray[faceIndex] === "F" && faceTemp === "B") || (faceArray[faceIndex] === "B" && faceTemp === "F")) {
-                        console.log("secondface set: " + faceArray[faceIndex]);
-                        secondFaceTemp = faceArray[faceIndex];
-                    } else {
-                        faceArray.push(faceTemp);
-                        faceTemp = faceArray[faceIndex];
-                    }
-                }
-            } else {
-                faceTemp = faceArray[faceIndex];
-            }
-
-            faceArray.splice(faceIndex, 1);
-            move += modArray[Math.floor(Math.random() * modArray.length)];
-        }
-
-        randomScramble += move + " ";
-    }
-
-    console.log("Moves:", moves);
-    console.log("Scramble:", randomScramble);
-
-    return randomScramble;
+  return parts.join(" ");
 }
+
 
 function generateClockScramble() {
   const pins = ["UR", "DR", "DL", "UL"];
