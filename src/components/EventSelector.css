@@ -1,107 +1,108 @@
-.event-selector-container {
-    position: relative;
-    right: 10px;
-    bottom: 80px;
-    font-weight: 500;
-    font-size: 16pt;
-    margin-top: 20px;
-    width: fit-content;
-  }
-  
-  .event-selector-box {
-    background: transparent;
-    color: white;
-    border: 1px solid white;
-    border-radius: 8px;
-    padding: 10px;
-    text-align: center;
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    transition: background 0.2s ease;
-  }
-  
-  .event-selector-box:hover {
-    background: #3D3D3D;
-  }
-  
-  .dropdown-arrow {
-    font-size: 16px;
-  }
-  
-  .event-dropdown {
-    position: absolute;
-    width: 30vw;
-    background: #1d1d1d;
-    border: 2px solid white;
-    border-radius: 8px;
-    margin-top: 5px;
-    z-index: 100;
-    max-height: 250px;
-    overflow-y: auto;
-    box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.3);
-  }
+/* === Trigger (sits under the cube as before) === */
+.event-selector-container,
+.event-selector-trigger {
+  position: relative;
+  width: fit-content;
+  font-weight: 500;
+  font-size: 16pt;
+  /* remove previous nudging so it doesn't float oddly */
+  right: 10px;
+  bottom: 70px;
+  margin-top: 20px;
+}
 
-  .event-dropdown.open-up {
-    margin-bottom: 45px;
-  }
+.event-selector-box {
+  background: transparent;
+  color: white;
+  border: 1px solid white;
+  border-radius: 8px;
+  padding: 10px;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;  /* center text + caret */
+  align-items: center;
+  gap: 8px;
+  transition: background 0.2s ease;
+}
+.event-selector-box:hover { background: #3D3D3D; }
 
-  .event-dropdown {
-    /* keep your existing rules… */
-    overflow-y: auto;
+.dropdown-arrow { font-size: 16px; }
+
+/* === Old anchored dropdown: fully disabled (kept to avoid side effects) === */
+.event-dropdown {
+  display: none !important;
+}
+
+/* === Modal overrides (uses your Detail.css .detailPopup & .detailPopupContent) === */
+/* Extra class added to the modal content to size the event selector nicely */
+.eventSelectorContent {
+  /* Match your Detail look but give it more room vertically for chips */
+  width: 640px;
+  max-width: 90vw;
+  height: auto;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   
-    /* Firefox */
-    scrollbar-width: none;
-    /* IE 10+ */
-    -ms-overflow-style: none;
+  /* detailPopupContent already provides bg, border, radius, padding */
+}
+
+/* Inner scroll area so header/close stay fixed */
+.event-groups-wrapper {
+  overflow: auto;
+  padding-right: 4px;
+  max-height: calc(70vh - 48px);
+
+  /* Hide scrollbars cross-browser */
+  scrollbar-width: none;         /* Firefox */
+  -ms-overflow-style: none;      /* IE 10+ */
+}
+.event-groups-wrapper::-webkit-scrollbar { display: none; }
+
+/* === Groups & chips (kept from your original, minor tweaks) === */
+.event-group {
+  padding: 8px 12px;
+  border-bottom: 1px solid #3D3D3D;
+}
+.event-group h4 {
+  margin: 0;
+  padding: 4px 0;
+  font-size: 14px;
+  color: #f1f1f1;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.event-list {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.event-item {
+  background: #3D3D3D;
+  color: white;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  text-align: left;
+}
+.event-item:hover { background: white; color: black; }
+.event-item.active { background: #2EC4B6; color: white; }
+
+/* === Responsive tweaks === */
+@media (max-width: 640px) {
+  .eventSelectorContent {
+    width: 95vw;
+    max-height: 75vh;
   }
-  
-  /* Chrome, Safari, Opera */
-  .event-dropdown::-webkit-scrollbar {
-    display: none;
-  }
-  
-  
-  .event-group {
-    padding: 8px 12px;
-    border-bottom: 1px solid #3D3D3D;
-  }
-  
-  .event-group h4 {
-    margin: 0;
-    padding: 4px 0;
-    font-size: 14px;
-    color: #f1f1f1;
-    text-transform: uppercase;
-    text-align: left;
-  }
-  
-  .event-list {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: wrap; 
-    gap: 5px;
-  }
-  
   .event-item {
-    background: #3D3D3D;
-    color: white;
-    padding: 6px 10px;
-    border-radius: 6px;
-    font-size: 14px;
-    transition: all 0.2s ease;
-    cursor: pointer;
-    text-align: left;
+    font-size: 15px;
+    padding: 8px 12px;
   }
-  
-  .event-item:hover {
-    background: white;
-    color: black;
-  }
-  
-  .event-item.active {
-    background: #2EC4B6;
-    color: white;
-  }
-  
+}

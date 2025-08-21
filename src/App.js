@@ -13,8 +13,9 @@ import EventSelector from "./components/EventSelector";
 import Scramble from "./components/Scramble/Scramble";
 import PuzzleSVG from "./components/PuzzleSVGs/PuzzleSVG";
 import SignInPopup from "./components/SignInPopup/SignInPopup";
-import { useSettings } from "./contexts/SettingsContext";
+import NameTag from"./components/Profile/NameTag";
 import Detail from "./components/Detail/Detail";
+import { useSettings } from "./contexts/SettingsContext";
 import { generateScramble } from "./components/scrambleUtils";
 import { Routes, Route, useLocation } from "react-router-dom";
 import { getUser } from "./services/getUser";
@@ -416,15 +417,11 @@ function App() {
                   <div className="scramble-select-container">
                     {/* LEFT SLOT (used to be EventSelector) -> now Sign-in/@Name */}
                     <div className="left-slot-auth">
-                      {isSignedIn ? (
-                        <button className="auth-button" onClick={() => setShowSettingsPopup(true)}>
-                          @{user?.Name || user?.UserID || "you"}
-                        </button>
-                      ) : (
-                        <button className="auth-button" onClick={handleShowSignInPopup}>
-                          Sign in
-                        </button>
-                      )}
+                      <NameTag
+                        isSignedIn={isSignedIn}
+                        user={user}
+                        handleSignIn={handleShowSignInPopup}
+                      />
                     </div>
 
                     {/* SCRAMBLE text (center) */}

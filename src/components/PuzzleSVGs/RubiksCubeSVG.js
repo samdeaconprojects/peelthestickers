@@ -1,7 +1,7 @@
 import React from 'react';
 import './RubiksCubeSVG.css';
 
-const RubiksCubeSVG = ({ n, faces, isMusicPlayer, isTimerCube }) => {
+const RubiksCubeSVG = ({ n, faces, isMusicPlayer, isTimerCube, isNameTagCube, isProfileCube }) => {
   console.log(faces);
   switch (n) {
     case '222':
@@ -103,7 +103,23 @@ const RubiksCubeSVG = ({ n, faces, isMusicPlayer, isTimerCube }) => {
     cubeScale = cubeScale / 2;
   }
 
-  const cubeClassName = isTimerCube ? 'cube' : 'nonTimerCube';
+  if (isNameTagCube) {
+    cubeScale = cubeScale / 4;
+  }
+
+  var cubeClassName = '';
+
+  if (isTimerCube) {
+    cubeClassName = 'cube';
+  } else if (isProfileCube) {
+    cubeClassName = 'nonTimerProfileCube';
+  }  else if (isMusicPlayer) {
+    cubeClassName = 'nonTimerCube';
+  } else if (isNameTagCube) {
+    cubeClassName = 'nonTimerCube';
+  }
+  
+
 
   const drawFace = (n, currFace) => { //currFace, 0 - top, 1 - left, 2 - right (+= n / 2 for back sides?)
     const stickers = [];

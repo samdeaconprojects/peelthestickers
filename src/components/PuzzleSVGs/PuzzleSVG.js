@@ -8,7 +8,7 @@ import MegaminxSVG from './MegaminxSVG';
 import ClockSVG from './ClockSVG';
 import { getScrambledFaces } from '../scrambleUtils';
 
-const PuzzleSVG = ({ event, scramble, isMusicPlayer, isTimerCube }) => {
+const PuzzleSVG = ({ event, scramble, isMusicPlayer, isTimerCube, isNameTagCube, isProfileCube }) => {
   const faceBasedEvents = ["222", "333", "444", "555", "666", "777", "333OH", "333BLD"];
   const isRubikEvent = faceBasedEvents.includes(event);
   const size = 45;
@@ -21,6 +21,8 @@ const PuzzleSVG = ({ event, scramble, isMusicPlayer, isTimerCube }) => {
         faces={getScrambledFaces(scramble, event)}
         isMusicPlayer={isMusicPlayer}
         isTimerCube={isTimerCube}
+        isNameTagCube={isNameTagCube}
+        isProfileCube={isProfileCube}
       />
     );
   }

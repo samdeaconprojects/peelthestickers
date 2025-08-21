@@ -130,6 +130,7 @@ export default function ProfileHeader({ user, sessions }) {
             event={ProfileEvent}
             scramble={ProfileScramble}
             isMusicPlayer={false}
+            isProfileCube={true}
             isTimerCube={false}
             />
          </div>

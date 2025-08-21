@@ -8,7 +8,7 @@ import { updateSolvePenalty } from '../../services/updateSolvePenalty';
 function Detail({ solve, userID, onClose, deleteTime, addPost, showNavButtons, onPrev, onNext, applyPenalty, setSessions }) {
   const isArray = Array.isArray(solve);
   const [notes, setNotes] = useState(
-    isArray ? solve.map(s => s.note || '') : solve.note || 'double x-cross'
+    isArray ? solve.map(s => s.note || '') : solve.note || 'Add a note'
   );
 
   useEffect(() => {
@@ -133,13 +133,13 @@ function Detail({ solve, userID, onClose, deleteTime, addPost, showNavButtons, o
           />
         </div>
         <div className="detailActions">
-          <button className="delete-button" onClick={() => handleDelete(index)}>Delete</button>
-          <button className="share-button" onClick={() => handleShare(index)}>Share</button>
           <div className="penalty-buttons">
             <button onClick={() => handlePenaltyChange('+2', index)}>+2</button>
             <button onClick={() => handlePenaltyChange('DNF', index)}>DNF</button>
             <button onClick={() => handlePenaltyChange(null, index)}>Clear</button>
           </div>
+          <button className="share-button" onClick={() => handleShare(index)}>Share</button>
+          <button className="delete-button" onClick={() => handleDelete(index)}>Delete</button>
         </div>
       </div>
     </div>
@@ -175,13 +175,13 @@ function Detail({ solve, userID, onClose, deleteTime, addPost, showNavButtons, o
                 />
               </div>
               <div className="detailActions">
-                <button className="delete-button" onClick={() => handleDelete()}>Delete</button>
-                <button className="share-button" onClick={() => handleShare()}>Share</button>
                 <div className="penalty-buttons">
                   <button onClick={() => handlePenaltyChange('+2')}>+2</button>
                   <button onClick={() => handlePenaltyChange('DNF')}>DNF</button>
                   <button onClick={() => handlePenaltyChange(null)}>Clear</button>
                 </div>
+                <button className="share-button" onClick={() => handleShare()}>Share</button>
+                <button className="delete-button" onClick={() => handleDelete()}>Delete</button>
               </div>
             </div>
             {showNavButtons && (

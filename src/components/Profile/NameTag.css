@@ -1,0 +1,47 @@
+.name-tag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 50%;
+}
+
+/* Add border + padding around the whole link (profileColor is inline style) */
+.name-tag-link {
+  display: flex;
+  align-items: center;
+      justify-content: center;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 8px;
+  padding: 4px 8px;
+  height: 50%;
+  width: 80%;
+}
+
+.name-tag-text {
+  margin-left: -38px;
+  font-weight: 600;
+  font-size: 10pt;
+}
+
+.auth-button {
+  height: 35px;
+  background-color: transparent;
+  border: solid #FFFFFF 2px;
+  border-radius: 8px;
+  color: #FFFFFF;
+  opacity: 50%;
+}
+
+.auth-button:hover {
+  opacity: 100%;
+  cursor: pointer;
+}
+
+.nametagCube {
+  
+}
+
+.nametagText {
+
+}

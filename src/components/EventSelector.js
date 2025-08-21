@@ -1,9 +1,9 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import "./EventSelector.css";
 
-function EventSelector({ currentEvent, handleEventChange, customSessions = [] , dropUp}) {
+function EventSelector({ currentEvent, handleEventChange, customSessions = [] }) {
   const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef(null);
+  const modalRef = useRef(null);
 
   const wcaEvents = [
     { id: "222", name: "2x2" },
@@ -34,7 +34,10 @@ function EventSelector({ currentEvent, handleEventChange, customSessions = [] , 
   const allEvents = [
     { label: "WCA Events", events: wcaEvents },
     { label: "Relay Events", events: relayEvents },
-    customSessions.length > 0 && { label: "Custom Sessions", events: customSessions.map(s => ({ id: s, name: s })) }
+    customSessions.length > 0 && {
+      label: "Custom Sessions",
+      events: customSessions.map(s => ({ id: s, name: s }))
+    }
   ].filter(Boolean);
 
   const handleSelect = (eventId) => {
@@ -42,48 +45,69 @@ function EventSelector({ currentEvent, handleEventChange, customSessions = [] , 
     setIsOpen(false);
   };
 
-  // Close dropdown when clicking outside
+  const close = useCallback(() => setIsOpen(false), []);
+
+  // Close on outside click (overlay)
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsOpen(false);
-      }
+    const onDocClick = (e) => {
+      if (!isOpen) return;
+      if (e.target.classList?.contains("detailPopup")) close();
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [isOpen, close]);
+
+  // Close on Esc
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") close();
+    };
+    if (isOpen) document.addEventListener("keydown", onKey, { capture: true });
+    return () => document.removeEventListener("keydown", onKey, { capture: true });
+  }, [isOpen, close]);
 
   return (
-    <div className="event-selector-container" ref={dropdownRef}>
-      <div className="event-selector-box" onClick={() => setIsOpen(!isOpen)}>
-        {wcaEvents.find(e => e.id === currentEvent)?.name ||
-          relayEvents.find(e => e.id === currentEvent)?.name ||
-          customSessions.find(s => s === currentEvent) ||
-          "Select an Event"}
-        <span className="dropdown-arrow" style={{ marginLeft: "8px" }}> {isOpen ? "▲" : "▼"}</span>
+    <>
+      {/* The trigger button that sits on the page */}
+      <div className="event-selector-trigger" onClick={() => setIsOpen(true)}>
+        <div className="event-selector-box">
+          {wcaEvents.find(e => e.id === currentEvent)?.name ||
+            relayEvents.find(e => e.id === currentEvent)?.name ||
+            customSessions.find(s => s === currentEvent) ||
+            "Select an Event"}
+          <span className="dropdown-arrow" style={{ marginLeft: 8 }}>▼</span>
+        </div>
       </div>
 
+      {/* Centered modal like Detail */}
       {isOpen && (
-        <div className={`event-dropdown${dropUp ? " open-up" : ""}`}>
-          {allEvents.map((group) => (
-            <div key={group.label} className="event-group">
-              <h4>{group.label}</h4>
-              <div className="event-list">
-                {group.events.map(event => (
-                  <div
-                    key={event.id}
-                    className={`event-item ${currentEvent === event.id ? "active" : ""}`}
-                    onClick={() => handleSelect(event.id)}
-                  >
-                    {event.name}
+        <div className="detailPopup" role="dialog" aria-modal="true">
+          <div className="detailPopupContent eventSelectorContent" ref={modalRef}>
+            <span className="closePopup" onClick={close}>x</span>
+
+            <div className="event-groups-wrapper">
+              {allEvents.map((group) => (
+                <div key={group.label} className="event-group">
+                  <h4>{group.label}</h4>
+                  <div className="event-list">
+                    {group.events.map(event => (
+                      <div
+                        key={event.id}
+                        className={`event-item ${currentEvent === event.id ? "active" : ""}`}
+                        onClick={() => handleSelect(event.id)}
+                      >
+                        {event.name}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
-          ))}
+
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 

@@ -263,3 +263,7 @@ select {
   opacity: 50%;
 }
 .left-slot-auth .auth-button:hover { opacity: 100%; cursor: pointer; }
+
+.left-slot-auth {
+  width: 13%;
+}
