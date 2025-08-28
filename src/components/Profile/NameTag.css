@@ -9,13 +9,14 @@
 .name-tag-link {
   display: flex;
   align-items: center;
-      justify-content: center;
+  justify-content: center;
   text-decoration: none;
   color: inherit;
   border-radius: 8px;
   padding: 4px 8px;
-  height: 50%;
+  height: 46%;
   width: 80%;
+  min-width: 120px;
 }
 
 .name-tag-text {
@@ -39,7 +40,7 @@
 }
 
 .nametagCube {
-  
+ margin-right: auto;
 }
 
 .nametagText {

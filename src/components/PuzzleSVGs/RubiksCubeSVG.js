@@ -116,7 +116,7 @@ const RubiksCubeSVG = ({ n, faces, isMusicPlayer, isTimerCube, isNameTagCube, is
   }  else if (isMusicPlayer) {
     cubeClassName = 'nonTimerCube';
   } else if (isNameTagCube) {
-    cubeClassName = 'nonTimerCube';
+    cubeClassName = 'nametagCube';
   }
   
 
