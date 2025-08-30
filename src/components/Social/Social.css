@@ -132,7 +132,9 @@
 
 
 .postNameCube {
-  transform: scale(.75) translate(0, 0); /* Make the cube SVG reasonably sized */
+  transform: scale(.75); /* Make the cube SVG reasonably sized */
+  margin-right: 80px;
+  margin-bottom: 80px;
 }
 
 .avatarName {
