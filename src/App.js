@@ -31,6 +31,8 @@ import { createSession } from "./services/createSession";
 import { createUser } from "./services/createUser";
 import { updateSolve } from "./services/updateSolve";
 import { updateUser } from "./services/updateUser";
+import { DEFAULT_EVENTS } from "./defaultEvents";
+
 
 import { calculateBestAverageOfFive, calculateAverage } from "./components/TimeList/TimeUtils";
 
@@ -136,41 +138,9 @@ function App() {
     tags: item.Tags || {}
   });
 
-  const handleSignIn = async (username, password) => {
-    try {
-      const profile = await getUser(username);
-      if (!profile) return alert("Invalid credentials!");
-
-      const userID = profile.PK?.split("#")[1] || username;
-
-      const posts = await getPosts(userID);
-      const userWithData = { ...profile, UserID: userID, Posts: posts, Friends: profile.Friends || [] };
-
-      setUser(userWithData);
-      setIsSignedIn(true);
-      setShowSignInPopup(false);
-
-      const sessionItems = await getSessions(userID);
-      const sessionsByEvent = {};
-
-      for (const session of sessionItems) {
-        const solves = await getSolvesBySession(userID, session.Event, session.SessionID);
-        const normalizedSolves = solves.map(normalizeSolve);
-
-        if (!sessionsByEvent[session.Event]) sessionsByEvent[session.Event] = [];
-        if (session.SessionID === "main") {
-          sessionsByEvent[session.Event] = normalizedSolves;
-        }
-      }
-
-      setSessions(sessionsByEvent);
-    } catch (error) {
-      console.error("Sign-in error:", error);
-    }
-  };
-
   const handleSignUp = async (username, password) => {
     try {
+      // Create the user profile
       await createUser({
         userID: username,
         name: username,
@@ -189,24 +159,96 @@ function App() {
         },
         Friends: []
       });
-
-      const defaultEvents = ["222", "333", "444", "555", "666", "777", "333OH", "333BLD"];
-      const createSessionPromises = defaultEvents.map(event =>
+  
+      // Create a default "main" session for every default event
+      const createSessionPromises = DEFAULT_EVENTS.map(event =>
         createSession(username, event, "main", "Main Session")
       );
       await Promise.all(createSessionPromises);
-
+  
       alert("User created successfully!");
+  
+      // Fetch user profile and sign them in immediately
       const profile = await getUser(username);
       setUser(profile);
       setIsSignedIn(true);
       setShowSignInPopup(false);
-
     } catch (error) {
       console.error("Error signing up:", error);
       alert("An error occurred during sign-up.");
     }
   };
+  
+
+  const handleSignIn = async (username, password) => {
+    try {
+      const profile = await getUser(username);
+      if (!profile) return alert("Invalid credentials!");
+  
+      const userID = profile.PK?.split("#")[1] || username;
+  
+      // Load posts and user data
+      const posts = await getPosts(userID);
+      const userWithData = {
+        ...profile,
+        UserID: userID,
+        Posts: posts,
+        Friends: profile.Friends || []
+      };
+  
+      setUser(userWithData);
+      setIsSignedIn(true);
+      setShowSignInPopup(false);
+  
+      // Fetch sessions for this user
+      let sessionItems = await getSessions(userID);
+  
+      // Backfill missing sessions BEFORE fetching solves
+      const missingEvents = DEFAULT_EVENTS.filter(event =>
+        !sessionItems.find(s => s.Event === event && s.SessionID === "main")
+      );
+  
+      if (missingEvents.length > 0) {
+        const createMissing = missingEvents.map(event =>
+          createSession(userID, event, "main", "Main Session")
+        );
+        await Promise.all(createMissing);
+  
+        // Fetch again after creating missing ones
+        sessionItems = await getSessions(userID);
+      }
+  
+      // Build sessions state
+      const sessionsByEvent = {};
+  
+      // Initialize all default events first
+      for (const event of DEFAULT_EVENTS) {
+        sessionsByEvent[event] = [];
+      }
+  
+      // Populate solves for all sessions we fetched
+      for (const session of sessionItems) {
+        const normalizedEvent = session.Event.toUpperCase();
+        const solves = await getSolvesBySession(userID, normalizedEvent, session.SessionID);
+        const normalizedSolves = solves.map(normalizeSolve);
+      
+        if (!sessionsByEvent[normalizedEvent]) sessionsByEvent[normalizedEvent] = [];
+        if (session.SessionID === "main") {
+          sessionsByEvent[normalizedEvent] = normalizedSolves;
+        }
+      }
+      
+
+      console.log("Final sessionsByEvent:", sessionsByEvent);
+
+  
+      setSessions(sessionsByEvent);
+    } catch (error) {
+      console.error("Sign-in error:", error);
+    }
+  };
+  
+  
 
   const fetchFullData = async (userID) => {
     try {
@@ -222,7 +264,14 @@ function App() {
   const addSolve = async (newTime) => {
     const scramble = getNextScramble();
     const timestamp = new Date().toISOString();
-
+  
+    console.log("🧩 Adding solve:", {
+      event: currentEvent,
+      sessionID: "main",
+      time: newTime,
+      scramble
+    });
+  
     const newSolve = {
       time: newTime,
       scramble,
@@ -232,19 +281,20 @@ function App() {
       datetime: timestamp,
       tags: {}
     };
-
+  
+    // Update local state
     const updatedSessions = {
       ...sessions,
       [currentEvent]: [...(sessions[currentEvent] || []), newSolve],
     };
     setSessions(updatedSessions);
-
+  
+    // Persist to DB
     if (isSignedIn && user) {
       try {
-        const sessionID = "main";
         await addSolveToDB(
           user.UserID,
-          sessionID,
+          "main", // 🔹 Placeholder until multi-session support is added
           currentEvent,
           newTime,
           scramble,
@@ -253,10 +303,11 @@ function App() {
           {}
         );
       } catch (err) {
-        console.error("Error adding solve:", err);
+        console.error("❌ Error adding solve:", err);
       }
     }
   };
+  
 
   const applyPenalty = async (timestamp, penalty, updatedTime) => {
     const updatedSessions = { ...sessions };

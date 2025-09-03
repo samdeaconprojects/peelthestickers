@@ -1,8 +1,16 @@
 import dynamoDB from "../components/SignIn/awsConfig";
-import { v4 as uuidv4 } from "uuid";
 
-export const addSolve = async (userID, sessionID, event, time, scramble, penalty, note, tags) => {
-    
+export const addSolve = async (
+  userID,
+  sessionID,
+  event,
+  time,
+  scramble,
+  penalty,
+  note,
+  tags
+) => {
+  const normalizedEvent = event.toUpperCase(); // 🔹 Always uppercase
   const timestamp = new Date().toISOString();
 
   const params = {
@@ -11,25 +19,23 @@ export const addSolve = async (userID, sessionID, event, time, scramble, penalty
       PK: `USER#${userID}`,
       SK: `SOLVE#${timestamp}`,
       SessionID: sessionID,
-      Event: event,
+      Event: normalizedEvent,
       Time: time,
       Scramble: scramble,
       Penalty: penalty,
       Note: note,
       Tags: tags,
       DateTime: timestamp,
-      GSI1PK: `SESSION#${userID}#${event}#${sessionID}`,
+      GSI1PK: `SESSION#${userID}#${normalizedEvent}#${sessionID}`,
       GSI1SK: timestamp
     }
   };
 
   try {
     await dynamoDB.put(params).promise();
-    console.log("USER ID");
-    console.log(userID)
-    console.log("Solve added.");
+    console.log(`✅ Solve added for ${normalizedEvent} / ${sessionID}`);
   } catch (err) {
-    console.error("Error adding solve:", err);
+    console.error("❌ Error adding solve:", err);
     throw err;
   }
 };
