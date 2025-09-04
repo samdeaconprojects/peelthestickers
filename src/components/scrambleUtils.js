@@ -158,20 +158,20 @@ function generateClockScramble() {
 
   // Phase 1: Pin turns
   for (const pin of pins) {
-    const amount = getRandomInt(0, 5); // Valid range: 0 to 5
+    const amount = getRandomInt(0, 7); 
     const sign = Math.random() < 0.5 ? '+' : '-';
     pinMoves.push(`${pin}${amount}${sign}`);
   }
 
   // Phase 2: Face turns
   for (const face of faces) {
-    const amount = getRandomInt(0, 5);
+    const amount = getRandomInt(0, 7);
     const sign = Math.random() < 0.5 ? '+' : '-';
     faceMoves.push(`${face}${amount}${sign}`);
   }
 
   // Phase 3: ALL turn
-  const allAmount = getRandomInt(0, 5);
+  const allAmount = getRandomInt(0, 7);
   const allSign = Math.random() < 0.5 ? '+' : '-';
   const allMove = `ALL${allAmount}${allSign}`;
 
@@ -181,12 +181,12 @@ function generateClockScramble() {
   // Phase 5: second round of face turns
   const secondFaceMoves = [];
   for (const face of faces) {
-    const amount = getRandomInt(0, 5);
+    const amount = getRandomInt(0, 7);
     const sign = Math.random() < 0.5 ? '+' : '-';
     secondFaceMoves.push(`${face}${amount}${sign}`);
   }
 
-  const finalAllAmount = getRandomInt(0, 5);
+  const finalAllAmount = getRandomInt(0, 7);
   const finalAllSign = Math.random() < 0.5 ? '+' : '-';
   const finalAllMove = `ALL${finalAllAmount}${finalAllSign}`;
 
