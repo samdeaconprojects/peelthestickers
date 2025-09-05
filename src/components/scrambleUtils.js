@@ -76,7 +76,12 @@ export function generateScramble(currentEvent) {
     return generateClockScramble();
   } else if ( currentEvent === "MEGAMINX") {
         return generateMegaminxScramble();
-
+  } else if ( currentEvent === "PYRAMINX") {
+        return generatePryaminxScramble();
+  } else if ( currentEvent === "SKEWB") {
+        return generateSkewbScramble();
+  } else if ( currentEvent === "SQ1") {
+        return generateSquare1Scramble();
   }
 
   const n = currentEventToN(currentEvent);
@@ -226,6 +231,139 @@ export function generateMegaminxScramble() {
 
   return scramble;
 }
+
+export function generatePryaminxScramble() {
+  const faces = ["U", "L", "R", "B"];
+  const tips = ["u", "l", "r", "b"];
+
+  const mainLen = getRandomInt(8, 10); // 8 or 9
+  const out = [];
+
+  // Main moves: 8–9 moves, random face, random prime, no consecutive duplicate faces
+  let lastFace = null;
+  for (let i = 0; i < mainLen; i++) {
+    let face;
+    do {
+      face = faces[getRandomInt(0, faces.length)];
+    } while (face === lastFace); // avoid consecutive same face
+    lastFace = face;
+    const prime = Math.random() < 0.5 ? "'" : "";
+    out.push(face + prime);
+  }
+
+  // Tips: choose k in [0..4], unique tips, random order, random prime
+  const tipCount = getRandomInt(0, 5); // 0–4
+  if (tipCount > 0) {
+    // shuffle copy of tips
+    const bag = [...tips];
+    for (let i = bag.length - 1; i > 0; i--) {
+      const j = getRandomInt(0, i + 1);
+      [bag[i], bag[j]] = [bag[j], bag[i]];
+    }
+    const chosen = bag.slice(0, tipCount);
+    for (const t of chosen) {
+      const prime = Math.random() < 0.5 ? "'" : "";
+      out.push(t + prime);
+    }
+  }
+
+  return out.join(" ");
+}
+
+
+export function generateSkewbScramble() {
+  const faces = ["U", "L", "R", "B"];
+
+  const mainLen = getRandomInt(8, 10); // 8 or 9
+  const out = [];
+
+  let lastFace = null;
+  for (let i = 0; i < mainLen; i++) {
+    let face;
+    do {
+      face = faces[getRandomInt(0, faces.length)];
+    } while (face === lastFace); // avoid consecutive same face
+    lastFace = face;
+    const prime = Math.random() < 0.5 ? "'" : "";
+    out.push(face + prime);
+  }
+
+
+
+  return out.join(" ");
+}
+
+export function generateSquare1Scramble() {
+  const CORNER = 2, EDGE = 1;
+
+  // Top and bottom start in solved state: C E C E ...
+  let top = [2,1,2,1,2,1,2,1];
+  let bottom = [2,1,2,1,2,1,2,1];
+
+  function validOffsets(face) {
+    const results = [];
+    let sum = 0;
+    for (let i = 1; i < face.length; i++) {
+      sum += face[i-1];
+      results.push(sum);
+    }
+    // mirror for negative moves
+    return [...new Set([...results, ...results.map(v => -v)])];
+  }
+
+  function rotate(face, amount) {
+    const ticks = ((amount % 12) + 12) % 12;
+    let sum = 0, idx = 0;
+    while (sum < ticks) {
+      sum += face[idx];
+      idx++;
+    }
+    return face.slice(idx).concat(face.slice(0, idx));
+  }
+
+  function isSlashable(top, bottom) {
+    const topRight = top.slice(4);
+    const bottomRight = bottom.slice(4);
+    const sum = arr => arr.reduce((a,b)=>a+b,0);
+    return sum(topRight) === 6 && sum(bottomRight) === 6;
+  }
+
+  const scramble = [];
+  const len = getRandomInt(12,15);
+
+  for (let i=0; i<len; i++) {
+    // choose legal moves
+    const topChoices = validOffsets(top);
+    const bottomChoices = validOffsets(bottom);
+
+    let move;
+    for (let tries=0; tries<100; tries++) {
+      const t = topChoices[Math.floor(Math.random()*topChoices.length)];
+      const b = bottomChoices[Math.floor(Math.random()*bottomChoices.length)];
+      const newTop = rotate(top,t);
+      const newBottom = rotate(bottom,b);
+      if (isSlashable(newTop,newBottom)) {
+        move = [t,b];
+        top = newTop;
+        bottom = newBottom;
+        break;
+      }
+    }
+    if (!move) break;
+
+    scramble.push(`(${move[0]},${move[1]})`);
+    scramble.push("/");
+
+    // perform slash
+    const topRight = top.slice(4);
+    const bottomRight = bottom.slice(4);
+    top = [...top.slice(0,4), ...bottomRight];
+    bottom = [...bottom.slice(0,4), ...topRight];
+  }
+
+  return scramble.join(" ");
+}
+
 
 
   // ************ Cube Structure for face arrays ************

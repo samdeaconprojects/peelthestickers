@@ -33,6 +33,7 @@ export default function Square1SVG({
     }
   }
 
+  /*
   function turnClockwise(isTop, count) {
     const s = square1.current;
     const right = isTop ? s.group1 : s.group3;
@@ -68,6 +69,62 @@ export default function Square1SVG({
     for (let k=0; k<i; k++) left.push(right.pop());
     for (let k=0; k<j; k++) right.push(left.pop());
   }
+    */
+
+  function turnClockwise(isTop, count) {
+  const s = square1.current;
+  const right = isTop ? s.group1 : s.group3;
+  const left  = isTop ? s.group2 : s.group4;
+
+  let pr = 0, i = 0;
+  // Count pieces on the right until we reach "count" ticks
+  while (pr < count && i < right.length) {
+    pr += right[i].length === 2 ? 1 : 2;
+    i++;
+  }
+  if (pr !== count) return; // ✅ safety: don't over-rotate
+
+  let pl = 0, j = 0;
+  // Count pieces on the left until we reach "count" ticks
+  while (pl < count && j < left.length) {
+    pl += left[j].length === 2 ? 1 : 2;
+    j++;
+  }
+  if (pl !== count) return; // ✅ safety: don't over-rotate
+
+  // Move i pieces from right → left
+  for (let k = 0; k < i; k++) left.unshift(right.shift());
+  // Move j pieces from left → right
+  for (let k = 0; k < j; k++) right.unshift(left.shift());
+}
+
+function turnCounterClockwise(isTop, count) {
+  const s = square1.current;
+  const right = isTop ? s.group1 : s.group3;
+  const left  = isTop ? s.group2 : s.group4;
+
+  let pr = 0, i = 0;
+  // Count pieces on the right starting from the end
+  while (pr < count && i < right.length) {
+    pr += right[right.length - 1 - i].length === 2 ? 1 : 2;
+    i++;
+  }
+  if (pr !== count) return; // ✅ safety
+
+  let pl = 0, j = 0;
+  // Count pieces on the left starting from the end
+  while (pl < count && j < left.length) {
+    pl += left[left.length - 1 - j].length === 2 ? 1 : 2;
+    j++;
+  }
+  if (pl !== count) return; // ✅ safety
+
+  // Move i pieces from right → left
+  for (let k = 0; k < i; k++) left.push(right.pop());
+  // Move j pieces from left → right
+  for (let k = 0; k < j; k++) right.push(left.pop());
+}
+
 
   function parseAlgorithm(alg) {
     const toks = alg.match(/\([^)]*\)|\//g) || [];
