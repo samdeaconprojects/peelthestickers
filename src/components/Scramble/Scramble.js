@@ -9,6 +9,7 @@ function Scramble({ onScrambleClick, onForwardScramble, scramble, currentEvent, 
     case '555': fontSize = isMusicPlayer ? 15 : 16; maxWidth = 70; break;
     case '666': fontSize = isMusicPlayer ? 12 : 14; maxWidth = 70; break;
     case '777': fontSize = isMusicPlayer ? 11 : 13; maxWidth = 70; break;
+    case 'MEGAMINX': fontSize = isMusicPlayer ? 12 : 15; maxWidth = 90; break;
     default: fontSize = 20; maxWidth = 80;
   }
 

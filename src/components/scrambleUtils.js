@@ -74,6 +74,9 @@ export function currentEventToString(currentEvent) {
 export function generateScramble(currentEvent) {
   if (currentEvent === "CLOCK") {
     return generateClockScramble();
+  } else if ( currentEvent === "MEGAMINX") {
+        return generateMegaminxScramble();
+
   }
 
   const n = currentEventToN(currentEvent);
@@ -200,8 +203,29 @@ function generateClockScramble() {
   ].join(' ');
 }
 
+export function generateMegaminxScramble() {
+  let scramble = "";
 
+  for (let i = 0; i < 7; i++) {
+    const moves = [];
 
+    // First 10 moves: alternate R / D
+    for (let j = 0; j < 10; j++) {
+      const move = j % 2 === 0 ? "R" : "D";
+      const suffix = Math.random() < 0.5 ? "++" : "--";
+      moves.push(move + suffix);
+    }
+
+    // Last move: U or U'
+    const lastMove = Math.random() < 0.5 ? "U" : "U'";
+    moves.push(lastMove);
+
+    // Add the line + newline
+    scramble += moves.join(" ") + "\n";
+  }
+
+  return scramble;
+}
 
 
   // ************ Cube Structure for face arrays ************
