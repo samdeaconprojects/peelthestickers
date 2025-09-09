@@ -1,12 +1,8 @@
 import dynamoDB from "../components/SignIn/awsConfig";
 
-export const createSession = async (
-  userID,
-  event,
-  sessionID = "main",
-  sessionName = "Main Session"
-) => {
-  const normalizedEvent = event.toUpperCase(); // 🔹 Always uppercase
+export const createSession = async (userID, event, sessionName) => {
+  const normalizedEvent = event.toUpperCase();
+  const sessionID = sessionName.toLowerCase().replace(/\s+/g, "-");
 
   const params = {
     TableName: "PTS",
@@ -22,9 +18,9 @@ export const createSession = async (
 
   try {
     await dynamoDB.put(params).promise();
-    console.log(`✅ Created session for ${normalizedEvent}`);
+    console.log(` Created session "${sessionName}" for ${normalizedEvent}`);
   } catch (err) {
-    console.error("❌ Error creating session:", err);
+    console.error(" Error creating session:", err);
     throw err;
   }
 };

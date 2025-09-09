@@ -95,6 +95,26 @@
 .event-item:hover { background: white; color: black; }
 .event-item.active { background: #2EC4B6; color: white; }
 
+
+
+
+.add-session-btn,
+.add-event-btn {
+  background: #2EC4B6;
+  color: white;
+  padding: 6px 10px;
+  margin-top: 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.add-session-btn:hover,
+.add-event-btn:hover {
+  background: #1ca296;
+}
+
+
 /* === Responsive tweaks === */
 @media (max-width: 640px) {
   .eventSelectorContent {

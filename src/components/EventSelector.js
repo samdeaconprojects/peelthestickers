@@ -1,10 +1,23 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import "./EventSelector.css";
+import { createSession } from "../services/createSession";
+import { createCustomEvent } from "../services/createCustomEvent";
+import { getSessions } from "../services/getSessions";
+import { getCustomEvents } from "../services/getCustomEvents";
 
-function EventSelector({ currentEvent, handleEventChange, customSessions = [] }) {
+function EventSelector({ currentEvent, handleEventChange, userID }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [sessions, setSessions] = useState([]);
+  const [customEvents, setCustomEvents] = useState([]);
+  const [showAddSession, setShowAddSession] = useState(false);
+  const [showAddEvent, setShowAddEvent] = useState(false);
+  const [newSessionName, setNewSessionName] = useState("");
+  const [newEventName, setNewEventName] = useState("");
+  const [targetEvent, setTargetEvent] = useState(null);
+
   const modalRef = useRef(null);
 
+  // Default events
   const wcaEvents = [
     { id: "222", name: "2x2" },
     { id: "333", name: "3x3" },
@@ -31,12 +44,38 @@ function EventSelector({ currentEvent, handleEventChange, customSessions = [] })
     { id: "mini-guildford", name: "Mini Guildford Relay" }
   ];
 
+  // Fetch sessions + custom events when modal opens
+  useEffect(() => {
+    if (!isOpen || !userID) return;
+
+    const fetchData = async () => {
+      try {
+        const sessionItems = await getSessions(userID);
+        setSessions(sessionItems);
+
+        const eventItems = await getCustomEvents(userID);
+        setCustomEvents(eventItems);
+      } catch (err) {
+        console.error("❌ Error fetching sessions/events:", err);
+      }
+    };
+
+    fetchData();
+  }, [isOpen, userID]);
+
   const allEvents = [
     { label: "WCA Events", events: wcaEvents },
     { label: "Relay Events", events: relayEvents },
-    customSessions.length > 0 && {
+    customEvents.length > 0 && {
+      label: "Custom Events",
+      events: customEvents
+    },
+    sessions.length > 0 && {
       label: "Custom Sessions",
-      events: customSessions.map(s => ({ id: s, name: s }))
+      events: sessions.map(s => ({
+        id: s.SessionID,
+        name: s.SessionName
+      }))
     }
   ].filter(Boolean);
 
@@ -47,7 +86,7 @@ function EventSelector({ currentEvent, handleEventChange, customSessions = [] })
 
   const close = useCallback(() => setIsOpen(false), []);
 
-  // Close on outside click (overlay)
+  // Close on outside click
   useEffect(() => {
     const onDocClick = (e) => {
       if (!isOpen) return;
@@ -68,18 +107,19 @@ function EventSelector({ currentEvent, handleEventChange, customSessions = [] })
 
   return (
     <>
-      {/* The trigger button that sits on the page */}
+      {/* Trigger */}
       <div className="event-selector-trigger" onClick={() => setIsOpen(true)}>
         <div className="event-selector-box">
           {wcaEvents.find(e => e.id === currentEvent)?.name ||
             relayEvents.find(e => e.id === currentEvent)?.name ||
-            customSessions.find(s => s === currentEvent) ||
+            customEvents.find(e => e.id === currentEvent)?.name ||
+            sessions.find(s => s.SessionID === currentEvent)?.SessionName ||
             "Select an Event"}
           <span className="dropdown-arrow" style={{ marginLeft: 8 }}>▼</span>
         </div>
       </div>
 
-      {/* Centered modal like Detail */}
+      {/* Modal */}
       {isOpen && (
         <div className="detailPopup" role="dialog" aria-modal="true">
           <div className="detailPopupContent eventSelectorContent" ref={modalRef}>
@@ -100,10 +140,89 @@ function EventSelector({ currentEvent, handleEventChange, customSessions = [] })
                       </div>
                     ))}
                   </div>
+                  {/* Add Session button for WCA/Relay groups only */}
+                  {group.label === "WCA Events" || group.label === "Relay Events" ? (
+                    <button
+                      className="add-session-btn"
+                      onClick={() => {
+                        setTargetEvent(group.events[0].id);
+                        setShowAddSession(true);
+                      }}
+                    >
+                      + Add Session
+                    </button>
+                  ) : null}
                 </div>
               ))}
             </div>
 
+            {/* Add Custom Event button */}
+            <div className="add-event-footer">
+              <button
+                className="add-event-btn"
+                onClick={() => setShowAddEvent(true)}
+              >
+                + Add Custom Event
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup: Add Session */}
+      {showAddSession && (
+        <div className="detailPopup" role="dialog" aria-modal="true">
+          <div className="detailPopupContent">
+            <h3>Add New Session</h3>
+            <input
+              value={newSessionName}
+              onChange={(e) => setNewSessionName(e.target.value)}
+              placeholder="Enter session name"
+            />
+            <div className="button-row">
+              <button
+                onClick={async () => {
+                  if (!newSessionName.trim()) return;
+                  await createSession(userID, targetEvent, newSessionName);
+                  const updated = await getSessions(userID);
+                  setSessions(updated);
+                  setShowAddSession(false);
+                  setNewSessionName("");
+                }}
+              >
+                Save
+              </button>
+              <button onClick={() => setShowAddSession(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup: Add Custom Event */}
+      {showAddEvent && (
+        <div className="detailPopup" role="dialog" aria-modal="true">
+          <div className="detailPopupContent">
+            <h3>Add Custom Event</h3>
+            <input
+              value={newEventName}
+              onChange={(e) => setNewEventName(e.target.value)}
+              placeholder="Enter event name"
+            />
+            <div className="button-row">
+              <button
+                onClick={async () => {
+                  if (!newEventName.trim()) return;
+                  await createCustomEvent(userID, newEventName);
+                  const updated = await getCustomEvents(userID);
+                  setCustomEvents(updated);
+                  setShowAddEvent(false);
+                  setNewEventName("");
+                }}
+              >
+                Save
+              </button>
+              <button onClick={() => setShowAddEvent(false)}>Cancel</button>
+            </div>
           </div>
         </div>
       )}
