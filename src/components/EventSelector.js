@@ -5,7 +5,13 @@ import { createCustomEvent } from "../services/createCustomEvent";
 import { getSessions } from "../services/getSessions";
 import { getCustomEvents } from "../services/getCustomEvents";
 
-function EventSelector({ currentEvent, handleEventChange, userID }) {
+function EventSelector({
+  currentEvent,
+  handleEventChange,
+  currentSession,
+  setCurrentSession,
+  userID
+}) {
   const [isOpen, setIsOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [customEvents, setCustomEvents] = useState([]);
@@ -44,9 +50,13 @@ function EventSelector({ currentEvent, handleEventChange, userID }) {
     { id: "mini-guildford", name: "Mini Guildford Relay" }
   ];
 
-  // Fetch sessions + custom events when modal opens
+  // Fetch sessions + custom events when user logs in
   useEffect(() => {
-    if (!isOpen || !userID) return;
+    if (!userID) {
+      setSessions([]);
+      setCustomEvents([]);
+      return;
+    }
 
     const fetchData = async () => {
       try {
@@ -61,26 +71,24 @@ function EventSelector({ currentEvent, handleEventChange, userID }) {
     };
 
     fetchData();
-  }, [isOpen, userID]);
+  }, [userID]);
 
   const allEvents = [
     { label: "WCA Events", events: wcaEvents },
     { label: "Relay Events", events: relayEvents },
-    customEvents.length > 0 && {
+    userID && customEvents.length > 0 && {
       label: "Custom Events",
       events: customEvents
-    },
-    sessions.length > 0 && {
-      label: "Custom Sessions",
-      events: sessions.map(s => ({
-        id: s.SessionID,
-        name: s.SessionName
-      }))
     }
   ].filter(Boolean);
 
-  const handleSelect = (eventId) => {
+  const handleSelectEvent = (eventId) => {
     handleEventChange({ target: { value: eventId } });
+    setCurrentSession("main"); // reset session when changing event
+  };
+
+  const handleSelectSession = (sessionId) => {
+    setCurrentSession(sessionId);
     setIsOpen(false);
   };
 
@@ -105,6 +113,11 @@ function EventSelector({ currentEvent, handleEventChange, userID }) {
     return () => document.removeEventListener("keydown", onKey, { capture: true });
   }, [isOpen, close]);
 
+  // Sessions for the currently selected event
+  const sessionsForEvent = sessions
+    .filter(s => s.Event === currentEvent)
+    .map(s => ({ id: s.SessionID, name: s.SessionName }));
+
   return (
     <>
       {/* Trigger */}
@@ -113,8 +126,12 @@ function EventSelector({ currentEvent, handleEventChange, userID }) {
           {wcaEvents.find(e => e.id === currentEvent)?.name ||
             relayEvents.find(e => e.id === currentEvent)?.name ||
             customEvents.find(e => e.id === currentEvent)?.name ||
-            sessions.find(s => s.SessionID === currentEvent)?.SessionName ||
             "Select an Event"}
+          {currentSession !== "main" && (
+            <span style={{ marginLeft: 6, fontSize: "0.9em", opacity: 0.8 }}>
+              ({sessionsForEvent.find(s => s.id === currentSession)?.name || currentSession})
+            </span>
+          )}
           <span className="dropdown-arrow" style={{ marginLeft: 8 }}>▼</span>
         </div>
       </div>
@@ -134,37 +151,54 @@ function EventSelector({ currentEvent, handleEventChange, userID }) {
                       <div
                         key={event.id}
                         className={`event-item ${currentEvent === event.id ? "active" : ""}`}
-                        onClick={() => handleSelect(event.id)}
+                        onClick={() => handleSelectEvent(event.id)}
                       >
                         {event.name}
                       </div>
                     ))}
                   </div>
-                  {/* Add Session button for WCA/Relay groups only */}
-                  {group.label === "WCA Events" || group.label === "Relay Events" ? (
-                    <button
-                      className="add-session-btn"
-                      onClick={() => {
-                        setTargetEvent(group.events[0].id);
-                        setShowAddSession(true);
-                      }}
-                    >
-                      + Add Session
-                    </button>
-                  ) : null}
                 </div>
               ))}
+
+              {/* Sessions for the current event */}
+              {userID && (
+                <div className="event-group">
+                  <h4>Sessions for {currentEvent}</h4>
+                  <div className="event-list">
+                    {sessionsForEvent.map(session => (
+                      <div
+                        key={session.id}
+                        className={`event-item ${currentSession === session.id ? "active" : ""}`}
+                        onClick={() => handleSelectSession(session.id)}
+                      >
+                        {session.name}
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    className="add-session-btn"
+                    onClick={() => {
+                      setTargetEvent(currentEvent);
+                      setShowAddSession(true);
+                    }}
+                  >
+                    + Add Session
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Add Custom Event button */}
-            <div className="add-event-footer">
-              <button
-                className="add-event-btn"
-                onClick={() => setShowAddEvent(true)}
-              >
-                + Add Custom Event
-              </button>
-            </div>
+            {userID && (
+              <div className="add-event-footer">
+                <button
+                  className="add-event-btn"
+                  onClick={() => setShowAddEvent(true)}
+                >
+                  + Add Custom Event
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

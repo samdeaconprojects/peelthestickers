@@ -13,7 +13,7 @@ import EventSelector from "./components/EventSelector";
 import Scramble from "./components/Scramble/Scramble";
 import PuzzleSVG from "./components/PuzzleSVGs/PuzzleSVG";
 import SignInPopup from "./components/SignInPopup/SignInPopup";
-import NameTag from"./components/Profile/NameTag";
+import NameTag from "./components/Profile/NameTag";
 import Detail from "./components/Detail/Detail";
 import { useSettings } from "./contexts/SettingsContext";
 import { generateScramble } from "./components/scrambleUtils";
@@ -21,6 +21,7 @@ import { Routes, Route, useLocation } from "react-router-dom";
 import { getUser } from "./services/getUser";
 import { getSessions } from "./services/getSessions";
 import { getSolvesBySession } from "./services/getSolvesBySession";
+import { getCustomEvents } from "./services/getCustomEvents";
 import { addSolve as addSolveToDB } from "./services/addSolve";
 import { deleteSolve } from "./services/deleteSolve";
 import { getPosts } from "./services/getPosts";
@@ -32,11 +33,15 @@ import { createUser } from "./services/createUser";
 import { updateSolve } from "./services/updateSolve";
 import { updateUser } from "./services/updateUser";
 import { DEFAULT_EVENTS } from "./defaultEvents";
-
-
-import { calculateBestAverageOfFive, calculateAverage } from "./components/TimeList/TimeUtils";
+import {
+  calculateBestAverageOfFive,
+  calculateAverage,
+} from "./components/TimeList/TimeUtils";
 
 function App() {
+  const [sessionsList, setSessionsList] = useState([]); // all sessions for user
+  const [customEvents, setCustomEvents] = useState([]); // all custom events for user
+  const [currentSession, setCurrentSession] = useState("main"); // selected session
   const [currentEvent, setCurrentEvent] = useState("333");
   const [scrambles, setScrambles] = useState({});
   const [sessions, setSessions] = useState({
@@ -87,6 +92,36 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [settings.eventKeyBindings]);
 
+  // 🔹 NEW: Refetch solves whenever event or session changes
+  useEffect(() => {
+    if (!isSignedIn || !user?.UserID) return;
+
+    const loadSolvesForCurrent = async () => {
+      try {
+        const normalizedEvent = currentEvent.toUpperCase();
+        const sessionId = currentSession || "main";
+        const solves = await getSolvesBySession(
+          user.UserID,
+          normalizedEvent,
+          sessionId
+        );
+        const normalizedSolves = solves.map(normalizeSolve);
+
+        setSessions((prev) => ({
+          ...prev,
+          [currentEvent]: normalizedSolves,
+        }));
+      } catch (err) {
+        console.error(
+          "❌ Error loading solves for current event/session:",
+          err
+        );
+      }
+    };
+
+    loadSolvesForCurrent();
+  }, [isSignedIn, user?.UserID, currentEvent, currentSession]);
+
   const preloadScrambles = (event) => {
     const newScrambles = Array.from({ length: 10 }, () => generateScramble(event));
     setScrambles((prevScrambles) => ({
@@ -123,7 +158,10 @@ function App() {
     const eventScrambles = scrambles[currentEvent] || [];
     setScrambles((prevScrambles) => {
       const updatedScrambles = { ...prevScrambles };
-      updatedScrambles[currentEvent] = [...eventScrambles.slice(1), generateScramble(currentEvent)];
+      updatedScrambles[currentEvent] = [
+        ...eventScrambles.slice(1),
+        generateScramble(currentEvent),
+      ];
       return updatedScrambles;
     });
   };
@@ -135,12 +173,11 @@ function App() {
     penalty: item.Penalty,
     note: item.Note || "",
     datetime: item.DateTime,
-    tags: item.Tags || {}
+    tags: item.Tags || {},
   });
 
   const handleSignUp = async (username, password) => {
     try {
-      // Create the user profile
       await createUser({
         userID: username,
         name: username,
@@ -157,18 +194,16 @@ function App() {
           secondaryColor: "#ffffff",
           timerInput: "Keyboard",
         },
-        Friends: []
+        Friends: [],
       });
-  
-      // Create a default "main" session for every default event
-      const createSessionPromises = DEFAULT_EVENTS.map(event =>
+
+      const createSessionPromises = DEFAULT_EVENTS.map((event) =>
         createSession(username, event, "main", "Main Session")
       );
       await Promise.all(createSessionPromises);
-  
+
       alert("User created successfully!");
-  
-      // Fetch user profile and sign them in immediately
+
       const profile = await getUser(username);
       setUser(profile);
       setIsSignedIn(true);
@@ -178,100 +213,85 @@ function App() {
       alert("An error occurred during sign-up.");
     }
   };
-  
 
   const handleSignIn = async (username, password) => {
     try {
       const profile = await getUser(username);
       if (!profile) return alert("Invalid credentials!");
-  
+
       const userID = profile.PK?.split("#")[1] || username;
-  
-      // Load posts and user data
+
       const posts = await getPosts(userID);
       const userWithData = {
         ...profile,
         UserID: userID,
         Posts: posts,
-        Friends: profile.Friends || []
+        Friends: profile.Friends || [],
       };
-  
+
       setUser(userWithData);
       setIsSignedIn(true);
       setShowSignInPopup(false);
-  
-      // Fetch sessions for this user
+
       let sessionItems = await getSessions(userID);
-  
-      // Backfill missing sessions BEFORE fetching solves
-      const missingEvents = DEFAULT_EVENTS.filter(event =>
-        !sessionItems.find(s => s.Event === event && s.SessionID === "main")
+      const eventItems = await getCustomEvents(userID);
+
+      setSessionsList(sessionItems);
+      setCustomEvents(eventItems);
+
+      const missingEvents = DEFAULT_EVENTS.filter(
+        (event) =>
+          !sessionItems.find(
+            (s) => s.Event === event && s.SessionID === "main"
+          )
       );
-  
+
       if (missingEvents.length > 0) {
-        const createMissing = missingEvents.map(event =>
+        const createMissing = missingEvents.map((event) =>
           createSession(userID, event, "main", "Main Session")
         );
         await Promise.all(createMissing);
-  
-        // Fetch again after creating missing ones
         sessionItems = await getSessions(userID);
       }
-  
-      // Build sessions state
+
       const sessionsByEvent = {};
-  
-      // Initialize all default events first
       for (const event of DEFAULT_EVENTS) {
         sessionsByEvent[event] = [];
       }
-  
-      // Populate solves for all sessions we fetched
+
       for (const session of sessionItems) {
         const normalizedEvent = session.Event.toUpperCase();
-        const solves = await getSolvesBySession(userID, normalizedEvent, session.SessionID);
+        const solves = await getSolvesBySession(
+          userID,
+          normalizedEvent,
+          session.SessionID
+        );
         const normalizedSolves = solves.map(normalizeSolve);
-      
-        if (!sessionsByEvent[normalizedEvent]) sessionsByEvent[normalizedEvent] = [];
+
+        if (!sessionsByEvent[normalizedEvent])
+          sessionsByEvent[normalizedEvent] = [];
         if (session.SessionID === "main") {
           sessionsByEvent[normalizedEvent] = normalizedSolves;
         }
       }
-      
 
-      console.log("Final sessionsByEvent:", sessionsByEvent);
-
-  
       setSessions(sessionsByEvent);
     } catch (error) {
       console.error("Sign-in error:", error);
-    }
-  };
-  
-  
-
-  const fetchFullData = async (userID) => {
-    try {
-      const userData = await getUser(userID);
-      if (userData) {
-        setSessions(userData.Sessions || {});
-      }
-    } catch (error) {
-      console.error("Error fetching full data:", error);
     }
   };
 
   const addSolve = async (newTime) => {
     const scramble = getNextScramble();
     const timestamp = new Date().toISOString();
-  
+
     console.log("🧩 Adding solve:", {
       event: currentEvent,
-      sessionID: "main",
+      sessionID: currentSession, // ✅ updated
       time: newTime,
-      scramble
+      scramble,
     });
-  
+
     const newSolve = {
       time: newTime,
       scramble,
@@ -279,22 +299,20 @@ function App() {
       penalty: null,
       note: "",
       datetime: timestamp,
-      tags: {}
+      tags: {},
     };
-  
-    // Update local state
+
     const updatedSessions = {
       ...sessions,
       [currentEvent]: [...(sessions[currentEvent] || []), newSolve],
     };
     setSessions(updatedSessions);
-  
-    // Persist to DB
+
     if (isSignedIn && user) {
       try {
         await addSolveToDB(
           user.UserID,
-          "main", // 🔹 Placeholder until multi-session support is added
+          currentSession,
           currentEvent,
           newTime,
           scramble,
@@ -307,7 +325,6 @@ function App() {
       }
     }
   };
-  
 
   const applyPenalty = async (timestamp, penalty, updatedTime) => {
     const updatedSessions = { ...sessions };
@@ -319,7 +336,7 @@ function App() {
           ...solve,
           penalty,
           time: updatedTime,
-          originalTime: solve.originalTime ?? solve.time
+          originalTime: solve.originalTime ?? solve.time,
         };
       }
       return solve;
@@ -333,7 +350,8 @@ function App() {
         await updateSolve(user.UserID, timestamp, {
           Penalty: penalty,
           Time: updatedTime,
-          OriginalTime: updatedSolves.find(s => s.datetime === timestamp)?.originalTime
+          OriginalTime: updatedSolves.find((s) => s.datetime === timestamp)
+            ?.originalTime,
         });
       } catch (err) {
         console.error("❌ Failed to update DynamoDB penalty:", err);
@@ -364,9 +382,9 @@ function App() {
     try {
       await createPost(user.UserID, note, event, solveList, comments);
       const posts = await getPosts(user.UserID);
-      setUser(prev => ({
+      setUser((prev) => ({
         ...prev,
-        Posts: posts
+        Posts: posts,
       }));
     } catch (err) {
       console.error("Error adding post:", err);
@@ -378,7 +396,6 @@ function App() {
 
     try {
       await deletePostFromDB(user.UserID, timestamp);
-      console.log("Post deleted.");
     } catch (err) {
       console.error("Error deleting post:", err);
     }
@@ -389,7 +406,7 @@ function App() {
     try {
       await updatePostComments(user.UserID, timestamp, comments);
       const fresh = await getPosts(user.UserID);
-      setUser(prev => ({ ...prev, Posts: fresh }));
+      setUser((prev) => ({ ...prev, Posts: fresh }));
     } catch (err) {
       console.error("Error updating comments:", err);
     }
@@ -397,6 +414,7 @@ function App() {
 
   const handleEventChange = (event) => {
     setCurrentEvent(event.target.value);
+    setCurrentSession("main"); // ✅ reset to main when event changes
   };
 
   const onScrambleClick = () => {
@@ -419,7 +437,6 @@ function App() {
   const handleShowSignInPopup = () => setShowSignInPopup(true);
   const handleCloseSignInPopup = () => setShowSignInPopup(false);
 
-  // NEW: open the native select programmatically (works in modern browsers)
   const openEventSelector = () => {
     const el =
       document.querySelector(".event-select select") ||
@@ -428,22 +445,32 @@ function App() {
       try {
         el.focus();
         el.click();
-      } catch (_) {
-        // ignore
-      }
+      } catch (_) {}
     }
   };
 
   const currentSolves = sessions[currentEvent] || [];
-  const avgOfFive = calculateAverage(currentSolves.slice(-5).map((s) => s.time), true).average;
-  const avgOfTwelve = calculateAverage(currentSolves.slice(-12).map((s) => s.time), true).average || "N/A";
-  const bestAvgOfFive = calculateBestAverageOfFive(currentSolves.map((s) => s.time));
+  const avgOfFive = calculateAverage(
+    currentSolves.slice(-5).map((s) => s.time),
+    true
+  ).average;
+  const avgOfTwelve =
+    calculateAverage(
+      currentSolves.slice(-12).map((s) => s.time),
+      true
+    ).average || "N/A";
+  const bestAvgOfFive = calculateBestAverageOfFive(
+    currentSolves.map((s) => s.time)
+  );
   const bestAvgOfTwelve =
     currentSolves.length >= 12
       ? Math.min(
           ...currentSolves.map((_, i) =>
             i + 12 <= currentSolves.length
-              ? calculateAverage(currentSolves.slice(i, i + 12).map((s) => s.time), true).average
+              ? calculateAverage(
+                  currentSolves.slice(i, i + 12).map((s) => s.time),
+                  true
+                ).average
               : Infinity
           )
         )
@@ -451,7 +478,11 @@ function App() {
 
   return (
     <div className={`App ${!isHomePage ? "music-player-mode" : ""}`}>
-      <div className={`navAndPage ${isHomePage || !showPlayerBar ? "fullHeight" : "reducedHeight"}`}>
+      <div
+        className={`navAndPage ${
+          isHomePage || !showPlayerBar ? "fullHeight" : "reducedHeight"
+        }`}
+      >
         <Navigation
           handleSignIn={handleShowSignInPopup}
           isSignedIn={isSignedIn}
@@ -466,7 +497,6 @@ function App() {
               element={
                 <>
                   <div className="scramble-select-container">
-                    {/* LEFT SLOT (used to be EventSelector) -> now Sign-in/@Name */}
                     <div className="left-slot-auth">
                       <NameTag
                         isSignedIn={isSignedIn}
@@ -475,7 +505,6 @@ function App() {
                       />
                     </div>
 
-                    {/* SCRAMBLE text (center) */}
                     <Scramble
                       scramble={scrambles[currentEvent]?.[0] || ""}
                       currentEvent={currentEvent}
@@ -483,7 +512,6 @@ function App() {
                       onForwardScramble={skipToNextScramble}
                     />
 
-                    {/* CUBE + EVENT SELECTOR (right column, selector under cube) */}
                     <div className="cube-and-event">
                       <div onClick={openEventSelector} style={{ cursor: "pointer" }}>
                         <PuzzleSVG
@@ -498,6 +526,11 @@ function App() {
                         <EventSelector
                           currentEvent={currentEvent}
                           handleEventChange={handleEventChange}
+                          currentSession={currentSession}
+                          setCurrentSession={setCurrentSession}
+                          sessions={sessionsList}
+                          customEvents={customEvents}
+                          userID={user?.UserID}
                         />
                       </div>
                     </div>
@@ -513,7 +546,7 @@ function App() {
                   <TimeList
                     user={user}
                     applyPenalty={applyPenalty}
-                    solves={sessions[currentEvent] || []}
+                    solves={currentSolves} // ✅ updated
                     deleteTime={(index) => deleteTime(currentEvent, index)}
                     addPost={addPost}
                     rowsToShow={3}
@@ -615,6 +648,10 @@ function App() {
         <PlayerBar
           sessions={sessions}
           currentEvent={currentEvent}
+          currentSession={currentSession}           
+          setCurrentSession={setCurrentSession}     
+          sessionsList={sessionsList}               
+          customEvents={customEvents}               
           handleEventChange={handleEventChange}
           deleteTime={deleteTime}
           addTime={addSolve}
