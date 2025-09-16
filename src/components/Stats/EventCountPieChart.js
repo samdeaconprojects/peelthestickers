@@ -2,10 +2,19 @@ import React from 'react';
 import PieChart from './PieChart';
 
 function EventCountPieChart({ sessions }) {
-  // Convert sessions into a flat solves list
-  const allSolves = Object.entries(sessions).flatMap(([event, solves]) =>
-    solves.map(solve => ({ ...solve, event })) // Ensure each solve has an event property
-  );
+  if (!sessions || typeof sessions !== "object") {
+    return <PieChart solves={[]} title="Event Breakdown" />;
+  }
+
+  // Flatten across all sessions inside each event
+  const allSolves = Object.entries(sessions).flatMap(([event, sessionMap]) => {
+    if (sessionMap && typeof sessionMap === "object") {
+      return Object.values(sessionMap)
+        .flat()
+        .map(solve => ({ ...solve, event }));
+    }
+    return [];
+  });
 
   return <PieChart solves={allSolves} title="Event Breakdown" />;
 }

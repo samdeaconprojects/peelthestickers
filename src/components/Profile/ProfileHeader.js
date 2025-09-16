@@ -2,8 +2,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import './Profile.css';
-import RubiksCubeSVG from '../PuzzleSVGs/PuzzleSVG';
-import { getScrambledFaces } from '../cubeStructure';
 import EventSelectorDetail from '../Detail/EventSelectorDetail';
 import { formatTime, calculateAverage } from '../TimeList/TimeUtils';
 import PuzzleSVG from '../PuzzleSVGs/PuzzleSVG';
@@ -31,9 +29,16 @@ export default function ProfileHeader({ user, sessions }) {
     setShowEventSelector(false);
   };
 
+  // ✅ Flatten all sessions for the given event
+  const getAllSolvesForEvent = (event) => {
+    if (!sessions[event]) return [];
+    if (Array.isArray(sessions[event])) return sessions[event]; // fallback
+    return Object.values(sessions[event]).flat();
+  };
+
   // helper to compute PBs
   const getPB = (event, type) => {
-    const times = (sessions[event] || []).map(s => s.time);
+    const times = getAllSolvesForEvent(event).map(s => s.time).filter(t => typeof t === 'number');
     if (!times.length) return 'N/A';
     if (type === 'single') return Math.min(...times);
     if (type === 'average') {
@@ -126,32 +131,20 @@ export default function ProfileHeader({ user, sessions }) {
             }}
           >
             <PuzzleSVG
-            className="profileCube"
-            event={ProfileEvent}
-            scramble={ProfileScramble}
-            isMusicPlayer={false}
-            isProfileCube={true}
-            isTimerCube={false}
+              className="profileCube"
+              event={ProfileEvent}
+              scramble={ProfileScramble}
+              isMusicPlayer={false}
+              isProfileCube={true}
+              isTimerCube={false}
             />
          </div>
-
         </div>
         <div className="profileNameAndUsername">
           <div className="profileName">{Name || 'Guest'}</div>
           <div className="profileUsername">@{UserID || 'guest'}</div>
         </div>
       </div>
-
-
-      {/* —— original Edit Events button —— 
-      <button
-        className="edit-events-button"
-        onClick={handleOpenSelector}
-      >
-        Edit Events
-      </button>
-
-      */}
 
       <div className="widgetBar">
         {widgets.map(w => (
@@ -167,7 +160,6 @@ export default function ProfileHeader({ user, sessions }) {
         ))}
       </div>
 
-      {/* —— overlay + detail pop‑up —— */}
       {openWidget && (
         <>
           <div
