@@ -1,48 +1,34 @@
 .name-tag {
   display: flex;
   align-items: center;
-  justify-content: center;
-  height: 50%;
+  margin-top: 20px;
 }
 
-/* Add border + padding around the whole link (profileColor is inline style) */
 .name-tag-link {
-  display: flex;
+  display: inline-flex;         /* shrink/expand to fit content */
   align-items: center;
-  justify-content: center;
   text-decoration: none;
   color: inherit;
   border-radius: 8px;
   padding: 4px 8px;
-  height: 46%;
-  width: 80%;
-  min-width: 120px;
-}
-
-.name-tag-text {
-  margin-left: -38px;
-  font-weight: 600;
-  font-size: 10pt;
-}
-
-.auth-button {
-  height: 35px;
-  background-color: transparent;
-  border: solid #FFFFFF 2px;
-  border-radius: 8px;
-  color: #FFFFFF;
-  opacity: 50%;
-}
-
-.auth-button:hover {
-  opacity: 100%;
-  cursor: pointer;
+  height: 40px;
+  width: auto;                  /* let width grow with text */
+  max-width: none;              /* remove the 200px cap */
 }
 
 .nametagCube {
- margin-right: auto;
+  flex: 0 0 auto;               /* fixed size, no stretching */
+  margin-right: 18px;            /* space between cube and text */
 }
 
 .nametagText {
+  flex: 0 1 auto;               /* text can shrink if needed */
+  white-space: nowrap;          /* keep username on one line */
+  overflow: hidden;
+  text-overflow: ellipsis;      /* if text is too long */
+}
 
+.name-tag-text {
+  font-weight: 600;
+  font-size: 10pt;
 }

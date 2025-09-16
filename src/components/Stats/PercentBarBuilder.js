@@ -85,14 +85,7 @@ const PercentBarBuilder = ({ solves, width, onSliceClick }) => {
           display: 'flex',
           flexDirection: 'column'
         }}>
-        {/* Percentage Label */}
-        <div style={{
-          marginLeft: '10%',
-          color: 'white',
-          fontSize: '42px',
-        }}>
-          <strong>{belowThresholdPercentage.toFixed(1)}%</strong>
-        </div>
+        
 
         {/* Threshold Input */}
       <label style={{ color: 'white', width: '100%', marginBottom: '10px', marginLeft: '10%',}}>
@@ -112,6 +105,15 @@ const PercentBarBuilder = ({ solves, width, onSliceClick }) => {
           }}
         />
       </label>
+
+      {/* Percentage Label */}
+        <div style={{
+          marginLeft: '10%',
+          color: 'white',
+          fontSize: '42px',
+        }}>
+          <strong>{belowThresholdPercentage.toFixed(1)}%</strong>
+        </div>
       </div>
       </div>
     </div>
