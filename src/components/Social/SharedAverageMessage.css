@@ -1,0 +1,51 @@
+.sharedAverageMessage {
+  background: #222;
+  border: 1px solid #2EC4B6;
+  border-radius: 8px;
+  padding: 8px;
+  margin: 6px 0;
+  color: white;
+  max-width: 100%;
+}
+
+.sharedAverageHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: bold;
+}
+
+.expandSharedBtn,
+.loadSharedBtn {
+  margin-top: 8px;
+  background: #2EC4B6;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: black;
+  font-weight: bold;
+}
+
+.sharedAverageTable {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+
+.sharedAverageTable table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.sharedAverageTable th,
+.sharedAverageTable td {
+  border: 1px solid #444;
+  padding: 4px 6px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.scrambleText {
+  font-family: monospace;
+  text-align: left;
+}

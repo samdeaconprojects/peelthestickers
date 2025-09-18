@@ -1,0 +1,46 @@
+.sharedAverageOverlay {
+  position: fixed;
+  top: 0; left: 0;
+  right: 0; bottom: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.sharedAverageModal {
+  background: #1a1a1a;
+  padding: 20px;
+  border-radius: 12px;
+  color: white;
+  min-width: 300px;
+}
+
+.sharedAverageModal h2 {
+  margin-bottom: 12px;
+}
+
+.sharedAverageModal label {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 12px;
+}
+
+.sharedAverageButtons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.sharedAverageButtons button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.sharedAverageButtons button:last-child {
+  background: #2EC4B6;
+  color: black;
+}

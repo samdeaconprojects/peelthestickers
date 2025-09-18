@@ -11,8 +11,10 @@ import { getMessages } from '../../services/getMessages';
 import { sendMessage } from '../../services/sendMessage';
 import PuzzleSVG from '../PuzzleSVGs/PuzzleSVG';
 import { generateScramble } from '../scrambleUtils';
+import SharedAverageModal from './SharedAverageModal';
+import SharedAverageMessage from './SharedAverageMessage'; // ✅ NEW
 
-function Social({ user, deletePost }) {
+function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
   const [activeTab, setActiveTab] = useState(0);
   const [feed, setFeed] = useState([]);
   const [selectedPost, setSelectedPost] = useState(null);
@@ -21,20 +23,20 @@ function Social({ user, deletePost }) {
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [messageInput, setMessageInput] = useState('');
+  const [showSharedModal, setShowSharedModal] = useState(false); // ✅ NEW
+
   const navigate = useNavigate();
 
   const activityEndRef = useRef(null);
   const messagesEndRef = useRef(null);
 
   const scrollActivityToBottom = () => {
-  activityEndRef.current?.scrollIntoView({ behavior: 'instant' });
-};
+    activityEndRef.current?.scrollIntoView({ behavior: 'instant' });
+  };
 
   const scrollMessagesToBottom = () => {
-  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-};
-
-
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   const getTransform = (event) => {
     const transforms = {
@@ -53,15 +55,14 @@ function Social({ user, deletePost }) {
   };
 
   useEffect(() => {
-  if (activeTab === 0) scrollActivityToBottom();
-}, [feed, activeTab]);
+    if (activeTab === 0) scrollActivityToBottom();
+  }, [feed, activeTab]);
 
-// When messages change or selecting a conversation, scroll to bottom
-useEffect(() => {
-  if (activeTab === 1 && selectedConversation?.messages) {
-    scrollMessagesToBottom();
-  }
-}, [selectedConversation, activeTab]);
+  useEffect(() => {
+    if (activeTab === 1 && selectedConversation?.messages) {
+      scrollMessagesToBottom();
+    }
+  }, [selectedConversation, activeTab]);
 
   useEffect(() => {
     const fetchFeed = async () => {
@@ -174,11 +175,10 @@ useEffect(() => {
   };
 
   const sortedConversations = [...conversations].sort((a, b) => {
-  const aTime = new Date(a.messages?.[a.messages.length - 1]?.timestamp || 0);
-  const bTime = new Date(b.messages?.[b.messages.length - 1]?.timestamp || 0);
-  return bTime - aTime;
-});
-
+    const aTime = new Date(a.messages?.[a.messages.length - 1]?.timestamp || 0);
+    const bTime = new Date(b.messages?.[b.messages.length - 1]?.timestamp || 0);
+    return bTime - aTime;
+  });
 
   const handleSendMessage = async () => {
     if (!selectedConversation || !messageInput.trim()) return;
@@ -212,39 +212,36 @@ useEffect(() => {
     }
   };
 
-  const sendSharedAo5Session = async () => {
-  if (!selectedConversation || !user?.UserID) return;
+  const handleConfirmSharedAverage = async (event, count) => {
+    if (!selectedConversation || !user?.UserID) return;
 
-  const event = selectedConversation.profileEvent || '333'; // or default fallback
-  const scrambles = Array.from({ length: 5 }, () => generateScramble(event));
+    const scrambles = Array.from({ length: count }, () => generateScramble(event));
+    const scrambleText = `[sharedAoN]${event}|${count}|${scrambles.join('||')}`;
 
-  const scrambleText = `[sharedAo5]${event}|${scrambles.join('||')}`;
+    const message = {
+      sender: user.UserID,
+      text: scrambleText,
+      timestamp: new Date().toISOString()
+    };
 
-  const message = {
-    sender: user.UserID,
-    text: scrambleText,
-    timestamp: new Date().toISOString()
+    const fid = selectedConversation.id;
+    const conversationID = [user.UserID, fid].sort().join('#');
+
+    const updatedConversation = {
+      ...selectedConversation,
+      messages: [...(selectedConversation.messages || []), message]
+    };
+    setSelectedConversation(updatedConversation);
+    setConversations(prev =>
+      prev.map(conv => (conv.id === fid ? updatedConversation : conv))
+    );
+
+    try {
+      await sendMessage(conversationID, user.UserID, message.text);
+    } catch (err) {
+      console.error("Failed to send shared average:", err);
+    }
   };
-
-  const fid = selectedConversation.id;
-  const conversationID = [user.UserID, fid].sort().join('#');
-
-  // Locally update
-  const updatedConversation = {
-    ...selectedConversation,
-    messages: [...(selectedConversation.messages || []), message]
-  };
-  setSelectedConversation(updatedConversation);
-  setConversations(prev =>
-    prev.map(conv => (conv.id === fid ? updatedConversation : conv))
-  );
-
-  try {
-    await sendMessage(conversationID, user.UserID, message.text);
-  } catch (err) {
-    console.error("Failed to send shared Ao5:", err);
-  }
-};
 
   if (!user) return <div>Please sign in to view your feed.</div>;
 
@@ -357,14 +354,27 @@ useEffect(() => {
               {selectedConversation ? (
                 <>
                   <div className="messages">
-                    {selectedConversation.messages.map((msg, idx) => (
-                      <div
-                        key={idx}
-                        className={`chatMessage ${msg.sender === user.UserID ? 'sent' : 'received'}`}
-                      >
-                        {msg.text || '[no text]'}
-                      </div>
-                    ))}
+                    {selectedConversation.messages.map((msg, idx) => {
+                      if (msg.text?.startsWith('[sharedAoN]')) {
+                        return (
+                          <SharedAverageMessage
+                            key={idx}
+                            msg={msg}
+                            user={user}
+                            onLoadSession={(session) => setSharedSession(session)}
+                            onMergeSession={(session) => mergeSharedSession(session)}
+                          />
+                        );
+                      }
+                      return (
+                        <div
+                          key={idx}
+                          className={`chatMessage ${msg.sender === user.UserID ? 'sent' : 'received'}`}
+                        >
+                          {msg.text || '[no text]'}
+                        </div>
+                      );
+                    })}
                     <div ref={messagesEndRef} />
                   </div>
                   <div className="messageInput">
@@ -374,8 +384,7 @@ useEffect(() => {
                       onChange={(e) => setMessageInput(e.target.value)}
                       placeholder="Type a message..."
                     />
-                    <button onClick={sendSharedAo5Session}>Shared Ao5</button>
-
+                    <button onClick={() => setShowSharedModal(true)}>Shared Average</button>
                     <button onClick={handleSendMessage}>Send</button>
                   </div>
                 </>
@@ -386,6 +395,13 @@ useEffect(() => {
           </div>
         )}
       </div>
+
+      <SharedAverageModal
+        isOpen={showSharedModal}
+        onClose={() => setShowSharedModal(false)}
+        defaultEvent={selectedConversation?.profileEvent || '333'}
+        onConfirm={handleConfirmSharedAverage}
+      />
 
       {selectedPost && (
         <PostDetail

@@ -64,6 +64,7 @@ function App() {
   const [showSettingsPopup, setShowSettingsPopup] = useState(false);
   const [selectedAverageSolves, setSelectedAverageSolves] = useState([]);
   const [selectedAverageIndex, setSelectedAverageIndex] = useState(0);
+  const [sharedSession, setSharedSession] = useState(null);
   const location = useLocation();
   const isHomePage = location.pathname === "/";
   const { settings } = useSettings();
@@ -177,6 +178,12 @@ function App() {
     datetime: item.DateTime,
     tags: item.Tags || {},
   });
+
+  const mergeSharedSession = (session) => {
+    // merge into whatever session the user has selected
+    // e.g., push solves into DynamoDB and local state
+    console.log("Merging shared session:", session);
+  };
 
   const handleSignUp = async (username, password) => {
     try {
@@ -639,6 +646,8 @@ function App() {
                   addPost={addPost}
                   deletePost={deletePost}
                   updateComments={handleUpdateComments}
+                  setSharedSession={setSharedSession}
+                  mergeSharedSession={mergeSharedSession}
                 />
               }
             />
@@ -651,7 +660,9 @@ function App() {
           sessions={sessions}
           currentEvent={currentEvent}
           currentSession={currentSession}           
-          setCurrentSession={setCurrentSession}     
+          setCurrentSession={setCurrentSession}   
+          sharedSession={sharedSession}        // NEW
+          clearSharedSession={() => setSharedSession(null)} // allow dismiss  
           sessionsList={sessionsList}               
           customEvents={customEvents}               
           handleEventChange={handleEventChange}
