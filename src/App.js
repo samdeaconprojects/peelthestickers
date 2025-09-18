@@ -38,6 +38,8 @@ import {
   calculateAverage,
 } from "./components/TimeList/TimeUtils";
 
+
+
 function App() {
   const [sessionsList, setSessionsList] = useState([]); // all sessions for user
   const [customEvents, setCustomEvents] = useState([]); // all custom events for user

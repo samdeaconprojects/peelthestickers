@@ -1,5 +1,5 @@
 // src/components/Social/Social.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './Social.css';
 import Post from '../Profile/Post';
@@ -23,6 +23,19 @@ function Social({ user, deletePost }) {
   const [messageInput, setMessageInput] = useState('');
   const navigate = useNavigate();
 
+  const activityEndRef = useRef(null);
+  const messagesEndRef = useRef(null);
+
+  const scrollActivityToBottom = () => {
+  activityEndRef.current?.scrollIntoView({ behavior: 'instant' });
+};
+
+  const scrollMessagesToBottom = () => {
+  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+};
+
+
+
   const getTransform = (event) => {
     const transforms = {
       '222': 'translate(23px, 58px) scale(0.7)',
@@ -38,6 +51,17 @@ function Social({ user, deletePost }) {
     };
     return transforms[event] || 'scale(0.6)';
   };
+
+  useEffect(() => {
+  if (activeTab === 0) scrollActivityToBottom();
+}, [feed, activeTab]);
+
+// When messages change or selecting a conversation, scroll to bottom
+useEffect(() => {
+  if (activeTab === 1 && selectedConversation?.messages) {
+    scrollMessagesToBottom();
+  }
+}, [selectedConversation, activeTab]);
 
   useEffect(() => {
     const fetchFeed = async () => {
@@ -74,7 +98,7 @@ function Social({ user, deletePost }) {
         );
 
         const merged = [...ownAnnotated, ...friendsArrays.flat()];
-        merged.sort((a, b) => new Date(b.DateTime || b.date) - new Date(a.DateTime || a.date));
+        merged.sort((a, b) => new Date(a.DateTime || a.date) - new Date(b.DateTime || b.date));
         setFeed(merged);
 
         const convos = await Promise.all(friendIds.map(async fid => {
@@ -278,6 +302,7 @@ function Social({ user, deletePost }) {
                 />
               </div>
             ))}
+            <div ref={activityEndRef} />
           </div>
         )}
 
@@ -340,6 +365,7 @@ function Social({ user, deletePost }) {
                         {msg.text || '[no text]'}
                       </div>
                     ))}
+                    <div ref={messagesEndRef} />
                   </div>
                   <div className="messageInput">
                     <input

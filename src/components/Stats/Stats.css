@@ -48,6 +48,11 @@ td:nth-child(13) {
     width: 100%;
     max-height: 550px;
     overflow-y: scroll;
+
+  min-height: 350px;   /* or whatever works */
+  flex: 0 0 auto;      /* don’t shrink when PlayerBar resizes */
+
+
   }
 
   /*

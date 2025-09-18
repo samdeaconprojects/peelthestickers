@@ -352,7 +352,7 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
         )}
 
         {activeTab === 1 && (
-          <div className="tabPanel">
+          <div className="tabPanel postsPanel">
             {recentPosts.length > 0 ? (
               recentPosts.map((post, idx) => (
                 <Post

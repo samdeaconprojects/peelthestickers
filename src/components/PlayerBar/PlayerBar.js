@@ -28,37 +28,27 @@ function PlayerBar({
   const location = useLocation();
   const { pathname } = location;
 
-  // Define border colors for different paths
   const borderColor = {
-    "/": "blue", // Home page
+    "/": "blue",
     "/profile": "#2EC4B6",
     "/stats": "yellow",
     "/social": "#50B6FF",
     "/settings": "#F64258",
   };
-
-  // Get the border color based on the current path, default to white if path not defined
   const currentBorderColor = borderColor[pathname] || "white";
 
   const getScrambleFontSize = (event) => {
     switch (event) {
-      case "222":
-        return "24px"; // Largest font size
-      case "333":
-        return "22px";
-      case "444":
-        return "18px";
-      case "555":
-        return "15px";
+      case "222": return "24px";
+      case "333": return "22px";
+      case "444": return "18px";
+      case "555": return "15px";
       case "666":
-      case "777":
-        return "12px"; // Smallest font size
-      default:
-        return "16px"; // Default font size
+      case "777": return "12px";
+      default: return "16px";
     }
   };
 
-  // 🔹 Get solves for the current event + session
   const currentSolves = sessions[currentEvent] || [];
 
   return (
@@ -66,9 +56,13 @@ function PlayerBar({
       className="player-bar"
       style={{ borderTop: `1px solid ${currentBorderColor}` }}
     >
-      <Timer addTime={addTime} />
+      {/* Left: Timer */}
+      <div className="playerbar-timer">
+        <Timer addTime={addTime} />
+      </div>
 
-      <div className="scramble-timelist">
+      {/* Middle: Scramble + TimeList */}
+      <div className="playerbar-scramble-timelist">
         <Scramble
           style={{ fontSize: getScrambleFontSize(currentEvent) }}
           onScrambleClick={onScrambleClick}
@@ -76,7 +70,6 @@ function PlayerBar({
           currentEvent={currentEvent}
           isMusicPlayer={true}
         />
-
         <TimeList
           user={user}
           applyPenalty={applyPenalty}
@@ -88,24 +81,29 @@ function PlayerBar({
         />
       </div>
 
-      {/* 🔹 Updated EventSelector props */}
-      <EventSelector
-        currentEvent={currentEvent}
-        handleEventChange={handleEventChange}
-        currentSession={currentSession}
-        setCurrentSession={setCurrentSession}
-        sessions={sessionsList}
-        customEvents={customEvents}
-        userID={user?.UserID}
-        dropUp={true}
-      />
+      {/* Right: EventSelector */}
+      <div className="playerbar-eventselector">
+        <EventSelector
+          currentEvent={currentEvent}
+          handleEventChange={handleEventChange}
+          currentSession={currentSession}
+          setCurrentSession={setCurrentSession}
+          sessions={sessionsList}
+          customEvents={customEvents}
+          userID={user?.UserID}
+          dropUp={true}
+        />
+      </div>
 
-      <RubiksCubeSVG
-        n={currentEvent}
-        faces={getScrambledFaces(scramble, currentEvent)}
-        isMusicPlayer={true}
-        isTimerCube={false}
-      />
+      {/* Far Right: Cube */}
+      <div className="playerbar-cube">
+        <RubiksCubeSVG
+          n={currentEvent}
+          faces={getScrambledFaces(scramble, currentEvent)}
+          isMusicPlayer={true}
+          isTimerCube={false}
+        />
+      </div>
     </div>
   );
 }

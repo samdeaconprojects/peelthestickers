@@ -46,6 +46,7 @@
   bottom: 0;
   right: 0;
   padding: 10px;
+  z-index: 2000;
 }
 
 button {
@@ -90,6 +91,7 @@ body {
   justify-content: space-between;
   position: relative;
   overflow-y: scroll;
+  overflow-x: hidden; /*?*/
 }
 
 /* Hide scrollbars in a container for Webkit-based browsers (e.g., Chrome, Safari) */
