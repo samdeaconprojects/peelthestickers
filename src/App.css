@@ -170,7 +170,7 @@ body {
   word-wrap: break-word;
   overflow-wrap: break-word;
   text-align: center;
-  margin-left: 70px;
+  margin-left: 50px;
 
   white-space: pre-wrap;  /* respects \n, for megaminx */
   word-break: break-word;

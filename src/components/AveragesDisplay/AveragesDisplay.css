@@ -1,73 +1,74 @@
-.container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-between;
-  height: 30%; 
-  box-sizing: border-box;
-  padding: 0 20px;
-  right: 40px;
-  position: relative;
-}
-
-/* BPA/WPA row */
-.possible-averages {
-  display: flex;
-  justify-content: center;
-  gap: 80px;
-  margin-bottom: 8px;
-  font-size: 18px;
-  font-weight: bold;
-  color: #FDFFFC;
-  opacity: 0.85;
-  left: 20px;
-  position: relative;
-}
-
-.bpa {
-  color: #00FF00; /* light green */
-}
-
-.wpa {
-  color: #FF7D7D; /* light red */
-}
-
-/* Main averages grid */
-.averages-display {
+.averages-table {
   display: grid;
-   grid-template-columns: 20% 70% 50%;
-  grid-template-rows: 10% 30% 20%;
-  gap: 6px;
+  grid-template-columns: 80px repeat(4, 1fr);
+  gap: 8px;
+  align-items: center;
+  text-align: center;
   color: #FDFFFC;
   font-family: 'Jost', sans-serif;
   font-weight: bold;
-  text-align: center;
-  margin-right: 20px;
-  margin-bottom: 20px;
- 
-  width: 100%;
-  max-width: 500px;
-  align-items: center;
-      right: 60px;
-    position: relative;
+  margin-right: 70px;  max-width: 600px;
+  position: relative;
 }
 
-.averagesTitle {
+/* Headers */
+.header {
   font-size: 12pt;
   opacity: 0.7;
   color: #50B6FF;
 }
 
-.averagesTime {
-  font-size: 24pt;
+.header.current-col {
+  font-size: 14pt;
+  opacity: 1;
+  color: #50B6FF;
 }
 
-.averagesTitle.best,
-.averagesTime.best {
-  font-size: 11pt;
-  opacity: 0.6;
+.header.bpa-header {
+  color: #00FF00; /* green title */
+}
+
+.header.wpa-header {
+  color: #FF7D7D; /* red title */
+}
+
+/* Row titles */
+.row-title {
+  font-size: 14pt;
+  opacity: 0.8;
+  color: #50B6FF;
+  cursor: pointer;
+}
+
+.row-title.ao5 {
+  font-size: 16pt;
+  opacity: 1;
+  color: #50B6FF; /* keep consistent color */
+}
+
+.row-title.ao12 {
+  font-size: 13pt;
+  opacity: 0.7;
+}
+
+/* Cells */
+.cell {
+  cursor: pointer;
+  font-size: 18pt;
+}
+
+.cell.current-col {
+  font-size: 28pt;  /* most important */
+  font-weight: bold;
+}
+
+.cell.best {
+  font-size: 18pt;
+  opacity: 0.8;
   color: #00FF00;
 }
 
-
-
+.cell.less-important {
+  font-size: 14pt;   /* BPA/WPA numbers smaller */
+  opacity: 0.6;
+}

@@ -25,43 +25,39 @@ function AveragesDisplay({ currentSolves, setSelectedAverageSolves }) {
 
   const lastFour = currentSolves.slice(-4).map(s => s.time).filter(t => typeof t === "number");
 
-  let bpa = "N/A";
-  let wpa = "N/A";
+  let bpa5 = "N/A", wpa5 = "N/A";
+  let bpa12 = "N/A", wpa12 = "N/A";
 
   if (lastFour.length === 4) {
     const sorted = [...lastFour].sort((a, b) => a - b);
-    const bestHypo = sorted[0];  // BPA adds another solve same as the best
-    const worstHypo = sorted[3]; // WPA adds another solve same as the worst
+    const bestHypo = sorted[0];
+    const worstHypo = sorted[3];
 
     const bestSet = [...lastFour, bestHypo];
     const worstSet = [...lastFour, worstHypo];
 
-    bpa = formatTime(calculateAverage(bestSet, true).average);
-    wpa = formatTime(calculateAverage(worstSet, true).average);
+    bpa5 = formatTime(calculateAverage(bestSet, true).average);
+    wpa5 = formatTime(calculateAverage(worstSet, true).average);
   }
 
   return (
-    <div className="container">
-      <div className="possible-averages">
-        <span className="bpa">BPA {bpa}</span>
-        <span className="wpa">WPA {wpa}</span>
+    <div className="averages-table">
+      <div className="header"></div>
+      <div className="header current-col">Current</div>
+      <div className="header">Best</div>
+      <div className="header bpa-header">BPA</div>
+      <div className="header wpa-header">WPA</div>
+
+      {/* AO5 row */}
+      <div className="row-title ao5" onClick={() => setSelectedAverageSolves(currentSolves.slice(-5))}>
+        AO5
       </div>
-
-      <div className="averages-display">
-        <p></p>
-        <p className="averagesTitle" onClick={() => setSelectedAverageSolves(currentSolves.slice(-5))}>AO5</p>
-        <p className="averagesTitle" onClick={() => setSelectedAverageSolves(currentSolves.slice(-12))}>AO12</p>
-        <p className="averagesTitle" style={{ opacity: 0.5 }}>CURRENT</p>
-
-        <p className="averagesTime" onClick={() => setSelectedAverageSolves(currentSolves.slice(-5))}>
-          {formatTime(avgOfFive)}
-        </p>
-        <p className="averagesTime" onClick={() => setSelectedAverageSolves(currentSolves.slice(-12))}>
-          {formatTime(avgOfTwelve)}
-        </p>
-
-        <p className="averagesTitle best">BEST</p>
-        <p className="averagesTime best" onClick={() => {
+      <div className="cell current-col ao5" onClick={() => setSelectedAverageSolves(currentSolves.slice(-5))}>
+        {formatTime(avgOfFive)}
+      </div>
+      <div
+        className="cell best ao5"
+        onClick={() => {
           if (currentSolves.length >= 5) {
             let bestSlice = [];
             let best = Infinity;
@@ -75,11 +71,23 @@ function AveragesDisplay({ currentSolves, setSelectedAverageSolves }) {
             }
             setSelectedAverageSolves(bestSlice);
           }
-        }}>
-          {formatTime(bestAvgOfFive)}
-        </p>
+        }}
+      >
+        {formatTime(bestAvgOfFive)}
+      </div>
+      <div className="cell less-important">{bpa5}</div>
+      <div className="cell less-important">{wpa5}</div>
 
-        <p className="averagesTime best" onClick={() => {
+      {/* AO12 row */}
+      <div className="row-title ao12" onClick={() => setSelectedAverageSolves(currentSolves.slice(-12))}>
+        AO12
+      </div>
+      <div className="cell current-col ao12" onClick={() => setSelectedAverageSolves(currentSolves.slice(-12))}>
+        {formatTime(avgOfTwelve)}
+      </div>
+      <div
+        className="cell best ao12"
+        onClick={() => {
           if (currentSolves.length >= 12) {
             let bestSlice = [];
             let best = Infinity;
@@ -93,10 +101,12 @@ function AveragesDisplay({ currentSolves, setSelectedAverageSolves }) {
             }
             setSelectedAverageSolves(bestSlice);
           }
-        }}>
-          {formatTime(bestAvgOfTwelve)}
-        </p>
+        }}
+      >
+        {formatTime(bestAvgOfTwelve)}
       </div>
+      <div className="cell less-important">{bpa12}</div>
+      <div className="cell less-important">{wpa12}</div>
     </div>
   );
 }
