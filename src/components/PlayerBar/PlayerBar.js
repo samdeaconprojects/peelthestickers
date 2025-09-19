@@ -1,12 +1,11 @@
-// PlayerBar.js
+// src/components/PlayerBar/PlayerBar.js
 import React from "react";
 import "./PlayerBar.css";
 import Timer from "../Timer/Timer";
 import TimeList from "../TimeList/TimeList";
 import EventSelector from "../EventSelector";
 import Scramble from "../Scramble/Scramble";
-import RubiksCubeSVG from "../PuzzleSVGs/RubiksCubeSVG";
-import { getScrambledFaces } from "../scrambleUtils";
+import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import { useLocation } from "react-router-dom";
 
 function PlayerBar({
@@ -39,13 +38,17 @@ function PlayerBar({
 
   const getScrambleFontSize = (event) => {
     switch (event) {
-      case "222": return "24px";
-      case "333": return "22px";
-      case "444": return "18px";
-      case "555": return "15px";
+      case "222": return "18px";
+      case "333": return "16px";
+      case "444": return "14px";
+      case "555": return "12px";
       case "666":
-      case "777": return "12px";
-      default: return "16px";
+      case "777": return "11px";
+      case "CLOCK": return "14px";
+      case "SKEWB":
+      case "PYRAMINX": return "14px";
+      case "MEGAMINX": return "10px";
+      default: return "14px";
     }
   };
 
@@ -56,50 +59,54 @@ function PlayerBar({
       className="player-bar"
       style={{ borderTop: `1px solid ${currentBorderColor}` }}
     >
-      {/* Left: Timer */}
-      <div className="playerbar-timer">
-        <Timer addTime={addTime} />
+      {/* LEFT: Timer + EventSelector */}
+      <div className="playerbar-left">
+        <div className="playerbar-timer">
+          <Timer addTime={addTime} />
+        </div>
+        <div className="playerbar-selector">
+          <EventSelector
+            currentEvent={currentEvent}
+            handleEventChange={handleEventChange}
+            currentSession={currentSession}
+            setCurrentSession={setCurrentSession}
+            sessions={sessionsList}
+            customEvents={customEvents}
+            userID={user?.UserID}
+            dropUp={true}
+          />
+        </div>
       </div>
 
-      {/* Middle: Scramble + TimeList */}
-      <div className="playerbar-scramble-timelist">
-        <Scramble
-          style={{ fontSize: getScrambleFontSize(currentEvent) }}
-          onScrambleClick={onScrambleClick}
-          scramble={scramble}
-          currentEvent={currentEvent}
-          isMusicPlayer={true}
-        />
-        <TimeList
-          user={user}
-          applyPenalty={applyPenalty}
-          solves={currentSolves}
-          deleteTime={(index) => deleteTime(currentEvent, index)}
-          inPlayerBar={true}
-          addPost={addPost}
-          rowsToShow={1}
-        />
+      {/* MIDDLE: Scramble + TimeList */}
+      <div className="playerbar-center">
+        <div className="scramble-box">
+          <Scramble
+            onScrambleClick={onScrambleClick}
+            scramble={scramble}
+            currentEvent={currentEvent}
+            isMusicPlayer={true}
+            style={{ fontSize: getScrambleFontSize(currentEvent) }}
+          />
+        </div>
+        <div className="playerbar-timelist">
+          <TimeList
+            user={user}
+            applyPenalty={applyPenalty}
+            solves={currentSolves}
+            deleteTime={(index) => deleteTime(currentEvent, index)}
+            inPlayerBar={true}
+            addPost={addPost}
+            rowsToShow={1}
+          />
+        </div>
       </div>
 
-      {/* Right: EventSelector */}
-      <div className="playerbar-eventselector">
-        <EventSelector
-          currentEvent={currentEvent}
-          handleEventChange={handleEventChange}
-          currentSession={currentSession}
-          setCurrentSession={setCurrentSession}
-          sessions={sessionsList}
-          customEvents={customEvents}
-          userID={user?.UserID}
-          dropUp={true}
-        />
-      </div>
-
-      {/* Far Right: Cube */}
+      {/* RIGHT: Puzzle SVG */}
       <div className="playerbar-cube">
-        <RubiksCubeSVG
-          n={currentEvent}
-          faces={getScrambledFaces(scramble, currentEvent)}
+        <PuzzleSVG
+          event={currentEvent}
+          scramble={scramble}
           isMusicPlayer={true}
           isTimerCube={false}
         />

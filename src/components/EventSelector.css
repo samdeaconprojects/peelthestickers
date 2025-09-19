@@ -1,16 +1,32 @@
-/* === Trigger (sits under the cube as before) === */
+/* === Trigger (base styles) === */
 .event-selector-container,
 .event-selector-trigger {
   position: relative;
   width: fit-content;
   font-weight: 500;
   font-size: 16pt;
-  /* remove previous nudging so it doesn't float oddly */
+  margin: 0;
+  bottom: 0;
+  right: 0;
+}
+
+/* === When inside PlayerBar: keep neutral, no offsets === */
+.player-bar .event-selector-container,
+.player-bar .event-selector-trigger {
+  bottom: 0;
+  margin-top: 0;
+  right: 0;
+}
+
+/* === When on homepage/main page: offset under cube === */
+.main-content .event-selector-container,
+.main-content .event-selector-trigger {
   right: 10px;
   bottom: 70px;
   margin-top: 20px;
 }
 
+/* === Dropdown box === */
 .event-selector-box {
   background: transparent;
   color: white;
@@ -29,15 +45,13 @@
 
 .dropdown-arrow { font-size: 16px; }
 
-/* === Old anchored dropdown: fully disabled (kept to avoid side effects) === */
+/* === Old anchored dropdown disabled === */
 .event-dropdown {
   display: none !important;
 }
 
-/* === Modal overrides (uses your Detail.css .detailPopup & .detailPopupContent) === */
-/* Extra class added to the modal content to size the event selector nicely */
+/* === Modal overrides (uses your Detail.css) === */
 .eventSelectorContent {
-  /* Match your Detail look but give it more room vertically for chips */
   width: 640px;
   max-width: 90vw;
   height: auto;
@@ -45,23 +59,20 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  
-  /* detailPopupContent already provides bg, border, radius, padding */
 }
 
-/* Inner scroll area so header/close stay fixed */
+/* Inner scroll area */
 .event-groups-wrapper {
   overflow: auto;
   padding-right: 4px;
   max-height: calc(70vh - 48px);
 
-  /* Hide scrollbars cross-browser */
   scrollbar-width: none;         /* Firefox */
   -ms-overflow-style: none;      /* IE 10+ */
 }
 .event-groups-wrapper::-webkit-scrollbar { display: none; }
 
-/* === Groups & chips (kept from your original, minor tweaks) === */
+/* === Groups & chips === */
 .event-group {
   padding: 8px 12px;
   border-bottom: 1px solid #3D3D3D;
@@ -95,9 +106,7 @@
 .event-item:hover { background: white; color: black; }
 .event-item.active { background: #2EC4B6; color: white; }
 
-
-
-
+/* === Add buttons === */
 .add-session-btn,
 .add-event-btn {
   background: #2EC4B6;
@@ -113,7 +122,6 @@
 .add-event-btn:hover {
   background: #1ca296;
 }
-
 
 /* === Responsive tweaks === */
 @media (max-width: 640px) {

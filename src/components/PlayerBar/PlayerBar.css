@@ -2,56 +2,111 @@
 
 .player-bar {
   display: grid;
-  grid-template-columns: auto 1fr auto auto; /* Timer | Scramble+TimeList | EventSelector | Cube */
+  grid-template-columns: minmax(100px, 200px) 1fr 120px; /* left | middle | cube */
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 160px;                 /* taller so nothing is cut off */
+  height: 160px;
   z-index: 1000;
 
   background-color: #121212;
   border-top: 1px solid var(--current-page-color);
-  padding: 12px 20px;
+  padding: 12px 18px;
   box-sizing: border-box;
-
   transition: transform 0.4s ease-in-out;
 }
 
-/* 🔹 Hide player bar smoothly when toggled */
-.player-bar.hidden {
-  transform: translateY(100%);
+.player-bar.hidden { transform: translateY(100%); }
+
+/* LEFT: timer + selector */
+.playerbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;                 /* selector sits close to timer */
+  height: 100%;
 }
 
-/* Timer */
-.player-bar .Timer {
+.playerbar-timer { display: flex; align-items: center; }
+
+.playerbar-timer .Timer {
+  font-size: 72px;           /* a little bigger */
   margin: 0;
-  font-size: 56px;               /* a bit larger */
+  line-height: 1;
+}
+
+/* keep selector vertically aligned with timer */
+.playerbar-selector {
+  display: flex;
+  align-items: center;
+}
+
+/* MIDDLE: scramble + timelist centered and stable */
+.playerbar-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 6px;
+}
+
+/* just a wrapper to keep future additions easy */
+.event-and-scramble { display: flex; align-items: center; justify-content: center; }
+
+/* fixed-height scramble box so TimeList never moves */
+.scramble-box {
+  max-width: 700px;
+  height: 46px;              /* taller than before to avoid clipping */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;          /* contain long content */
+  text-align: center;
+}
+
+/* clamp to two lines if Scramble component ever wraps;
+   otherwise we rely on auto font-shrink from JS */
+.scramble-box .scramble-text {
+  white-space: normal;
+  line-height: 1.1;
+  /*display: -webkit-box;*/
+  /*-webkit-line-clamp: 2;     /* show up to 2 lines */
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0 auto;
+}
+
+/* TimeList: same spot, no jumping */
+.playerbar-timelist {
+  width: 100%;
+  max-width: 700px;
+  height: 40px;              /* fixed row height */
+  overflow: hidden;          /* hide extra rows/overflow */
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-/* Scramble + TimeList */
-.scramble-timelist {
+.playerbar-timelist .TimeList {
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* RIGHT: cube pulled in a bit */
+.playerbar-cube {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   justify-content: center;
-  overflow: hidden;
 }
 
-/* Cube */
-.RubiksCubeSVG,
-.nonTimerCube {
-  width: 100px;
-  height: 100px;
-}
-
-/* Cube */
 .playerbar-cube svg {
   width: 90px;
   height: 90px;
 }
+
+/* make sure any global .Timer margin doesn't leak here */
+.player-bar .Timer { margin: 0 !important; }
