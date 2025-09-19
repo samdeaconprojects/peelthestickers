@@ -37,7 +37,7 @@
 }
 
 .navAndPage.reducedHeight {
-  height: 80%;
+   height: calc(100% - 160px);
 }
 
 

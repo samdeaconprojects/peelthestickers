@@ -10,7 +10,7 @@
   bottom: 0;
   left: 0;
   right: 0;
-  height: 180px;                 /* taller so nothing is cut off */
+  height: 160px;                 /* taller so nothing is cut off */
   z-index: 1000;
 
   background-color: #121212;
@@ -48,4 +48,10 @@
 .nonTimerCube {
   width: 100px;
   height: 100px;
+}
+
+/* Cube */
+.playerbar-cube svg {
+  width: 90px;
+  height: 90px;
 }

@@ -16,7 +16,7 @@
     justify-content: space-between;
     align-items: center;
     text-align: center;
-    margin-bottom: 15px;
+    margin-bottom: 5px;
   }
   
   .stats-header .stat-item {
@@ -60,7 +60,7 @@
   }
 
   .stats-body {
-    margin: 2%;
+    margin-left: 2%;
   }
   
   /* Bottom Grid Layout */
@@ -68,13 +68,13 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 15px;
-    margin-top: 15px;
+    margin-top: 5px;
   }
   
   /* Title Styling */
   h4 {
     margin: 10px 0;
-    font-size: 24px;
+    font-size: 20px;
     color: #aaa;
     /*border-bottom: 1px solid #555;*/
   }
@@ -82,7 +82,6 @@
   /* Individual Stat */
   .ao-item {
     display: flex;
-    font-size: larger;
   }
 
   .ao-title {
