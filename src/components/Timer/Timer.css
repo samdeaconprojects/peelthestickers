@@ -1,13 +1,31 @@
+/* Timer container */
+.timer-display {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+/* Timer text when in keyboard mode */
+.Timer {
+  color: white;
+  /* Grow with screen width but stay within reasonable bounds */
+  font-size: clamp(2rem, 16vw, 12rem);
+  text-align: center;
+  margin-right: 70px;
+}
+
+/* Manual entry mode */
 .manual-entry-container {
   display: flex;
   flex-direction: column;
   align-items: center;
   margin-right: 70px;
-  
 }
 
 .manual-display {
-  font-size: 4rem;
+  /* Responsive font size like Timer */
+  font-size: clamp(2rem, 8vw, 8rem);
   margin-bottom: 0.5rem;
   color: white;
   padding: 0.4rem 1rem;
@@ -30,8 +48,8 @@
   color: white;
 
   display: flex;
-  align-items: center;    /* vertical centering */
-  justify-content: center; /* horizontal centering */
+  align-items: center;
+  justify-content: center;
 }
 
 @keyframes flash {

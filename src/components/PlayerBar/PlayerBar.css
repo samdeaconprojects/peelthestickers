@@ -60,7 +60,6 @@
 /* fixed-height scramble box so TimeList never moves */
 .scramble-box {
   max-width: 700px;
-  height: 46px;              /* taller than before to avoid clipping */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -84,7 +83,6 @@
 .playerbar-timelist {
   width: 100%;
   max-width: 700px;
-  height: 40px;              /* fixed row height */
   overflow: hidden;          /* hide extra rows/overflow */
   display: flex;
   align-items: center;
