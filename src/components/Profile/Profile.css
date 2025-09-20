@@ -44,6 +44,7 @@
   min-height: 0;      /* allow flex children to shrink */
   overflow-y: auto;   /* enable vertical scrolling */
   padding: 10px;
+  align-items: center;
 }
 
 
@@ -94,7 +95,7 @@
     justify-content: space-between;
     
     border-radius: 12px;
-    width: 100%;
+    width: 94%;
 }
 
 .post:hover {

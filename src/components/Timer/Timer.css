@@ -13,6 +13,7 @@
   font-size: clamp(2rem, 16vw, 12rem);
   text-align: center;
   margin-right: 70px;
+  letter-spacing: 12px;
 }
 
 /* Manual entry mode */

@@ -1,5 +1,10 @@
 export const formatTime = (timeToDisplay, isAverage = false, penalty = null) => {
-  if (timeToDisplay === Number.MAX_SAFE_INTEGER || penalty === 'DNF') return 'DNF';
+  if (timeToDisplay === "DNF" || timeToDisplay === Number.MAX_SAFE_INTEGER || penalty === 'DNF') {
+    return 'DNF';
+  }
+  if (timeToDisplay === "N/A" || timeToDisplay === null || isNaN(timeToDisplay)) {
+    return 'N/A';
+  }
 
   let minutes = Math.floor(timeToDisplay / 60000);
   let seconds = Math.floor((timeToDisplay % 60000) / 1000);
@@ -25,6 +30,7 @@ export const formatTime = (timeToDisplay, isAverage = false, penalty = null) => 
 
 
 
+
   // TimeUtils.js
 export const calculateAverageForGraph = (times) => {
   if (!times || times.length === 0) {
@@ -37,48 +43,45 @@ export const calculateAverageForGraph = (times) => {
 
 
 export const calculateAverage = (timesArray, removeMinMax) => {
-  //console.log("Original timesArray: " + timesArray);
+  // Count DNFs (stored as "DNF" or MAX_SAFE_INTEGER etc.)
+  const dnfCount = timesArray.filter(
+    t => t === "DNF" || t === null || t === undefined || t === Number.MAX_SAFE_INTEGER
+  ).length;
 
-  // Ensure all entries are numeric and map to an array of objects with value and original index
-  const indexedArray = timesArray.map((time, index) => ({ value: parseFloat(time), index }))
-                                 .filter(item => !isNaN(item.value));  // Filter out non-numeric entries
+  if (dnfCount >= 2) {
+    return { average: "DNF", minIndex: -1, maxIndex: -1 };
+  }
+
+  // Convert numeric times
+  const indexedArray = timesArray
+    .map((time, index) => ({ value: parseFloat(time), index }))
+    .filter(item => !isNaN(item.value));
 
   if (indexedArray.length === 0) {
-      return { average: null, minIndex: -1, maxIndex: -1 };
+    return { average: "N/A", minIndex: -1, maxIndex: -1 };
   }
 
-  // Sort indexedArray based on the value in ascending order
   indexedArray.sort((a, b) => a.value - b.value);
 
-  //console.log("Sorted indexedArray: ");
-  //indexedArray.forEach(item => console.log(`Value: ${item.value}, Original Index: ${item.index}`));
-
-  let sum = 0;  // Initialize sum
-  let currAverage = 0;
-
+  let currAverage;
   if (removeMinMax && indexedArray.length > 2) {
-      // Remove the smallest and largest values if appropriate
-      const filteredArray = indexedArray.slice(1, -1);
-      sum = filteredArray.reduce((acc, curr) => acc + curr.value, 0);
-      currAverage = sum / filteredArray.length;
+    const filteredArray = indexedArray.slice(1, -1);
+    const sum = filteredArray.reduce((acc, curr) => acc + curr.value, 0);
+    currAverage = sum / filteredArray.length;
   } else {
-      // Calculate sum of all values
-      sum = indexedArray.reduce((acc, curr) => acc + curr.value, 0);
-      currAverage = sum / indexedArray.length;
+    const sum = indexedArray.reduce((acc, curr) => acc + curr.value, 0);
+    currAverage = sum / indexedArray.length;
   }
 
-  const minIndex = indexedArray[0].index;
-  const maxIndex = indexedArray[indexedArray.length - 1].index;
-
-  //console.log("Average: " + currAverage);
-
   return {
-      average: currAverage,
-      minIndex: minIndex,
-      maxIndex: maxIndex,
-      sortedWithOriginalIndexes: indexedArray // This includes both sorted values and their original indexes
+    average: currAverage,
+    minIndex: indexedArray[0].index,
+    maxIndex: indexedArray[indexedArray.length - 1].index,
+    sortedWithOriginalIndexes: indexedArray
   };
 };
+
+
 
 
 export const getOveralls = (timesArray) => {
@@ -105,12 +108,35 @@ export const calculateAverageOfFive = (times) => {
   };
 
 export const calculateBestAverageOfFive = (times) => {
-    let bestAvg = Infinity;
-    for (let i = 0; i <= times.length - 5; i++) {
-      const avg = calculateAverage(times.slice(i, i + 5), true).average;
-      if (avg < bestAvg) {
-        bestAvg = avg;
+  let bestAvg = Infinity;
+  let found = false;
+
+  for (let i = 0; i <= times.length - 5; i++) {
+    const avgResult = calculateAverage(times.slice(i, i + 5), true).average;
+    if (typeof avgResult === "number" && isFinite(avgResult)) {
+      found = true;
+      if (avgResult < bestAvg) {
+        bestAvg = avgResult;
       }
     }
-    return isFinite(bestAvg) ? bestAvg : 'N/A';
-  };
+  }
+
+  return found ? bestAvg : "N/A";
+};
+
+export const calculateBestAverageOfTwelve = (times) => {
+  let bestAvg = Infinity;
+  let found = false;
+
+  for (let i = 0; i <= times.length - 12; i++) {
+    const avgResult = calculateAverage(times.slice(i, i + 12), true).average;
+    if (typeof avgResult === "number" && isFinite(avgResult)) {
+      found = true;
+      if (avgResult < bestAvg) {
+        bestAvg = avgResult;
+      }
+    }
+  }
+
+  return found ? bestAvg : "N/A";
+};

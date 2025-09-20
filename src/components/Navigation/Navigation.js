@@ -2,11 +2,11 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import './Navigation.css';
-import ptsLogo from '../../assets/ptsyrg.svg';
+import ptsLogo from '../../assets/LogoStrokeWide.svg';
 import statsIcon from '../../assets/Stats.svg';
 import socialIcon from '../../assets/Social.svg';
 import profileIcon from '../../assets/Profile.svg';
-import settingsIcon from '../../assets/Settings.svg';
+import settingsIcon from '../../assets/SettingsOrange.svg';
 
 
 

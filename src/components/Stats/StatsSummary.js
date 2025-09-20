@@ -34,50 +34,54 @@ function StatsSummary({ solves }) {
   const [average, setAverage] = useState(null);
   const [median, setMedian] = useState(null);
   const [stdDev, setStdDev] = useState(null);
-  const [bestSingle, setBestSingle] = useState(null); // New state for best single time
+  const [bestSingle, setBestSingle] = useState(null);
   const [currentAverages, setCurrentAverages] = useState({});
   const [bestAverages, setBestAverages] = useState({});
 
   useEffect(() => {
-  if (solves && solves.length > 0) {
-    // Only include solves that are NOT DNFs for numeric stats
-    const filteredSolves = solves.filter(s => s.penalty !== 'DNF');
-    const times = filteredSolves.map(s => s.time);
+    if (solves && solves.length > 0) {
+      // Times with DNFs included (DNF → "DNF")
+      const times = solves.map(s => s.penalty === 'DNF' ? "DNF" : s.time);
+      // Numeric-only times for stats + larger averages
+      const numericTimes = solves.filter(s => s.penalty !== 'DNF').map(s => s.time);
 
-    if (times.length === 0) {
-      setAverage(null);
-      setMedian(null);
-      setStdDev(null);
-      setBestSingle(null);
-      setCurrentAverages({});
-      setBestAverages({});
-      return;
-    }
-
-    // Calculate basic stats
-    setAverage(times.reduce((sum, t) => sum + t, 0) / times.length);
-    setMedian(calculateMedianTime(times));
-    setStdDev(calculateStandardDeviation(times));
-    setBestSingle(Math.min(...times)); // Find the fastest single solve
-
-    // Define the different AoX values to track
-    const aoValues = [5, 12, 50, 100, 1000, 10000, 100000, 1000000];
-
-    let newCurrentAverages = {};
-    let newBestAverages = {};
-
-    aoValues.forEach(n => {
-      if (times.length >= n) {
-        newCurrentAverages[n] = calculateAverage(times.slice(-n), true).average || "N/A";
-        newBestAverages[n] = calculateBestAverage(times, n) || "N/A";
+      if (times.length === 0) {
+        setAverage(null);
+        setMedian(null);
+        setStdDev(null);
+        setBestSingle(null);
+        setCurrentAverages({});
+        setBestAverages({});
+        return;
       }
-    });
 
-    setCurrentAverages(newCurrentAverages);
-    setBestAverages(newBestAverages);
-  }
-}, [solves]);
+      // Basic stats (ignore DNFs)
+      setAverage(numericTimes.length > 0 ? numericTimes.reduce((sum, t) => sum + t, 0) / numericTimes.length : "N/A");
+      setMedian(numericTimes.length > 0 ? calculateMedianTime(numericTimes) : "N/A");
+      setStdDev(numericTimes.length > 1 ? calculateStandardDeviation(numericTimes) : "N/A");
+      setBestSingle(numericTimes.length > 0 ? Math.min(...numericTimes) : "N/A");
 
+      const aoValues = [5, 12, 50, 100, 1000, 10000, 100000, 1000000];
+      let newCurrentAverages = {};
+      let newBestAverages = {};
+
+      aoValues.forEach(n => {
+        if (times.length >= n) {
+          if (n === 5 || n === 12) {
+            // ✅ Current AO5 / AO12 respect DNFs
+            newCurrentAverages[n] = calculateAverage(times.slice(-n), true).average;
+          } else {
+            // ✅ Larger averages ignore DNFs
+            newCurrentAverages[n] = calculateAverage(numericTimes.slice(-n), true).average || "N/A";
+          }
+          newBestAverages[n] = calculateBestAverage(numericTimes, n) || "N/A";
+        }
+      });
+
+      setCurrentAverages(newCurrentAverages);
+      setBestAverages(newBestAverages);
+    }
+  }, [solves]);
 
   if (!solves || solves.length === 0) {
     return <div>No solves available</div>;
@@ -107,33 +111,35 @@ function StatsSummary({ solves }) {
       </div>
 
       <div className="stats-body">
-
-      <div className="best-single">
-          <div className="single-time">{formatTime(bestSingle)} </div> <div className='stat-title'>BEST SINGLE</div>
+        <div className="best-single">
+          <div className="single-time">{formatTime(bestSingle)} </div>
+          <div className='stat-title'>BEST SINGLE</div>
         </div>
 
-      {/* Bottom Grid */}
-      <div className="summary-grid">
-        {/* Best Averages */}
-        <div className="stats-best">
-          <h4>BEST</h4>
-          {Object.keys(bestAverages).map(n => (
-            <div key={`best-ao${n}`} className="ao-item">
-              <strong>{formatTime(bestAverages[n])}</strong> &nbsp; <div className='ao-title'>ao{n}</div>
-            </div>
-          ))}
-        </div>
+        {/* Bottom Grid */}
+        <div className="summary-grid">
+          {/* Best Averages */}
+          <div className="stats-best">
+            <h4>BEST</h4>
+            {Object.keys(bestAverages).map(n => (
+              <div key={`best-ao${n}`} className="ao-item">
+                <strong>{formatTime(bestAverages[n])}</strong> &nbsp;
+                <div className='ao-title'>ao{n}</div>
+              </div>
+            ))}
+          </div>
 
-        {/* Current Averages */}
-        <div className="stats-current">
-          <h4>CURRENT</h4>
-          {Object.keys(currentAverages).map(n => (
-            <div key={`current-ao${n}`} className="ao-item">
-              <strong>{formatTime(currentAverages[n])}</strong>  &nbsp; <div className='ao-title'>ao{n}</div>
-            </div>
-          ))}
+          {/* Current Averages */}
+          <div className="stats-current">
+            <h4>CURRENT</h4>
+            {Object.keys(currentAverages).map(n => (
+              <div key={`current-ao${n}`} className="ao-item">
+                <strong>{formatTime(currentAverages[n])}</strong> &nbsp;
+                <div className='ao-title'>ao{n}</div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
       </div>
     </div>
   );
