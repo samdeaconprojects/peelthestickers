@@ -112,7 +112,7 @@ body {
 
 .timer-display {
   text-align: right;
-  /*font-family: 'Droid Sans Mono', monospace;*/
+  font-family: 'Droid Sans Mono', monospace;
   display: flex;
   max-height: 30%;
 }
