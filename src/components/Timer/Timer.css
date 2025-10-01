@@ -22,6 +22,7 @@
   flex-direction: column;
   align-items: center;
   margin-right: 55px;
+  margin-bottom: 40px;
 }
 
 .manual-display {
@@ -36,7 +37,7 @@
 .keypad-grid {
   display: grid;
   grid-template-columns: repeat(3, 60px);
-  grid-gap: 10px;
+  grid-gap: 8px;
 }
 
 .keypad-grid button {

@@ -7,9 +7,6 @@
 
 
 
-/* Other styles that use these colors */
-
-
 .App {
   display: flex;
   flex-direction: column;
@@ -139,8 +136,7 @@ body {
 }
 
 .event-select {
-  margin-right: 0px; /* Add some space between the select and the SVG */
-
+  margin-right: 0px; 
   font-weight: 500;
   font-size: 16pt;
   margin-top: 30px;
@@ -162,19 +158,21 @@ body {
   width: 100%;
 }
 
+.scramble-container {
+  text-align: center;
+}
+
 .scramble-text {
-  display: inline-block; /* Add this to allow max-width to work properly */
+  display: inline-block; 
   font-size: 20pt;
-  max-width: 50%; /* Adjust this value as needed */
+  max-width: 50%; 
   white-space: normal;
   word-wrap: break-word;
   overflow-wrap: break-word;
   text-align: center;
-  margin-left: 50px;
-
-  white-space: pre-wrap;  /* respects \n, for megaminx */
+  margin-right: 4vw;
+  white-space: pre-wrap;  /* for \n - like mega */
   word-break: break-word;
-
 }
 
 select {
@@ -194,7 +192,6 @@ select {
 }
 
 .music-player-mode .content {
-  /* Your styles for the new page content above the player */
 }
 
 .music-player-mode .player {
@@ -215,44 +212,35 @@ select {
 }
 
 .music-player-mode .Timer {
-  font-size: 40pt; /* Adjust as needed */
-  /* Add any additional positioning styles if needed */
+  font-size: 40pt; 
   margin-right: 20px;
 }
 
 .music-player-mode .scramble-text {
-  font-size: 8pt; /* Adjust font size */
-  max-width: 100%; /* Adjust width as needed */
-  /* Update positioning if needed */
+  font-size: 8pt; 
+  max-width: 100%; 
   z-index: 3;
 }
 
 .music-player-mode .TimeList {
-  width: 100%; /* Adjust width as needed */
-  /* Add any additional styles for TimeList in music player mode */
+  width: 100%; 
 }
 
 .music-player-mode .time-list-container {
 
 }
 
-/* Ensure the table and its content adjust correctly */
 .music-player-mode .TimeList table {
   width: 100%; /* Table width should be 100% of TimeList width */
 }
 
 .music-player-mode .TimeList td {
-  /* Adjust table cell styles if needed */
 }
 
 .Page {
   width: 100%;
 }
 
-
-
-
-/* Put under your existing rules if needed */
 .cube-and-event {
   display: flex;
   flex-direction: column;
