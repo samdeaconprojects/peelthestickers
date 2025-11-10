@@ -47,6 +47,8 @@
 }
 
 button {
+  position: relative;
+  z-index: 2000;
   height: 35px;
   background-color: transparent;
   border: solid #FFFFFF 2px;
