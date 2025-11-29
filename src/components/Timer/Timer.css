@@ -27,7 +27,7 @@
 
 .manual-display {
   /* Responsive font size like Timer */
-  font-size: clamp(2rem, 8vw, 8rem);
+  font-size: clamp(3rem, 12vw, 12rem);
   margin-bottom: 0.5rem;
   color: white;
   padding: 0.4rem 1rem;
@@ -36,19 +36,19 @@
 
 .keypad-grid {
   display: grid;
-  grid-template-columns: repeat(3, 60px);
-  grid-gap: 8px;
+  grid-template-columns: repeat(10, 60px);
+  gap: 8px;
+  justify-content: center; /* centers entire keypad */
 }
 
 .keypad-grid button {
   font-size: 1.25rem;
   padding: 12px;
   border-radius: 6px;
-  border: 2px solid #50B6FF; /*2EC4B6*/
+  border: 2px solid #50B6FF;
   background-color: transparent;
   cursor: pointer;
   color: white;
-
   display: flex;
   align-items: center;
   justify-content: center;

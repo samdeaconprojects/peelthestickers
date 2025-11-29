@@ -202,11 +202,51 @@ if (event.key === ':') {
         <div className="manual-entry-container">
           <div className="manual-display">{manualTime || '0.00'}</div>
           <div className="keypad-grid">
-            {keypadButtons.map((val, i) => (
-              <button id={`keypad-${val}`} key={i} onClick={() => handlePadClick(val)}>
-                {val}
-              </button>
-            ))}
+            {/* Top row: 0–9 across 10 columns */}
+{['0','1','2','3','4','5','6','7','8','9'].map((val, i) => (
+  <button
+    id={`keypad-${val}`}
+    key={val}
+    style={{ gridColumn: i + 1 }}
+    onClick={() => handlePadClick(val)}
+  >
+    {val}
+  </button>
+))}
+
+{/* Second row — centered special buttons */}
+<button
+  id="keypad-."
+  style={{ gridColumn: 4 }}
+  onClick={() => handlePadClick('.')}
+>
+  .
+</button>
+
+<button
+  id="keypad-⌫"
+  style={{ gridColumn: 5 }}
+  onClick={() => handlePadClick('⌫')}
+>
+  ⌫
+</button>
+
+<button
+  id="keypad-:"
+  style={{ gridColumn: 6 }}
+  onClick={() => handlePadClick(':')}
+>
+  :
+</button>
+
+<button
+  id="keypad-Enter"
+  style={{ gridColumn: '7 / span 2' }}  /* spans columns 7–8 */
+  onClick={() => handlePadClick('Enter')}
+>
+  Enter
+</button>
+
           </div>
         </div>
       )}
