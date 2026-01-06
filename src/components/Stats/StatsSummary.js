@@ -30,7 +30,7 @@ const calculateBestAverage = (times, n) => {
   return isFinite(bestAvg) ? bestAvg : 'N/A';
 };
 
-function StatsSummary({ solves }) {
+function StatsSummary({ solves, overallStats }) {  //  overallStats NEW
   const [average, setAverage] = useState(null);
   const [median, setMedian] = useState(null);
   const [stdDev, setStdDev] = useState(null);
@@ -55,11 +55,27 @@ function StatsSummary({ solves }) {
         return;
       }
 
-      // Basic stats (ignore DNFs)
-      setAverage(numericTimes.length > 0 ? numericTimes.reduce((sum, t) => sum + t, 0) / numericTimes.length : "N/A");
-      setMedian(numericTimes.length > 0 ? calculateMedianTime(numericTimes) : "N/A");
-      setStdDev(numericTimes.length > 1 ? calculateStandardDeviation(numericTimes) : "N/A");
-      setBestSingle(numericTimes.length > 0 ? Math.min(...numericTimes) : "N/A");
+      // Basic stats (ignore DNFs) for the *window* of solves
+      setAverage(
+        numericTimes.length > 0
+          ? numericTimes.reduce((sum, t) => sum + t, 0) / numericTimes.length
+          : "N/A"
+      );
+      setMedian(
+        numericTimes.length > 0
+          ? calculateMedianTime(numericTimes)
+          : "N/A"
+      );
+      setStdDev(
+        numericTimes.length > 1
+          ? calculateStandardDeviation(numericTimes)
+          : "N/A"
+      );
+      setBestSingle(
+        numericTimes.length > 0
+          ? Math.min(...numericTimes)
+          : "N/A"
+      );
 
       const aoValues = [5, 12, 50, 100, 1000, 10000, 100000, 1000000];
       let newCurrentAverages = {};
@@ -68,37 +84,71 @@ function StatsSummary({ solves }) {
       aoValues.forEach(n => {
         if (times.length >= n) {
           if (n === 5 || n === 12) {
-            // ✅ Current AO5 / AO12 respect DNFs
+            // ✅ Current AO5 / AO12 respect DNFs for the visible window
             newCurrentAverages[n] = calculateAverage(times.slice(-n), true).average;
           } else {
-            // ✅ Larger averages ignore DNFs
-            newCurrentAverages[n] = calculateAverage(numericTimes.slice(-n), true).average || "N/A";
+            // ✅ Larger averages ignore DNFs on the window
+            newCurrentAverages[n] =
+              calculateAverage(numericTimes.slice(-n), true).average || "N/A";
           }
           newBestAverages[n] = calculateBestAverage(numericTimes, n) || "N/A";
         }
       });
 
+      // 🔹 Override BEST Ao5/Ao12 with precomputed overall stats if available
+      if (overallStats) {
+        if (overallStats.bestAo5Ms != null) {
+          newBestAverages[5] = overallStats.bestAo5Ms;
+        }
+        if (overallStats.bestAo12Ms != null) {
+          newBestAverages[12] = overallStats.bestAo12Ms;
+        }
+      }
+
       setCurrentAverages(newCurrentAverages);
       setBestAverages(newBestAverages);
+    } else {
+      // No solves in the current window → just reset window-based stats
+      setAverage(null);
+      setMedian(null);
+      setStdDev(null);
+      setBestSingle(null);
+      setCurrentAverages({});
+      setBestAverages({});
     }
-  }, [solves]);
+  }, [solves, overallStats]);  // depend on overallStats too
 
   if (!solves || solves.length === 0) {
     return <div>No solves available</div>;
   }
+
+  const totalSolveCount =
+    overallStats && overallStats.solveCount != null
+      ? overallStats.solveCount
+      : solves.length;
+
+  const meanToDisplay =
+    overallStats && overallStats.overallAvgMs != null
+      ? overallStats.overallAvgMs
+      : average;
+
+  const bestSingleToDisplay =
+    overallStats && overallStats.bestSingleMs != null
+      ? overallStats.bestSingleMs
+      : bestSingle;
 
   return (
     <div className="stats-summary">
       {/* Top Section */}
       <div className="stats-header">
         <div className="stat-count">
-          <div className="count-value">{solves.length}</div>
+          <div className="count-value">{totalSolveCount}</div>
           <div className="count-title">solves</div>
         </div>
 
         <div className="summary-item">
           <div className="stat-title">MEAN</div>
-          <div className="stat-value">{formatTime(average)}</div>
+          <div className="stat-value">{formatTime(meanToDisplay)}</div>
         </div>
         <div className="summary-item">
           <div className="stat-title">MEDIAN</div>
@@ -112,7 +162,7 @@ function StatsSummary({ solves }) {
 
       <div className="stats-body">
         <div className="best-single">
-          <div className="single-time">{formatTime(bestSingle)} </div>
+          <div className="single-time">{formatTime(bestSingleToDisplay)} </div>
           <div className='stat-title'>BEST SINGLE</div>
         </div>
 

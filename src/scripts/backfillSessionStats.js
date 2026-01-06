@@ -1,5 +1,8 @@
 // scripts/backfillSessionStats.js
 import { backfillSessionStatsForUser } from "../services/backfillSessionStats.js";
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.scripts' });
+
 
 const userID = process.argv[2];
 

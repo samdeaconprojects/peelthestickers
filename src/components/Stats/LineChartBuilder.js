@@ -1,3 +1,4 @@
+// LineChartBuilder.js
 import React, { useState } from "react";
 import PropTypes from "prop-types";
 
@@ -10,25 +11,25 @@ const LineChartBuilder = ({
   horizontalGuides: numberOfHorizontalGuides,
   verticalGuides: numberOfVerticalGuides,
   precision,
-  onDotClick // New prop for handling dot clicks
+  useDateMode,
+  onDotClick
 }) => {
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, time: '' });
   const FONT_SIZE = width / 50;
-  const maximumXFromData = Math.max(...data.map(e => e.x));
+  const maxX = Math.max(...data.map(e => e.x));
+  const minX = Math.min(...data.map(e => e.x));
   const maxY = Math.max(...data.map(e => e.y));
-  const maximumYFromData = Math.ceil(maxY / 10) * 10; // Round up to the nearest 10 seconds
-  
-  const digits =
-    parseFloat(maximumYFromData.toString()).toFixed(precision).length + 1;
+  const maximumYFromData = Math.ceil(maxY / 10) * 10;
 
+  const digits = parseFloat(maximumYFromData.toString()).toFixed(precision).length + 1;
   const padding = (FONT_SIZE + digits) * 3;
   const chartWidth = width - padding * 2;
   const chartHeight = height - padding * 2;
 
   const points = data
     .map(element => {
-      const x = (element.x / maximumXFromData) * chartWidth + padding;
-      const y = chartHeight - ((element.y) / maximumYFromData) * chartHeight + padding;
+      const x = ((element.x - minX) / (maxX - minX)) * chartWidth + padding;
+      const y = chartHeight - (element.y / maximumYFromData) * chartHeight + padding;
       return `${x},${y}`;
     })
     .join(" ");
@@ -38,10 +39,7 @@ const LineChartBuilder = ({
   );
 
   const XAxis = () => (
-    <Axis
-      points={`${padding},${height - padding} ${width - padding},${height -
-        padding}`}
-    />
+    <Axis points={`${padding},${height - padding} ${width - padding},${height - padding}`} />
   );
 
   const YAxis = () => (
@@ -50,25 +48,21 @@ const LineChartBuilder = ({
 
   const VerticalGuides = () => {
     const guideCount = numberOfVerticalGuides || data.length - 1;
-
     const startY = padding;
     const endY = height - padding;
 
     return new Array(guideCount).fill(0).map((_, index) => {
       const ratio = (index + 1) / guideCount;
-
       const xCoordinate = padding + ratio * (width - padding * 2);
-
       return (
-        <React.Fragment key={index}>
-          <polyline
-            fill="none"
-            stroke="#c2c2c2"
-            opacity={".2"}
-            strokeWidth=".5"
-            points={`${xCoordinate},${startY} ${xCoordinate},${endY}`}
-          />
-        </React.Fragment>
+        <polyline
+          key={index}
+          fill="none"
+          stroke="#c2c2c2"
+          opacity={".2"}
+          strokeWidth=".5"
+          points={`${xCoordinate},${startY} ${xCoordinate},${endY}`}
+        />
       );
     });
   };
@@ -76,42 +70,32 @@ const LineChartBuilder = ({
   const HorizontalGuides = () => {
     const startX = padding;
     const endX = width - padding;
-
     return new Array(numberOfHorizontalGuides).fill(0).map((_, index) => {
       const ratio = (index + 1) / numberOfHorizontalGuides;
-
       const yCoordinate = chartHeight - chartHeight * ratio + padding;
-
       return (
-        <React.Fragment key={index}>
-          <polyline
-            fill="none"
-            stroke={"#c2c2c2"}
-            opacity={".2"}
-            strokeWidth=".5"
-            points={`${startX},${yCoordinate} ${endX},${yCoordinate}`}
-          />
-        </React.Fragment>
+        <polyline
+          key={index}
+          fill="none"
+          stroke="#c2c2c2"
+          opacity={".2"}
+          strokeWidth=".5"
+          points={`${startX},${yCoordinate} ${endX},${yCoordinate}`}
+        />
       );
     });
   };
 
   const LabelsXAxis = () => {
     const y = height - padding + FONT_SIZE * 2;
-
     return data.map((element, index) => {
-      const x =
-        (element.x / maximumXFromData) * chartWidth + padding - FONT_SIZE / 2;
+      const x = ((element.x - minX) / (maxX - minX)) * chartWidth + padding - FONT_SIZE / 2;
       return (
         <text
           key={index}
           x={x}
           y={y}
-          style={{
-            fill: "#808080",
-            fontSize: FONT_SIZE,
-            fontFamily: "Helvetica"
-          }}
+          style={{ fill: "#808080", fontSize: FONT_SIZE, fontFamily: "Helvetica" }}
         >
           {element.label}
         </text>
@@ -123,20 +107,13 @@ const LineChartBuilder = ({
     const PARTS = numberOfHorizontalGuides;
     return new Array(PARTS + 1).fill(0).map((_, index) => {
       const x = FONT_SIZE;
-      const ratio = index / numberOfHorizontalGuides;
-
-      const yCoordinate =
-        chartHeight - chartHeight * ratio + padding + FONT_SIZE / 2;
+      const yCoordinate = chartHeight - chartHeight * (index / PARTS) + padding + FONT_SIZE / 2;
       return (
         <text
           key={index}
           x={x}
           y={yCoordinate}
-          style={{
-            fill: "#808080",
-            fontSize: FONT_SIZE,
-            fontFamily: "Helvetica"
-          }}
+          style={{ fill: "#808080", fontSize: FONT_SIZE, fontFamily: "Helvetica" }}
         >
           {(maximumYFromData * (index / PARTS)).toFixed(1) + "s"}
         </text>
@@ -155,9 +132,7 @@ const LineChartBuilder = ({
 
   return (
     <div style={{ position: 'relative' }}>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-      >
+      <svg viewBox={`0 0 ${width} ${height}`}>
         <XAxis />
         <LabelsXAxis />
         <YAxis />
@@ -171,40 +146,27 @@ const LineChartBuilder = ({
           strokeWidth={STROKE}
           points={points}
         />
-        {data.map((element, index) => {
-          const x = (element.x / maximumXFromData) * chartWidth + padding;
-          const y =
-            chartHeight - (element.y / maximumYFromData) * chartHeight + padding;
-          return (
-            element.isDNF ? (
-  <circle
-    key={index}
-    cx={x}
-    cy={y}
-    r={6}
-    fill="none"
-    stroke="red"
-    strokeWidth={2}
-    onMouseOver={(e) => handleMouseOver(e, element.time)}
-    onMouseOut={handleMouseOut}
-    onClick={() => onDotClick(element.solve, element.fullIndex)}
-  />
-) : (
-  <circle
-    key={index}
-    cx={x}
-    cy={y}
-    r={5}
-    fill={element.color}
-    onMouseOver={(e) => handleMouseOver(e, element.time)}
-    onMouseOut={handleMouseOut}
-    onClick={() => onDotClick(element.solve, element.fullIndex)}
-  />
-)
 
+        {data.map((element, index) => {
+          const x = ((element.x - minX) / (maxX - minX)) * chartWidth + padding;
+          const y = chartHeight - (element.y / maximumYFromData) * chartHeight + padding;
+          return (
+            <circle
+              key={index}
+              cx={x}
+              cy={y}
+              r={element.isDNF ? 6 : 5}
+              fill={element.isDNF ? 'none' : element.color}
+              stroke={element.isDNF ? 'red' : 'none'}
+              strokeWidth={element.isDNF ? 2 : 0}
+              onMouseOver={(e) => handleMouseOver(e, element.time)}
+              onMouseOut={handleMouseOut}
+              onClick={() => onDotClick(element.solve, element.fullIndex)}
+            />
           );
         })}
       </svg>
+
       {tooltip.visible && (
         <div
           style={{
@@ -241,7 +203,7 @@ LineChartBuilder.propTypes = {
       color: PropTypes.string,
       time: PropTypes.string,
       solve: PropTypes.object,
-      solveIndex: PropTypes.number // Added solveIndex to propTypes
+      solveIndex: PropTypes.number
     })
   ).isRequired,
   height: PropTypes.number,
@@ -249,7 +211,8 @@ LineChartBuilder.propTypes = {
   horizontalGuides: PropTypes.number,
   verticalGuides: PropTypes.number,
   precision: PropTypes.number,
-  onDotClick: PropTypes.func.isRequired // Ensure onDotClick is provided
+  useDateMode: PropTypes.bool,
+  onDotClick: PropTypes.func.isRequired
 };
 
 export default LineChartBuilder;

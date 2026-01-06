@@ -14,7 +14,10 @@ import { getUser } from '../../services/getUser';
 import { updateUser } from '../../services/updateUser';
 import { updatePostComments } from '../../services/updatePostComments';
 import { getSessions } from '../../services/getSessions';
-import { getSolvesBySession } from '../../services/getSolvesBySession';
+import {
+  getSolvesBySession,
+  getLastNSolvesBySession, // 🔹 NEW
+} from '../../services/getSolvesBySession';
 
 function Profile({ user, setUser, deletePost: deletePostProp }) {
   const { userID: paramID } = useParams();
@@ -25,6 +28,7 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
 
   const [viewedProfile, setViewedProfile] = useState(null);
   const [viewedSessions, setViewedSessions] = useState({});
+  const [viewedSessionStats, setViewedSessionStats] = useState({}); // 🔹 NEW
   const [posts, setPosts] = useState([]);
   const [selectedPost, setSelectedPost] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
@@ -72,16 +76,24 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
         const sessionItems = await getSessions(viewID);
 
         const grouped = {};
+        const statsByEvent = {}; // 🔹 NEW
+
         for (const session of sessionItems) {
-          const ev = session.Event || 'UNKNOWN';
+          const ev = (session.Event || 'UNKNOWN').toUpperCase();
           const sid = session.SessionID || 'main';
 
           if (!grouped[ev]) grouped[ev] = {};
+          if (!statsByEvent[ev]) statsByEvent[ev] = {}; // 🔹 NEW
+
+          // 🔹 Store per-session Stats blob from Dynamo (overall stats)
+          statsByEvent[ev][sid] = session.Stats || null;
+
           if (!grouped[ev][sid]) grouped[ev][sid] = [];
 
           try {
-            const solves = await getSolvesBySession(viewID, ev, sid);
-            grouped[ev][sid].push(...solves.map(normalizeSolve));
+            // 🔹 Only fetch the last N solves for charts, not all
+            const solves = await getLastNSolvesBySession(viewID, ev, sid, 200);
+            grouped[ev][sid] = solves.map(normalizeSolve);
           } catch (err) {
             console.error('Error fetching solves for', ev, sid, err);
           }
@@ -89,6 +101,7 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
 
         console.log('Grouped sessions for profile:', grouped);
         setViewedSessions(grouped);
+        setViewedSessionStats(statsByEvent); // 🔹 NEW
       } catch (err) {
         console.error('Failed to fetch sessions:', err);
       }
@@ -182,7 +195,11 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
 
   return (
     <div className="Page">
-      <ProfileHeader user={viewedProfile} sessions={viewedSessions} />
+      <ProfileHeader
+        user={viewedProfile}
+        sessions={viewedSessions}
+        sessionStats={viewedSessionStats} // 🔹 NEW (overall stats per session)
+      />
 
       {!isOwn && (
         <button
@@ -314,10 +331,14 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
                   if (item.chart === 'pieChart') {
                     return (
                       <div key={idx} className="stats-item">
-                        <EventCountPieChart sessions={viewedSessions} />
+                       <EventCountPieChart
+                          sessions={viewedSessions}
+                          sessionStats={viewedSessionStats}   
+                        />
                       </div>
                     );
                   }
+
                   if (item.chart === 'barChart') {
                     let solves = [];
                     if (item.session === 'all') {

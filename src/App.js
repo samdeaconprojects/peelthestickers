@@ -20,7 +20,10 @@ import { generateScramble } from "./components/scrambleUtils";
 import { Routes, Route, useLocation } from "react-router-dom";
 import { getUser } from "./services/getUser";
 import { getSessions } from "./services/getSessions";
-import { getSolvesBySession } from "./services/getSolvesBySession";
+import {
+  getSolvesBySession,
+  getLastNSolvesBySession, 
+} from "./services/getSolvesBySession";
 import { getCustomEvents } from "./services/getCustomEvents";
 import { addSolve as addSolveToDB } from "./services/addSolve";
 import { deleteSolve } from "./services/deleteSolve";
@@ -40,11 +43,14 @@ import {
 
 
 
+
 function App() {
   const [sessionsList, setSessionsList] = useState([]); // all sessions for user
   const [customEvents, setCustomEvents] = useState([]); // all custom events for user
   const [currentSession, setCurrentSession] = useState("main"); // selected session
   const [currentEvent, setCurrentEvent] = useState("333");
+  const [sessionStats, setSessionStats] = useState({}); // overall stats per session
+
   const [scrambles, setScrambles] = useState({});
   const [sessions, setSessions] = useState({
     "222": [],
@@ -95,18 +101,21 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [settings.eventKeyBindings]);
 
-  // 🔹 NEW: Refetch solves whenever event or session changes
-  useEffect(() => {
+  // Refetch solves whenever event or session changes
+    useEffect(() => {
     if (!isSignedIn || !user?.UserID) return;
 
     const loadSolvesForCurrent = async () => {
       try {
         const normalizedEvent = currentEvent.toUpperCase();
         const sessionId = currentSession || "main";
-        const solves = await getSolvesBySession(
+
+        // 🔹 Only fetch the latest 200 solves by default (tune N as you like)
+        const solves = await getLastNSolvesBySession(
           user.UserID,
           normalizedEvent,
-          sessionId
+          sessionId,
+          200
         );
         const normalizedSolves = solves.map(normalizeSolve);
 
@@ -116,7 +125,7 @@ function App() {
         }));
       } catch (err) {
         console.error(
-          "❌ Error loading solves for current event/session:",
+          "Error loading solves for current event/session:",
           err
         );
       }
@@ -124,6 +133,7 @@ function App() {
 
     loadSolvesForCurrent();
   }, [isSignedIn, user?.UserID, currentEvent, currentSession]);
+
 
   const preloadScrambles = (event) => {
     const newScrambles = Array.from({ length: 10 }, () => generateScramble(event));
@@ -186,109 +196,106 @@ function App() {
   };
 
   const handleSignUp = async (username, password) => {
-    try {
-      await createUser({
-        userID: username,
-        name: username,
-        username: username,
-        color: "#0E171D",
-        profileEvent: "333",
-        profileScramble: generateScramble("333"),
-        chosenStats: [],
-        headerStats: [],
-        wcaid: null,
-        cubeCollection: [],
-        settings: {
-          primaryColor: "#0E171D",
-          secondaryColor: "#ffffff",
-          timerInput: "Keyboard",
-        },
-        Friends: [],
-      });
+  try {
+    await createUser({
+      userID: username,
+      name: username,
+      username: username,
+      color: "#0E171D",
+      profileEvent: "333",
+      profileScramble: generateScramble("333"),
+      chosenStats: [],
+      headerStats: [],
+      wcaid: null,
+      cubeCollection: [],
+      settings: {
+        primaryColor: "#0E171D",
+        secondaryColor: "#ffffff",
+        timerInput: "Keyboard",
+      },
+      Friends: [],
+    });
 
-      const createSessionPromises = DEFAULT_EVENTS.map((event) =>
-        createSession(username, event, "main", "Main Session")
-      );
-      await Promise.all(createSessionPromises);
+    const createSessionPromises = DEFAULT_EVENTS.map((event) =>
+      createSession(username, event, "main", "Main Session")
+    );
+    await Promise.all(createSessionPromises);
 
-      alert("User created successfully!");
+    alert("User created successfully!");
 
-      const profile = await getUser(username);
-      setUser(profile);
-      setIsSignedIn(true);
-      setShowSignInPopup(false);
-    } catch (error) {
-      console.error("Error signing up:", error);
-      alert("An error occurred during sign-up.");
-    }
-  };
+    const profile = await getUser(username);
+    setUser(profile);
+    setIsSignedIn(true);
+    setShowSignInPopup(false);
+  } catch (error) {
+    console.error("Error signing up:", error);
+    alert("An error occurred during sign-up.");
+  }
+};
+
 
   const handleSignIn = async (username, password) => {
-    try {
-      const profile = await getUser(username);
-      if (!profile) return alert("Invalid credentials!");
+  try {
+    const profile = await getUser(username);
+    if (!profile) return alert("Invalid credentials!");
 
-      const userID = profile.PK?.split("#")[1] || username;
+    const userID = profile.PK?.split("#")[1] || username;
 
-      const posts = await getPosts(userID);
-      const userWithData = {
-        ...profile,
-        UserID: userID,
-        Posts: posts,
-        Friends: profile.Friends || [],
-      };
+    const posts = await getPosts(userID);
+    const userWithData = {
+      ...profile,
+      UserID: userID,
+      Posts: posts,
+      Friends: profile.Friends || [],
+    };
 
-      setUser(userWithData);
-      setIsSignedIn(true);
-      setShowSignInPopup(false);
+    setUser(userWithData);
+    setIsSignedIn(true);
+    setShowSignInPopup(false);
 
-      let sessionItems = await getSessions(userID);
-      const eventItems = await getCustomEvents(userID);
+    let sessionItems = await getSessions(userID);
+    const eventItems = await getCustomEvents(userID);
 
-      setSessionsList(sessionItems);
-      setCustomEvents(eventItems);
+    setSessionsList(sessionItems);
+    setCustomEvents(eventItems);
 
-      const missingEvents = DEFAULT_EVENTS.filter(
-        (event) =>
-          !sessionItems.find(
-            (s) => s.Event === event && s.SessionID === "main"
-          )
+    const missingEvents = DEFAULT_EVENTS.filter(
+      (event) =>
+        !sessionItems.find(
+          (s) => s.Event === event && s.SessionID === "main"
+        )
+    );
+
+    if (missingEvents.length > 0) {
+      const createMissing = missingEvents.map((event) =>
+        createSession(userID, event, "main", "Main Session")
       );
-
-      if (missingEvents.length > 0) {
-        const createMissing = missingEvents.map((event) =>
-          createSession(userID, event, "main", "Main Session")
-        );
-        await Promise.all(createMissing);
-        sessionItems = await getSessions(userID);
-      }
-
-      const sessionsByEvent = {};
-      for (const event of DEFAULT_EVENTS) {
-        sessionsByEvent[event] = [];
-      }
-
-      for (const session of sessionItems) {
-        const normalizedEvent = session.Event.toUpperCase();
-        const solves = await getSolvesBySession(
-          userID,
-          normalizedEvent,
-          session.SessionID
-        );
-        const normalizedSolves = solves.map(normalizeSolve);
-
-        if (!sessionsByEvent[normalizedEvent])
-          sessionsByEvent[normalizedEvent] = [];
-        if (session.SessionID === "main") {
-          sessionsByEvent[normalizedEvent] = normalizedSolves;
-        }
-      }
-
-      setSessions(sessionsByEvent);
-    } catch (error) {
-      console.error("Sign-in error:", error);
+      await Promise.all(createMissing);
+      sessionItems = await getSessions(userID);
+      setSessionsList(sessionItems); // refresh
     }
-  };
+
+    const statsByEvent = {};
+    for (const event of DEFAULT_EVENTS) {
+      statsByEvent[event] = {};
+    }
+
+    for (const session of sessionItems) {
+      const ev = (session.Event || "").toUpperCase();
+      const sid = session.SessionID || "main";
+
+      if (!statsByEvent[ev]) statsByEvent[ev] = {};
+      statsByEvent[ev][sid] = session.Stats || null;
+    }
+
+    setSessionStats(statsByEvent);
+    //  Do not setSessions(...) here – solves will load on demand
+
+  } catch (error) {
+    console.error("Sign-in error:", error);
+  }
+};
+
 
   const addSolve = async (newTime) => {
     const scramble = getNextScramble();
@@ -629,14 +636,17 @@ function App() {
               element={
                 <Stats
                   sessions={sessions}
+                  sessionStats={sessionStats}      
                   setSessions={setSessions}
                   currentEvent={currentEvent}
-                  setCurrentEvent={setCurrentEvent}
+                  currentSession={currentSession}  
+                  user = {user}
                   deleteTime={(eventKey, index) => deleteTime(eventKey, index)}
                   addPost={addPost}
                 />
               }
             />
+
 
             <Route
               path="/social"

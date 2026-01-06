@@ -3,17 +3,44 @@ import LineChartBuilder from "./LineChartBuilder";
 import Label from "./AxisLabel";
 import ChartTitle from "./ChartTitle";
 import './Stats.css';
-import { formatTime, calculateAverage, getOveralls, calculateAverageOfFive, calculateBestAverageOfFive } from '../TimeList/TimeUtils';
+import {
+  formatTime,
+  calculateAverage,
+  getOveralls,
+  calculateAverageOfFive,
+  calculateBestAverageOfFive
+} from '../TimeList/TimeUtils';
 import LineChart from './LineChart';
 import TimeTable from './TimeTable';
 import PercentBar from './PercentBar';
 import StatsSummary from './StatsSummary';
 import BarChart from './BarChart';
+import { getSolvesBySession } from '../../services/getSolvesBySession'; 
 
-function Stats({ sessions, setSessions, currentEvent, deleteTime, addPost }) {
-  const [solvesPerPage, setSolvesPerPage] = useState(100); // Default to showing 300 solves
+function Stats({
+  sessions,
+  sessionStats,          // (optional, fine to leave even if unused here)
+  setSessions,
+  currentEvent,
+  currentSession,        
+  user,                  
+  deleteTime,
+  addPost
+}) {
+  const [solvesPerPage, setSolvesPerPage] = useState(100); // Default to showing 100 solves
   const [currentPage, setCurrentPage] = useState(0); // Start on the first page
   const [statsEvent, setStatsEvent] = useState(currentEvent); // Local state for the stats page event
+
+  // Normalize DynamoDB solve item into UI shape (same as in App.js)
+  const normalizeSolve = (item) => ({
+    time: item.Time,
+    scramble: item.Scramble,
+    event: item.Event,
+    penalty: item.Penalty,
+    note: item.Note || '',
+    datetime: item.DateTime,
+    tags: item.Tags || {},
+  });
 
   // Get the solves for the selected stats event
   const solves = sessions[statsEvent] || [];
@@ -23,13 +50,10 @@ function Stats({ sessions, setSessions, currentEvent, deleteTime, addPost }) {
   const endIndex = solves.length - solvesPerPage * currentPage;
 
   // Slice the array to get the subset of solves to display
-  //const solvesToDisplay = solves.slice(startIndex, endIndex);
-
   const solvesToDisplay = solves.slice(startIndex, endIndex).map((solve, i) => ({
     ...solve,
     fullIndex: startIndex + i, // Store correct index from full session
   }));
-  
 
   const handleEventChange = (event) => {
     setStatsEvent(event.target.value);
@@ -39,11 +63,11 @@ function Stats({ sessions, setSessions, currentEvent, deleteTime, addPost }) {
   const handleDeleteSolve = (fullIndex) => {
     const updatedSessions = {
       ...sessions,
-      [statsEvent]: sessions[statsEvent].filter((_, i) => i !== fullIndex), // ✅ Use fullIndex
+      [statsEvent]: sessions[statsEvent].filter((_, i) => i !== fullIndex), // Use fullIndex
     };
   
-    setSessions(updatedSessions); // ✅ Updates App.js state
-    deleteTime(statsEvent, fullIndex); // ✅ Calls the backend with correct index
+    setSessions(updatedSessions); //Updates App.js state
+    deleteTime(statsEvent, fullIndex); //Calls the backend with correct index
   };
 
   const handlePreviousPage = () => {
@@ -72,9 +96,37 @@ function Stats({ sessions, setSessions, currentEvent, deleteTime, addPost }) {
     }
   };
 
-  const handleShowAll = () => {
-    setSolvesPerPage(solves.length); // Set to total solves
-    setCurrentPage(0);
+  // 🔹 NEW: truly load *all* solves from DynamoDB for this event/session
+  const handleShowAll = async () => {
+    // If we don't have a signed-in user, just fall back to current in-memory array
+    if (!user?.UserID) {
+      setSolvesPerPage(solves.length);
+      setCurrentPage(0);
+      return;
+    }
+
+    try {
+      const sessionId = currentSession || 'main';
+      const fullItems = await getSolvesBySession(
+        user.UserID,
+        statsEvent.toUpperCase(),
+        sessionId
+      );
+      const normalized = fullItems.map(normalizeSolve);
+
+      setSessions((prev) => ({
+        ...prev,
+        [statsEvent]: normalized,
+      }));
+
+      setSolvesPerPage(normalized.length);
+      setCurrentPage(0);
+    } catch (err) {
+      console.error('Failed to load all solves for Stats:', err);
+      // Still show whatever we already have
+      setSolvesPerPage(solves.length);
+      setCurrentPage(0);
+    }
   };
 
   return (
@@ -87,19 +139,34 @@ function Stats({ sessions, setSessions, currentEvent, deleteTime, addPost }) {
             </option>
           ))}
         </select>
-        <button onClick={handlePreviousPage} disabled={currentPage >= Math.floor(solves.length / solvesPerPage) - 1}>
+        <button
+          onClick={handlePreviousPage}
+          disabled={currentPage >= Math.floor(solves.length / solvesPerPage) - 1}
+        >
           Older ▲
         </button>
-        <button onClick={handleNextPage} disabled={currentPage === 0}>
+        <button
+          onClick={handleNextPage}
+          disabled={currentPage === 0}
+        >
           Newer ▼
         </button>
-        <button onClick={handleZoomIn} disabled={solvesPerPage <= 50}>
+        <button
+          onClick={handleZoomIn}
+          disabled={solvesPerPage <= 50}
+        >
           Zoom +
         </button>
-        <button onClick={handleZoomOut} disabled={solvesPerPage >= solves.length}>
+        <button
+          onClick={handleZoomOut}
+          disabled={solvesPerPage >= solves.length}
+        >
           Zoom -
         </button>
-        <button onClick={handleShowAll} disabled={solvesPerPage === solves.length}>
+        <button
+          onClick={handleShowAll}
+          disabled={solvesPerPage === solves.length && solves.length > 0}
+        >
           Show All
         </button>
       </div>
@@ -107,10 +174,18 @@ function Stats({ sessions, setSessions, currentEvent, deleteTime, addPost }) {
       <div className="stats-page">
         <div className="stats-grid">
           <div className="stats-item">
-            <StatsSummary solves={solvesToDisplay} />
+            <StatsSummary
+              solves={solvesToDisplay}
+              overallStats={null} // or sessionStats?.[statsEvent]?.[currentSession || 'main']
+            />
           </div>
           <div className="stats-item">
-            <LineChart solves={solvesToDisplay} title={`Current Avg: ${statsEvent}`} deleteTime={(index) => handleDeleteSolve(index)} addPost={addPost} />
+            <LineChart
+              solves={solvesToDisplay}
+              title={`Current Avg: ${statsEvent}`}
+              deleteTime={(index) => handleDeleteSolve(index)}
+              addPost={addPost}
+            />
           </div>
           <div className="stats-item">
             <PercentBar solves={solvesToDisplay} title="Solves Distribution by Time" />
@@ -119,7 +194,11 @@ function Stats({ sessions, setSessions, currentEvent, deleteTime, addPost }) {
             <BarChart solves={solvesToDisplay} />
           </div>
           <div className="stats-item">
-            <TimeTable solves={solvesToDisplay} deleteTime={(index) => handleDeleteSolve(index)} addPost={addPost} />
+            <TimeTable
+              solves={solvesToDisplay}
+              deleteTime={(index) => handleDeleteSolve(index)}
+              addPost={addPost}
+            />
           </div>
         </div>
       </div>
