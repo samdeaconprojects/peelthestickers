@@ -18,6 +18,8 @@ function PlayerBar({
   addTime,
   scramble,
   onScrambleClick,
+  goForwardScramble,
+  goBackwardScramble,
   addPost,
   user,
   applyPenalty,
@@ -82,12 +84,14 @@ function PlayerBar({
       <div className="playerbar-center">
         <div className="scramble-box">
           <Scramble
-            onScrambleClick={onScrambleClick}
-            scramble={scramble}
-            currentEvent={currentEvent}
-            isMusicPlayer={true}
-            style={{ fontSize: getScrambleFontSize(currentEvent) }}
-          />
+  onScrambleClick={onScrambleClick}
+  scramble={scramble}
+  currentEvent={currentEvent}
+  isMusicPlayer={true}
+  onForwardScramble={goForwardScramble}
+  onBackwardScramble={goBackwardScramble}
+/>
+
         </div>
         <div className="playerbar-timelist">
           <TimeList

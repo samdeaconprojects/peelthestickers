@@ -1,4 +1,4 @@
-function Scramble({ onScrambleClick, onForwardScramble, scramble, currentEvent, isMusicPlayer }) {
+function Scramble({ onScrambleClick, onForwardScramble, onBackwardScramble, scramble, currentEvent, isMusicPlayer }) {
   let fontSize, maxWidth;
   switch (currentEvent) {
     case '222': fontSize = 20; maxWidth = 100; break;
@@ -15,15 +15,29 @@ function Scramble({ onScrambleClick, onForwardScramble, scramble, currentEvent, 
 
   return (
     <div className="scramble-container">
-      <p
-        className="scramble-text"
-        style={{ fontSize: `${fontSize}pt`, maxWidth: `${maxWidth}%` }}
-        onClick={() => onScrambleClick(scramble)}
-      >
-        {scramble}
-      </p>
-      <button className="scramble-next-button" onClick={onForwardScramble}>→</button>
-    </div>
+  <button
+    className="scramble-prev-button"
+    onClick={onBackwardScramble}
+  >
+    ←
+  </button>
+
+  <p
+    className="scramble-text"
+    style={{ fontSize: `${fontSize}pt`, maxWidth: `${maxWidth}%` }}
+    onClick={() => onScrambleClick(scramble)}
+  >
+    {scramble}
+  </p>
+
+  <button
+    className="scramble-next-button"
+    onClick={onForwardScramble}
+  >
+    →
+  </button>
+</div>
+
   );
 }
 

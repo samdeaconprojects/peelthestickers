@@ -206,6 +206,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 10px;
+  align-items: stretch;
 }
 
 .chatMessage {

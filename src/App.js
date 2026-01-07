@@ -35,6 +35,8 @@ import { createSession } from "./services/createSession";
 import { createUser } from "./services/createUser";
 import { updateSolve } from "./services/updateSolve";
 import { updateUser } from "./services/updateUser";
+import { sendMessage } from "./services/sendMessage";
+
 import { DEFAULT_EVENTS } from "./defaultEvents";
 import {
   calculateBestAverageOfFive,
@@ -71,6 +73,8 @@ function App() {
   const [selectedAverageSolves, setSelectedAverageSolves] = useState([]);
   const [selectedAverageIndex, setSelectedAverageIndex] = useState(0);
   const [sharedSession, setSharedSession] = useState(null);
+  const [sharedIndex, setSharedIndex] = useState(0);
+
   const location = useLocation();
   const isHomePage = location.pathname === "/";
   const { settings } = useSettings();
@@ -134,6 +138,21 @@ function App() {
     loadSolvesForCurrent();
   }, [isSignedIn, user?.UserID, currentEvent, currentSession]);
 
+  useEffect(() => {
+  if (!sharedSession) return;
+
+  const { event, sessionID } = sharedSession;
+
+  setCurrentEvent(event);
+  setCurrentSession(sessionID);
+  setSharedIndex(0);
+
+  console.log("📌 Loaded Shared Session:", sessionID);
+}, [sharedSession]);
+
+
+
+
 
   const preloadScrambles = (event) => {
     const newScrambles = Array.from({ length: 10 }, () => generateScramble(event));
@@ -178,6 +197,37 @@ function App() {
       return updatedScrambles;
     });
   };
+
+  // 🔹 Next Scramble (works for normal + shared)
+const goForwardScramble = () => {
+  if (sharedSession) {
+    setSharedIndex(i =>
+      Math.min(i + 1, sharedSession.scrambles.length - 1)
+    );
+  } else {
+    skipToNextScramble();
+  }
+};
+
+// 🔹 Previous Scramble (works for normal + shared)
+const goBackwardScramble = () => {
+  if (sharedSession) {
+    setSharedIndex(i => Math.max(i - 1, 0));
+  } else {
+    // normal scrambles: prepend a fresh scramble and stay stable
+    setScrambles(prev => {
+      const arr = prev[currentEvent] || [];
+      return {
+        ...prev,
+        [currentEvent]: [
+          generateScramble(currentEvent),
+          ...arr
+        ]
+      };
+    });
+  }
+};
+
 
   const normalizeSolve = (item) => ({
     time: item.Time,
@@ -298,49 +348,129 @@ function App() {
 
 
   const addSolve = async (newTime) => {
-    const scramble = getNextScramble();
-    const timestamp = new Date().toISOString();
+  let scramble;
 
-    console.log("🧩 Adding solve:", {
-      event: currentEvent,
-      sessionID: currentSession, // ✅ updated
-      time: newTime,
-      scramble,
-    });
+  // -----------------------
+  // SHARED SESSION MODE
+  // -----------------------
+  let activeSharedID = null;
+  let solveIndexForBroadcast = null;
 
-    const newSolve = {
-      time: newTime,
-      scramble,
-      event: currentEvent,
-      penalty: null,
-      note: "",
-      datetime: timestamp,
-      tags: {},
-    };
+  if (sharedSession) {
+    scramble = sharedSession.scrambles[sharedIndex];
 
-    const updatedSessions = {
-      ...sessions,
-      [currentEvent]: [...(sessions[currentEvent] || []), newSolve],
-    };
-    setSessions(updatedSessions);
+    // save index BEFORE advancing
+    solveIndexForBroadcast = sharedIndex;
+    activeSharedID = sharedSession.sharedID;
 
-    if (isSignedIn && user) {
-      try {
-        await addSolveToDB(
-          user.UserID,
-          currentSession,
-          currentEvent,
-          newTime,
-          scramble,
-          null,
-          "",
-          {}
-        );
-      } catch (err) {
-        console.error("❌ Error adding solve:", err);
-      }
+    const nextIndex = sharedIndex + 1;
+    setSharedIndex(nextIndex);
+
+    if (nextIndex >= sharedSession.scrambles.length) {
+      console.log("✅ Shared session completed");
+      setSharedSession(null);
     }
+    setScrambles(prev => ({
+  ...prev,
+  [currentEvent]: [...prev[currentEvent]]
+}));
+
+  } else {
+    // -----------------------
+    // NORMAL MODE
+    // -----------------------
+    scramble = getNextScramble();
+  }
+
+  const timestamp = new Date().toISOString();
+
+  console.log("🧩 Adding solve:", {
+    event: currentEvent,
+    sessionID: currentSession,
+    time: newTime,
+    scramble,
+  });
+
+  const newSolve = {
+    time: newTime,
+    scramble,
+    event: currentEvent,
+    penalty: null,
+    note: "",
+    datetime: timestamp,
+    tags: sharedSession
+      ? {
+          IsShared: true,
+          SharedID: sharedSession.sharedID,
+          SharedIndex: sharedIndex,
+        }
+      : {},
   };
+
+  // update local UI immediately
+  const updatedSessions = {
+    ...sessions,
+    [currentEvent]: [...(sessions[currentEvent] || []), newSolve],
+  };
+  setSessions(updatedSessions);
+
+  // -----------------------------
+  // SAVE TO DATABASE
+  // -----------------------------
+  if (isSignedIn && user) {
+    try {
+      await addSolveToDB(
+        user.UserID,
+        currentSession,
+        currentEvent,
+        newTime,
+        scramble,
+        null,
+        "",
+        newSolve.tags
+      );
+
+      // ======================================================
+      //  🔥 BROADCAST BACK TO CHAT (so scoreboard updates)
+      // ======================================================
+
+      // CASE 1 — persistent shared session ("shared_<id>")
+      if (activeSharedID) {
+  const messageText =
+    `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
+
+  const conversationID = activeSharedID
+    .replace("SHARED#", "")
+    .split("#")
+    .slice(0,2)
+    .sort()
+    .join("#");
+
+  await sendMessage(conversationID, user.UserID, messageText);
+}
+
+
+      // CASE 2 — temporary shared session flow
+      if (activeSharedID) {
+  const messageText =
+    `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
+
+  const conversationID = activeSharedID
+    .replace("SHARED#", "")
+    .split("#")
+    .slice(0,2)
+    .sort()
+    .join("#");
+
+  await sendMessage(conversationID, user.UserID, messageText);
+}
+
+    } catch (err) {
+      console.error("❌ Error adding solve:", err);
+    }
+  }
+};
+
 
   const applyPenalty = async (timestamp, penalty, updatedTime) => {
     const updatedSessions = { ...sessions };
@@ -522,11 +652,18 @@ function App() {
                     </div>
 
                     <Scramble
-                      scramble={scrambles[currentEvent]?.[0] || ""}
-                      currentEvent={currentEvent}
-                      onScrambleClick={onScrambleClick}
-                      onForwardScramble={skipToNextScramble}
-                    />
+  scramble={
+    sharedSession
+      ? sharedSession.scrambles[sharedIndex] || ""
+      : scrambles[currentEvent]?.[0] || ""
+  }
+  currentEvent={currentEvent}
+  onScrambleClick={onScrambleClick}
+  onForwardScramble={goForwardScramble}
+  onBackwardScramble={goBackwardScramble}
+/>
+
+
 
                     <div className="cube-and-event">
                       <div onClick={openEventSelector} style={{ cursor: "pointer" }}>
@@ -667,23 +804,30 @@ function App() {
 
       {!isHomePage && showPlayerBar && (
         <PlayerBar
-          sessions={sessions}
-          currentEvent={currentEvent}
-          currentSession={currentSession}           
-          setCurrentSession={setCurrentSession}   
-          sharedSession={sharedSession}        // NEW
-          clearSharedSession={() => setSharedSession(null)} // allow dismiss  
-          sessionsList={sessionsList}               
-          customEvents={customEvents}               
-          handleEventChange={handleEventChange}
-          deleteTime={deleteTime}
-          addTime={addSolve}
-          scramble={scrambles[currentEvent]?.[0] || ""}
-          onScrambleClick={onScrambleClick}
-          addPost={addPost}
-          user={user}
-          applyPenalty={applyPenalty}
-        />
+  sessions={sessions}
+  currentEvent={currentEvent}
+  currentSession={currentSession}           
+  setCurrentSession={setCurrentSession}   
+  sharedSession={sharedSession}
+  clearSharedSession={() => setSharedSession(null)}
+  sessionsList={sessionsList}
+  customEvents={customEvents}
+  handleEventChange={handleEventChange}
+  deleteTime={deleteTime}
+  addTime={addSolve}
+  scramble={
+    sharedSession
+      ? sharedSession.scrambles[sharedIndex] || ""
+      : scrambles[currentEvent]?.[0] || ""
+  }
+  onScrambleClick={onScrambleClick}
+  goForwardScramble={goForwardScramble}
+  goBackwardScramble={goBackwardScramble}
+  addPost={addPost}
+  user={user}
+  applyPenalty={applyPenalty}
+/>
+
       )}
 
       {!isHomePage && (

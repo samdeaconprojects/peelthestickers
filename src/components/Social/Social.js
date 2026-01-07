@@ -9,6 +9,8 @@ import { getUser } from '../../services/getUser';
 import { updatePostComments } from '../../services/updatePostComments';
 import { getMessages } from '../../services/getMessages';
 import { sendMessage } from '../../services/sendMessage';
+import { createSession } from '../../services/createSession';
+
 import PuzzleSVG from '../PuzzleSVGs/PuzzleSVG';
 import { generateScramble } from '../scrambleUtils';
 import SharedAverageModal from './SharedAverageModal';
@@ -147,6 +149,39 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
     }
   };
 
+  const loadSharedSession = async ({ sharedID, event, scrambles }) => {
+  if (!user?.UserID) return;
+
+  const sessionID = sharedID.split("#").slice(0,3).join("#");
+
+
+  const sessionName = `Shared ${event} with ${
+    selectedConversation?.name || "Friend"
+  }`;
+
+  try {
+    await createSession(
+      user.UserID,
+      event,
+      sessionID,
+      sessionName
+    );
+
+    setSharedSession({
+      sessionID,
+      event,
+      sharedID,
+      scrambles
+    });
+
+  } catch (err) {
+    console.error("Failed to create shared session", err);
+  }
+};
+
+
+
+
   useEffect(() => {
     const fetchSuggestion = async () => {
       if (!searchTerm) {
@@ -213,35 +248,50 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
   };
 
   const handleConfirmSharedAverage = async (event, count) => {
-    if (!selectedConversation || !user?.UserID) return;
+  if (!selectedConversation || !user?.UserID) return;
 
-    const scrambles = Array.from({ length: count }, () => generateScramble(event));
-    const scrambleText = `[sharedAoN]${event}|${count}|${scrambles.join('||')}`;
+  const scrambles = Array.from({ length: count }, () => generateScramble(event));
 
-    const message = {
-      sender: user.UserID,
-      text: scrambleText,
-      timestamp: new Date().toISOString()
-    };
+  const fid = selectedConversation.id;
+  // Stable conversation identity (alphabetical)
+const conversationID = [user.UserID, fid].sort().join('#');
 
-    const fid = selectedConversation.id;
-    const conversationID = [user.UserID, fid].sort().join('#');
+//  Persistent shared session ID per pair per event
+const sessionID = `SHARED#${conversationID}#${event}`;
 
-    const updatedConversation = {
-      ...selectedConversation,
-      messages: [...(selectedConversation.messages || []), message]
-    };
-    setSelectedConversation(updatedConversation);
-    setConversations(prev =>
-      prev.map(conv => (conv.id === fid ? updatedConversation : conv))
-    );
+//  Per-run ID so each Ao5 / Ao12 is independent
+const sharedRunID = `${sessionID}#${Date.now()}`;
 
-    try {
-      await sendMessage(conversationID, user.UserID, message.text);
-    } catch (err) {
-      console.error("Failed to send shared average:", err);
-    }
+const scrambleText =
+  `[sharedAoN]${sharedRunID}|${event}|${count}|${scrambles.join('||')}`;
+
+
+  const message = {
+    sender: user.UserID,
+    text: scrambleText,
+    timestamp: new Date().toISOString()
   };
+
+  const updatedConversation = {
+    ...selectedConversation,
+    messages: [...(selectedConversation.messages || []), message]
+  };
+
+  setSelectedConversation(updatedConversation);
+
+  setConversations(prev =>
+    prev.map(conv =>
+      conv.id === fid ? updatedConversation : conv
+    )
+  );
+
+  try {
+    await sendMessage(conversationID, user.UserID, message.text);
+  } catch (err) {
+    console.error("Failed to send shared average:", err);
+  }
+};
+
 
   if (!user) return <div>Please sign in to view your feed.</div>;
 
@@ -355,26 +405,37 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
                 <>
                   <div className="messages">
                     {selectedConversation.messages.map((msg, idx) => {
-                      if (msg.text?.startsWith('[sharedAoN]')) {
-                        return (
-                          <SharedAverageMessage
-                            key={idx}
-                            msg={msg}
-                            user={user}
-                            onLoadSession={(session) => setSharedSession(session)}
-                            onMergeSession={(session) => mergeSharedSession(session)}
-                          />
-                        );
-                      }
-                      return (
-                        <div
-                          key={idx}
-                          className={`chatMessage ${msg.sender === user.UserID ? 'sent' : 'received'}`}
-                        >
-                          {msg.text || '[no text]'}
-                        </div>
-                      );
-                    })}
+
+  // Shared Average main message
+  if (msg.text?.startsWith('[sharedAoN]')) {
+    return (
+      <SharedAverageMessage
+        key={idx}
+        msg={msg}
+        user={user}
+        messages={selectedConversation.messages} // updates still flow in 👍
+        onLoadSession={(session) => loadSharedSession(session)}
+        onMerge={(session) => mergeSharedSession(session)}
+      />
+    );
+  }
+
+  // ❗️ Hide shared updates from UI but KEEP them in data
+  if (msg.text?.startsWith('[sharedUpdate]')) {
+    return null;
+  }
+
+  // Normal chat message
+  return (
+    <div
+      key={idx}
+      className={`chatMessage ${msg.sender === user.UserID ? 'sent' : 'received'}`}
+    >
+      {msg.text || '[no text]'}
+    </div>
+  );
+})}
+
                     <div ref={messagesEndRef} />
                   </div>
                   <div className="messageInput">
