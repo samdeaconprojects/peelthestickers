@@ -1,38 +1,52 @@
-.puzzle-wrapper {
+.puzzle-svg-wrapper {
   position: relative;
   display: inline-block;
   overflow: visible;
 }
 
-.puzzle-content {
-  display: inline-block;
-}
-
-/* Flip button anchored to the wrapper corner */
-.puzzle-flip {
-  position: absolute;
-  top: -10px;
-  right: -40px;
-
-  padding: 4px;
+/* ✅ Flip button styling that ignores global App.css button rules */
+.puzzle-flip-btn {
+  appearance: none !important;
+  -webkit-appearance: none !important;
   background: none !important;
   border: none !important;
-  height: auto !important;
+  outline: none !important;
+  box-shadow: none !important;
+
+  position: absolute;
+  top: -6px;          /* tuck into corner a bit */
+  right: -6px;
+
+  padding: 0 !important;
+  margin: 0 !important;
+
+  width: 26px;
+  height: 26px;
+
+  display: grid;
+  place-items: center;
 
   cursor: pointer;
   z-index: 50;
 
-  opacity: 0.55;
-  transition: opacity 0.15s ease;
+  opacity: 0.3;
+  transition: opacity 140ms ease, transform 120ms ease;
 }
 
-.puzzle-flip:hover {
+.puzzle-flip-btn:hover {
+  opacity: 1;
+  transform: scale(1.03);
+}
+
+.puzzle-flip-btn:active {
+  transform: scale(0.95);
   opacity: 1;
 }
 
-.puzzle-flip img {
-  width: 22px;
-  height: 22px;
+.puzzle-flip-icon {
+  width: 18px;
+  height: 18px;
   display: block;
   pointer-events: none;
+  user-select: none;
 }

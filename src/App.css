@@ -146,7 +146,7 @@ body {
   background-color: transparent;
 }
 
-/* ✅ this header row should not be height-clamped */
+/*  this header row should not be height-clamped */
 .scramble-select-container {
   display: flex;
   flex-direction: row;
@@ -170,6 +170,7 @@ body {
 
 .scramble-text {
   display: inline-block;
+  margin-left: 6%;
   font-size: 20pt;
   max-width: 50%;
   white-space: normal;

@@ -1,4 +1,3 @@
-// src/components/PuzzleSVGs/PuzzleSVG.js
 import React, { useEffect, useState } from "react";
 import RubiksCubeSVG from "./RubiksCubeSVG";
 import SkewbSVG from "./SkewbSVG";
@@ -18,29 +17,24 @@ const PuzzleSVG = ({
   isNameTagCube,
   isProfileCube,
 }) => {
-  const faceBasedEvents = [
-    "222",
-    "333",
-    "444",
-    "555",
-    "666",
-    "777",
-    "333OH",
-    "333BLD",
-  ];
+  const faceBasedEvents = ["222", "333", "444", "555", "666", "777", "333OH", "333BLD"];
   const isRubikEvent = faceBasedEvents.includes(event);
 
   // Base size for non-rubik puzzles
   const size = event === "SQ1" ? 36 : 45;
   const gap = 2;
 
-  // flip state (used for everything)
-  const [isFlipped, setIsFlipped] = useState(false);
+  // Shared flip state
+  const [showFront, setShowFront] = useState(true);
 
-  // Reset flip when event changes
+  // Reset to front when event changes
   useEffect(() => {
-    setIsFlipped(false);
+    setShowFront(true);
   }, [event]);
+
+  // ✅ Only show flip button on the TIMER HUD cube
+  // (no profile, no nametag, no music player by default)
+  const showFlipButton = Boolean(isTimerCube) && !isProfileCube && !isNameTagCube;
 
   const eventMap = {
     SKEWB: SkewbSVG,
@@ -50,43 +44,48 @@ const PuzzleSVG = ({
     CLOCK: ClockSVG,
   };
 
-  const SpecificPuzzle = eventMap[event];
-
+  // Wrap everything so the flip button can sit in the puzzle corner
   return (
-    <div className="puzzle-wrapper">
-      {/* ✅ Flip button now exists for NxN AND non-rubik */}
-      <button
-        className="puzzle-flip"
-        aria-label="Flip puzzle"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation(); // ✅ stops opening EventSelector
-          setIsFlipped((f) => !f);
-        }}
-      >
-        <img src={FlipIcon} alt="" />
-      </button>
+    <div className="puzzle-svg-wrapper">
+      {showFlipButton && (
+        <button
+          type="button"
+          className="puzzle-flip-btn"
+          aria-label="Flip puzzle"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setShowFront((f) => !f);
+          }}
+        >
+          <img className="puzzle-flip-icon" src={FlipIcon} alt="" />
+        </button>
+      )}
 
-      {/* ✅ Everything renders inside a flippable wrapper */}
-      <div className={`puzzle-content ${isFlipped ? "flipped" : ""}`}>
-        {isRubikEvent ? (
-          <RubiksCubeSVG
-            n={event}
-            faces={getScrambledFaces(scramble, event)}
-            isMusicPlayer={isMusicPlayer}
-            isTimerCube={isTimerCube}
-            isNameTagCube={isNameTagCube}
-            isProfileCube={isProfileCube}
-          />
-        ) : SpecificPuzzle ? (
-          <SpecificPuzzle
-            scramble={scramble}
-            size={size}
-            gap={gap}
-            showFront={!isFlipped} // keeps your existing "front/back" logic working
-          />
-        ) : null}
-      </div>
+      {isRubikEvent ? (
+        <RubiksCubeSVG
+          n={event}
+          faces={getScrambledFaces(scramble, event)}
+          showFront={showFront}              // ✅ NxN flip support
+          isMusicPlayer={isMusicPlayer}
+          isTimerCube={isTimerCube}
+          isNameTagCube={isNameTagCube}
+          isProfileCube={isProfileCube}
+        />
+      ) : (
+        (() => {
+          const SpecificPuzzle = eventMap[event];
+          if (!SpecificPuzzle) return null;
+          return (
+            <SpecificPuzzle
+              scramble={scramble}
+              size={size}
+              gap={gap}
+              showFront={showFront}
+            />
+          );
+        })()
+      )}
     </div>
   );
 };

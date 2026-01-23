@@ -2,67 +2,66 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 14px;
 }
 
-/* shared style for both arrows */
+/* =========================
+   Override global App.css button
+   ========================= */
 .scramble-nav-btn {
-  appearance: none;
-  -webkit-appearance: none;
-  border: none;
-  outline: none;
+  appearance: none !important;
+  -webkit-appearance: none !important;
 
-  /* modern pill */
+  background: none !important;
+  border: none !important;          /*  kills App.css outline */
+  outline: none !important;
+  box-shadow: none !important;
+
+  padding: 0 !important;            /*  stop App.css padding effects */
+  margin: 0 !important;
+
+  width: 36px;                      /*  smaller hit box */
   height: 36px;
-  min-width: 52px;          /* ✅ wider */
-  padding: 0 14px;
-  border-radius: 999px;
-
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.85);
-
-  cursor: pointer;
-
-  /* ✅ lower opacity until hover */
-  opacity: 0.45;
-
   display: grid;
   place-items: center;
 
-  /* nicer arrow look */
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1;
+  cursor: pointer;
 
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease,
-    background 140ms ease,
-    color 140ms ease;
+  opacity: 0.3;                     /* 30% default */
+  transition: opacity 140ms ease, transform 120ms ease;
 }
 
+/* 100% on hover */
 .scramble-nav-btn:hover {
-  opacity: 0.9;
-  background: rgba(255, 255, 255, 0.14);
-  transform: translateY(-1px);
-}
-
-.scramble-nav-btn:active {
-  transform: translateY(0px) scale(0.98);
-  opacity: 0.95;
-}
-
-/* keyboard focus that still feels modern (no outline) */
-.scramble-nav-btn:focus-visible {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.18);
-  box-shadow: 0 0 0 2px rgba(18, 234, 104, 0.35); /* subtle ring */
 }
 
-/* optional: slightly different alignment for arrows */
-.scramble-prev-button span {
+/* press */
+.scramble-nav-btn:active {
+  transform: scale(0.94);
+  opacity: 1;
+}
+
+/* no visible outline, but still keyboard friendly if you want later */
+.scramble-nav-btn:focus,
+.scramble-nav-btn:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* icon size: "half" what you had */
+.scramble-nav-icon {
+  width: 20px;     /*  smaller */
+  height: 20px;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* optional tiny nudge if SVG looks optically off */
+.scramble-prev-button .scramble-nav-icon {
   transform: translateX(-1px);
 }
-.scramble-next-button span {
+.scramble-next-button .scramble-nav-icon {
   transform: translateX(1px);
 }

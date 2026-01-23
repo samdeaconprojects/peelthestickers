@@ -5,7 +5,6 @@ import "./RubiksCubeSVG.css";
 const RubiksCubeSVG = ({
   n,
   faces,
-  showFront = true, // ✅ NEW: controls which face set is shown (no mirroring)
   isMusicPlayer,
   isTimerCube,
   isNameTagCube,
@@ -13,6 +12,7 @@ const RubiksCubeSVG = ({
 }) => {
   // console.log(faces);
 
+  // Convert event string -> numeric N
   switch (n) {
     case "222": n = 2; break;
     case "333": n = 3; break;
@@ -103,41 +103,33 @@ const RubiksCubeSVG = ({
       break;
   }
 
+  // Scale variants
   if (isMusicPlayer) cubeScale = cubeScale / 2;
   if (isNameTagCube) cubeScale = cubeScale / 4;
 
+  // Class variants
   let cubeClassName = "";
   if (isTimerCube) cubeClassName = "cube";
   else if (isProfileCube) cubeClassName = "nonTimerProfileCube";
   else if (isMusicPlayer) cubeClassName = "nonTimerCube";
   else if (isNameTagCube) cubeClassName = "nametagCube";
 
-  const faceToHex = (color) => {
-    switch (color) {
-      case "yellow": return "#FFFF00";
-      case "white": return "#FFFFFF";
-      case "red": return "#F64258";
-      case "orange": return "#FF8F0C";
-      case "blue": return "#50B6FF";
-      case "green": return "#12EA68";
-      default: return "#000000";
-    }
-  };
-
-  // ✅ Face mapping: your faces array order is [U, F, R, B, L, D]
-  // Front view: U + F + R  -> indices [0,1,2]
-  // Back  view: U + B + L  -> indices [0,3,4]
-  const TOP_FACE = 0;
-  const LEFT_FACE = showFront ? 1 : 3;   // F or B
-  const RIGHT_FACE = showFront ? 2 : 4;  // R or L
-
-  const drawFace = (faceIndex) => {
+  const drawFace = (n, currFace) => {
     const stickers = [];
-    const face = faces?.[faceIndex];
-    if (!face) return stickers;
+    let stickerColor = "";
 
     for (let row = 0; row < n; row++) {
       for (let col = 0; col < n; col++) {
+        switch (faces[currFace][row][col]) {
+          case "yellow": stickerColor = "#FFFF00"; break;
+          case "white": stickerColor = "#FFFFFF"; break;
+          case "red": stickerColor = "#F64258"; break;
+          case "orange": stickerColor = "#FF8F0C"; break;
+          case "blue": stickerColor = "#50B6FF"; break;
+          case "green": stickerColor = "#12EA68"; break;
+          default: break;
+        }
+
         stickers.push(
           <rect
             x={(size + gap) * col}
@@ -146,8 +138,8 @@ const RubiksCubeSVG = ({
             ry={1}
             width={size}
             height={size}
-            fill={faceToHex(face?.[row]?.[col])}
-            key={`sticker-${faceIndex}-${row}-${col}`}
+            fill={stickerColor}
+            key={`sticker-${row}-${col}`}
           />
         );
       }
@@ -155,26 +147,21 @@ const RubiksCubeSVG = ({
     return stickers;
   };
 
-  // your existing tuning
-  const hudDropByN = {
-    2: 55,
-    3: 60,
-    4: 60,
-    5: 65,
-    6: 62,
-    7: 64,
-  };
-  const hudDrop = hudDropByN[n] ?? 0;
+  //  HUD offsets ONLY for the timer cube (do NOT affect profile/nametag/music)
+  const hudDropByN = { 2: 55, 3: 60, 4: 55, 5: 60, 6: 62, 7: 64 };
+  const hudShiftXByN = { 2: 25, 3: 10, 4: 0, 5: 0, 6: 0, 7: 0 };
 
-  const hudShiftXByN = {
-    2: 30,
-    3: 10,
-    4: 5,
-    5: -10,
-    6: 0,
-    7: 0,
-  };
-  const hudShiftX = hudShiftXByN[n] ?? 0;
+  const hudDrop = isTimerCube ? (hudDropByN[n] ?? 0) : 0;
+  const hudShiftX = isTimerCube ? (hudShiftXByN[n] ?? 0) : 0;
+
+  // tweak values if needed: Y usually -12 to -26 is the sweet spot
+  const nameTagNudgeY = isNameTagCube ? -30 : 0;
+  const nameTagNudgeX = isNameTagCube ? 0 : 0;
+
+  const transformOrigin =
+    isTimerCube ? "top center" :
+    isNameTagCube ? "top left" :
+    "center";
 
   return (
     <div
@@ -182,32 +169,32 @@ const RubiksCubeSVG = ({
       style={{
         position: "relative",
         transform: `scale(${cubeScale / 100})`,
-        transformOrigin: "top center",
+        transformOrigin,
       }}
     >
-      {/* move the entire cube drawing down + right together */}
+      {/* move the entire cube drawing together */}
       <div
         style={{
           position: "relative",
-          transform: `translate(${hudShiftX}px, ${hudDrop}px)`,
+          transform: `translate(${hudShiftX + nameTagNudgeX}px, ${hudDrop + nameTagNudgeY}px)`,
         }}
       >
         <div
           className="face topFace"
           style={{ top: `${topFaceTop}px`, left: `${topFaceLeft}px` }}
         >
-          <svg>{drawFace(TOP_FACE)}</svg>
+          <svg>{drawFace(n, 0)}</svg>
         </div>
 
         <div className="face leftFace">
-          <svg>{drawFace(LEFT_FACE)}</svg>
+          <svg>{drawFace(n, 1)}</svg>
         </div>
 
         <div
           className="face rightFace"
           style={{ top: `${rightFaceTop}px`, left: `${rightFaceLeft}px` }}
         >
-          <svg>{drawFace(RIGHT_FACE)}</svg>
+          <svg>{drawFace(n, 2)}</svg>
         </div>
       </div>
     </div>
