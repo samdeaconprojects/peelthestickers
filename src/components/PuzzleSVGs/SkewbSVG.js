@@ -1,5 +1,5 @@
 // src/components/SkewbSVG/SkewbSVG.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import './SkewbSVG.css';
 
 const colorMap = {
@@ -11,8 +11,13 @@ const colorMap = {
   yellow: '#FFFF00'
 };
 
-export default function SkewbSVG({ scramble = 'U R B L U B L U', size = 60, gap = 0 }) {
-  const cornerTemplates = [
+export default function SkewbSVG({
+  scramble = 'U R B L U B L U',
+  size = 60,
+  gap = 0,
+  showFront = true, // ✅ controlled by PuzzleSVG now
+}) {
+  const cornerTemplates = useMemo(() => ([
     ['white','orange','blue'],
     ['white','blue','red'],
     ['white','red','green'],
@@ -21,125 +26,143 @@ export default function SkewbSVG({ scramble = 'U R B L U B L U', size = 60, gap 
     ['yellow','green','red'],
     ['yellow','red','blue'],
     ['yellow','blue','orange']
-  ];
-  const centerTemplates = ['white','green','red','blue','orange','yellow'];
+  ]), []);
 
-  const [corners, setCorners] = useState(cornerTemplates.map(c=>[...c]));
+  const centerTemplates = useMemo(() => (['white','green','red','blue','orange','yellow']), []);
+
+  const [corners, setCorners] = useState(cornerTemplates.map(c => [...c]));
   const [centers, setCenters] = useState([...centerTemplates]);
-  const [faces, setFaces]     = useState([]);
-  const [showFront, setShowFront] = useState(true);
+  const [faces, setFaces] = useState([]);
 
-  const cycleCW  = arr => [arr[arr.length-1], ...arr.slice(0,arr.length-1)];
+  const cycleCW  = arr => [arr[arr.length - 1], ...arr.slice(0, arr.length - 1)];
   const cycleCCW = arr => [...arr.slice(1), arr[0]];
 
   function computeFaces(ctr, cen) {
-    const f = Array(6).fill(0).map((_,i)=>[ cen[i] ]);
-    f[0][1]=ctr[0][0]; f[0][2]=ctr[1][0]; f[0][3]=ctr[2][0]; f[0][4]=ctr[3][0];
-    f[1][1]=ctr[3][1]; f[1][2]=ctr[2][2]; f[1][3]=ctr[5][1]; f[1][4]=ctr[4][2];
-    f[2][1]=ctr[2][1]; f[2][2]=ctr[1][2]; f[2][3]=ctr[6][1]; f[2][4]=ctr[5][2];
-    f[3][1]=ctr[1][1]; f[3][2]=ctr[0][2]; f[3][3]=ctr[7][1]; f[3][4]=ctr[6][2];
-    f[4][1]=ctr[0][1]; f[4][2]=ctr[3][2]; f[4][3]=ctr[7][2]; f[4][4]=ctr[4][1];
-    f[5][1]=ctr[4][0]; f[5][2]=ctr[5][0]; f[5][3]=ctr[6][0]; f[5][4]=ctr[7][0];
+    const f = Array(6).fill(0).map((_, i) => [cen[i]]);
+    f[0][1] = ctr[0][0]; f[0][2] = ctr[1][0]; f[0][3] = ctr[2][0]; f[0][4] = ctr[3][0];
+    f[1][1] = ctr[3][1]; f[1][2] = ctr[2][2]; f[1][3] = ctr[5][1]; f[1][4] = ctr[4][2];
+    f[2][1] = ctr[2][1]; f[2][2] = ctr[1][2]; f[2][3] = ctr[6][1]; f[2][4] = ctr[5][2];
+    f[3][1] = ctr[1][1]; f[3][2] = ctr[0][2]; f[3][3] = ctr[7][1]; f[3][4] = ctr[6][2];
+    f[4][1] = ctr[0][1]; f[4][2] = ctr[3][2]; f[4][3] = ctr[7][2]; f[4][4] = ctr[4][1];
+    f[5][1] = ctr[4][0]; f[5][2] = ctr[5][0]; f[5][3] = ctr[6][0]; f[5][4] = ctr[7][0];
     return f;
   }
 
   function moveU(mod) {
-    setCenters(c=>{const x=[...c];
-      if(mod==="'" ) [x[0],x[3],x[4]]=[x[4],x[0],x[3]];
-      else            [x[0],x[3],x[4]]=[x[3],x[4],x[0]];
+    setCenters(c => {
+      const x = [...c];
+      if (mod === "'") [x[0], x[3], x[4]] = [x[4], x[0], x[3]];
+      else            [x[0], x[3], x[4]] = [x[3], x[4], x[0]];
       return x;
     });
-    setCorners(c=>{const x=c.map(r=>[...r]);
-      if(mod==="'" ){
-        x[0]=cycleCCW(x[0]);
-        [x[1],x[3],x[7]]=[cycleCW(x[3]),cycleCW(x[7]),cycleCW(x[1])];
+    setCorners(c => {
+      const x = c.map(r => [...r]);
+      if (mod === "'") {
+        x[0] = cycleCCW(x[0]);
+        [x[1], x[3], x[7]] = [cycleCW(x[3]), cycleCW(x[7]), cycleCW(x[1])];
       } else {
-        x[0]=cycleCW(x[0]);
-        [x[1],x[3],x[7]]=[cycleCCW(x[7]),cycleCCW(x[1]),cycleCCW(x[3])];
+        x[0] = cycleCW(x[0]);
+        [x[1], x[3], x[7]] = [cycleCCW(x[7]), cycleCCW(x[1]), cycleCCW(x[3])];
       }
       return x;
     });
   }
+
   function moveR(mod) {
-    setCenters(c=>{const x=[...c];
-      if(mod==="'" ) [x[2],x[3],x[5]]=[x[3],x[5],x[2]];
-      else            [x[2],x[3],x[5]]=[x[5],x[2],x[3]];
+    setCenters(c => {
+      const x = [...c];
+      if (mod === "'") [x[2], x[3], x[5]] = [x[3], x[5], x[2]];
+      else            [x[2], x[3], x[5]] = [x[5], x[2], x[3]];
       return x;
     });
-    setCorners(c=>{const x=c.map(r=>[...r]);
-      if(mod==="'" ){
-        x[6]=cycleCCW(x[6]);
-        [x[1],x[7],x[5]]=[cycleCW(x[7]),cycleCW(x[5]),cycleCW(x[1])];
+    setCorners(c => {
+      const x = c.map(r => [...r]);
+      if (mod === "'") {
+        x[6] = cycleCCW(x[6]);
+        [x[1], x[7], x[5]] = [cycleCW(x[7]), cycleCW(x[5]), cycleCW(x[1])];
       } else {
-        x[6]=cycleCW(x[6]);
-        [x[1],x[7],x[5]]=[cycleCCW(x[5]),cycleCCW(x[1]),cycleCCW(x[7])];
+        x[6] = cycleCW(x[6]);
+        [x[1], x[7], x[5]] = [cycleCCW(x[5]), cycleCCW(x[1]), cycleCCW(x[7])];
       }
       return x;
     });
   }
+
   function moveL(mod) {
-    setCenters(c=>{const x=[...c];
-      if(mod==="'" ) [x[1],x[4],x[5]]=[x[5],x[1],x[4]];
-      else            [x[1],x[4],x[5]]=[x[4],x[5],x[1]];
+    setCenters(c => {
+      const x = [...c];
+      if (mod === "'") [x[1], x[4], x[5]] = [x[5], x[1], x[4]];
+      else            [x[1], x[4], x[5]] = [x[4], x[5], x[1]];
       return x;
     });
-    setCorners(c=>{const x=c.map(r=>[...r]);
-      if(mod==="'" ){
-        x[4]=cycleCCW(x[4]);
-        [x[3],x[5],x[7]]=[cycleCW(x[5]),cycleCW(x[7]),cycleCW(x[3])];
+    setCorners(c => {
+      const x = c.map(r => [...r]);
+      if (mod === "'") {
+        x[4] = cycleCCW(x[4]);
+        [x[3], x[5], x[7]] = [cycleCW(x[5]), cycleCW(x[7]), cycleCW(x[3])];
       } else {
-        x[4]=cycleCW(x[4]);
-        [x[3],x[5],x[7]]=[cycleCCW(x[7]),cycleCCW(x[3]),cycleCCW(x[5])];
+        x[4] = cycleCW(x[4]);
+        [x[3], x[5], x[7]] = [cycleCCW(x[7]), cycleCCW(x[3]), cycleCCW(x[5])];
       }
       return x;
     });
   }
+
   function moveB(mod) {
-    setCenters(c=>{const x=[...c];
-      if(mod==="'" ) [x[3],x[4],x[5]]=[x[4],x[5],x[3]];
-      else            [x[3],x[4],x[5]]=[x[5],x[3],x[4]];
+    setCenters(c => {
+      const x = [...c];
+      if (mod === "'") [x[3], x[4], x[5]] = [x[4], x[5], x[3]];
+      else            [x[3], x[4], x[5]] = [x[5], x[3], x[4]];
       return x;
     });
-    setCorners(c=>{const x=c.map(r=>[...r]);
-      if(mod==="'" ){
-        x[7]=cycleCCW(x[7]);
-        [x[0],x[4],x[6]]=[cycleCW(x[4]),cycleCW(x[6]),cycleCW(x[0])];
+    setCorners(c => {
+      const x = c.map(r => [...r]);
+      if (mod === "'") {
+        x[7] = cycleCCW(x[7]);
+        [x[0], x[4], x[6]] = [cycleCW(x[4]), cycleCW(x[6]), cycleCW(x[0])];
       } else {
-        x[7]=cycleCW(x[7]);
-        [x[0],x[4],x[6]]=[cycleCCW(x[6]),cycleCCW(x[0]),cycleCCW(x[4])];
+        x[7] = cycleCW(x[7]);
+        [x[0], x[4], x[6]] = [cycleCCW(x[6]), cycleCCW(x[0]), cycleCCW(x[4])];
       }
       return x;
     });
   }
 
   function applyAlg(alg) {
-    alg.trim().split(/\s+/).forEach(m=>{
-      const f=m[0], md=m.length>1?m.substr(1):'';
-      switch(f) {
+    alg.trim().split(/\s+/).forEach(m => {
+      const f = m[0];
+      const md = m.length > 1 ? m.substr(1) : '';
+      switch (f) {
         case 'U': moveU(md); break;
         case 'R': moveR(md); break;
         case 'L': moveL(md); break;
         case 'B': moveB(md); break;
+        default: break;
       }
     });
   }
 
+  // reset when scramble changes
   useEffect(() => {
-    setCorners(cornerTemplates.map(c=>[...c]));
+    setCorners(cornerTemplates.map(c => [...c]));
     setCenters([...centerTemplates]);
+    // then apply scramble next tick
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scramble]);
 
+  // when state changes, recompute faces
   useEffect(() => {
     setFaces(computeFaces(corners, centers));
   }, [corners, centers]);
 
+  // apply scramble once after reset
   useEffect(() => {
     if (scramble) applyAlg(scramble);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [corners.length]);
 
   const drawFace = (faceCols, idx) => {
-    const s = size, g = gap, h = s/2;
+    const s = size, g = gap, h = s / 2;
     const centerPts = [
       `${h},0`,
       `${s},${h}`,
@@ -147,46 +170,56 @@ export default function SkewbSVG({ scramble = 'U R B L U B L U', size = 60, gap 
       `0,${h}`
     ].join(' ');
     const triPts = [
-      [`${h},0`,`0,${h}`,`0,0`],
-      [`${h},0`,`${s},${h}`,`${s},0`],
-      [`${s},${h}`,`${h},${s}`,`${s},${s}`],
-      [`0,${h}`,`${h},${s}`,`0,${s}`]
+      [`${h},0`, `0,${h}`, `0,0`],
+      [`${h},0`, `${s},${h}`, `${s},0`],
+      [`${s},${h}`, `${h},${s}`, `${s},${s}`],
+      [`0,${h}`, `${h},${s}`, `0,${s}`]
     ];
+
     return (
-      <svg key={idx} className="skewbFace" width={s+g} height={s+g}>
-        <polygon points={centerPts}
+      <svg key={idx} className="skewbFace" width={s + g} height={s + g}>
+        <polygon
+          points={centerPts}
           fill={colorMap[faceCols[0]]}
-          stroke="#000" strokeWidth="1" />
-        {triPts.map((pts,i)=>( 
-          <polygon key={i}
+          stroke="#000"
+          strokeWidth="1"
+        />
+        {triPts.map((pts, i) => (
+          <polygon
+            key={i}
             points={pts.join(' ')}
-            fill={colorMap[faceCols[i+1]]}
-            stroke="#000" strokeWidth="1" />
+            fill={colorMap[faceCols[i + 1]]}
+            stroke="#000"
+            strokeWidth="1"
+          />
         ))}
       </svg>
     );
   };
 
-  const frontClasses  = ['topFace','leftFace','rightFace'];
-  const backClasses   = ['backFace','leftBackFace','bottomFace'];
-  const frontIdxs     = [0,1,2];
-  const backIdxs      = [3,4,5];
+  // ✅ We ALWAYS render the same 3 slots (top/left/right)
+  // and only swap which face's COLORS feed those slots when flipped.
+  //
+  // Current "front layout" uses faces [0,1,2] -> (top, left, right).
+  // When flipped, we want the *same layout* but show the opposite side colors.
+  // A simple mapping that matches your old intent is: [3,4,5] (back, leftBack, bottom)
+  // but drawn into the SAME slots (top/left/right).
+  const layoutSlots = [
+    { cls: 'topFace',  faceFront: 0, faceBack: 3 },
+    { cls: 'leftFace', faceFront: 1, faceBack: 4 },
+    { cls: 'rightFace',faceFront: 2, faceBack: 5 },
+  ];
 
   return (
     <div className="skewbContainer">
-      <button className="flipButton" onClick={()=>setShowFront(f=>!f)}>
-        {showFront?'Show Back':'Show Front'}
-      </button>
-      {(showFront ? frontIdxs : backIdxs).map((idx,i) => (
-        <div
-          key={idx}
-          className={`skewbFaceContainer ${
-            showFront ? frontClasses[i] : backClasses[i]
-          }`}
-        >
-          {faces[idx] && drawFace(faces[idx], idx)}
-        </div>
-      ))}
+      {layoutSlots.map((slot) => {
+        const idx = showFront ? slot.faceFront : slot.faceBack;
+        return (
+          <div key={slot.cls} className={`skewbFaceContainer ${slot.cls}`}>
+            {faces[idx] && drawFace(faces[idx], idx)}
+          </div>
+        );
+      })}
     </div>
   );
 }

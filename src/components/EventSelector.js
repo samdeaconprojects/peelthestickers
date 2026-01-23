@@ -10,7 +10,8 @@ function EventSelector({
   handleEventChange,
   currentSession,
   setCurrentSession,
-  userID
+  userID,
+  onSessionChange,
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
@@ -23,7 +24,9 @@ function EventSelector({
 
   const modalRef = useRef(null);
 
-  // Default events
+  // -----------------------------
+  // Event definitions
+  // -----------------------------
   const wcaEvents = [
     { id: "222", name: "2x2" },
     { id: "333", name: "3x3" },
@@ -41,16 +44,18 @@ function EventSelector({
     { id: "444BLD", name: "4x4 BLD" },
     { id: "555BLD", name: "5x5 BLD" },
     { id: "333MULTIBLD", name: "3x3 Multi-BLD" },
-    { id: "333FEW", name: "3x3 Fewest Moves" }
+    { id: "333FEW", name: "3x3 Fewest Moves" },
   ];
 
   const relayEvents = [
-    { id: "2x2-4x4", name: "2x2-4x4 Relay" },
-    { id: "2x2-7x7", name: "2x2-7x7 Relay" },
-    { id: "mini-guildford", name: "Mini Guildford Relay" }
+    { id: "2x2-4x4", name: "2x2–4x4 Relay" },
+    { id: "2x2-7x7", name: "2x2–7x7 Relay" },
+    { id: "mini-guildford", name: "Mini Guildford Relay" },
   ];
 
-  // Fetch sessions + custom events when user logs in
+  // -----------------------------
+  // Fetch sessions & custom events
+  // -----------------------------
   useEffect(() => {
     if (!userID) {
       setSessions([]);
@@ -60,11 +65,8 @@ function EventSelector({
 
     const fetchData = async () => {
       try {
-        const sessionItems = await getSessions(userID);
-        setSessions(sessionItems);
-
-        const eventItems = await getCustomEvents(userID);
-        setCustomEvents(eventItems);
+        setSessions(await getSessions(userID));
+        setCustomEvents(await getCustomEvents(userID));
       } catch (err) {
         console.error("❌ Error fetching sessions/events:", err);
       }
@@ -78,23 +80,78 @@ function EventSelector({
     { label: "Relay Events", events: relayEvents },
     userID && customEvents.length > 0 && {
       label: "Custom Events",
-      events: customEvents
-    }
+      events: customEvents,
+    },
   ].filter(Boolean);
 
+  // -----------------------------
+  // Normal sessions
+  // -----------------------------
+  const normalSessionsForEvent = sessions
+    .filter(
+      (s) =>
+        s.Event === currentEvent &&
+        !s.SessionID.startsWith("shared_") &&
+        !s.SessionID.startsWith("SHARED#")
+    )
+    .map((s) => ({
+      id: s.SessionID,
+      name: s.SessionName,
+    }));
+
+  // -----------------------------
+  // Shared session grouping
+  // -----------------------------
+  const sharedGroups = {};
+
+  sessions.forEach((s) => {
+    if (s.Event !== currentEvent) return;
+    if (
+      !s.SessionID.startsWith("shared_") &&
+      !s.SessionID.startsWith("SHARED#")
+    )
+      return;
+
+    const raw = s.SessionID
+      .replace("SHARED#", "")
+      .replace("shared_", "");
+
+    const users = raw.split("_")[0].split("#").sort();
+    const key = users.join("#");
+
+    if (!sharedGroups[key]) {
+      sharedGroups[key] = { users, sessions: [] };
+    }
+
+    sharedGroups[key].sessions.push({
+      id: s.SessionID,
+      name: s.SessionName || "Shared Session",
+    });
+  });
+
+  const activeSharedLabel =
+    Object.values(sharedGroups)
+      .find((g) => g.sessions.some((s) => s.id === currentSession))
+      ?.users.join(" ↔ ") || null;
+
+  // -----------------------------
+  // Handlers
+  // -----------------------------
   const handleSelectEvent = (eventId) => {
     handleEventChange({ target: { value: eventId } });
-    setCurrentSession("main"); // reset session when changing event
-  };
-
-  const handleSelectSession = (sessionId) => {
-    setCurrentSession(sessionId);
+    setCurrentSession("main");
     setIsOpen(false);
   };
 
+  const handleSelectSession = (sessionId) => {
+  setCurrentSession(sessionId);
+  onSessionChange?.();
+  setIsOpen(false);
+};
+
+
   const close = useCallback(() => setIsOpen(false), []);
 
-  // Close on outside click
   useEffect(() => {
     const onDocClick = (e) => {
       if (!isOpen) return;
@@ -104,35 +161,39 @@ function EventSelector({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [isOpen, close]);
 
-  // Close on Esc
   useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === "Escape") close();
-    };
+    const onKey = (e) => e.key === "Escape" && close();
     if (isOpen) document.addEventListener("keydown", onKey, { capture: true });
-    return () => document.removeEventListener("keydown", onKey, { capture: true });
+    return () =>
+      document.removeEventListener("keydown", onKey, { capture: true });
   }, [isOpen, close]);
 
-  // Sessions for the currently selected event
-  const sessionsForEvent = sessions
-    .filter(s => s.Event === currentEvent)
-    .map(s => ({ id: s.SessionID, name: s.SessionName }));
+  const eventName =
+    wcaEvents.find((e) => e.id === currentEvent)?.name ||
+    relayEvents.find((e) => e.id === currentEvent)?.name ||
+    customEvents.find((e) => e.id === currentEvent)?.name ||
+    "Select Event";
 
+  const sessionLabel =
+    activeSharedLabel ||
+    normalSessionsForEvent.find((s) => s.id === currentSession)?.name ||
+    currentSession;
+
+  // -----------------------------
+  // Render
+  // -----------------------------
   return (
     <>
       {/* Trigger */}
       <div className="event-selector-trigger" onClick={() => setIsOpen(true)}>
         <div className="event-selector-box">
-          {wcaEvents.find(e => e.id === currentEvent)?.name ||
-            relayEvents.find(e => e.id === currentEvent)?.name ||
-            customEvents.find(e => e.id === currentEvent)?.name ||
-            "Select an Event"}
-          {currentSession !== "main" && (
-            <span style={{ marginLeft: 6, fontSize: "0.9em", opacity: 0.8 }}>
-              ({sessionsForEvent.find(s => s.id === currentSession)?.name || currentSession})
-            </span>
-          )}
-          <span className="dropdown-arrow" style={{ marginLeft: 8 }}>▼</span>
+          <div className="event-selector-text">
+            <div className="event-selector-event">{eventName}</div>
+            {currentSession !== "main" && (
+              <div className="event-selector-session">{sessionLabel}</div>
+            )}
+          </div>
+          <span className="dropdown-arrow">▼</span>
         </div>
       </div>
 
@@ -147,10 +208,12 @@ function EventSelector({
                 <div key={group.label} className="event-group">
                   <h4>{group.label}</h4>
                   <div className="event-list">
-                    {group.events.map(event => (
+                    {group.events.map((event) => (
                       <div
                         key={event.id}
-                        className={`event-item ${currentEvent === event.id ? "active" : ""}`}
+                        className={`event-item ${
+                          currentEvent === event.id ? "active" : ""
+                        }`}
                         onClick={() => handleSelectEvent(event.id)}
                       >
                         {event.name}
@@ -160,21 +223,50 @@ function EventSelector({
                 </div>
               ))}
 
-              {/* Sessions for the current event */}
               {userID && (
                 <div className="event-group">
-                  <h4>Sessions for {currentEvent}</h4>
+                  <h4>Sessions</h4>
+
                   <div className="event-list">
-                    {sessionsForEvent.map(session => (
+                    {normalSessionsForEvent.map((s) => (
                       <div
-                        key={session.id}
-                        className={`event-item ${currentSession === session.id ? "active" : ""}`}
-                        onClick={() => handleSelectSession(session.id)}
+                        key={s.id}
+                        className={`event-item ${
+                          currentSession === s.id ? "active" : ""
+                        }`}
+                        onClick={() => handleSelectSession(s.id)}
                       >
-                        {session.name}
+                        {s.name}
                       </div>
                     ))}
                   </div>
+
+                  {Object.keys(sharedGroups).length > 0 && (
+                    <>
+                      <h4 style={{ marginTop: 10 }}>Shared</h4>
+                      {Object.entries(sharedGroups).map(([key, group]) => (
+                        <div key={key} style={{ marginBottom: 8 }}>
+                          <div className="event-item shared-group-label">
+                            {group.users.join(" ↔ ")}
+                          </div>
+                          <div className="event-list" style={{ marginLeft: 12 }}>
+                            {group.sessions.map((s) => (
+                              <div
+                                key={s.id}
+                                className={`event-item ${
+                                  currentSession === s.id ? "active" : ""
+                                }`}
+                                onClick={() => handleSelectSession(s.id)}
+                              >
+                                {s.name}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+
                   <button
                     className="add-session-btn"
                     onClick={() => {
@@ -188,7 +280,6 @@ function EventSelector({
               )}
             </div>
 
-            {/* Add Custom Event button */}
             {userID && (
               <div className="add-event-footer">
                 <button
@@ -199,64 +290,6 @@ function EventSelector({
                 </button>
               </div>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* Popup: Add Session */}
-      {showAddSession && (
-        <div className="detailPopup" role="dialog" aria-modal="true">
-          <div className="detailPopupContent">
-            <h3>Add New Session</h3>
-            <input
-              value={newSessionName}
-              onChange={(e) => setNewSessionName(e.target.value)}
-              placeholder="Enter session name"
-            />
-            <div className="button-row">
-              <button
-                onClick={async () => {
-                  if (!newSessionName.trim()) return;
-                  await createSession(userID, targetEvent, newSessionName);
-                  const updated = await getSessions(userID);
-                  setSessions(updated);
-                  setShowAddSession(false);
-                  setNewSessionName("");
-                }}
-              >
-                Save
-              </button>
-              <button onClick={() => setShowAddSession(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Popup: Add Custom Event */}
-      {showAddEvent && (
-        <div className="detailPopup" role="dialog" aria-modal="true">
-          <div className="detailPopupContent">
-            <h3>Add Custom Event</h3>
-            <input
-              value={newEventName}
-              onChange={(e) => setNewEventName(e.target.value)}
-              placeholder="Enter event name"
-            />
-            <div className="button-row">
-              <button
-                onClick={async () => {
-                  if (!newEventName.trim()) return;
-                  await createCustomEvent(userID, newEventName);
-                  const updated = await getCustomEvents(userID);
-                  setCustomEvents(updated);
-                  setShowAddEvent(false);
-                  setNewEventName("");
-                }}
-              >
-                Save
-              </button>
-              <button onClick={() => setShowAddEvent(false)}>Cancel</button>
-            </div>
           </div>
         </div>
       )}

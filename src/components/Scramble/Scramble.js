@@ -15,31 +15,33 @@ function Scramble({ onScrambleClick, onForwardScramble, onBackwardScramble, scra
 
   return (
     <div className="scramble-container">
-  <button
-    className="scramble-prev-button"
-    onClick={onBackwardScramble}
-  >
-    ←
-  </button>
+      <button
+        className="scramble-nav-btn scramble-prev-button"
+        onClick={onBackwardScramble}
+        aria-label="Previous scramble"
+        type="button"
+      >
+        <span aria-hidden="true">←</span>
+      </button>
 
-  <p
-    className="scramble-text"
-    style={{ fontSize: `${fontSize}pt`, maxWidth: `${maxWidth}%` }}
-    onClick={() => onScrambleClick(scramble)}
-  >
-    {scramble}
-  </p>
+      <p
+        className="scramble-text"
+        style={{ fontSize: `${fontSize}pt`, maxWidth: `${maxWidth}%` }}
+        onClick={() => onScrambleClick(scramble)}
+      >
+        {scramble}
+      </p>
 
-  <button
-    className="scramble-next-button"
-    onClick={onForwardScramble}
-  >
-    →
-  </button>
-</div>
-
+      <button
+        className="scramble-nav-btn scramble-next-button"
+        onClick={onForwardScramble}
+        aria-label="Next scramble"
+        type="button"
+      >
+        <span aria-hidden="true">→</span>
+      </button>
+    </div>
   );
 }
-
 
 export default Scramble;

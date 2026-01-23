@@ -1,0 +1,38 @@
+.puzzle-wrapper {
+  position: relative;
+  display: inline-block;
+  overflow: visible;
+}
+
+.puzzle-content {
+  display: inline-block;
+}
+
+/* Flip button anchored to the wrapper corner */
+.puzzle-flip {
+  position: absolute;
+  top: -10px;
+  right: -40px;
+
+  padding: 4px;
+  background: none !important;
+  border: none !important;
+  height: auto !important;
+
+  cursor: pointer;
+  z-index: 50;
+
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+.puzzle-flip:hover {
+  opacity: 1;
+}
+
+.puzzle-flip img {
+  width: 22px;
+  height: 22px;
+  display: block;
+  pointer-events: none;
+}

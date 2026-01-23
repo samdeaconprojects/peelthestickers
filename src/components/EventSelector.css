@@ -18,13 +18,7 @@
   right: 0;
 }
 
-/* === When on homepage/main page: offset under cube === */
-.main-content .event-selector-container,
-.main-content .event-selector-trigger {
-  right: 10px;
-  bottom: 70px;
-  margin-top: 20px;
-}
+
 
 /* === Dropdown box === */
 .event-selector-box {
@@ -122,6 +116,32 @@
 .add-event-btn:hover {
   background: #1ca296;
 }
+
+.event-selector-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+
+.event-selector-event {
+  font-size: 16pt;
+  font-weight: 500;
+}
+
+.event-selector-session {
+  font-size: 10pt;
+  opacity: 0.7;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+.shared-group-label {
+  font-weight: 600;
+  opacity: 0.85;
+  cursor: default;
+}
+
 
 /* === Responsive tweaks === */
 @media (max-width: 640px) {

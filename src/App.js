@@ -559,9 +559,12 @@ const goBackwardScramble = () => {
   };
 
   const handleEventChange = (event) => {
-    setCurrentEvent(event.target.value);
-    setCurrentSession("main"); // ✅ reset to main when event changes
-  };
+  setCurrentEvent(event.target.value);
+  setCurrentSession("main");
+  setSharedSession(null);     
+  setSharedIndex(0);
+};
+
 
   const onScrambleClick = () => {
     const scrambleText = scrambles[currentEvent]?.[0] || "";
@@ -584,16 +587,14 @@ const goBackwardScramble = () => {
   const handleCloseSignInPopup = () => setShowSignInPopup(false);
 
   const openEventSelector = () => {
-    const el =
-      document.querySelector(".event-select select") ||
-      document.querySelector(".event-select");
-    if (el) {
-      try {
-        el.focus();
-        el.click();
-      } catch (_) {}
-    }
-  };
+  const el = document.querySelector(".event-selector-trigger");
+  if (el) {
+    try {
+      el.click();
+    } catch (_) {}
+  }
+};
+
 
   const currentSolves = sessions[currentEvent] || [];
   const avgOfFive = calculateAverage(
@@ -666,27 +667,37 @@ const goBackwardScramble = () => {
 
 
                     <div className="cube-and-event">
-                      <div onClick={openEventSelector} style={{ cursor: "pointer" }}>
-                        <PuzzleSVG
-                          event={currentEvent}
-                          scramble={scrambles[currentEvent]?.[0] || ""}
-                          isMusicPlayer={!isHomePage}
-                          isTimerCube={true}
-                        />
-                      </div>
+  <div
+    className="puzzle-hud"
+    onClick={openEventSelector}
+    style={{ cursor: "pointer" }}
+  >
+    <PuzzleSVG
+      event={currentEvent}
+      scramble={scrambles[currentEvent]?.[0] || ""}
+      isMusicPlayer={!isHomePage}
+      isTimerCube={true}
+    />
+  </div>
 
-                      <div onClick={openEventSelector} style={{ cursor: "pointer" }}>
-                        <EventSelector
-                          currentEvent={currentEvent}
-                          handleEventChange={handleEventChange}
-                          currentSession={currentSession}
-                          setCurrentSession={setCurrentSession}
-                          sessions={sessionsList}
-                          customEvents={customEvents}
-                          userID={user?.UserID}
-                        />
-                      </div>
-                    </div>
+  <div className="event-hud">
+    <EventSelector
+      currentEvent={currentEvent}
+      handleEventChange={handleEventChange}
+      currentSession={currentSession}
+      setCurrentSession={setCurrentSession}
+      sessions={sessionsList}
+      customEvents={customEvents}
+      userID={user?.UserID}
+      onSessionChange={() => {
+        setSharedSession(null);
+        setSharedIndex(0);
+      }}
+    />
+  </div>
+</div>
+
+
                   </div>
 
                   <Timer addTime={addSolve} />

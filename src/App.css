@@ -5,8 +5,6 @@
   --current-page-color: #2ec4b6;
 }
 
-
-
 .App {
   display: flex;
   flex-direction: column;
@@ -17,7 +15,6 @@
   height: 100vh;
   background-color: var(--primary-color);
   color: var(--secondary-color);
- 
 }
 
 .navAndPage {
@@ -34,9 +31,8 @@
 }
 
 .navAndPage.reducedHeight {
-   height: calc(100% - 160px);
+  height: calc(100% - 160px);
 }
-
 
 .toggle-bar {
   position: fixed;
@@ -75,7 +71,6 @@ button:hover {
   transition: transform 1.5s ease-in-out;
 }
 
-
 body {
   font-family: 'Jost', sans-serif;
 }
@@ -108,7 +103,6 @@ body {
   -ms-overflow-style: none; /* Hide scrollbar for IE and Edge */
 }
 
-
 .timer-display {
   text-align: right;
   font-family: 'Droid Sans Mono', monospace;
@@ -125,6 +119,7 @@ body {
 }
 
 .cube {
+  position: relative;  
   height: 150px;
   min-width: 150px;
   margin-top: 80px;
@@ -138,7 +133,7 @@ body {
 }
 
 .event-select {
-  margin-right: 0px; 
+  margin-right: 0px;
   font-weight: 500;
   font-size: 16pt;
   margin-top: 30px;
@@ -151,23 +146,32 @@ body {
   background-color: transparent;
 }
 
+/* ✅ this header row should not be height-clamped */
 .scramble-select-container {
   display: flex;
   flex-direction: row;
-
-  max-height: 20%;
+  align-items: flex-start;     /* ✅ keep top aligned */
   justify-content: space-between;
   width: 100%;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 
+/* left slot already 13% */
+.left-slot-auth {
+  width: 13%;
+}
+
+/* center scramble stays centered */
 .scramble-container {
+  flex: 1;
   text-align: center;
 }
 
 .scramble-text {
-  display: inline-block; 
+  display: inline-block;
   font-size: 20pt;
-  max-width: 50%; 
+  max-width: 50%;
   white-space: normal;
   word-wrap: break-word;
   overflow-wrap: break-word;
@@ -177,6 +181,51 @@ body {
   word-break: break-word;
 }
 
+/* right HUD fixed width */
+.cube-and-event {
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;         /* ✅ center selector under cube */
+  justify-content: flex-start;
+  gap: 10px;
+  flex: 0 0 240px;             /* ✅ don’t shrink */
+}
+
+/* cube area */
+.cube-and-event .puzzle-hud {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+   padding-top: 18px;   /* tweak 12–28 */
+  box-sizing: border-box;
+}
+
+/* selector area */
+.cube-and-event .event-hud {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+/* ✅ don't let global cube margin push the HUD down */
+.cube-and-event .cube {
+  margin-top: 0 !important;
+}
+
+/* Give the puzzle a little breathing room from the top of the HUD */
+.cube-and-event .puzzle-hud {
+  padding-top: 16px;   /* tweak: try 12px–24px */
+  box-sizing: border-box;
+}
+
+/* Optional: even more drop for bigger NxN */
+.cube-and-event .puzzle-hud .cube {
+  margin-top: 0px;    /* tweak: 0–16px */
+}
+
+
 select {
   border: #FDFFFC solid 1px;
   border-radius: 5px;
@@ -185,7 +234,6 @@ select {
   height: 35px;
   background-color: transparent;
   color: #FDFFFC;
-
 }
 
 .TimeList {
@@ -214,26 +262,25 @@ select {
 }
 
 .music-player-mode .Timer {
-  font-size: 40pt; 
+  font-size: 40pt;
   margin-right: 20px;
 }
 
 .music-player-mode .scramble-text {
-  font-size: 8pt; 
-  max-width: 100%; 
+  font-size: 8pt;
+  max-width: 100%;
   z-index: 3;
 }
 
 .music-player-mode .TimeList {
-  width: 100%; 
+  width: 100%;
 }
 
 .music-player-mode .time-list-container {
-
 }
 
 .music-player-mode .TimeList table {
-  width: 100%; /* Table width should be 100% of TimeList width */
+  width: 100%;
 }
 
 .music-player-mode .TimeList td {
@@ -241,12 +288,6 @@ select {
 
 .Page {
   width: 100%;
-}
-
-.cube-and-event {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
 }
 
 .left-slot-auth .auth-button {
@@ -257,8 +298,7 @@ select {
   color: #FFFFFF;
   opacity: 50%;
 }
-.left-slot-auth .auth-button:hover { opacity: 100%; cursor: pointer; }
-
-.left-slot-auth {
-  width: 13%;
+.left-slot-auth .auth-button:hover {
+  opacity: 100%;
+  cursor: pointer;
 }

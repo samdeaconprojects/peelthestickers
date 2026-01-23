@@ -1,21 +1,68 @@
 .scramble-container {
-    display: flex;
-    justify-content: center; /* Centers the scramble text horizontally */
-  }
-
-  .scramble-container {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
 }
 
-.scramble-next-button {
-  font-size: 1.2em;
-  padding: 2px 8px;
-  cursor: pointer;
-  background-color: var(--primary-color, #0E171D);
-  color: white;
+/* shared style for both arrows */
+.scramble-nav-btn {
+  appearance: none;
+  -webkit-appearance: none;
   border: none;
-  border-radius: 4px;
+  outline: none;
+
+  /* modern pill */
+  height: 36px;
+  min-width: 52px;          /* ✅ wider */
+  padding: 0 14px;
+  border-radius: 999px;
+
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+
+  cursor: pointer;
+
+  /* ✅ lower opacity until hover */
+  opacity: 0.45;
+
+  display: grid;
+  place-items: center;
+
+  /* nicer arrow look */
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.scramble-nav-btn:hover {
+  opacity: 0.9;
+  background: rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+.scramble-nav-btn:active {
+  transform: translateY(0px) scale(0.98);
+  opacity: 0.95;
+}
+
+/* keyboard focus that still feels modern (no outline) */
+.scramble-nav-btn:focus-visible {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 0 2px rgba(18, 234, 104, 0.35); /* subtle ring */
+}
+
+/* optional: slightly different alignment for arrows */
+.scramble-prev-button span {
+  transform: translateX(-1px);
+}
+.scramble-next-button span {
+  transform: translateX(1px);
 }

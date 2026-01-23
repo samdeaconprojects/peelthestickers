@@ -25,3 +25,16 @@
     transform: rotate(60deg) skewY(-30deg) scaleY(1.10);
     
   }
+
+  .cube,
+.nonTimerCube,
+.nametagCube,
+.nonTimerProfileCube {
+  position: relative;
+}
+
+.cube {
+  display: block;      /* spacer height matters */
+  position: relative;  /* also OK here if you prefer CSS over inline */
+}
+

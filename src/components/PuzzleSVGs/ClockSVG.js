@@ -1,15 +1,12 @@
 // src/components/PuzzleSVGs/ClockSVG.js
 import React, { useRef, useEffect, useState } from 'react';
 
-const COLOR1     = '#FFFDF4';//'#D792DE'
-const COLOR2     = '#1211E7';//'#F9D19E'
+const COLOR1     = '#FFFDF4';
+const COLOR2     = '#1211E7';
 const NOON_COLOR = '#ED5336';
 
-export default function ClockSVG({ scramble, size }) {
-  //size = 35;
-
-  const [showFront, setShowFront] = useState(true);
-  const [version, setVersion] = useState(0); // <- added state to force rerender
+export default function ClockSVG({ scramble, size, showFront = true }) {
+  const [version, setVersion] = useState(0); // force rerender
 
   const spacing = size;
   const dialR   = size / 3;
@@ -112,7 +109,7 @@ export default function ClockSVG({ scramble, size }) {
     backFace.current  = Array.from({ length: 3 }, () => [0, 0, 0]);
     pins.current      = [[true, true], [true, true]];
 
-    scramble.trim().split(/\s+/).forEach(mv => {
+    scramble?.trim()?.split(/\s+/).forEach(mv => {
       if (mv === 'y2') return y2();
       const m = mv.match(/(UR|UL|DR|DL|U|D|R|L|ALL)(\d+)([+-])/);
       if (!m) return;
@@ -121,7 +118,7 @@ export default function ClockSVG({ scramble, size }) {
       ({ UR, UL, DR, DL, U, D, R, L, ALL }[face])?.(count);
     });
 
-    setVersion(v => v + 1); // 🔁 force rerender
+    setVersion(v => v + 1);
   }, [scramble]);
 
   function renderDial(x, y, pos, isFront) {
@@ -186,40 +183,27 @@ export default function ClockSVG({ scramble, size }) {
   }
 
   return (
-    <div style={{ position: 'relative', display: 'inline-block' }}>
-      <button
-        onClick={() => setShowFront(f => !f)}
-        style={{
-          position: 'absolute', top: -28, right: 0,
-          padding: '4px 8px', background: '#2EC4B6',
-          color: '#fff', border: 'none', borderRadius: 4,
-          cursor: 'pointer'
-        }}
-      >
-        {showFront ? 'Show Back' : 'Show Front'}
-      </button>
-      <svg key={version} width={width} height={height} viewBox={`0 0 ${width + offsetX} ${height}`}>
-        <g>
-          <circle cx={offsetX + spacing * 1.5} cy={spacing * 1.5} r={spacing * 1.5 + spacing / 10} fill={showFront ? COLOR1 : COLOR2} />
-          {[ [0,0], [2,0], [0,2], [2,2] ].map(([r, c]) => (
-            <circle key={`${r}${c}`}
-              cx={offsetX + r * spacing + spacing / 2}
-              cy={c * spacing + spacing / 2}
-              r={dialR * 1.5}
-              fill={showFront ? COLOR1 : COLOR2}
-            />
-          ))}
-          {renderPins(showFront)}
-          {Array.from({ length: 3 }).flatMap((_, r) =>
-            Array.from({ length: 3 }).map((_, c) => {
-              const pos = showFront
-                ? frontFace.current[c][r]
-                : backFace.current[c][r];
-              return renderDial(r * spacing + spacing / 2, c * spacing + spacing / 2, pos, showFront);
-            })
-          )}
-        </g>
-      </svg>
-    </div>
+    <svg key={version} width={width} height={height} viewBox={`0 0 ${width + offsetX} ${height}`}>
+      <g>
+        <circle cx={offsetX + spacing * 1.5} cy={spacing * 1.5} r={spacing * 1.5 + spacing / 10} fill={showFront ? COLOR1 : COLOR2} />
+        {[ [0,0], [2,0], [0,2], [2,2] ].map(([r, c]) => (
+          <circle key={`${r}${c}`}
+            cx={offsetX + r * spacing + spacing / 2}
+            cy={c * spacing + spacing / 2}
+            r={dialR * 1.5}
+            fill={showFront ? COLOR1 : COLOR2}
+          />
+        ))}
+        {renderPins(showFront)}
+        {Array.from({ length: 3 }).flatMap((_, r) =>
+          Array.from({ length: 3 }).map((_, c) => {
+            const pos = showFront
+              ? frontFace.current[c][r]
+              : backFace.current[c][r];
+            return renderDial(r * spacing + spacing / 2, c * spacing + spacing / 2, pos, showFront);
+          })
+        )}
+      </g>
+    </svg>
   );
 }
