@@ -3,9 +3,19 @@
 .socialHeader {
   display: flex;
   justify-content: space-between;
-  margin-right: 10px;
-  align-items: center;
+  align-items: flex-start;   /* top-align so icons never drop */
+  gap: 12px;
+
+  /*  was height: 118px; + overflow hidden (caused dead space + clipping) */
+  height: 90px;
+  padding: 8px 10px 0 10px;
+
+  flex-shrink: 0;            /* prevents header from shrinking */
+  overflow: visible;         /* prevents clipping of search */
 }
+
+
+/* ---------- Search (shorter) ---------- */
 
 .socialHeader input {
   font-size: 16pt;
@@ -14,15 +24,20 @@
   border: 2px solid #B4B4B4;
   width: 100%;
   height: 34px;
-  margin: 10px;
+
+  margin: 0;          /* ✅ was 10px (pushed/cut off in header) */
   padding: 0 10px;
   color: white;
 }
 
 .searchContainer {
-  width: 25%;
-  margin-right: 20px;
+  width: 16%;
+  min-width: 220px;
+  max-width: 320px;
+  margin-right: 14px;
   position: relative;
+
+  padding-top: 2px;   /* ✅ replaces old input margin spacing */
 }
 
 .suggestionsList {
@@ -47,65 +62,129 @@
   background-color: #333;
 }
 
+/* ---------- Icon Tabs ---------- */
+
 .tabContainer {
   display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+
+  align-items: flex-start; /* keep icons at top */
+  padding-top: 2px;
 }
 
-.tabButton {
-  background-color: transparent;
-  color: #aaa;
+.tabIconButton {
+  background: transparent;
   border: none;
-  font-size: 16pt;
-  margin-right: 20px;
   cursor: pointer;
+  opacity: 0.5;
+  position: relative;
+
+  /* ✅ make icon box deterministic so dot placement is consistent */
+  width: 54px;
+  height: 54px;
+  padding: 0;
+
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+
+  line-height: 0; /* ✅ removes baseline weirdness */
 }
 
-.tabButton.active {
-  color: white;
-  font-weight: bold;
-  border-bottom: 2px solid white;
+.tabIconButton:hover { opacity: 1; }
+.tabIconButton.active { opacity: 1; }
+
+.tabIcon {
+  width: 34px;
+  height: 34px;
+  display: block;
+
+  margin-top: 6px; /*  consistent icon placement */
+  filter: brightness(0) invert(1);
 }
+
+.tabDot {
+  position: absolute;
+  scale: 50%;
+  left: 44%;
+
+  /*  was bottom:-6px; (inconsistent). Use fixed top position. */
+  top: 44px;  /* tweak 42–48 if you want it slightly lower/higher */
+
+  transform: translateX(-50%);
+  width: 14px;
+  height: 14px;
+  filter: brightness(0) invert(1);
+  pointer-events: none;
+}
+
+.tabIconButton:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+
+/* ---------- Header Conversation Strip (moved up) ---------- */
+
+.headerConversationStrip {
+  flex: 1;
+  min-width: 0;
+
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;  /* top-align strip contents */
+
+  overflow-x: auto;
+  overflow-y: hidden;       /* no vertical growth */
+
+  padding: 0 6px;           /* remove vertical padding that adds height */
+  gap: 6px;
+}
+
+/* Make the top-bar tiles smaller */
+.headerConversationStrip .conversationPreview {
+  transform: scale(0.75);
+  transform-origin: top left;
+  padding: 0;              /* scaling handles the padding feel */
+  margin: 0;
+}
+
 
 /* Make the whole Social page a flex column that fills its area */
 .Page {
   width: 100%;
   display: flex;
   flex-direction: column;
-
-  /* Let Social take up available space without forcing full page height */
-  flex: 1;          /* fills parent flex column */
-  min-height: 0;    /* critical: allows children to shrink/scroll properly */
-}
-
-
-/* Content area under the header should fill and allow inner scrolling */
-.profileContent {
-  display: flex;
-  flex-direction: column;
   flex: 1;
-  min-height: 0;            /* critical so inner panels can scroll */
-  overflow: hidden;         /* prevent outer scrollbars */
+  min-height: 0;
 }
 
-/* A tab panel is a container; children will control scroll */
+.profileContent {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  margin-top: 0;
+  padding-top: 0;
+}
+
 .tabPanel {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;            /* allow inner scrollers */
+  min-height: 0;
   overflow: hidden;
-  padding: 0;               /* pad inner sections instead */
+  padding: 0;
 }
 
-/* ACTIVITY: make the list itself scroll */
 .activityPanel {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 10px;            /* inner padding */
-  overflow-y: auto;         /* only activity list scrolls */
+  padding: 10px;
+  overflow-y: auto;
 }
 
 .chatBubble {
@@ -120,24 +199,33 @@
   align-self: flex-start;
 }
 
-/* MESSAGES: layout with fixed header strip + fixed input, middle scroll */
 .messagesPanel {
   display: flex;
   flex: 1;
   flex-direction: column;
-  min-height: 0;            /* allow children to shrink */
-  overflow: hidden;         /* stop full-panel scrolling */
+  min-height: 0;
+  overflow: hidden;
+  padding-top: 0;
 }
 
-.conversationStrip {
-  flex-shrink: 0;           /* always visible */
-  display: flex;
-  flex-direction: row;
-  overflow-x: auto;
-  gap: 12px;
-  padding: 10px;
-  border-bottom: 1px solid #444;
+.socialPage .tabPanel {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 65px
+  );
+
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 65px
+  );
+
+  margin-top: 0;
 }
+
+
+/* (conversationStrip removed from here; now in header) */
 
 .avatarContainer {
   display: flex;
@@ -146,6 +234,7 @@
   cursor: pointer;
 }
 
+/* ✅ make this the positioning anchor */
 .profilePicturePost {
   width: 90px;
   height: 90px;
@@ -157,13 +246,51 @@
   margin: 6px;
   border: 2px solid #2EC4B6;
   overflow: hidden;
+  position: relative; /* ✅ anchor for absolute cube */
 }
 
-.postNameCube {
-  transform: scale(.75);
-  margin-right: 80px;
-  margin-bottom: 80px;
+/* ✅ reduce header-only tile spacing so the row sits high */
+.headerConversationStrip .profilePicturePost {
+  margin: 0; /* was 6px; pushes bar down */
 }
+
+/* ✅ the “one true” centering method */
+.postNameCube {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+
+  /* tuning knobs */
+  --as: 1;
+  --ax: 0px;
+  --ay: 0px;
+
+  transform:
+    translate(-50%, -50%)
+    translate(var(--ax), var(--ay))
+    scale(var(--as));
+
+  transform-origin: center;
+  pointer-events: none; /* ✅ avatar clicks still work */
+}
+
+/* NxN cubes */
+.postNameCube--222 { --as: 2.6; --ax: -10px; --ay: 14px;  }
+.postNameCube--333 { --as: 2.5; --ax: -12px; --ay: 1px; }
+.postNameCube--333oh {  --as: 2.5; --ax: -12px; --ay: 1px; }
+.postNameCube--333bld {  --as: 2.5; --ax: -12px; --ay: 1px; }
+
+.postNameCube--444 { --as: 2.30; --ax: -15px; --ay: -2px; }
+.postNameCube--555 { --as: 2.30; --ax: -17px; --ay: -6px; }
+.postNameCube--666 { --as: 2.25; --ax: -17px; --ay: -2px; }
+.postNameCube--777 { --as: 2.25; --ax: -17px; --ay: -2px; }
+
+.postNameCube--skewb { --as: 0.84; --ax: 17px; --ay: 27px; }
+.postNameCube--clock { --as: 0.58; --ax: 6px; --ay: 10px; }
+.postNameCube--sq1 { --as: 0.70; --ax: 0px; --ay: 2px; }
+
+.postNameCube--pyraminx { --as: 0.66; --ax: 0px; --ay: 2px; }
+.postNameCube--megaminx { --as: 0.50; --ax: 0px; --ay: 2px; }
 
 .avatarName {
   font-size: 12px;
@@ -180,6 +307,7 @@
   border: 2px solid transparent;
   color: white;
   transition: border 0.2s ease;
+  flex-shrink: 0;
 }
 
 .conversationPreview:hover {
@@ -192,16 +320,18 @@
 
 .conversationView {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;            /* critical for inner scrolling */
-  /* no overflow here; children control it */
+  min-height: 0;
+  padding-top: 0;
+  margin-top: 0;
+  display: flex;             
+  flex-direction: column;     
 }
+
 
 .messages {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;         /* only messages scroll */
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -219,18 +349,16 @@
 
 .sent {
   align-self: flex-end;
-  background-color: #2EC4B6;
   color: black;
 }
 
 .received {
   align-self: flex-start;
-  background-color: #444;
   color: white;
 }
 
 .messageInput {
-  flex-shrink: 0;           /* always pinned to bottom */
+  flex-shrink: 0;
   display: flex;
   gap: 10px;
   padding: 10px;
@@ -251,9 +379,9 @@
   padding: 10px 20px;
   font-size: 14pt;
   border-radius: 8px;
-  border: none;
-  background-color: #2EC4B6;
-  color: black;
+  border: 2px solid #ccc;
+  background-color: transparent;
+  color: white;
   cursor: pointer;
 }
 

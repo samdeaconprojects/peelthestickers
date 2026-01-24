@@ -1,52 +1,49 @@
-.puzzle-svg-wrapper {
+.puzzle-svg-wrap {
   position: relative;
   display: inline-block;
   overflow: visible;
 }
 
-/* ✅ Flip button styling that ignores global App.css button rules */
+/* isolate transforms so flip icon never gets transformed/mirrored */
+.puzzle-svg-inner {
+  position: relative;
+}
+
+/* flip button pinned to wrapper corner */
 .puzzle-flip-btn {
-  appearance: none !important;
-  -webkit-appearance: none !important;
-  background: none !important;
-  border: none !important;
-  outline: none !important;
-  box-shadow: none !important;
-
   position: absolute;
-  top: -6px;          /* tuck into corner a bit */
-  right: -6px;
-
-  padding: 0 !important;
-  margin: 0 !important;
-
-  width: 26px;
-  height: 26px;
-
-  display: grid;
-  place-items: center;
-
+  top: 6px;
+  right: 6px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  outline: none;
   cursor: pointer;
-  z-index: 50;
+  z-index: 20;
 
   opacity: 0.3;
-  transition: opacity 140ms ease, transform 120ms ease;
+  transition: opacity 140ms ease;
 }
 
 .puzzle-flip-btn:hover {
   opacity: 1;
-  transform: scale(1.03);
 }
 
-.puzzle-flip-btn:active {
-  transform: scale(0.95);
-  opacity: 1;
+/* prevent global App.css button styles from leaking in */
+.puzzle-flip-btn,
+.puzzle-flip-btn:hover,
+.puzzle-flip-btn:active,
+.puzzle-flip-btn:focus,
+.puzzle-flip-btn:focus-visible {
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
 }
 
+/* icon size */
 .puzzle-flip-icon {
   width: 18px;
   height: 18px;
   display: block;
   pointer-events: none;
-  user-select: none;
 }

@@ -14,7 +14,13 @@ import { createSession } from '../../services/createSession';
 import PuzzleSVG from '../PuzzleSVGs/PuzzleSVG';
 import { generateScramble } from '../scrambleUtils';
 import SharedAverageModal from './SharedAverageModal';
-import SharedAverageMessage from './SharedAverageMessage'; // ✅ NEW
+import SharedAverageMessage from './SharedAverageMessage';
+
+import DotIcon from '../../assets/Dot.svg';
+import FlipIcon from '../../assets/Flip.svg';
+
+import SocialHomeIcon from '../../assets/SocialHome.svg';
+import SocialMessagesIcon from '../../assets/SocialMessages.svg';
 
 function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
   const [activeTab, setActiveTab] = useState(0);
@@ -25,7 +31,7 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [messageInput, setMessageInput] = useState('');
-  const [showSharedModal, setShowSharedModal] = useState(false); // ✅ NEW
+  const [showSharedModal, setShowSharedModal] = useState(false);
 
   const navigate = useNavigate();
 
@@ -40,20 +46,16 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const getTransform = (event) => {
-    const transforms = {
-      '222': 'translate(23px, 58px) scale(0.7)',
-      '333': 'translate(6px, 38px)scale(0.6)',
-      '444': 'translate(3px, 34px) scale(0.55)',
-      '555': 'translate(-1px, 26px) scale(0.55)',
-      '666': 'translate(0px, 32px) scale(0.54)',
-      '777': 'translate(0px, 31px) scale(0.54)',
-      'CLOCK': 'translate(6px, 12px) scale(0.55)',
-      'SKEWB': 'translate(16px, 25px) scale(0.80)',
-      'MEGAMINX': 'translate(-4px, -16px) scale(0.8)',
-      'PYRAMINX': 'translate(0px, -18px) scale(0.88)',
-    };
-    return transforms[event] || 'scale(0.6)';
+  const hexToRgba = (hex, a = 0.3) => {
+    if (!hex) return `rgba(46,196,182,${a})`;
+    let h = String(hex).replace('#', '').trim();
+    if (h.length === 3) h = h.split('').map(c => c + c).join('');
+    if (h.length !== 6) return `rgba(46,196,182,${a})`;
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    if ([r, g, b].some(v => Number.isNaN(v))) return `rgba(46,196,182,${a})`;
+    return `rgba(${r},${g},${b},${a})`;
   };
 
   useEffect(() => {
@@ -149,38 +151,40 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
     }
   };
 
-  const loadSharedSession = async ({ sharedID, event, scrambles }) => {
-  if (!user?.UserID) return;
+  const handleRefreshMessages = async () => {
+    if (!selectedConversation || !user?.UserID) return;
 
-  const sessionID = sharedID.split("#").slice(0,3).join("#");
+    const fid = selectedConversation.id;
+    const conversationID = [user.UserID, fid].sort().join('#');
+    const messages = await getMessages(conversationID);
 
-
-  const sessionName = `Shared ${event} with ${
-    selectedConversation?.name || "Friend"
-  }`;
-
-  try {
-    await createSession(
-      user.UserID,
-      event,
-      sessionID,
-      sessionName
+    setSelectedConversation(prev => ({ ...prev, messages }));
+    setConversations(prev =>
+      prev.map(conv =>
+        conv.id === fid ? { ...conv, messages } : conv
+      )
     );
+  };
 
-    setSharedSession({
-      sessionID,
-      event,
-      sharedID,
-      scrambles
-    });
+  const loadSharedSession = async ({ sharedID, event, scrambles }) => {
+    if (!user?.UserID) return;
 
-  } catch (err) {
-    console.error("Failed to create shared session", err);
-  }
-};
+    const sessionID = sharedID.split("#").slice(0, 3).join("#");
+    const sessionName = `Shared ${event} with ${selectedConversation?.name || "Friend"}`;
 
+    try {
+      await createSession(user.UserID, event, sessionID, sessionName);
 
-
+      setSharedSession({
+        sessionID,
+        event,
+        sharedID,
+        scrambles
+      });
+    } catch (err) {
+      console.error("Failed to create shared session", err);
+    }
+  };
 
   useEffect(() => {
     const fetchSuggestion = async () => {
@@ -248,60 +252,114 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
   };
 
   const handleConfirmSharedAverage = async (event, count) => {
-  if (!selectedConversation || !user?.UserID) return;
+    if (!selectedConversation || !user?.UserID) return;
 
-  const scrambles = Array.from({ length: count }, () => generateScramble(event));
+    const scrambles = Array.from({ length: count }, () => generateScramble(event));
 
-  const fid = selectedConversation.id;
-  // Stable conversation identity (alphabetical)
-const conversationID = [user.UserID, fid].sort().join('#');
+    const fid = selectedConversation.id;
+    const conversationID = [user.UserID, fid].sort().join('#');
+    const sessionID = `SHARED#${conversationID}#${event}`;
+    const sharedRunID = `${sessionID}#${Date.now()}`;
 
-//  Persistent shared session ID per pair per event
-const sessionID = `SHARED#${conversationID}#${event}`;
+    const scrambleText =
+      `[sharedAoN]${sharedRunID}|${event}|${count}|${scrambles.join('||')}`;
 
-//  Per-run ID so each Ao5 / Ao12 is independent
-const sharedRunID = `${sessionID}#${Date.now()}`;
+    const message = {
+      sender: user.UserID,
+      text: scrambleText,
+      timestamp: new Date().toISOString()
+    };
 
-const scrambleText =
-  `[sharedAoN]${sharedRunID}|${event}|${count}|${scrambles.join('||')}`;
+    const updatedConversation = {
+      ...selectedConversation,
+      messages: [...(selectedConversation.messages || []), message]
+    };
 
+    setSelectedConversation(updatedConversation);
 
-  const message = {
-    sender: user.UserID,
-    text: scrambleText,
-    timestamp: new Date().toISOString()
+    setConversations(prev =>
+      prev.map(conv =>
+        conv.id === fid ? updatedConversation : conv
+      )
+    );
+
+    try {
+      await sendMessage(conversationID, user.UserID, message.text);
+    } catch (err) {
+      console.error("Failed to send shared average:", err);
+    }
   };
-
-  const updatedConversation = {
-    ...selectedConversation,
-    messages: [...(selectedConversation.messages || []), message]
-  };
-
-  setSelectedConversation(updatedConversation);
-
-  setConversations(prev =>
-    prev.map(conv =>
-      conv.id === fid ? updatedConversation : conv
-    )
-  );
-
-  try {
-    await sendMessage(conversationID, user.UserID, message.text);
-  } catch (err) {
-    console.error("Failed to send shared average:", err);
-  }
-};
-
 
   if (!user) return <div>Please sign in to view your feed.</div>;
 
   return (
-    <div className="Page">
+    <div className="Page socialPage">
       <div className="socialHeader">
+        {/* LEFT: icon tabs */}
         <div className="tabContainer">
-          <button className={`tabButton ${activeTab === 0 ? 'active' : ''}`} onClick={() => setActiveTab(0)}>Activity</button>
-          <button className={`tabButton ${activeTab === 1 ? 'active' : ''}`} onClick={() => setActiveTab(1)}>Messages</button>
+          <button
+            className={`tabIconButton ${activeTab === 0 ? 'active' : ''}`}
+            onClick={() => setActiveTab(0)}
+            aria-label="Activity"
+            title="Activity"
+          >
+            <img className="tabIcon" src={SocialHomeIcon} alt="" />
+            {activeTab === 0 && <img className="tabDot" src={DotIcon} alt="" />}
+          </button>
+
+          <button
+            className={`tabIconButton ${activeTab === 1 ? 'active' : ''}`}
+            onClick={() => setActiveTab(1)}
+            aria-label="Messages"
+            title="Messages"
+          >
+            <img className="tabIcon" src={SocialMessagesIcon} alt="" />
+            {activeTab === 1 && <img className="tabDot" src={DotIcon} alt="" />}
+          </button>
+
+          <button
+            className={`tabIconButton tabIconButton--flip ${activeTab === 1 ? '' : 'disabled'}`}
+            onClick={handleRefreshMessages}
+            aria-label="Refresh messages"
+            title={activeTab === 1 ? "Refresh" : "Switch to Messages to refresh"}
+            disabled={activeTab !== 1 || !selectedConversation}
+          >
+            <img className="tabIcon" src={FlipIcon} alt="" />
+          </button>
         </div>
+
+        {/* CENTER: conversation strip (Messages only) */}
+        {activeTab === 1 && (
+          <div className="headerConversationStrip">
+            {sortedConversations.map(conv => (
+              <div
+                key={conv.id}
+                className={`conversationPreview ${selectedConversation?.id === conv.id ? 'selected' : ''}`}
+                onClick={() => setSelectedConversation(conv)}
+              >
+                <div className="avatarContainer">
+                  <div
+                    className="profilePicturePost"
+                    style={{ borderColor: conv.color || '#2EC4B6' }}
+                  >
+                    <div className={`postNameCube postNameCube--${(conv.profileEvent || "333").toLowerCase()}`}>
+                      <PuzzleSVG
+                        event={conv.profileEvent || "333"}
+                        scramble={conv.profileScramble || ""}
+                        isMusicPlayer={false}
+                        isTimerCube={false}
+                        isNameTagCube={true}
+                      />
+                    </div>
+                  </div>
+                  <div className="avatarName">{conv.name}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* RIGHT: search */}
         <div className="searchContainer">
           <input
             type="text"
@@ -337,12 +395,12 @@ const scrambleText =
                     post.SolveList && post.SolveList.length
                       ? post.SolveList
                       : [{
-                          event: post.Event,
-                          scramble: post.Scramble,
-                          time: post.Time,
-                          note: post.Note,
-                          comments: post.Comments || []
-                        }]
+                        event: post.Event,
+                        scramble: post.Scramble,
+                        time: post.Time,
+                        note: post.Note,
+                        comments: post.Comments || []
+                      }]
                   }
                   postColor={post.postColor}
                   onClick={() => setSelectedPost(post)}
@@ -355,89 +413,51 @@ const scrambleText =
 
         {activeTab === 1 && (
           <div className="tabPanel messagesPanel">
-            <div className="conversationStrip">
-              {sortedConversations.map(conv => (
-                <div
-                  key={conv.id}
-                  className={`conversationPreview ${selectedConversation?.id === conv.id ? 'selected' : ''}`}
-                  onClick={() => setSelectedConversation(conv)}
-                >
-                  <div className="avatarContainer">
-                    <div
-                      className="profilePicturePost"
-                      style={{ borderColor: conv.color || '#2EC4B6' }}
-                    >
-                      <div
-                        className="postNameCube"
-                        style={{ transform: getTransform(conv.profileEvent) }}
-                      >
-                        <PuzzleSVG
-                          event={conv.profileEvent || '333'}
-                          scramble={conv.profileScramble || ''}
-                          isMusicPlayer={false}
-                          isTimerCube={false}
-                        />
-                      </div>
-                    </div>
-                    <div className="avatarName">{conv.name}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
             <div className="conversationView">
-              <button className="refreshButton" onClick={async () => {
-                if (!selectedConversation) return;
-                const fid = selectedConversation.id;
-                const conversationID = [user.UserID, fid].sort().join('#');
-                const messages = await getMessages(conversationID);
-                setSelectedConversation(prev => ({ ...prev, messages }));
-                setConversations(prev =>
-                  prev.map(conv =>
-                    conv.id === fid ? { ...conv, messages } : conv
-                  )
-                );
-              }}>
-                Refresh
-              </button>
-
               {selectedConversation ? (
                 <>
                   <div className="messages">
                     {selectedConversation.messages.map((msg, idx) => {
+                      if (msg.text?.startsWith('[sharedAoN]')) {
+                        // DO NOT wrap this — wrapping changes size + can mess scroll.
+                        return (
+                          <SharedAverageMessage
+                            key={idx}
+                            msg={msg}
+                            user={user}
+                            messages={selectedConversation.messages}
+                            onLoadSession={(session) => loadSharedSession(session)}
+                            onMerge={(session) => mergeSharedSession(session)}
+                          />
+                        );
+                      }
 
-  // Shared Average main message
-  if (msg.text?.startsWith('[sharedAoN]')) {
-    return (
-      <SharedAverageMessage
-        key={idx}
-        msg={msg}
-        user={user}
-        messages={selectedConversation.messages} // updates still flow in 👍
-        onLoadSession={(session) => loadSharedSession(session)}
-        onMerge={(session) => mergeSharedSession(session)}
-      />
-    );
-  }
+                      if (msg.text?.startsWith('[sharedUpdate]')) return null;
 
-  // ❗️ Hide shared updates from UI but KEEP them in data
-  if (msg.text?.startsWith('[sharedUpdate]')) {
-    return null;
-  }
+                      const isOwn = msg.sender === user.UserID;
 
-  // Normal chat message
-  return (
-    <div
-      key={idx}
-      className={`chatMessage ${msg.sender === user.UserID ? 'sent' : 'received'}`}
-    >
-      {msg.text || '[no text]'}
-    </div>
-  );
-})}
+                      const senderColor = isOwn
+                        ? (user?.Color || user?.color || '#2EC4B6')
+                        : (selectedConversation?.color || '#888888');
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`chatMessage ${isOwn ? 'sent' : 'received'}`}
+                          style={{
+                            color: '#fff',
+                            backgroundColor: hexToRgba(senderColor, 0.3),
+                            border: `2px solid ${senderColor}`,
+                          }}
+                        >
+                          {msg.text || '[no text]'}
+                        </div>
+                      );
+                    })}
 
                     <div ref={messagesEndRef} />
                   </div>
+
                   <div className="messageInput">
                     <input
                       type="text"
@@ -472,12 +492,12 @@ const scrambleText =
             selectedPost.SolveList && selectedPost.SolveList.length
               ? selectedPost.SolveList
               : [{
-                  event: selectedPost.Event,
-                  scramble: selectedPost.Scramble,
-                  time: selectedPost.Time,
-                  note: selectedPost.Note,
-                  comments: selectedPost.Comments || []
-                }]
+                event: selectedPost.Event,
+                scramble: selectedPost.Scramble,
+                time: selectedPost.Time,
+                note: selectedPost.Note,
+                comments: selectedPost.Comments || []
+              }]
           }
           comments={selectedPost.Comments || []}
           onClose={() => setSelectedPost(null)}
