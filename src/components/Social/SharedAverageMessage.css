@@ -1,8 +1,11 @@
 /* src/components/Social/SharedAverageMessage.css */
 
+/* src/components/Social/SharedAverageMessage.css */
+
+
+
 .sharedAverageMessage {
   background: #222;
-  border: 1px solid #2EC4B6;
   border-radius: 8px;
   padding: 8px;
   margin: 6px 0;
@@ -10,6 +13,60 @@
 
   max-width: 100%;
   align-self: stretch;
+
+  /* --- blended split border --- */
+  border: 2px solid transparent;
+
+  /* width of the “blend band” (increase for smoother/longer fade) */
+  --blend: 10px;
+
+  
+
+  /* Use background-clip trick to draw a gradient border */
+  background:
+    /* inner fill */
+    linear-gradient(
+      rgba(34, 34, 34, .98),
+      rgba(34, 34, 34, .98)
+    ) padding-box,
+    /* border gradient */
+    linear-gradient(
+      90deg,
+      var(--youColor) 0,
+      var(--youColor) calc(var(--split) - var(--blend)),
+      var(--theirColor) calc(var(--split) + var(--blend)),
+      var(--theirColor) 100%
+    ) border-box;
+}
+
+
+/* ---- Split "border" that does NOT affect layout ---- */
+.sharedAverageMessage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+
+  /* thickness */
+  padding: 2px;
+
+  /* split gradient (left=you, right=them, moved by --split) */
+  background: linear-gradient(
+    90deg,
+    var(--youColor) 0%,
+    var(--youColor) var(--split),
+    var(--theirColor) var(--split),
+    var(--theirColor) 100%
+  );
+
+  /* punch out the middle so only the 2px ring shows */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+
+  pointer-events: none;
 }
 
 .sharedAverageHeader {
@@ -17,6 +74,20 @@
   align-items: center;
   gap: 8px;
   font-weight: bold;
+}
+
+/* ---- Make PuzzleSVG half size (only in header) ---- */
+.sharedAverageIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  /* shrink */
+  transform: scale(0.5);
+  transform-origin: left center;
+
+  /* prevent it from affecting layout weirdly */
+  line-height: 0;
 }
 
 .expandSharedBtn,

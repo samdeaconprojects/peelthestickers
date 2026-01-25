@@ -1,9 +1,23 @@
+// src/components/Social/SharedAverageMessage.js
 import React, { useState, useMemo } from 'react';
 import PuzzleSVG from '../PuzzleSVGs/PuzzleSVG';
 import './SharedAverageMessage.css';
 
-function SharedAverageMessage({ msg, user, messages = [], onLoadSession, onDismiss }) {
+function SharedAverageMessage({
+  msg,
+  user,
+  messages = [],
+  onLoadSession,
+  onDismiss,
+
+  // OPTIONAL: pass these in from Social.js for true profile colors
+  yourColor,
+  theirColor,
+}) {
   const [expanded, setExpanded] = useState(false);
+
+  const safeYourColor = yourColor || user?.Color || user?.color || '#2EC4B6';
+  const safeTheirColor = theirColor || '#888888';
 
   // -----------------------------
   // Parse ORIGINAL shared message
@@ -62,18 +76,52 @@ function SharedAverageMessage({ msg, user, messages = [], onLoadSession, onDismi
       .filter(Boolean);
   }, [messages, parsed]);
 
+  // -----------------------------
+  // Build times maps + compute split
+  // (all inside one memo so deps are stable)
+  // -----------------------------
+  const { yourTimes, theirTimes, splitPercent } = useMemo(() => {
+    const yt = {};
+    const tt = {};
+
+    // fill maps
+    updates.forEach(u => {
+      if (u.userID === user?.UserID) yt[u.index] = u.time;
+      else tt[u.index] = u.time;
+    });
+
+    // compute wins-based split
+    let yourWins = 0;
+    let theirWins = 0;
+
+    const count = parsed?.count || 0;
+    for (let i = 0; i < count; i++) {
+      const a = yt[i];
+      const b = tt[i];
+
+      if (typeof a !== 'number' || typeof b !== 'number') continue;
+      if (!isFinite(a) || !isFinite(b)) continue;
+
+      if (a < b) yourWins++;
+      else if (b < a) theirWins++;
+    }
+
+    const total = yourWins + theirWins;
+    let p = 50;
+
+    if (total > 0) {
+      p = (yourWins / total) * 100;
+
+      // clamp so it doesn't go full 0/100 instantly
+      // remove this clamp if you want true extremes
+      p = Math.max(20, Math.min(80, p));
+    }
+
+    return { yourTimes: yt, theirTimes: tt, splitPercent: p };
+  }, [updates, user?.UserID, parsed?.count]);
+
+  // After all hooks:
   if (!parsed) return null;
-
-  // -----------------------------
-  // Build lookup maps
-  // -----------------------------
-  const yourTimes = {};
-  const theirTimes = {};
-
-  updates.forEach(u => {
-    if (u.userID === user.UserID) yourTimes[u.index] = u.time;
-    else theirTimes[u.index] = u.time;
-  });
 
   const formatMs = ms =>
     ms || ms === 0 ? (ms / 1000).toFixed(2) : '–';
@@ -88,13 +136,22 @@ function SharedAverageMessage({ msg, user, messages = [], onLoadSession, onDismi
       : parsed.scrambles.slice(0, MAX_VISIBLE);
 
   return (
-    <div className="sharedAverageMessage">
-
+    <div
+      className="sharedAverageMessage"
+      style={{
+        '--youColor': safeYourColor,
+        '--theirColor': safeTheirColor,
+        '--split': `${splitPercent}%`,
+      }}
+    >
       <div className="sharedAverageHeader">
-        <PuzzleSVG
-          event={parsed.event}
-          scramble={parsed.scrambles?.[0] || ''}
-        />
+        <div className="sharedAverageIcon">
+          <PuzzleSVG
+            event={parsed.event}
+            scramble={parsed.scrambles?.[0] || ''}
+          />
+        </div>
+
         <span>
           {msg.sender === user.UserID ? 'You' : msg.sender}
           {" shared an Ao"}

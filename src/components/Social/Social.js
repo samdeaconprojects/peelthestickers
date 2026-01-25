@@ -422,13 +422,17 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
                         // DO NOT wrap this — wrapping changes size + can mess scroll.
                         return (
                           <SharedAverageMessage
-                            key={idx}
-                            msg={msg}
-                            user={user}
-                            messages={selectedConversation.messages}
-                            onLoadSession={(session) => loadSharedSession(session)}
-                            onMerge={(session) => mergeSharedSession(session)}
-                          />
+  key={idx}
+  msg={msg}
+  user={user}
+  messages={selectedConversation.messages}
+  onLoadSession={(session) => loadSharedSession(session)}
+  onMerge={(session) => mergeSharedSession(session)}
+
+  yourColor={user?.Color || user?.color || '#2EC4B6'}
+  theirColor={selectedConversation?.color || '#888888'}
+/>
+
                         );
                       }
 

@@ -212,13 +212,13 @@
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    black 65px
+    black 52px
   );
 
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    black 65px
+    black 52px
   );
 
   margin-top: 0;
