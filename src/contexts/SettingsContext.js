@@ -26,7 +26,14 @@ export const SettingsProvider = ({ children }) => {
     secondaryColor: '#ffffff',
     timerInput: 'Keyboard',
     horizontalTimeList: true, // default to horizontal
-    eventKeyBindings: defaultEventBindings
+    eventKeyBindings: defaultEventBindings,
+
+    //  Inspection settings
+    inspectionEnabled: false,
+    inspectionCountDirection: "down", // "down" or "up"
+    inspectionBeeps: true, 
+    inspectionFullscreen: false,
+
   });
 
   const updateSettings = (newSettings) => {

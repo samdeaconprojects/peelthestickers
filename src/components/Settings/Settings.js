@@ -138,6 +138,50 @@ function Settings({ userID, onClose, onProfileUpdate }) {
   />
 </div>
 
+<div className="setting-item">
+  <label>WCA Inspection</label>
+  <input
+    type="checkbox"
+    checked={!!settings.inspectionEnabled}
+    onChange={(e) => updateSettings({ inspectionEnabled: e.target.checked })}
+  />
+</div>
+
+<div className="setting-item">
+  <label>Inspection Beeps</label>
+  <input
+    type="checkbox"
+    checked={!!settings.inspectionBeeps}
+    onChange={(e) =>
+      updateSettings({ inspectionBeeps: e.target.checked })
+    }
+    disabled={!settings.inspectionEnabled}
+  />
+</div>
+
+<div className="setting-item">
+  <label>Fullscreen Inspection</label>
+  <input
+    type="checkbox"
+    checked={!!settings.inspectionFullscreen}
+    onChange={(e) =>
+      updateSettings({ inspectionFullscreen: e.target.checked })
+    }
+    disabled={!settings.inspectionEnabled}
+  />
+</div>
+
+<div className="setting-item">
+  <label>Inspection Style</label>
+  <select
+    value={settings.inspectionCountDirection || "down"}
+    onChange={(e) => updateSettings({ inspectionCountDirection: e.target.value })}
+  >
+    <option value="down">Countdown (15 → 0)</option>
+    <option value="up">Count up (0 → 15)</option>
+  </select>
+</div>
+
                     <h2>Key Bindings</h2>
                     <div className="settings-container">
                         {Object.entries(settings.eventKeyBindings).map(([event, combo]) => (
