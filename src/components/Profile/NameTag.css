@@ -1,3 +1,5 @@
+/* src/components/NameTag.css */
+
 .name-tag {
   display: flex;
   align-items: center;
@@ -10,16 +12,59 @@
   text-decoration: none;
   color: inherit;
   border-radius: 8px;
+  border: 2px solid #fff;
   padding: 4px 8px;
   height: 40px;
   width: auto;                  /* let width grow with text */
   max-width: none;              /* remove the 200px cap */
 }
 
+/* ✅ Default behavior (NxN should look exactly like before) */
 .nametagCube {
   flex: 0 0 auto;               /* fixed size, no stretching */
-  margin-right: 18px;            /* space between cube and text */
+  margin-right: 18px;           /* space between cube and text */
+  display: flex;
+  align-items: center;          /* keep baseline stable */
+  
 }
+
+/* -------------------------------------------------
+   Only non-NxN: create a viewport + scale down
+   ------------------------------------------------- */
+
+/* Make ONLY these events use a fixed viewport */
+.nametagCube--pyraminx,
+.nametagCube--megaminx,
+.nametagCube--skewb,
+.nametagCube--clock,
+.nametagCube--sq1 {
+  width: 34px;
+  height: 34px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+}
+
+/* Move ONLY NxN cubes down */
+.nametagCube:not(
+  .nametagCube--pyraminx,
+  .nametagCube--megaminx,
+  .nametagCube--skewb,
+  .nametagCube--clock,
+  .nametagCube--sq1
+) {
+  transform: translateY(3px);
+}
+
+
+/* Scale only the inner SVG/component */
+.nametagCube--pyraminx > * { transform: scale(0.30); transform-origin: center; }
+.nametagCube--megaminx > * { transform: scale(0.25) translate(6px, 0px); transform-origin: center; }
+.nametagCube--skewb > *    { transform: scale(0.40) translate(16px, 26px); transform-origin: center; }
+.nametagCube--clock > *    { transform: scale(0.30) translate(18px, 20px); transform-origin: center; }
+.nametagCube--sq1 > *      { transform: scale(0.40); transform-origin: center; }
 
 .nametagText {
   flex: 0 1 auto;               /* text can shrink if needed */

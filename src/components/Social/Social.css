@@ -21,7 +21,7 @@
   font-size: 16pt;
   background-color: transparent;
   border-radius: 8px;
-  border: 2px solid #B4B4B4;
+  border: 2px solid #696767;
   width: 100%;
   height: 34px;
 
@@ -44,7 +44,7 @@
   position: absolute;
   top: 48px;
   background: #1a1a1a;
-  border: 1px solid #ccc;
+  border: 1px solid #696767;
   width: 100%;
   z-index: 2;
   list-style: none;
@@ -177,6 +177,7 @@
   padding: 0;
 }
 
+
 .activityPanel {
   flex: 1;
   min-height: 0;
@@ -185,7 +186,17 @@
   gap: 12px;
   padding: 10px;
   overflow-y: auto;
+
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 48px);
+  mask-image: linear-gradient(to bottom, transparent 0px, black 48px);
 }
+
+.activityPanel::before {
+  content: "";
+  height: 48px;   /* match the fade height */
+  flex-shrink: 0;
+}
+
 
 .chatBubble {
   width: 90%;
@@ -209,19 +220,8 @@
 }
 
 .socialPage .tabPanel {
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    black 52px
-  );
 
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    black 52px
-  );
-
-  margin-top: 0;
+  margin-top: 0px;
 }
 
 
@@ -337,6 +337,23 @@
   gap: 6px;
   padding: 10px;
   align-items: stretch;
+
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0px,
+    black 48px
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0px,
+    black 48px
+  );
+}
+
+.messages::before {
+  content: "";
+  height: 48px;       /* must match fade height */
+  flex-shrink: 0;
 }
 
 .chatMessage {
@@ -370,7 +387,7 @@
   padding: 10px;
   font-size: 14pt;
   border-radius: 8px;
-  border: 2px solid #ccc;
+  border: 2px solid #696767;
   background-color: transparent;
   color: white;
 }
@@ -385,8 +402,85 @@
   cursor: pointer;
 }
 
+.messageInput button {
+  display: flex;              /*  key fix */
+  align-items: center;        /* vertical centering */
+  justify-content: center;
+
+  line-height: 1;             /* removes baseline drop */
+}
+
+
 .noConversation {
   color: #aaa;
   font-size: 14pt;
   padding: 20px;
+}
+
+
+/* --- FIX: keep search anchored to the top-right even when collapsed --- */
+.searchContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+
+  /* make it always claim the same space on the right */
+  justify-content: flex-end;
+  width: 25%;
+  left: 30px;
+  margin-right: 20px;
+  min-width: 260px;   /* prevents it collapsing too tiny */
+}
+
+/* icon stays at the far right */
+.searchIconButton {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  z-index: 3;
+}
+
+/* input expands LEFT from the icon */
+.searchContainer input {
+  order: -1;               /* puts input to the left of the icon */
+  width: 0;
+  opacity: 0;
+  padding: 0;
+  margin-right: 10px;      /* space between input and icon */
+  pointer-events: none;
+
+  font-size: 16pt;
+  background-color: transparent;
+  border-radius: 8px;
+  border: 2px solid #B4B4B4;
+  height: 34px;
+  color: white;
+
+  transition:
+    width 0.01s ease,
+    opacity 0.15s ease,
+    padding 0.15s ease,
+    margin-right 0.15s ease;
+}
+
+/* expanded when open */
+.searchContainer.open input {
+  width: 100%;
+  max-width: 320px;        /* adjust this to taste */
+  opacity: 1;
+  padding: 0 10px;
+  pointer-events: auto;
+  margin-right: 10px;
+}
+
+/* suggestions should align under the input (not under the icon) */
+.searchContainer .suggestionsList {
+  position: absolute;
+  top: 48px;
+  right: 0;                /* dropdown stays anchored to the right edge */
+  width: calc(100% - 40px);/* leaves room for icon, tweak if needed */
+  background: #1a1a1a;
+  border: 1px solid #ccc;
+  z-index: 2;
 }

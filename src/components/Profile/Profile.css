@@ -98,8 +98,16 @@
     width: 94%;
 }
 
+.post {
+    display: flex;
+    justify-content: space-between;
+    border-radius: 12px;
+    width: 94%;
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
 .post:hover {
-    background-color: rgb(200, 200, 200,.2);
+    background-color: rgba(200, 200, 200, 0.05);
     cursor: pointer;
 }
 
@@ -116,7 +124,7 @@
 
 .postDate {
     color: #c2c2c2;
-    opacity: 85%;
+    opacity: 65%;
     margin-left: auto;
     padding: 8px;
 }
@@ -125,6 +133,7 @@
     display: flex;
     justify-content: right;
     align-items: center;
+    margin: 5px;
 }
 
 .profilePicturePost {
@@ -314,3 +323,53 @@
     color: white;
   }
   
+
+  /* --- Post title puzzle positioning --- */
+
+/* Base for BOTH types */
+.postTitleCube {
+  width: 75%;
+  height: 75%;
+  scale: 50%;
+  margin-top: 28px;
+  margin-left: 20px;
+
+  position: relative; /* anchor for inner translate */
+  overflow: visible;
+}
+
+.postTitleCube--nxn {
+  margin-right: 100px;
+}
+
+.postTitleCube--other {
+  margin-right: 0px;
+}
+
+
+/*  NxN: leave EXACTLY as-is (no extra transforms) */
+.postTitleCube--nxn {
+  /* no-op on purpose */
+}
+
+/*  Non-NxN: use a transform map without touching NxN */
+.postTitleCube--other {
+  --as: 1;
+  --ax: 0px;
+  --ay: 0px;
+}
+
+.postTitleCube--other > * {
+  transform:
+    translate(var(--ax), var(--ay))
+    scale(var(--as));
+  transform-origin: center;
+}
+
+/* --- Non-NxN tuning map (nudge up/left) --- */
+.postTitleCube--pyraminx { --as: 1.3; --ax: -60px; --ay: -50px; }
+.postTitleCube--megaminx { --as: 1.1; --ax: -60px;  --ay: -50px; }
+.postTitleCube--skewb    { --as: 1.8; --ax: -40px; --ay: 5px; }
+.postTitleCube--clock    { --as: 1.25; --ax: -80px; --ay: -40px; }
+.postTitleCube--sq1      { --as: 1.6; --ax: -70px; --ay: -55px; }
+

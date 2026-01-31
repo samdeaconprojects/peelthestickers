@@ -30,9 +30,9 @@ export const SettingsProvider = ({ children }) => {
 
     //  Inspection settings
     inspectionEnabled: false,
-    inspectionCountDirection: "down", // "down" or "up"
+    inspectionCountDirection: "up", 
     inspectionBeeps: true, 
-    inspectionFullscreen: false,
+    inspectionFullscreen: true,
 
   });
 

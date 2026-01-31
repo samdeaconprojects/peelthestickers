@@ -4,10 +4,10 @@ import { Link } from "react-router-dom";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import "./NameTag.css";
 
-function NameTag({ isSignedIn, user, handleSignIn }) {
-  if (!isSignedIn) {
+function NameTag({ isSignedIn, handleSignIn, user, name, picture, to, size = "sm" }) {
+  if (isSignedIn === false) {
     return (
-      <div className="name-tag">
+      <div className={`name-tag name-tag--${size}`}>
         <button className="auth-button" onClick={handleSignIn}>
           Sign in
         </button>
@@ -15,29 +15,31 @@ function NameTag({ isSignedIn, user, handleSignIn }) {
     );
   }
 
-  // fallback color if user has none set
-  const profileColor = user?.Color || "#FFFFFF";
+  const u = user || {};
+  const derivedId =
+    u?.UserID || u?.userID || (typeof u?.PK === "string" ? u.PK.split("#")[1] : null);
+
+  const displayName = u?.Name || name || derivedId || "user";
+  const profileColor = u?.Color || u?.color || "#FFFFFF";
+  const linkTo = to || (derivedId ? `/profile/${derivedId}` : "/profile");
+
+  const ev = (u?.ProfileEvent || u?.profileEvent || "333");
+  const evClass = String(ev).toLowerCase();
 
   return (
-    <div className="name-tag">
-      
-      <Link
-        to="/profile"
-        className="name-tag-link"
-        style={{ border: `2px solid ${profileColor}` }}
-      >
-        <div className="nametagCube">
-        <PuzzleSVG
-          event={user?.ProfileEvent || "333"}
-          scramble={user?.ProfileScramble || ""}
-          isTimerCube={false}
-          isNameTagCube={true}
-        />
+    <div className={`name-tag name-tag--${size}`}>
+      <Link to={linkTo} className="name-tag-link" style={{ borderColor: profileColor }}>
+        <div className={`nametagCube nametagCube--${evClass}`}>
+          <PuzzleSVG
+            event={ev}
+            scramble={u?.ProfileScramble || u?.profileScramble || ""}
+            isTimerCube={false}
+            isNameTagCube={true}
+          />
         </div>
 
         <div className="nametagText">
-
-        <span className="name-tag-text">@{user?.Name || user?.UserID}</span>
+          <span className="name-tag-text">@{displayName}</span>
         </div>
       </Link>
     </div>

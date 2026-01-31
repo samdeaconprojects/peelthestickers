@@ -129,6 +129,15 @@ export const addSolve = async (userID, a1, a2, a3, a4, a5, a6, a7) => {
     DateTime: ts,
   };
 
+   // Relay support: store legs/scrambles/times as top-level attributes (sparse)
+  if (tags?.IsRelay) {
+    if (Array.isArray(tags.RelayLegs)) solveItem.RelayLegs = tags.RelayLegs;
+    if (Array.isArray(tags.RelayScrambles)) solveItem.RelayScrambles = tags.RelayScrambles;
+    if (Array.isArray(tags.RelayLegTimes)) solveItem.RelayLegTimes = tags.RelayLegTimes;
+    solveItem.SessionType = "RELAY"; // optional convenience
+  }
+
+
   await dynamoDB.put({ TableName: "PTS", Item: solveItem }).promise();
 
   // 2) Update SessionStats incrementally (optimistic concurrency)

@@ -33,7 +33,6 @@ function Timer({ addTime }) {
 
   const keypadButtons = ['7','8','9','4','5','6','1','2','3','0','.','⌫',':','Enter'];
 
-  // ✅ ALWAYS use latest beeps setting (prevents interval closure bug)
   const inspectionBeepsRef = useRef(!!settings.inspectionBeeps);
   useEffect(() => {
     inspectionBeepsRef.current = !!settings.inspectionBeeps;

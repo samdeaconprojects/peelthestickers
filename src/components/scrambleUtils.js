@@ -5,69 +5,99 @@ export function getRandomInt(min, max) {
 }
 
 export function currentEventToN(currentEvent) {
-    let n;
+  const e = String(currentEvent || '').toUpperCase();
 
-    switch (currentEvent) {
-        case '222':
-          n = 2;
-          break;
-        case '333':
-        case '333OH':
-        case '333BLD':
-          n = 3;
-          break;
-        case '444':
-          n = 4;
-          break;
-        case '555':
-          n = 5;
-          break;
-        case '666':
-          n = 6;
-          break;
-        case '777':
-          n = 7;
-          break;
-        default:
-          n = 3; // Default to 3x3 if currentEvent is not recognized
-      }
+  let n;
+  switch (e) {
+    case '222':
+      n = 2;
+      break;
+    case '333':
+    case '333OH':
+    case '333BLD':
+      n = 3;
+      break;
+    case '444':
+      n = 4;
+      break;
+    case '555':
+      n = 5;
+      break;
+    case '666':
+      n = 6;
+      break;
+    case '777':
+      n = 7;
+      break;
 
-      return n;
+    // ✅ non-NxN (not used for NxN scrambles, but avoids weird fallbacks)
+    case 'CLOCK':
+    case 'MEGAMINX':
+    case 'PYRAMINX':
+    case 'SKEWB':
+    case 'SQ1':
+      n = 3; // placeholder; NxN scramble logic won’t be used for these anyway
+      break;
+
+    default:
+      n = 3;
+  }
+
+  return n;
 }
 
 export function currentEventToString(currentEvent) {
+  const e = String(currentEvent || '').toUpperCase();
+
   let n;
+  switch (e) {
+    case '222':
+      n = "2x2";
+      break;
+    case '333':
+      n = "3x3";
+      break;
+    case '333OH':
+      n = "3x3 One-Handed";
+      break;
+    case '333BLD':
+      n = "3x3 Blindfolded";
+      break;
+    case '444':
+      n = "4x4";
+      break;
+    case '555':
+      n = "5x5";
+      break;
+    case '666':
+      n = "6x6";
+      break;
+    case '777':
+      n = "7x7";
+      break;
 
-  switch (currentEvent) {
-      case '222':
-        n = "2x2";
-        break;
-      case '333':
-        n = "3x3";
-        break;
-      case '333OH':
-        n = "3x3 One-Handed";
-        break;
-      case '333BLD':
-        n = "3x3 Blindfolded";
-        break;
-      case '444':
-        n = "4x4";
-        break;
-      case '555':
-        n = "5x5";
-        break;
-      case '666':
-        n = "6x6";
-        break;
-      case '777':
-        n = "7x7";
-        break;
-      default:
-        n = "3x3"; // Default to 3x3 if currentEvent is not recognized
-    }
+    // add non-NxN labels
+    case 'CLOCK':
+      n = "Clock";
+      break;
+    case 'MEGAMINX':
+      n = "Megaminx";
+      break;
+    case 'PYRAMINX':
+      n = "Pyraminx";
+      break;
+    case 'SKEWB':
+      n = "Skewb";
+      break;
+    case 'SQ1':
+      n = "Square-1";
+      break;
 
-    return n;
+    default:
+      n = "3x3";
+  }
+
+  return n;
 }
 
 

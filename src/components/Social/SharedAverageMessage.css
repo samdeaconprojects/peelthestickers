@@ -6,7 +6,7 @@
 
 .sharedAverageMessage {
   background: #222;
-  border-radius: 8px;
+  border-radius: 16px;
   padding: 8px;
   margin: 6px 0;
   color: white;
@@ -18,7 +18,7 @@
   border: 2px solid transparent;
 
   /* width of the “blend band” (increase for smoother/longer fade) */
-  --blend: 10px;
+  --blend: 30px;
 
   
 
@@ -32,10 +32,10 @@
     /* border gradient */
     linear-gradient(
       90deg,
-      var(--youColor) 0,
-      var(--youColor) calc(var(--split) - var(--blend)),
-      var(--theirColor) calc(var(--split) + var(--blend)),
-      var(--theirColor) 100%
+      var(--theirColor) 0,
+      var(--theirColor) calc(var(--split) - var(--blend)),
+      var(--youColor) calc(var(--split) + var(--blend)),
+      var(--youColor) 100%
     ) border-box;
 }
 

@@ -18,6 +18,7 @@ import SharedAverageMessage from './SharedAverageMessage';
 
 import DotIcon from '../../assets/Dot.svg';
 import FlipIcon from '../../assets/Flip.svg';
+import SearchIcon from '../../assets/Search.svg';
 
 import SocialHomeIcon from '../../assets/SocialHome.svg';
 import SocialMessagesIcon from '../../assets/SocialMessages.svg';
@@ -32,6 +33,9 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [messageInput, setMessageInput] = useState('');
   const [showSharedModal, setShowSharedModal] = useState(false);
+
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef(null);
 
   const navigate = useNavigate();
 
@@ -76,31 +80,56 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
         const ownAnnotated = own.map(p => ({
           ...p,
           author: user.Name,
+          authorID: user.UserID,
           isOwn: true,
-          postColor: user.Color || user.color || '#2EC4B6'
+          postColor: user.Color || user.color || '#2EC4B6',
+          profileEvent: user.ProfileEvent || '333',
+ profileScramble: user.ProfileScramble || ''
         }));
 
         const friendIds = user.Friends || [];
-        const profiles = await Promise.all(friendIds.map(id => getUser(id)));
 
-        const nameById = {}, colorById = {};
-        profiles.forEach(prof => {
-          const fid = prof.PK?.split('#')[1] || prof.userID;
-          nameById[fid] = prof.Name || prof.name;
-          colorById[fid] = prof.Color || prof.color || '#cccccc';
-        });
+const profilesById = Object.fromEntries(
+  await Promise.all(
+    friendIds.map(async (id) => {
+      try {
+        const prof = await getUser(id);
+        return [id, prof];
+      } catch (e) {
+        console.warn("getUser failed for", id, e);
+        return [id, null];
+      }
+    })
+  )
+);
+
+const nameById = {};
+const colorById = {};
+friendIds.forEach((id) => {
+  const prof = profilesById[id];
+  nameById[id] = prof?.Name || prof?.name || id;
+  colorById[id] = prof?.Color || prof?.color || "#cccccc";
+});
+
+
 
         const friendsArrays = await Promise.all(
-          friendIds.map(async id => {
-            const posts = await getPosts(id);
-            return posts.map(p => ({
-              ...p,
-              author: nameById[id] || id,
-              isOwn: false,
-              postColor: colorById[id] || '#cccccc'
-            }));
-          })
-        );
+  friendIds.map(async (id) => {
+    const posts = await getPosts(id);
+    const prof = profilesById[id];
+
+    return posts.map((p) => ({
+      ...p,
+      author: nameById[id] || id,
+      authorID: id,
+      isOwn: false,
+      postColor: colorById[id] || "#cccccc",
+      profileEvent: prof?.ProfileEvent || prof?.profileEvent || "333",
+      profileScramble: prof?.ProfileScramble || prof?.profileScramble || "",
+    }));
+  })
+);
+
 
         const merged = [...ownAnnotated, ...friendsArrays.flat()];
         merged.sort((a, b) => new Date(a.DateTime || a.date) - new Date(b.DateTime || b.date));
@@ -109,15 +138,17 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
         const convos = await Promise.all(friendIds.map(async fid => {
           const id = [user.UserID, fid].sort().join('#');
           const messages = await getMessages(id);
-          const prof = profiles.find(p => p.PK?.endsWith(`#${fid}`));
-          return {
-            id: fid,
-            name: nameById[fid] || fid,
-            color: colorById[fid] || '#cccccc',
-            profileEvent: prof?.ProfileEvent || '333',
-            profileScramble: prof?.ProfileScramble || '',
-            messages
-          };
+          const prof = profilesById[fid];
+
+return {
+  id: fid,
+  name: nameById[fid] || fid,
+  color: colorById[fid] || "#cccccc",
+  profileEvent: prof?.ProfileEvent || prof?.profileEvent || "333",
+  profileScramble: prof?.ProfileScramble || prof?.profileScramble || "",
+  messages,
+};
+
         }));
         setConversations(convos);
       } catch (err) {
@@ -210,6 +241,7 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
   const handleSearchSelect = (id) => {
     setSearchTerm('');
     setSuggestions([]);
+    setSearchOpen(false);
     navigate(`/profile/${id}`);
   };
 
@@ -360,20 +392,49 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
         )}
 
         {/* RIGHT: search */}
-        <div className="searchContainer">
+        <div
+          className={`searchContainer ${searchOpen ? 'open' : ''}`}
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget)) {
+              setSearchOpen(false);
+            }
+          }}
+        >
           <input
+            ref={searchInputRef}
             type="text"
             placeholder="Search user..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && suggestions.length && handleSearchSelect(suggestions[0].id)}
           />
-          {suggestions.length > 0 && (
+
+          <button
+            className="searchIconButton"
+            onClick={() => {
+              setSearchOpen(true);
+              setTimeout(() => searchInputRef.current?.focus(), 0);
+            }}
+            aria-label="Search users"
+            title="Search"
+            type="button"
+          >
+            <img className="tabIcon" src={SearchIcon} alt="" />
+          </button>
+
+          {searchOpen && suggestions.length > 0 && (
             <ul className="suggestionsList">
               {suggestions.map(s => (
-                <li key={s.id} onClick={() => handleSearchSelect(s.id)}>
-                  {s.name} ({s.id})
-                </li>
+                <li
+  key={s.id}
+  onMouseDown={(e) => {
+    e.preventDefault(); // prevents the blur/unmount before selection
+    handleSearchSelect(s.id);
+  }}
+>
+  {s.name} ({s.id})
+</li>
+
               ))}
             </ul>
           )}
@@ -390,6 +451,13 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
               >
                 <Post
                   name={post.author}
+                  user={{
+   UserID: post.authorID,
+   Name: post.author,
+  Color: post.postColor,
+  ProfileEvent: post.profileEvent,
+   ProfileScramble: post.profileScramble,
+ }}
                   date={new Date(post.DateTime || post.date).toLocaleString()}
                   solveList={
                     post.SolveList && post.SolveList.length
@@ -464,11 +532,18 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
 
                   <div className="messageInput">
                     <input
-                      type="text"
-                      value={messageInput}
-                      onChange={(e) => setMessageInput(e.target.value)}
-                      placeholder="Type a message..."
-                    />
+  type="text"
+  value={messageInput}
+  onChange={(e) => setMessageInput(e.target.value)}
+  placeholder="Type a message..."
+  onKeyDown={(e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  }}
+/>
+
                     <button onClick={() => setShowSharedModal(true)}>Shared Average</button>
                     <button onClick={handleSendMessage}>Send</button>
                   </div>
