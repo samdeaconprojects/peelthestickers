@@ -1,3 +1,4 @@
+// src/App.js
 import React, { useState, useEffect } from "react";
 import "./App.css";
 import Timer from "./components/Timer/Timer";
@@ -20,10 +21,7 @@ import { generateScramble } from "./components/scrambleUtils";
 import { Routes, Route, useLocation } from "react-router-dom";
 import { getUser } from "./services/getUser";
 import { getSessions } from "./services/getSessions";
-import {
-  getSolvesBySession,
-  getLastNSolvesBySession, 
-} from "./services/getSolvesBySession";
+import { getLastNSolvesBySession } from "./services/getSolvesBySession";
 import { getCustomEvents } from "./services/getCustomEvents";
 import { addSolve as addSolveToDB } from "./services/addSolve";
 import { deleteSolve } from "./services/deleteSolve";
@@ -43,9 +41,6 @@ import {
   calculateAverage,
 } from "./components/TimeList/TimeUtils";
 
-
-
-
 function App() {
   const [sessionsList, setSessionsList] = useState([]); // all sessions for user
   const [customEvents, setCustomEvents] = useState([]); // all custom events for user
@@ -63,6 +58,7 @@ function App() {
     "777": [],
     "333OH": [],
     "333BLD": [],
+    "RELAY": [],
   });
   const [showPlayerBar, setShowPlayerBar] = useState(true);
   const [showDetail, setShowDetail] = useState(false);
@@ -75,9 +71,20 @@ function App() {
   const [sharedSession, setSharedSession] = useState(null);
   const [sharedIndex, setSharedIndex] = useState(0);
 
+  // Relay session support
+  const [activeSessionObj, setActiveSessionObj] = useState(null);
+  const [relayLegIndex, setRelayLegIndex] = useState(0);
+  const [relayLegTimes, setRelayLegTimes] = useState([]);
+  const [relayScrambles, setRelayScrambles] = useState([]);
+  const [relayLegs, setRelayLegs] = useState([]);
+
   const location = useLocation();
   const isHomePage = location.pathname === "/";
   const { settings } = useSettings();
+
+  // Normalize only for relay so we always read/write solves under sessions["RELAY"]
+  const eventKey =
+    String(currentEvent || "").toUpperCase() === "RELAY" ? "RELAY" : currentEvent;
 
   useEffect(() => {
     if (!scrambles[currentEvent]) {
@@ -106,15 +113,15 @@ function App() {
   }, [settings.eventKeyBindings]);
 
   // Refetch solves whenever event or session changes
-    useEffect(() => {
+  useEffect(() => {
     if (!isSignedIn || !user?.UserID) return;
 
     const loadSolvesForCurrent = async () => {
       try {
-        const normalizedEvent = currentEvent.toUpperCase();
+        const normalizedEvent = eventKey.toUpperCase();
         const sessionId = currentSession || "main";
 
-        // 🔹 Only fetch the latest 200 solves by default (tune N as you like)
+        // Only fetch the latest 200 solves by default (tune N as you like)
         const solves = await getLastNSolvesBySession(
           user.UserID,
           normalizedEvent,
@@ -125,34 +132,45 @@ function App() {
 
         setSessions((prev) => ({
           ...prev,
-          [currentEvent]: normalizedSolves,
+          [eventKey]: normalizedSolves,
         }));
       } catch (err) {
-        console.error(
-          "Error loading solves for current event/session:",
-          err
-        );
+        console.error("Error loading solves for current event/session:", err);
       }
     };
 
     loadSolvesForCurrent();
-  }, [isSignedIn, user?.UserID, currentEvent, currentSession]);
+  }, [isSignedIn, user?.UserID, eventKey, currentSession]);
 
   useEffect(() => {
-  if (!sharedSession) return;
+    if (!sharedSession) return;
 
-  const { event, sessionID } = sharedSession;
+    const { event, sessionID } = sharedSession;
 
-  setCurrentEvent(event);
-  setCurrentSession(sessionID);
-  setSharedIndex(0);
+    setCurrentEvent(event);
+    setCurrentSession(sessionID);
+    setSharedIndex(0);
 
-  console.log("📌 Loaded Shared Session:", sessionID);
-}, [sharedSession]);
+    console.log("Loaded Shared Session:", sessionID);
+  }, [sharedSession]);
 
+  // When a relay session is selected, prep relay legs + scrambles
+  useEffect(() => {
+    const isRelay =
+      String(currentEvent || "").toUpperCase() === "RELAY" &&
+      activeSessionObj?.SessionType === "RELAY";
 
+    if (!isRelay) return;
 
+    const legs = Array.isArray(activeSessionObj?.RelayLegs)
+      ? activeSessionObj.RelayLegs
+      : [];
 
+    setRelayLegs(legs);
+    setRelayLegIndex(0);
+    setRelayLegTimes([]);
+    setRelayScrambles(legs.map((ev) => generateScramble(ev)));
+  }, [currentEvent, currentSession, activeSessionObj]);
 
   const preloadScrambles = (event) => {
     const newScrambles = Array.from({ length: 10 }, () => generateScramble(event));
@@ -198,46 +216,92 @@ function App() {
     });
   };
 
-  // 🔹 Next Scramble (works for normal + shared)
-const goForwardScramble = () => {
-  if (sharedSession) {
-    setSharedIndex(i =>
-      Math.min(i + 1, sharedSession.scrambles.length - 1)
-    );
-  } else {
-    skipToNextScramble();
-  }
-};
+  // New relay set: regenerate scrambles + clear leg progress
+  const resetRelaySet = () => {
+    const legs = Array.isArray(relayLegs) ? relayLegs : [];
+    if (!legs.length) return;
 
-// 🔹 Previous Scramble (works for normal + shared)
-const goBackwardScramble = () => {
-  if (sharedSession) {
-    setSharedIndex(i => Math.max(i - 1, 0));
-  } else {
-    // normal scrambles: prepend a fresh scramble and stay stable
-    setScrambles(prev => {
-      const arr = prev[currentEvent] || [];
-      return {
-        ...prev,
-        [currentEvent]: [
-          generateScramble(currentEvent),
-          ...arr
-        ]
-      };
-    });
-  }
-};
+    setRelayLegIndex(0);
+    setRelayLegTimes([]);
+    setRelayScrambles(legs.map((ev) => generateScramble(ev)));
+  };
 
+  // Next Scramble (works for normal + shared + relay)
+  const goForwardScramble = () => {
+    const isRelay =
+      String(currentEvent || "").toUpperCase() === "RELAY" &&
+      activeSessionObj?.SessionType === "RELAY";
 
-  const normalizeSolve = (item) => ({
-    time: item.Time,
-    scramble: item.Scramble,
-    event: item.Event,
-    penalty: item.Penalty,
-    note: item.Note || "",
-    datetime: item.DateTime,
-    tags: item.Tags || {},
-  });
+    if (isRelay) {
+      resetRelaySet();
+      return;
+    }
+
+    if (sharedSession) {
+      setSharedIndex((i) => Math.min(i + 1, sharedSession.scrambles.length - 1));
+    } else {
+      skipToNextScramble();
+    }
+  };
+
+  // Previous Scramble (works for normal + shared + relay)
+  const goBackwardScramble = () => {
+    const isRelay =
+      String(currentEvent || "").toUpperCase() === "RELAY" &&
+      activeSessionObj?.SessionType === "RELAY";
+
+    if (isRelay) {
+      resetRelaySet();
+      return;
+    }
+
+    if (sharedSession) {
+      setSharedIndex((i) => Math.max(i - 1, 0));
+    } else {
+      // normal scrambles: prepend a fresh scramble and stay stable
+      setScrambles((prev) => {
+        const arr = prev[currentEvent] || [];
+        return {
+          ...prev,
+          [currentEvent]: [generateScramble(currentEvent), ...arr],
+        };
+      });
+    }
+  };
+
+  const normalizeSolve = (item) => {
+    const baseTags = item.Tags || {};
+
+    const relayLegsLocal = item.RelayLegs || baseTags.RelayLegs || null;
+    const relayScramblesLocal = item.RelayScrambles || baseTags.RelayScrambles || null;
+    const relayLegTimesLocal = item.RelayLegTimes || baseTags.RelayLegTimes || null;
+
+    const mergedTags =
+      relayLegsLocal || relayScramblesLocal || relayLegTimesLocal
+        ? {
+            ...baseTags,
+            IsRelay: baseTags.IsRelay ?? true,
+            RelayLegs: relayLegsLocal ?? baseTags.RelayLegs,
+            RelayScrambles: relayScramblesLocal ?? baseTags.RelayScrambles,
+            RelayLegTimes: relayLegTimesLocal ?? baseTags.RelayLegTimes,
+          }
+        : baseTags;
+
+    return {
+      time: item.Time,
+      scramble: item.Scramble,
+      event: item.Event,
+      penalty: item.Penalty,
+      note: item.Note || "",
+      datetime: item.DateTime,
+      tags: mergedTags,
+
+      // relay extras (for later UI/detail)
+      relayLegs: relayLegsLocal,
+      relayScrambles: relayScramblesLocal,
+      relayLegTimes: relayLegTimesLocal,
+    };
+  };
 
   const mergeSharedSession = (session) => {
     // merge into whatever session the user has selected
@@ -246,235 +310,344 @@ const goBackwardScramble = () => {
   };
 
   const handleSignUp = async (username, password) => {
-  try {
-    await createUser({
-      userID: username,
-      name: username,
-      username: username,
-      color: "#0E171D",
-      profileEvent: "333",
-      profileScramble: generateScramble("333"),
-      chosenStats: [],
-      headerStats: [],
-      wcaid: null,
-      cubeCollection: [],
-      settings: {
-        primaryColor: "#0E171D",
-        secondaryColor: "#ffffff",
-        timerInput: "Keyboard",
-      },
-      Friends: [],
-    });
+    try {
+      await createUser({
+        userID: username,
+        name: username,
+        username: username,
+        color: "#0E171D",
+        profileEvent: "333",
+        profileScramble: generateScramble("333"),
+        chosenStats: [],
+        headerStats: [],
+        wcaid: null,
+        cubeCollection: [],
+        settings: {
+          primaryColor: "#0E171D",
+          secondaryColor: "#ffffff",
+          timerInput: "Keyboard",
+        },
+        Friends: [],
+      });
 
-    const createSessionPromises = DEFAULT_EVENTS.map((event) =>
-      createSession(username, event, "main", "Main Session")
-    );
-    await Promise.all(createSessionPromises);
+      const createSessionPromises = DEFAULT_EVENTS.map((event) =>
+        createSession(username, event, "main", "Main Session")
+      );
+      await Promise.all(createSessionPromises);
 
-    alert("User created successfully!");
+      alert("User created successfully!");
 
-    const profile = await getUser(username);
-    setUser(profile);
-    setIsSignedIn(true);
-    setShowSignInPopup(false);
-  } catch (error) {
-    console.error("Error signing up:", error);
-    alert("An error occurred during sign-up.");
-  }
-};
-
+      const profile = await getUser(username);
+      setUser(profile);
+      setIsSignedIn(true);
+      setShowSignInPopup(false);
+    } catch (error) {
+      console.error("Error signing up:", error);
+      alert("An error occurred during sign-up.");
+    }
+  };
 
   const handleSignIn = async (username, password) => {
-  try {
-    const profile = await getUser(username);
-    if (!profile) return alert("Invalid credentials!");
+    try {
+      const profile = await getUser(username);
+      if (!profile) return alert("Invalid credentials!");
 
-    const userID = profile.PK?.split("#")[1] || username;
+      const userID = profile.PK?.split("#")[1] || username;
 
-    const posts = await getPosts(userID);
-    const userWithData = {
-      ...profile,
-      UserID: userID,
-      Posts: posts,
-      Friends: profile.Friends || [],
-    };
+      const posts = await getPosts(userID);
+      const userWithData = {
+        ...profile,
+        UserID: userID,
+        Posts: posts,
+        Friends: profile.Friends || [],
+      };
 
-    setUser(userWithData);
-    setIsSignedIn(true);
-    setShowSignInPopup(false);
+      setUser(userWithData);
+      setIsSignedIn(true);
+      setShowSignInPopup(false);
 
-    let sessionItems = await getSessions(userID);
-    const eventItems = await getCustomEvents(userID);
+      let sessionItems = await getSessions(userID);
+      const eventItems = await getCustomEvents(userID);
 
-    setSessionsList(sessionItems);
-    setCustomEvents(eventItems);
+      setSessionsList(sessionItems);
+      setCustomEvents(eventItems);
 
-    const missingEvents = DEFAULT_EVENTS.filter(
-      (event) =>
-        !sessionItems.find(
-          (s) => s.Event === event && s.SessionID === "main"
-        )
-    );
-
-    if (missingEvents.length > 0) {
-      const createMissing = missingEvents.map((event) =>
-        createSession(userID, event, "main", "Main Session")
+      const missingEvents = DEFAULT_EVENTS.filter(
+        (event) =>
+          !sessionItems.find((s) => s.Event === event && s.SessionID === "main")
       );
-      await Promise.all(createMissing);
-      sessionItems = await getSessions(userID);
-      setSessionsList(sessionItems); // refresh
+
+      if (missingEvents.length > 0) {
+        const createMissing = missingEvents.map((event) =>
+          createSession(userID, event, "main", "Main Session")
+        );
+        await Promise.all(createMissing);
+        sessionItems = await getSessions(userID);
+        setSessionsList(sessionItems); // refresh
+      }
+
+      const statsByEvent = {};
+      for (const event of DEFAULT_EVENTS) {
+        statsByEvent[event] = {};
+      }
+
+      for (const session of sessionItems) {
+        const ev = (session.Event || "").toUpperCase();
+        const sid = session.SessionID || "main";
+
+        if (!statsByEvent[ev]) statsByEvent[ev] = {};
+        statsByEvent[ev][sid] = session.Stats || null;
+      }
+
+      setSessionStats(statsByEvent);
+      //  Do not setSessions(...) here – solves will load on demand
+    } catch (error) {
+      console.error("Sign-in error:", error);
     }
-
-    const statsByEvent = {};
-    for (const event of DEFAULT_EVENTS) {
-      statsByEvent[event] = {};
-    }
-
-    for (const session of sessionItems) {
-      const ev = (session.Event || "").toUpperCase();
-      const sid = session.SessionID || "main";
-
-      if (!statsByEvent[ev]) statsByEvent[ev] = {};
-      statsByEvent[ev][sid] = session.Stats || null;
-    }
-
-    setSessionStats(statsByEvent);
-    //  Do not setSessions(...) here – solves will load on demand
-
-  } catch (error) {
-    console.error("Sign-in error:", error);
-  }
-};
-
+  };
 
   const addSolve = async (newTime) => {
-  let scramble;
+    // Relay mode
+    const isRelay =
+      String(currentEvent || "").toUpperCase() === "RELAY" &&
+      activeSessionObj?.SessionType === "RELAY" &&
+      Array.isArray(relayLegs) &&
+      relayLegs.length > 0;
 
-  // -----------------------
-  // SHARED SESSION MODE
-  // -----------------------
-  let activeSharedID = null;
-  let solveIndexForBroadcast = null;
+    if (isRelay) {
+      // Relay mode
+const isRelay =
+  String(currentEvent || "").toUpperCase() === "RELAY" &&
+  activeSessionObj?.SessionType === "RELAY" &&
+  Array.isArray(relayLegs) &&
+  relayLegs.length > 0;
 
-  if (sharedSession) {
-    scramble = sharedSession.scrambles[sharedIndex];
-
-    // save index BEFORE advancing
-    solveIndexForBroadcast = sharedIndex;
-    activeSharedID = sharedSession.sharedID;
-
-    const nextIndex = sharedIndex + 1;
-    setSharedIndex(nextIndex);
-
-    if (nextIndex >= sharedSession.scrambles.length) {
-      console.log("✅ Shared session completed");
-      setSharedSession(null);
-    }
-    setScrambles(prev => ({
-  ...prev,
-  [currentEvent]: [...prev[currentEvent]]
-}));
-
-  } else {
-    // -----------------------
-    // NORMAL MODE
-    // -----------------------
-    scramble = getNextScramble();
-  }
-
+if (isRelay) {
   const timestamp = new Date().toISOString();
 
-  console.log("🧩 Adding solve:", {
-    event: currentEvent,
-    sessionID: currentSession,
-    time: newTime,
-    scramble,
-  });
+  const relayTags = {
+    IsRelay: true,
+    RelayLegs: relayLegs,
+    RelayScrambles: relayScrambles,
+  };
+
+  // If user wants per-leg timing, keep current behavior
+  if ((settings?.relayMode || "total") === "legs") {
+    const legIdx = relayLegIndex;
+
+    const nextLegTimes = [...relayLegTimes, newTime];
+    setRelayLegTimes(nextLegTimes);
+
+    const isLastLeg = legIdx >= relayLegs.length - 1;
+
+    // still in-progress -> advance to next leg
+    if (!isLastLeg) {
+      setRelayLegIndex(legIdx + 1);
+      return;
+    }
+
+    // completed legs -> save ONE solve with total + leg breakdown
+    const totalMs = nextLegTimes.reduce((a, b) => a + b, 0);
+
+    const fullRelayTags = {
+      ...relayTags,
+      RelayLegTimes: nextLegTimes,
+    };
+
+    const newSolve = {
+      time: totalMs,
+      scramble: "Relay",
+      event: "RELAY",
+      penalty: null,
+      note: "",
+      datetime: timestamp,
+      tags: fullRelayTags,
+    };
+
+    // update local UI immediately (store under sessions["RELAY"])
+    setSessions((prev) => ({
+      ...prev,
+      RELAY: [...(prev.RELAY || []), newSolve],
+    }));
+
+    if (isSignedIn && user) {
+      try {
+        await addSolveToDB(
+          user.UserID,
+          currentSession,
+          "RELAY",
+          totalMs,
+          "Relay",
+          null,
+          "",
+          fullRelayTags
+        );
+      } catch (err) {
+        console.error("Error adding relay solve:", err);
+      }
+    }
+
+    resetRelaySet();
+    return;
+  }
+
+  // Default: total-time relay (normal start/stop saves immediately)
+  const totalMs = newTime;
 
   const newSolve = {
-    time: newTime,
-    scramble,
-    event: currentEvent,
+    time: totalMs,
+    scramble: "Relay",
+    event: "RELAY",
     penalty: null,
     note: "",
     datetime: timestamp,
-    tags: sharedSession
-      ? {
-          IsShared: true,
-          SharedID: sharedSession.sharedID,
-          SharedIndex: sharedIndex,
-        }
-      : {},
+    tags: relayTags,
   };
 
-  // update local UI immediately
-  const updatedSessions = {
-    ...sessions,
-    [currentEvent]: [...(sessions[currentEvent] || []), newSolve],
-  };
-  setSessions(updatedSessions);
+  setSessions((prev) => ({
+    ...prev,
+    RELAY: [...(prev.RELAY || []), newSolve],
+  }));
 
-  // -----------------------------
-  // SAVE TO DATABASE
-  // -----------------------------
   if (isSignedIn && user) {
     try {
       await addSolveToDB(
         user.UserID,
         currentSession,
-        currentEvent,
-        newTime,
-        scramble,
+        "RELAY",
+        totalMs,
+        "Relay",
         null,
         "",
-        newSolve.tags
+        relayTags
       );
-
-      // ======================================================
-      //  🔥 BROADCAST BACK TO CHAT (so scoreboard updates)
-      // ======================================================
-
-      // CASE 1 — persistent shared session ("shared_<id>")
-      if (activeSharedID) {
-  const messageText =
-    `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
-
-  const conversationID = activeSharedID
-    .replace("SHARED#", "")
-    .split("#")
-    .slice(0,2)
-    .sort()
-    .join("#");
-
-  await sendMessage(conversationID, user.UserID, messageText);
-}
-
-
-      // CASE 2 — temporary shared session flow
-      if (activeSharedID) {
-  const messageText =
-    `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
-
-  const conversationID = activeSharedID
-    .replace("SHARED#", "")
-    .split("#")
-    .slice(0,2)
-    .sort()
-    .join("#");
-
-  await sendMessage(conversationID, user.UserID, messageText);
-}
-
     } catch (err) {
-      console.error("❌ Error adding solve:", err);
+      console.error("Error adding relay solve:", err);
     }
   }
-};
 
+  resetRelaySet();
+  return;
+}
+
+    }
+
+    let scramble;
+
+    // -----------------------
+    // SHARED SESSION MODE
+    // -----------------------
+    let activeSharedID = null;
+    let solveIndexForBroadcast = null;
+
+    if (sharedSession) {
+      scramble = sharedSession.scrambles[sharedIndex];
+
+      // save index BEFORE advancing
+      solveIndexForBroadcast = sharedIndex;
+      activeSharedID = sharedSession.sharedID;
+
+      const nextIndex = sharedIndex + 1;
+      setSharedIndex(nextIndex);
+
+      if (nextIndex >= sharedSession.scrambles.length) {
+        console.log("Shared session completed");
+        setSharedSession(null);
+      }
+      setScrambles((prev) => ({
+        ...prev,
+        [currentEvent]: [...prev[currentEvent]],
+      }));
+    } else {
+      // -----------------------
+      // NORMAL MODE
+      // -----------------------
+      scramble = getNextScramble();
+    }
+
+    const timestamp = new Date().toISOString();
+
+    console.log("Adding solve:", {
+      event: currentEvent,
+      sessionID: currentSession,
+      time: newTime,
+      scramble,
+    });
+
+    const newSolve = {
+      time: newTime,
+      scramble,
+      event: currentEvent,
+      penalty: null,
+      note: "",
+      datetime: timestamp,
+      tags: sharedSession
+        ? {
+            IsShared: true,
+            SharedID: sharedSession.sharedID,
+            SharedIndex: sharedIndex,
+          }
+        : {},
+    };
+
+    // update local UI immediately
+    const updatedSessions = {
+      ...sessions,
+      [currentEvent]: [...(sessions[currentEvent] || []), newSolve],
+    };
+    setSessions(updatedSessions);
+
+    // -----------------------------
+    // SAVE TO DATABASE
+    // -----------------------------
+    if (isSignedIn && user) {
+      try {
+        await addSolveToDB(
+          user.UserID,
+          currentSession,
+          currentEvent,
+          newTime,
+          scramble,
+          null,
+          "",
+          newSolve.tags
+        );
+
+        // BROADCAST BACK TO CHAT (so scoreboard updates)
+        if (activeSharedID) {
+          const messageText = `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
+
+          const conversationID = activeSharedID
+            .replace("SHARED#", "")
+            .split("#")
+            .slice(0, 2)
+            .sort()
+            .join("#");
+
+          await sendMessage(conversationID, user.UserID, messageText);
+        }
+
+        if (activeSharedID) {
+          const messageText = `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
+
+          const conversationID = activeSharedID
+            .replace("SHARED#", "")
+            .split("#")
+            .slice(0, 2)
+            .sort()
+            .join("#");
+
+          await sendMessage(conversationID, user.UserID, messageText);
+        }
+      } catch (err) {
+        console.error("Error adding solve:", err);
+      }
+    }
+  };
 
   const applyPenalty = async (timestamp, penalty, updatedTime) => {
     const updatedSessions = { ...sessions };
-    const eventSolves = updatedSessions[currentEvent] || [];
+    const eventSolves = updatedSessions[eventKey] || [];
 
     const updatedSolves = eventSolves.map((solve) => {
       if (solve.datetime === timestamp) {
@@ -488,7 +661,7 @@ const goBackwardScramble = () => {
       return solve;
     });
 
-    updatedSessions[currentEvent] = updatedSolves;
+    updatedSessions[eventKey] = updatedSolves;
     setSessions(updatedSessions);
 
     if (isSignedIn && user?.UserID) {
@@ -500,16 +673,16 @@ const goBackwardScramble = () => {
             ?.originalTime,
         });
       } catch (err) {
-        console.error("❌ Failed to update DynamoDB penalty:", err);
+        console.error("Failed to update DynamoDB penalty:", err);
       }
     }
   };
 
-  const deleteTime = async (eventKey, index) => {
+  const deleteTime = async (eventKeyParam, index) => {
     const originalSessions = { ...sessions };
-    const solve = sessions[eventKey][index];
-    const updated = sessions[eventKey].filter((_, idx) => idx !== index);
-    setSessions({ ...sessions, [eventKey]: updated });
+    const solve = sessions[eventKeyParam][index];
+    const updated = sessions[eventKeyParam].filter((_, idx) => idx !== index);
+    setSessions({ ...sessions, [eventKeyParam]: updated });
 
     if (isSignedIn && user) {
       try {
@@ -559,12 +732,18 @@ const goBackwardScramble = () => {
   };
 
   const handleEventChange = (event) => {
-  setCurrentEvent(event.target.value);
-  setCurrentSession("main");
-  setSharedSession(null);     
-  setSharedIndex(0);
-};
+    setCurrentEvent(event.target.value);
+    setCurrentSession("main");
+    setSharedSession(null);
+    setSharedIndex(0);
 
+    // reset relay state when switching events
+    setActiveSessionObj(null);
+    setRelayLegIndex(0);
+    setRelayLegTimes([]);
+    setRelayScrambles([]);
+    setRelayLegs([]);
+  };
 
   const onScrambleClick = () => {
     const scrambleText = scrambles[currentEvent]?.[0] || "";
@@ -587,16 +766,15 @@ const goBackwardScramble = () => {
   const handleCloseSignInPopup = () => setShowSignInPopup(false);
 
   const openEventSelector = () => {
-  const el = document.querySelector(".event-selector-trigger");
-  if (el) {
-    try {
-      el.click();
-    } catch (_) {}
-  }
-};
+    const el = document.querySelector(".event-selector-trigger");
+    if (el) {
+      try {
+        el.click();
+      } catch (_) {}
+    }
+  };
 
-
-  const currentSolves = sessions[currentEvent] || [];
+  const currentSolves = sessions[eventKey] || [];
   const avgOfFive = calculateAverage(
     currentSolves.slice(-5).map((s) => s.time),
     true
@@ -622,6 +800,25 @@ const goBackwardScramble = () => {
           )
         )
       : "N/A";
+
+  // figure out what scramble + svg should show
+  const isRelayActive =
+    String(currentEvent || "").toUpperCase() === "RELAY" &&
+    activeSessionObj?.SessionType === "RELAY" &&
+    relayLegs.length > 0;
+
+  const relayCurrentEvent = isRelayActive ? relayLegs[relayLegIndex] : null;
+  const relayCurrentScramble = isRelayActive
+    ? relayScrambles[relayLegIndex] || ""
+    : "";
+
+  const displayedScramble = sharedSession
+    ? sharedSession.scrambles[sharedIndex] || ""
+    : isRelayActive
+    ? relayCurrentScramble
+    : scrambles[currentEvent]?.[0] || "";
+
+  const displayedSvgEvent = isRelayActive ? relayCurrentEvent : currentEvent;
 
   return (
     <div className={`App ${!isHomePage ? "music-player-mode" : ""}`}>
@@ -652,52 +849,93 @@ const goBackwardScramble = () => {
                       />
                     </div>
 
-                    <Scramble
-  scramble={
-    sharedSession
-      ? sharedSession.scrambles[sharedIndex] || ""
-      : scrambles[currentEvent]?.[0] || ""
-  }
-  currentEvent={currentEvent}
-  onScrambleClick={onScrambleClick}
-  onForwardScramble={goForwardScramble}
-  onBackwardScramble={goBackwardScramble}
-/>
+                    <div className="scrambleRelayContainer">
+                      <Scramble
+                        scramble={displayedScramble}
+                        currentEvent={displayedSvgEvent}
+                        onScrambleClick={onScrambleClick}
+                        onForwardScramble={goForwardScramble}
+                        onBackwardScramble={goBackwardScramble}
+                      />
 
-
+                      {/*  Relay leg buttons (under the scramble) */}
+                      {isRelayActive && (
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            gap: "8px",
+                            marginTop: "8px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          {relayLegs.map((ev, idx) => {
+                            const done = idx < relayLegTimes.length;
+                            const active = idx === relayLegIndex;
+                            return (
+                              <button
+                                key={`${ev}-${idx}`}
+                                type="button"
+                                onClick={() => setRelayLegIndex(idx)}
+                                style={{
+                                  background: active ? "#2EC4B6" : "#3D3D3D",
+                                  color: "white",
+                                  border: "none",
+                                  borderRadius: "6px",
+                                  padding: "6px 10px",
+                                  cursor: "pointer",
+                                  opacity: done ? 1 : 0.85,
+                                  fontWeight: done ? 700 : 500,
+                                }}
+                              >
+                                {ev}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
 
                     <div className="cube-and-event">
-  <div
-    className="puzzle-hud"
-    onClick={openEventSelector}
-    style={{ cursor: "pointer" }}
-  >
-    <PuzzleSVG
-      event={currentEvent}
-      scramble={scrambles[currentEvent]?.[0] || ""}
-      isMusicPlayer={!isHomePage}
-      isTimerCube={true}
-    />
-  </div>
+                      <div
+                        className="puzzle-hud"
+                        onClick={openEventSelector}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <PuzzleSVG
+                          event={displayedSvgEvent}
+                          scramble={displayedScramble}
+                          isMusicPlayer={!isHomePage}
+                          isTimerCube={true}
+                        />
+                      </div>
 
-  <div className="event-hud">
-    <EventSelector
-      currentEvent={currentEvent}
-      handleEventChange={handleEventChange}
-      currentSession={currentSession}
-      setCurrentSession={setCurrentSession}
-      sessions={sessionsList}
-      customEvents={customEvents}
-      userID={user?.UserID}
-      onSessionChange={() => {
-        setSharedSession(null);
-        setSharedIndex(0);
-      }}
-    />
-  </div>
-</div>
+                      <div className="event-hud">
+                        <EventSelector
+                          currentEvent={currentEvent}
+                          handleEventChange={handleEventChange}
+                          currentSession={currentSession}
+                          setCurrentSession={setCurrentSession}
+                          sessions={sessionsList}
+                          customEvents={customEvents}
+                          userID={user?.UserID}
+                          onSessionChange={() => {
+                            setSharedSession(null);
+                            setSharedIndex(0);
 
-
+                            // reset relay progress when changing sessions
+                            setRelayLegIndex(0);
+                            setRelayLegTimes([]);
+                            setRelayScrambles([]);
+                            setRelayLegs([]);
+                          }}
+                          onSelectSessionObj={(sessionObj) => {
+                            setActiveSessionObj(sessionObj);
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   <Timer addTime={addSolve} />
@@ -710,8 +948,8 @@ const goBackwardScramble = () => {
                   <TimeList
                     user={user}
                     applyPenalty={applyPenalty}
-                    solves={currentSolves} // ✅ updated
-                    deleteTime={(index) => deleteTime(currentEvent, index)}
+                    solves={currentSolves}
+                    deleteTime={(index) => deleteTime(eventKey, index)}
                     addPost={addPost}
                     rowsToShow={3}
                     onAverageClick={(solveArray) => {
@@ -729,17 +967,15 @@ const goBackwardScramble = () => {
                       }}
                       deleteTime={() =>
                         deleteTime(
-                          currentEvent,
-                          sessions[currentEvent].indexOf(
+                          eventKey,
+                          sessions[eventKey].indexOf(
                             selectedAverageSolves[selectedAverageIndex]
                           )
                         )
                       }
                       addPost={addPost}
                       showNavButtons={true}
-                      onPrev={() =>
-                        setSelectedAverageIndex((i) => Math.max(0, i - 1))
-                      }
+                      onPrev={() => setSelectedAverageIndex((i) => Math.max(0, i - 1))}
                       onNext={() =>
                         setSelectedAverageIndex((i) =>
                           Math.min(selectedAverageSolves.length - 1, i + 1)
@@ -784,17 +1020,16 @@ const goBackwardScramble = () => {
               element={
                 <Stats
                   sessions={sessions}
-                  sessionStats={sessionStats}      
+                  sessionStats={sessionStats}
                   setSessions={setSessions}
                   currentEvent={currentEvent}
-                  currentSession={currentSession}  
-                  user = {user}
-                  deleteTime={(eventKey, index) => deleteTime(eventKey, index)}
+                  currentSession={currentSession}
+                  user={user}
+                  deleteTime={(eventKeyParam, index) => deleteTime(eventKeyParam, index)}
                   addPost={addPost}
                 />
               }
             />
-
 
             <Route
               path="/social"
@@ -815,46 +1050,35 @@ const goBackwardScramble = () => {
 
       {!isHomePage && showPlayerBar && (
         <PlayerBar
-  sessions={sessions}
-  currentEvent={currentEvent}
-  currentSession={currentSession}           
-  setCurrentSession={setCurrentSession}   
-  sharedSession={sharedSession}
-  clearSharedSession={() => setSharedSession(null)}
-  sessionsList={sessionsList}
-  customEvents={customEvents}
-  handleEventChange={handleEventChange}
-  deleteTime={deleteTime}
-  addTime={addSolve}
-  scramble={
-    sharedSession
-      ? sharedSession.scrambles[sharedIndex] || ""
-      : scrambles[currentEvent]?.[0] || ""
-  }
-  onScrambleClick={onScrambleClick}
-  goForwardScramble={goForwardScramble}
-  goBackwardScramble={goBackwardScramble}
-  addPost={addPost}
-  user={user}
-  applyPenalty={applyPenalty}
-/>
-
+          sessions={sessions}
+          currentEvent={currentEvent}
+          currentSession={currentSession}
+          setCurrentSession={setCurrentSession}
+          sharedSession={sharedSession}
+          clearSharedSession={() => setSharedSession(null)}
+          sessionsList={sessionsList}
+          customEvents={customEvents}
+          handleEventChange={handleEventChange}
+          deleteTime={deleteTime}
+          addTime={addSolve}
+          scramble={displayedScramble}
+          onScrambleClick={onScrambleClick}
+          goForwardScramble={goForwardScramble}
+          goBackwardScramble={goBackwardScramble}
+          addPost={addPost}
+          user={user}
+          applyPenalty={applyPenalty}
+        />
       )}
 
       {!isHomePage && (
         <div className="toggle-bar">
           {showPlayerBar ? (
-            <button
-              className="toggle-button"
-              onClick={() => setShowPlayerBar(false)}
-            >
+            <button className="toggle-button" onClick={() => setShowPlayerBar(false)}>
               &#x25BC;
             </button>
           ) : (
-            <button
-              className="toggle-button"
-              onClick={() => setShowPlayerBar(true)}
-            >
+            <button className="toggle-button" onClick={() => setShowPlayerBar(true)}>
               &#x25B2;
             </button>
           )}
@@ -873,9 +1097,7 @@ const goBackwardScramble = () => {
         <Settings
           userID={user?.UserID}
           onClose={() => setShowSettingsPopup(false)}
-          onProfileUpdate={(fresh) =>
-            setUser((prev) => ({ ...prev, ...fresh }))
-          }
+          onProfileUpdate={(fresh) => setUser((prev) => ({ ...prev, ...fresh }))}
         />
       )}
     </div>

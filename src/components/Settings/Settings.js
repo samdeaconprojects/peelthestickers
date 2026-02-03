@@ -127,6 +127,18 @@ function Settings({ userID, onClose, onProfileUpdate }) {
                             <option value="Stackmat">Stackmat</option>
                         </select>
                     </div>
+
+                    <div className="setting-item">
+                      <label>Relay Timing Mode</label>
+                      <select
+                        value={settings.relayMode || "total"}
+                        onChange={(e) => updateSettings({ relayMode: e.target.value })}
+                      >
+                        <option value="total">Single total time (default)</option>
+                        <option value="legs">Per-leg times (auto-advance)</option>
+                      </select>
+                    </div>
+
                     <div className="setting-item">
   <label>Strict Timer Mode</label>
   <input

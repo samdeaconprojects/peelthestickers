@@ -182,16 +182,21 @@ body {
   word-break: break-word;
 }
 
+.scrambleRelayContainer {
+  display: flex;
+  flex-direction: column;
+}
+
 /* right HUD fixed width */
 .cube-and-event {
   width: 240px;
   margin-right: -20px;
   display: flex;
   flex-direction: column;
-  align-items: center;         /* ✅ center selector under cube */
+  align-items: center;         /*  center selector under cube */
   justify-content: flex-start;
   gap: 10px;
-  flex: 0 0 240px;             /* ✅ don’t shrink */
+  flex: 0 0 240px;             /*  don’t shrink */
 }
 
 /* cube area */

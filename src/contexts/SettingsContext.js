@@ -34,6 +34,8 @@ export const SettingsProvider = ({ children }) => {
     inspectionBeeps: true, 
     inspectionFullscreen: true,
 
+    // Relay settings
+    relayMode: "total", // "total" (default) | "legs"
   });
 
   const updateSettings = (newSettings) => {

@@ -1,3 +1,4 @@
+// src/components/TimeList/TimeList.js
 import React, { useState, useEffect } from 'react';
 import './TimeList.css';
 import './TimeItem.css';
@@ -71,6 +72,26 @@ console.log("USER ID TIMELIST");
               className={`TimeItem ${isBest ? 'overall-border-min' : ''} ${isWorst ? 'overall-border-max' : ''} ${isCurrentFive ? 'current-five' : ''}`}
               key={index}
               onClick={() => {
+                if (solve?.tags?.IsRelay && Array.isArray(solve.tags.RelayLegs)) {
+                  const legs = solve.tags.RelayLegs || [];
+                  const scrs = solve.tags.RelayScrambles || [];
+                  const timesArr = solve.tags.RelayLegTimes || [];
+
+                  const expanded = legs.map((ev, i) => ({
+                    event: ev,
+                    scramble: scrs[i] || "",
+                    time: timesArr[i] ?? 0,
+                    penalty: null,
+                    note: "",
+                    datetime: `${solve.datetime}#${i}`, // unique enough for UI
+                    userID: user?.UserID,
+                  }));
+
+                  setSelectedSolveList(expanded);
+                  setSelectedSolveIndex(solveIndex); // keep index so delete can delete the relay solve
+                  return;
+                }
+
                 setSelectedSolve({ ...solve, userID: user?.UserID });
                 setSelectedSolveIndex(solveIndex);
               }}
@@ -182,9 +203,32 @@ console.log("USER ID TIMELIST");
                   key={index}
                   className={`TimeItem ${isBest ? 'dashed-border-min' : ''} ${isWorst ? 'dashed-border-max' : ''}`}
                   onClick={() => {
+                    // If it's a relay solve, expand into per-leg solves for Detail
+                    if (solve?.tags?.IsRelay && Array.isArray(solve.tags.RelayLegs)) {
+                      const legs = solve.tags.RelayLegs || [];
+                      const scrs = solve.tags.RelayScrambles || [];
+                      const times = solve.tags.RelayLegTimes || [];
+
+                      const expanded = legs.map((ev, i) => ({
+                        event: ev,
+                        scramble: scrs[i] || "",
+                        time: times[i] ?? 0,
+                        penalty: null,
+                        note: "",
+                        datetime: `${solve.datetime}#${i}`, // unique enough for UI
+                        userID: user?.UserID,
+                      }));
+
+                      setSelectedSolveList(expanded);
+                      setSelectedSolveIndex(actualIndex); // ✅ use actualIndex here
+                      return;
+                    }
+
+                    // normal solve behavior
                     setSelectedSolve({ ...solve, userID: user?.UserID });
-                    setSelectedSolveIndex(actualIndex);
+                    setSelectedSolveIndex(actualIndex); // ✅ use actualIndex here
                   }}
+
                 >
                   {formatTime(solve.time, false, solve.penalty)}
                   <span className="delete-icon" onClick={(e) => { e.stopPropagation(); deleteTime(actualIndex); }}>x</span>
@@ -241,6 +285,16 @@ console.log("USER ID TIMELIST");
               solve={selectedSolve}
               userID={user?.UserID}
               onClose={() => setSelectedSolve(null)}
+              deleteTime={() => deleteTime(selectedSolveIndex)}
+              addPost={addPost}
+              applyPenalty={applyPenalty}
+            />
+          )}
+          {selectedSolveList && (
+            <Detail
+              solve={selectedSolveList}
+              userID={user?.UserID}
+              onClose={() => setSelectedSolveList(null)}
               deleteTime={() => deleteTime(selectedSolveIndex)}
               addPost={addPost}
               applyPenalty={applyPenalty}
