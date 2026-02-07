@@ -26,12 +26,20 @@ export const SettingsProvider = ({ children }) => {
     secondaryColor: '#ffffff',
     timerInput: 'Keyboard',
     horizontalTimeList: true, // default to horizontal
+
+    // NEW: Time color modes:
+    // "binary"     => only best/worst (existing behavior)
+    // "continuous" => true spectrum by time (each solve can be different)
+    // "bucket"     => 5-band spectrum by time
+    // "index"      => evenly distributed colors by index (ignores outliers)
+    timeColorMode: "index",
+
     eventKeyBindings: defaultEventBindings,
 
     //  Inspection settings
     inspectionEnabled: false,
-    inspectionCountDirection: "up", 
-    inspectionBeeps: true, 
+    inspectionCountDirection: "up",
+    inspectionBeeps: true,
     inspectionFullscreen: true,
 
     // Relay settings

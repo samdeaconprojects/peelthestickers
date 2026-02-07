@@ -73,13 +73,12 @@ function Settings({ userID, onClose, onProfileUpdate }) {
             });
             if (onProfileUpdate) onProfileUpdate(fresh);
             setStatusMessage('✅ Profile updated.');
-            setTimeout(() => setStatusMessage(''), 2000); // Hide after 3 seconds
+            setTimeout(() => setStatusMessage(''), 2000);
 
         } catch (err) {
             console.error('❌ Error updating profile:', err);
             setStatusMessage('❌ Failed to update profile.');
             setTimeout(() => setStatusMessage(''), 2000);
-
         }
     };
 
@@ -128,6 +127,20 @@ function Settings({ userID, onClose, onProfileUpdate }) {
                         </select>
                     </div>
 
+                    {/* NEW: Time color mode */}
+                    <div className="setting-item">
+                      <label>Time Color Mode</label>
+                      <select
+                        value={settings.timeColorMode || "binary"}
+                        onChange={(e) => updateSettings({ timeColorMode: e.target.value })}
+                      >
+                        <option value="binary">Binary (only best/worst)</option>
+                        <option value="continuous">True spectrum (by time)</option>
+                        <option value="bucket">Bucket spectrum (5 bands)</option>
+                        <option value="index">Index spectrum (evenly distributed)</option>
+                      </select>
+                    </div>
+
                     <div className="setting-item">
                       <label>Relay Timing Mode</label>
                       <select
@@ -140,59 +153,55 @@ function Settings({ userID, onClose, onProfileUpdate }) {
                     </div>
 
                     <div className="setting-item">
-  <label>Strict Timer Mode</label>
-  <input
-    type="checkbox"
-    checked={!settings.horizontalTimeList}
-    onChange={(e) =>
-      updateSettings({ horizontalTimeList: !e.target.checked })
-    }
-  />
-</div>
+                      <label>Strict Timer Mode</label>
+                      <input
+                        type="checkbox"
+                        checked={!settings.horizontalTimeList}
+                        onChange={(e) =>
+                          updateSettings({ horizontalTimeList: !e.target.checked })
+                        }
+                      />
+                    </div>
 
-<div className="setting-item">
-  <label>WCA Inspection</label>
-  <input
-    type="checkbox"
-    checked={!!settings.inspectionEnabled}
-    onChange={(e) => updateSettings({ inspectionEnabled: e.target.checked })}
-  />
-</div>
+                    <div className="setting-item">
+                      <label>WCA Inspection</label>
+                      <input
+                        type="checkbox"
+                        checked={!!settings.inspectionEnabled}
+                        onChange={(e) => updateSettings({ inspectionEnabled: e.target.checked })}
+                      />
+                    </div>
 
-<div className="setting-item">
-  <label>Inspection Beeps</label>
-  <input
-    type="checkbox"
-    checked={!!settings.inspectionBeeps}
-    onChange={(e) =>
-      updateSettings({ inspectionBeeps: e.target.checked })
-    }
-    disabled={!settings.inspectionEnabled}
-  />
-</div>
+                    <div className="setting-item">
+                      <label>Inspection Beeps</label>
+                      <input
+                        type="checkbox"
+                        checked={!!settings.inspectionBeeps}
+                        onChange={(e) => updateSettings({ inspectionBeeps: e.target.checked })}
+                        disabled={!settings.inspectionEnabled}
+                      />
+                    </div>
 
-<div className="setting-item">
-  <label>Fullscreen Inspection</label>
-  <input
-    type="checkbox"
-    checked={!!settings.inspectionFullscreen}
-    onChange={(e) =>
-      updateSettings({ inspectionFullscreen: e.target.checked })
-    }
-    disabled={!settings.inspectionEnabled}
-  />
-</div>
+                    <div className="setting-item">
+                      <label>Fullscreen Inspection</label>
+                      <input
+                        type="checkbox"
+                        checked={!!settings.inspectionFullscreen}
+                        onChange={(e) => updateSettings({ inspectionFullscreen: e.target.checked })}
+                        disabled={!settings.inspectionEnabled}
+                      />
+                    </div>
 
-<div className="setting-item">
-  <label>Inspection Style</label>
-  <select
-    value={settings.inspectionCountDirection || "down"}
-    onChange={(e) => updateSettings({ inspectionCountDirection: e.target.value })}
-  >
-    <option value="down">Countdown (15 → 0)</option>
-    <option value="up">Count up (0 → 15)</option>
-  </select>
-</div>
+                    <div className="setting-item">
+                      <label>Inspection Style</label>
+                      <select
+                        value={settings.inspectionCountDirection || "down"}
+                        onChange={(e) => updateSettings({ inspectionCountDirection: e.target.value })}
+                      >
+                        <option value="down">Countdown (15 → 0)</option>
+                        <option value="up">Count up (0 → 15)</option>
+                      </select>
+                    </div>
 
                     <h2>Key Bindings</h2>
                     <div className="settings-container">
@@ -226,14 +235,13 @@ function Settings({ userID, onClose, onProfileUpdate }) {
                 </div>
                 <button className="save-button" onClick={saveProfileChanges}>Save Profile</button>
             </div>
-            {statusMessage && (
-  <div className="status-message">
-    {statusMessage}
-  </div>
-)}
 
+            {statusMessage && (
+              <div className="status-message">
+                {statusMessage}
+              </div>
+            )}
         </div>
-        
     );
 }
 

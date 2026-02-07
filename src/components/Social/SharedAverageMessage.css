@@ -1,35 +1,27 @@
 /* src/components/Social/SharedAverageMessage.css */
 
-/* src/components/Social/SharedAverageMessage.css */
+.sharedAverageCard {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: stretch;
 
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 
-
-.sharedAverageMessage {
-  background: #222;
-  border-radius: 16px;
-  padding: 8px;
+  border-radius: 18px;
+  padding: 12px;
   margin: 6px 0;
   color: white;
 
-  max-width: 100%;
-  align-self: stretch;
-
-  /* --- blended split border --- */
-  border: 2px solid transparent;
-
-  /* width of the “blend band” (increase for smoother/longer fade) */
   --blend: 30px;
 
-  
-
-  /* Use background-clip trick to draw a gradient border */
   background:
-    /* inner fill */
     linear-gradient(
-      rgba(34, 34, 34, .98),
-      rgba(34, 34, 34, .98)
+      rgba(var(--primaryRgb), 0.97),
+      rgba(var(--primaryRgb), 0.97)
     ) padding-box,
-    /* border gradient */
     linear-gradient(
       90deg,
       var(--theirColor) 0,
@@ -37,93 +29,370 @@
       var(--youColor) calc(var(--split) + var(--blend)),
       var(--youColor) 100%
     ) border-box;
+
+  border: 2px solid transparent;
+  overflow: hidden;
 }
 
-
-/* ---- Split "border" that does NOT affect layout ---- */
-.sharedAverageMessage::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 8px;
-
-  /* thickness */
-  padding: 2px;
-
-  /* split gradient (left=you, right=them, moved by --split) */
-  background: linear-gradient(
-    90deg,
-    var(--youColor) 0%,
-    var(--youColor) var(--split),
-    var(--theirColor) var(--split),
-    var(--theirColor) 100%
-  );
-
-  /* punch out the middle so only the 2px ring shows */
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-
-  pointer-events: none;
+/* --- TOP LAYOUT --- */
+.sharedAverageTop {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 6px 12px 6px;
 }
 
-.sharedAverageHeader {
+.sharedAverageSide {
+  all: unset;
+  cursor: pointer;
+
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: bold;
+  gap: 10px;
+
+  padding: 16px 12px;
+  border-radius: 14px;
+
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+
+  transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
 }
 
-/* ---- Make PuzzleSVG half size (only in header) ---- */
-.sharedAverageIcon {
-  display: inline-flex;
+.sharedAverageSide:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+/* LEFT = THEM, RIGHT = YOU */
+.sharedAverageSideThem {
+  justify-content: flex-start;
+  text-align: left;
+  box-shadow: 0 0 0 1px rgba(180, 180, 180, 0.10) inset;
+}
+
+.sharedAverageSideYou {
+  justify-content: flex-end;
+  text-align: right;
+  box-shadow: 0 0 0 1px rgba(46, 196, 182, 0.10) inset;
+}
+
+.sharedAverageSideIcon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  transform-origin: center;
+  margin-right: 0; /* was 50px */
+}
+
+
+.sharedAverageSideMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sharedAverageSideMetaThem {
+  align-items: flex-start;
+  margin-left: 20px;
+}
+
+.sharedAverageSideMetaRight {
+  align-items: flex-end;
+  margin-right: 20px;
+}
+
+.sharedAverageEventLabel {
+  font-size: 28px;
+  font-weight: 900;
+  opacity: 0.95;
+  letter-spacing: 0.4px;
+}
+
+.sharedAverageName {
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  font-size: 12px;
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+.sharedAverageSideBig {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-
-  /* shrink */
-  transform: scale(0.5);
-  transform-origin: left center;
-
-  /* prevent it from affecting layout weirdly */
-  line-height: 0;
 }
 
-.expandSharedBtn,
-.loadSharedBtn,
-.dismissSharedBtn {
-  margin-top: 8px;
-  background: #2EC4B6;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  color: black;
-  font-weight: bold;
+.sharedAverageSideBigCenter {
+  min-width: 120px;
+  display: flex;
+  flex-direction: row;
+}
+
+.sharedAverageBig {
+  font-size: 42px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.4px;
+}
+
+.sharedAverageSmallLabel {
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0.7;
+  margin-top: 2px;
+}
+
+/* Center scoreboard */
+.sharedAverageCenter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.sharedAverageCenterTitle {
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.7;
+}
+
+.sharedAverageScoreRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.sharedAverageScore {
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.sharedAverageScoreLabel {
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0.75;
+}
+
+.sharedAverageMeanRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.sharedAverageMeanLabel {
+  font-weight: 800;
+  opacity: 0.7;
+}
+
+.sharedAverageMean {
+  font-weight: 900;
+}
+
+.sharedAverageMeanMid {
+  opacity: 0.5;
+  font-weight: 700;
+}
+
+/* --- TABLE --- */
+.sharedAverageTableWrap {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  padding: 10px;
+  overflow: visible;
 }
 
 .sharedAverageTable {
-  margin-top: 10px;
-  overflow-x: auto;
-  overflow-y: visible;
-}
-
-.sharedAverageTable table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
-.sharedAverageTable th,
+/* IMPORTANT: row glow goes on the TR, not pseudo elements */
+.sharedAverageTable tr.sharedRowWinYou {
+  /* YOU are on RIGHT */
+  background: linear-gradient(
+    90deg,
+    rgba(0,0,0,0) 0%,
+    rgba(0,0,0,0) 55%,
+    rgba(var(--youRgb), 0.10) 80%,
+    rgba(var(--youRgb), 0.18) 100%
+  );
+}
+
+.sharedAverageTable tr.sharedRowWinThem {
+  /* THEM are on LEFT */
+  background: linear-gradient(
+    90deg,
+    rgba(var(--theirRgb), 0.18) 0%,
+    rgba(var(--theirRgb), 0.10) 20%,
+    rgba(0,0,0,0) 45%,
+    rgba(0,0,0,0) 100%
+  );
+}
+
+.sharedAverageTable tr.sharedRowTie {
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.05) 0%,
+    rgba(0,0,0,0) 50%,
+    rgba(255,255,255,0.05) 100%
+  );
+}
+
+/* keep cells transparent so TR background shows as one continuous band */
 .sharedAverageTable td {
-  border: 1px solid #444;
-  padding: 4px 6px;
-  font-size: 12px;
+  padding: 8px 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  vertical-align: middle;
+  background: transparent;
+}
+
+.sharedAverageTable tr:first-child td {
+  border-top: none;
+}
+
+.sharedAverageIdx {
+  width: 44px;
+  text-align: center;
+  font-weight: 900;
+  opacity: 0.65;
+  letter-spacing: 0.2px;
+}
+
+.sharedAverageTimeCell {
+  width: 190px;
   text-align: center;
 }
 
-.scrambleText {
-  font-family: monospace;
-  text-align: left;
+.sharedAverageScramble {
+  width: auto;
+  overflow: hidden;
+}
+
+.sharedAverageScrambleText {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+/* Winner outline wrapper */
+.sharedAveragePillWrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  padding: 2px;
+  line-height: 1;
+}
+
+.sharedAveragePillWrap .time-item,
+.sharedAveragePillWrap .TimeItem {
+  opacity: 1 !important;
+}
+
+.sharedAveragePillWrap li,
+.sharedAveragePillWrap .time-item {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* This is the "TimeList cell" look */
+.sharedAverageTimeItem {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  min-width: 78px;
+
+  border-radius: 8px;
+  padding: 4px 10px;
+
+  border: 1px solid #50B6FF;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.sharedAveragePillWrap > .TimeItem {
+  min-width: 70px;
+}
+
+.sharedAverageTimeItem .time-item,
+.sharedAverageTimeItem li {
+  display: inline-block;
+  width: auto;
+}
+
+/* Use your existing TimeItem.css classes for borders */
+.sharedAverageTimeItem.overall-border-min { border: 2px solid #00FF00 !important; }
+.sharedAverageTimeItem.overall-border-max { border: 2px solid #FF0000 !important; }
+.sharedAverageTimeItem.faster { border: 2px solid #9ACD32 !important; }
+.sharedAverageTimeItem.middle-fast { border: 2px solid #FFFF00 !important; }
+.sharedAverageTimeItem.slower { border: 2px solid #FFA500 !important; }
+
+/* dashed extremes in binary mode */
+.sharedAverageTimeItem.dashed-border-min { border: 2px dashed #00FF00 !important; }
+.sharedAverageTimeItem.dashed-border-max { border: 2px dashed #FF0000 !important; }
+
+/* expand + actions */
+.sharedAverageExpandBtn {
+  margin-top: 10px;
+  width: 100%;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: white;
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 800;
+  opacity: 0.85;
+}
+
+.sharedAverageExpandBtn:hover {
+  opacity: 1;
+  border-color: rgba(255, 255, 255, 0.26);
+}
+
+.sharedAverageActions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.sharedAverageBtn {
+  flex: 1;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.sharedAverageBtnPrimary {
+  background: var(--youColor);
+  color: black;
+}
+
+.sharedAverageBtnGhost {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: white;
 }

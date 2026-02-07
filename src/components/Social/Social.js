@@ -23,7 +23,10 @@ import SearchIcon from '../../assets/Search.svg';
 import SocialHomeIcon from '../../assets/SocialHome.svg';
 import SocialMessagesIcon from '../../assets/SocialMessages.svg';
 
-function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
+import { hexToRgbString } from "../../utils/colorUtils";
+
+
+function Social({ user, deletePost, setSharedSession, mergeSharedSession, refreshTick }) {
   const [activeTab, setActiveTab] = useState(0);
   const [feed, setFeed] = useState([]);
   const [selectedPost, setSelectedPost] = useState(null);
@@ -50,17 +53,7 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const hexToRgba = (hex, a = 0.3) => {
-    if (!hex) return `rgba(46,196,182,${a})`;
-    let h = String(hex).replace('#', '').trim();
-    if (h.length === 3) h = h.split('').map(c => c + c).join('');
-    if (h.length !== 6) return `rgba(46,196,182,${a})`;
-    const r = parseInt(h.slice(0, 2), 16);
-    const g = parseInt(h.slice(2, 4), 16);
-    const b = parseInt(h.slice(4, 6), 16);
-    if ([r, g, b].some(v => Number.isNaN(v))) return `rgba(46,196,182,${a})`;
-    return `rgba(${r},${g},${b},${a})`;
-  };
+  
 
   useEffect(() => {
     if (activeTab === 0) scrollActivityToBottom();
@@ -71,6 +64,32 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession }) {
       scrollMessagesToBottom();
     }
   }, [selectedConversation, activeTab]);
+
+  useEffect(() => {
+  // Only refresh when you're actually in Messages tab with a convo selected.
+  if (activeTab !== 1) return;
+  if (!selectedConversation) return;
+  if (!user?.UserID) return;
+
+  handleRefreshMessages();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [refreshTick]); 
+
+
+useEffect(() => {
+  if (activeTab !== 1) return;
+  if (!selectedConversation) return;
+  if (!user?.UserID) return;
+
+  const id = setInterval(() => {
+    handleRefreshMessages();
+    console.log("REFRESHING IN SOCIAL SHARED?");
+  }, 10000);
+
+  return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [activeTab, selectedConversation?.id, user?.UserID]);
+
 
   useEffect(() => {
     const fetchFeed = async () => {
@@ -496,10 +515,14 @@ return {
   messages={selectedConversation.messages}
   onLoadSession={(session) => loadSharedSession(session)}
   onMerge={(session) => mergeSharedSession(session)}
+  yourColor={user?.Color || user?.color || "#2EC4B6"}
+  theirColor={selectedConversation?.color || "#888888"}
 
-  yourColor={user?.Color || user?.color || '#2EC4B6'}
-  theirColor={selectedConversation?.color || '#888888'}
+  yourUsername={user?.Username}
+  theirUsername={selectedConversation?.username || selectedConversation?.id}
 />
+
+
 
                         );
                       }
@@ -518,7 +541,7 @@ return {
                           className={`chatMessage ${isOwn ? 'sent' : 'received'}`}
                           style={{
                             color: '#fff',
-                            backgroundColor: hexToRgba(senderColor, 0.3),
+                            backgroundColor: hexToRgbString(senderColor, 0.3),
                             border: `2px solid ${senderColor}`,
                           }}
                         >

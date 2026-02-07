@@ -71,6 +71,10 @@ function App() {
   const [sharedSession, setSharedSession] = useState(null);
   const [sharedIndex, setSharedIndex] = useState(0);
 
+  // forces Social to refresh messages when it changes
+  const [socialRefreshTick, setSocialRefreshTick] = useState(0);
+
+
   // Relay session support
   const [activeSessionObj, setActiveSessionObj] = useState(null);
   const [relayLegIndex, setRelayLegIndex] = useState(0);
@@ -407,52 +411,86 @@ function App() {
   };
 
   const addSolve = async (newTime) => {
-    // Relay mode
-    const isRelay =
-      String(currentEvent || "").toUpperCase() === "RELAY" &&
-      activeSessionObj?.SessionType === "RELAY" &&
-      Array.isArray(relayLegs) &&
-      relayLegs.length > 0;
+  // -----------------------
+  // RELAY MODE
+  // -----------------------
+  const isRelay =
+    String(currentEvent || "").toUpperCase() === "RELAY" &&
+    activeSessionObj?.SessionType === "RELAY" &&
+    Array.isArray(relayLegs) &&
+    relayLegs.length > 0;
 
-    if (isRelay) {
-      // Relay mode
-const isRelay =
-  String(currentEvent || "").toUpperCase() === "RELAY" &&
-  activeSessionObj?.SessionType === "RELAY" &&
-  Array.isArray(relayLegs) &&
-  relayLegs.length > 0;
+  if (isRelay) {
+    const timestamp = new Date().toISOString();
 
-if (isRelay) {
-  const timestamp = new Date().toISOString();
+    const relayTags = {
+      IsRelay: true,
+      RelayLegs: relayLegs,
+      RelayScrambles: relayScrambles,
+    };
 
-  const relayTags = {
-    IsRelay: true,
-    RelayLegs: relayLegs,
-    RelayScrambles: relayScrambles,
-  };
+    // If user wants per-leg timing, keep current behavior
+    if ((settings?.relayMode || "total") === "legs") {
+      const legIdx = relayLegIndex;
 
-  // If user wants per-leg timing, keep current behavior
-  if ((settings?.relayMode || "total") === "legs") {
-    const legIdx = relayLegIndex;
+      const nextLegTimes = [...relayLegTimes, newTime];
+      setRelayLegTimes(nextLegTimes);
 
-    const nextLegTimes = [...relayLegTimes, newTime];
-    setRelayLegTimes(nextLegTimes);
+      const isLastLeg = legIdx >= relayLegs.length - 1;
 
-    const isLastLeg = legIdx >= relayLegs.length - 1;
+      // still in-progress -> advance to next leg
+      if (!isLastLeg) {
+        setRelayLegIndex(legIdx + 1);
+        return;
+      }
 
-    // still in-progress -> advance to next leg
-    if (!isLastLeg) {
-      setRelayLegIndex(legIdx + 1);
+      // completed legs -> save ONE solve with total + leg breakdown
+      const totalMs = nextLegTimes.reduce((a, b) => a + b, 0);
+
+      const fullRelayTags = {
+        ...relayTags,
+        RelayLegTimes: nextLegTimes,
+      };
+
+      const newSolve = {
+        time: totalMs,
+        scramble: "Relay",
+        event: "RELAY",
+        penalty: null,
+        note: "",
+        datetime: timestamp,
+        tags: fullRelayTags,
+      };
+
+      // update local UI immediately (store under sessions["RELAY"])
+      setSessions((prev) => ({
+        ...prev,
+        RELAY: [...(prev.RELAY || []), newSolve],
+      }));
+
+      if (isSignedIn && user) {
+        try {
+          await addSolveToDB(
+            user.UserID,
+            currentSession,
+            "RELAY",
+            totalMs,
+            "Relay",
+            null,
+            "",
+            fullRelayTags
+          );
+        } catch (err) {
+          console.error("Error adding relay solve:", err);
+        }
+      }
+
+      resetRelaySet();
       return;
     }
 
-    // completed legs -> save ONE solve with total + leg breakdown
-    const totalMs = nextLegTimes.reduce((a, b) => a + b, 0);
-
-    const fullRelayTags = {
-      ...relayTags,
-      RelayLegTimes: nextLegTimes,
-    };
+    // Default: total-time relay (normal start/stop saves immediately)
+    const totalMs = newTime;
 
     const newSolve = {
       time: totalMs,
@@ -461,10 +499,9 @@ if (isRelay) {
       penalty: null,
       note: "",
       datetime: timestamp,
-      tags: fullRelayTags,
+      tags: relayTags,
     };
 
-    // update local UI immediately (store under sessions["RELAY"])
     setSessions((prev) => ({
       ...prev,
       RELAY: [...(prev.RELAY || []), newSolve],
@@ -480,7 +517,7 @@ if (isRelay) {
           "Relay",
           null,
           "",
-          fullRelayTags
+          relayTags
         );
       } catch (err) {
         console.error("Error adding relay solve:", err);
@@ -491,159 +528,109 @@ if (isRelay) {
     return;
   }
 
-  // Default: total-time relay (normal start/stop saves immediately)
-  const totalMs = newTime;
+  // -----------------------
+  // NORMAL / SHARED MODE
+  // -----------------------
+  let scramble;
+
+  // SHARED SESSION MODE
+  let activeSharedID = null;
+  let solveIndexForBroadcast = null;
+
+  if (sharedSession) {
+    scramble = sharedSession.scrambles[sharedIndex];
+
+    // save index BEFORE advancing
+    solveIndexForBroadcast = sharedIndex;
+    activeSharedID = sharedSession.sharedID;
+
+    const nextIndex = sharedIndex + 1;
+    setSharedIndex(nextIndex);
+
+    if (nextIndex >= sharedSession.scrambles.length) {
+      console.log("Shared session completed");
+      setSharedSession(null);
+    }
+
+    // keeps your existing behavior (forces rerender path)
+    setScrambles((prev) => ({
+      ...prev,
+      [currentEvent]: [...(prev[currentEvent] || [])],
+    }));
+  } else {
+    // NORMAL MODE
+    scramble = getNextScramble();
+  }
+
+  const timestamp = new Date().toISOString();
+
+  console.log("Adding solve:", {
+    event: currentEvent,
+    sessionID: currentSession,
+    time: newTime,
+    scramble,
+  });
 
   const newSolve = {
-    time: totalMs,
-    scramble: "Relay",
-    event: "RELAY",
+    time: newTime,
+    scramble,
+    event: currentEvent,
     penalty: null,
     note: "",
     datetime: timestamp,
-    tags: relayTags,
+    tags: sharedSession
+      ? {
+          IsShared: true,
+          SharedID: sharedSession.sharedID,
+          SharedIndex: sharedIndex,
+        }
+      : {},
   };
 
+  // update local UI immediately
   setSessions((prev) => ({
     ...prev,
-    RELAY: [...(prev.RELAY || []), newSolve],
+    [currentEvent]: [...(prev[currentEvent] || []), newSolve],
   }));
 
+  // -----------------------------
+  // SAVE TO DATABASE
+  // -----------------------------
   if (isSignedIn && user) {
     try {
       await addSolveToDB(
         user.UserID,
         currentSession,
-        "RELAY",
-        totalMs,
-        "Relay",
+        currentEvent,
+        newTime,
+        scramble,
         null,
         "",
-        relayTags
+        newSolve.tags
       );
+
+      // BROADCAST BACK TO CHAT (so scoreboard updates)
+      if (activeSharedID) {
+        const messageText = `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
+
+        const conversationID = activeSharedID
+          .replace("SHARED#", "")
+          .split("#")
+          .slice(0, 2)
+          .sort()
+          .join("#");
+
+        await sendMessage(conversationID, user.UserID, messageText);
+
+        // ✅ triggers Social to refetch (you’ll wire this in Social.js)
+        setSocialRefreshTick((t) => t + 1);
+      }
     } catch (err) {
-      console.error("Error adding relay solve:", err);
+      console.error("Error adding solve:", err);
     }
   }
+};
 
-  resetRelaySet();
-  return;
-}
-
-    }
-
-    let scramble;
-
-    // -----------------------
-    // SHARED SESSION MODE
-    // -----------------------
-    let activeSharedID = null;
-    let solveIndexForBroadcast = null;
-
-    if (sharedSession) {
-      scramble = sharedSession.scrambles[sharedIndex];
-
-      // save index BEFORE advancing
-      solveIndexForBroadcast = sharedIndex;
-      activeSharedID = sharedSession.sharedID;
-
-      const nextIndex = sharedIndex + 1;
-      setSharedIndex(nextIndex);
-
-      if (nextIndex >= sharedSession.scrambles.length) {
-        console.log("Shared session completed");
-        setSharedSession(null);
-      }
-      setScrambles((prev) => ({
-        ...prev,
-        [currentEvent]: [...prev[currentEvent]],
-      }));
-    } else {
-      // -----------------------
-      // NORMAL MODE
-      // -----------------------
-      scramble = getNextScramble();
-    }
-
-    const timestamp = new Date().toISOString();
-
-    console.log("Adding solve:", {
-      event: currentEvent,
-      sessionID: currentSession,
-      time: newTime,
-      scramble,
-    });
-
-    const newSolve = {
-      time: newTime,
-      scramble,
-      event: currentEvent,
-      penalty: null,
-      note: "",
-      datetime: timestamp,
-      tags: sharedSession
-        ? {
-            IsShared: true,
-            SharedID: sharedSession.sharedID,
-            SharedIndex: sharedIndex,
-          }
-        : {},
-    };
-
-    // update local UI immediately
-    const updatedSessions = {
-      ...sessions,
-      [currentEvent]: [...(sessions[currentEvent] || []), newSolve],
-    };
-    setSessions(updatedSessions);
-
-    // -----------------------------
-    // SAVE TO DATABASE
-    // -----------------------------
-    if (isSignedIn && user) {
-      try {
-        await addSolveToDB(
-          user.UserID,
-          currentSession,
-          currentEvent,
-          newTime,
-          scramble,
-          null,
-          "",
-          newSolve.tags
-        );
-
-        // BROADCAST BACK TO CHAT (so scoreboard updates)
-        if (activeSharedID) {
-          const messageText = `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
-
-          const conversationID = activeSharedID
-            .replace("SHARED#", "")
-            .split("#")
-            .slice(0, 2)
-            .sort()
-            .join("#");
-
-          await sendMessage(conversationID, user.UserID, messageText);
-        }
-
-        if (activeSharedID) {
-          const messageText = `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
-
-          const conversationID = activeSharedID
-            .replace("SHARED#", "")
-            .split("#")
-            .slice(0, 2)
-            .sort()
-            .join("#");
-
-          await sendMessage(conversationID, user.UserID, messageText);
-        }
-      } catch (err) {
-        console.error("Error adding solve:", err);
-      }
-    }
-  };
 
   const applyPenalty = async (timestamp, penalty, updatedTime) => {
     const updatedSessions = { ...sessions };
@@ -1041,6 +1028,7 @@ if (isRelay) {
                   updateComments={handleUpdateComments}
                   setSharedSession={setSharedSession}
                   mergeSharedSession={mergeSharedSession}
+                  refreshTick={socialRefreshTick}
                 />
               }
             />

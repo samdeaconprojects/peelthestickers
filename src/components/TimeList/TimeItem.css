@@ -1,36 +1,31 @@
 /* TimeItem.css */
 .time-item {
-    margin: 5px; /* Adjust margins as needed */
-    padding: 5px; /* Adjust padding as needed */
-    cursor: pointer; /* Indicates the item is clickable */
-    flex: 0 0 calc(100% / 12 - 10px); /* Start with 12 items per row */
-    text-align: center; /* Center text within the item */
+    margin: 5px;
+    padding: 5px;
+    cursor: pointer;
+    flex: 0 0 calc(100% / 12 - 10px);
+    text-align: center;
     background-color: transparent;
-    
-  }
+}
 
-  /* TimeItem.css */
+/* TimeItem.css */
 .time-item {
   position: relative;
-  
-  
   display: inline-block;
 }
 
 .TimeItem {
-  position: relative; /* Needed to position the delete button absolutely */
-  padding: 5px; /* Adjust padding as needed */
+  position: relative;
+  padding: 5px;
 }
 
 .TimeItem {
-  display: inline-block; /* Ensure it behaves as a block */
-  /*transition: transform 0.1s ease-out, box-shadow 0.1s ease-out; /* Smooth transition */
+  display: inline-block;
   z-index: 10;
 }
 
 .TimeItem:hover {
-  transform: translateY(-2px); /* Moves the element 5px upwards */
-  /*box-shadow: 0px 5px 10px rgba(0, 0, 0, 0.2); /* Optional: Adds a shadow for a lifting effect */
+  transform: translateY(-2px);
 }
 
 .delete-icon {
@@ -60,58 +55,60 @@
   cursor: pointer;
 }
 
-  .TimeItem {
-    opacity: 50%;
-  }
+.TimeItem {
+  opacity: 50%;
+}
 
-  .dashed-border-max {
-    border: 2px dashed #FF0000 !important; /* Example: orange dashed border */
-  }
+.dashed-border-max {
+  border: 2px dashed #FF0000 !important;
+}
 
-  .dashed-border-min {
-    border: 2px dashed #00FF00 !important; /* Example: orange dashed border */
-  }
+.dashed-border-min {
+  border: 2px dashed #00FF00 !important;
+}
 
-  .overall-border-max {
-    border: 2px solid #FF0000 !important; /* Example: orange dashed border */
-  }
+.overall-border-max {
+  border: 2px solid #FF0000 !important;
+}
 
-  .overall-border-min {
-    border: 2px solid #00FF00 !important; /* Example: orange dashed border */
-  }
-  
-  .current-five {
-    opacity: 100%;
-  }
+.overall-border-min {
+  border: 2px solid #00FF00 !important;
+}
 
-  .fastest {
-    border: 2px dashed #00FF00 !important;
-  }
+.current-five {
+  opacity: 100%;
+}
 
-  .faster {
-    border: 2px solid #9ACD32 !important;
-  }
+/* === Bucket spectrum classes (SOLID borders) === */
+/* fastest/slowest dashed still exist but we are NOT using them for normal solves in TimeList */
+.fastest {
+  border: 2px dashed #00FF00 !important;
+}
 
-  .middle-fast {
-    border: 2px solid #FFFF00 !important; 
-  }
+/* CHANGED: make this a bold green instead of yellow-green puke */
+.faster {
+  border: 2px solid #00E676 !important; /* bold bright green */
+}
 
-  .slower {
-    border: 2px solid #FFA500 !important; 
-  }
+.middle-fast {
+  border: 2px solid #FFFF00 !important;
+}
 
-  .slowest {
-    border: 2px dashed #FF0000 !important;
+.slower {
+  border: 2px solid #FFA500 !important;
+}
+
+.slowest {
+  border: 2px dashed #FF0000 !important;
+}
+
+.not-current-five {
+  opacity: 50%;
+}
+
+/* For smaller screens, adjust to 5 items per row */
+@media (max-width: 767px) {
+  .time-item {
+    flex: 0 0 calc(100% / 5 - 10px);
   }
-  
-  .not-current-five {
-    opacity: 50%;
-  }
-  
-  /* For smaller screens, adjust to 5 items per row */
-  @media (max-width: 767px) {
-    .time-item {
-      flex: 0 0 calc(100% / 5 - 10px); /* Adjust width calculation as per margin/padding */
-    }
-  }
-  
+}

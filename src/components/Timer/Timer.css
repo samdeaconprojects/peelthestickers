@@ -10,9 +10,10 @@
 .Timer {
   color: white;
   /* Grow with screen width but stay within reasonable bounds */
-  font-size: clamp(2rem, 16vw, 18rem);
+  font-size: clamp(2rem, 16vw, 20rem);
   text-align: center;
-  margin-right: 70px;
+  margin-right: 10%;
+  margin-top: 25%;
   letter-spacing: 12px;
 }
 
