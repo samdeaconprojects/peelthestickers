@@ -1,98 +1,177 @@
-.stats-summary {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    margin: auto;
-    margin-right: 10%;
-    padding: 2%;
-    color: #fff;
-    font-size: x-large;
-    /*border: 1px solid #444;*/
-  }
-  
-  /* Top Section */
-  .stats-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    text-align: center;
-    margin-bottom: 5px;
-  }
-  
-  .stats-header .stat-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-  }
-  
-  .stat-title {
-    font-size: small;
-    font-weight: 800;
-    color: #aaa;
-    margin-bottom: 4px;
+.statsSummaryEmpty {
+  color: rgba(255,255,255,0.7);
+  padding: 18px;
+}
+
+/* Whole header bar */
+.statsSummaryBar {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 160px 1fr auto;
+  gap: 18px;
+  align-items: center;
+
+  color: #fff;
+}
+
+/* Left: solve count + best single */
+.ssCount {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 6px;
+}
+
+.ssCountValue {
+  font-size: 56px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.ssCountLabel {
+  margin-top: -6px;
+  color: rgba(255,255,255,0.55);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.ssBestSingle {
+  margin-top: 4px;
+}
+
+.ssBestSingleValue {
+  color: #0add5e;
+  font-weight: 900;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.ssBestSingleLabel {
+  margin-top: 2px;
+  color: rgba(255,255,255,0.55);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Middle: mean/median/stddev */
+.ssMainStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(110px, 1fr));
+  gap: 12px;
+  align-items: center;
+  justify-items: center;
+  text-align: center;
+}
+
+.ssStatLabel {
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.05em;
+}
+
+.ssStatValue {
+  margin-top: 4px;
+  font-size: 26px;
+  font-weight: 900;
+  color: #ffd400; /* your yellow */
+}
+
+/* Right: 3 mini panels */
+.ssPanels {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.ssPanel {
+  width: 170px;
+  padding: 10px 10px 8px 10px;
+  border-radius: 10px;
+
+  border: 2px solid rgba(46, 196, 182, 0.35);
+  background: rgba(46, 196, 182, 0.07);
+}
+
+.ssPanelTitle {
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(255,255,255,0.8);
+  margin-bottom: 6px;
+}
+
+/* Tight list */
+.ssPanelGrid {
+  display: grid;
+  gap: 4px;
+}
+
+.ssRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ssKey {
+  font-weight: 900;
+  font-size: 13px;
+  color: rgba(255,255,255,0.92);
+}
+
+.ssLbl {
+  font-weight: 900;
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  text-transform: lowercase;
+}
+
+/* Slightly different accents per panel (subtle) */
+.ssPanel--current {
+  border-color: rgba(255, 210, 0, 0.35);
+  background: rgba(255, 210, 0, 0.06);
+}
+.ssPanel--best {
+  border-color: rgba(46, 196, 182, 0.35);
+  background: rgba(46, 196, 182, 0.07);
+}
+.ssPanel--overall {
+  border-color: rgba(200, 200, 200, 0.28);
+  background: rgba(200, 200, 200, 0.06);
+}
+
+/* Responsive: stack panels below on narrow widths */
+@media (max-width: 1100px) {
+  .statsSummaryBar {
+    grid-template-columns: 140px 1fr;
+    grid-template-rows: auto auto;
   }
 
-  .single-time {
-    font-size: x-large;
-    font-weight: 800;
-    color: #0add5e;
-  }
-  
-  .stats-header .stat-value .count-value .count-title {
-    font-size: larger;
-
+  .ssPanels {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
-  .stat-value {
-    font-weight: 800;
-    color: yellow;
+  .ssPanel {
+    width: 190px;
+  }
+}
+
+@media (max-width: 800px) {
+  .ssMainStats {
+    grid-template-columns: 1fr;
+    justify-items: start;
+    text-align: left;
   }
 
-  .count-value {
-    font-size: 42pt;
+  .ssStatValue {
+    font-size: 22px;
   }
 
-  .count-title {
-    color: #aaa;
-
+  .ssCountValue {
+    font-size: 44px;
   }
-
-  .stats-body {
-    margin-left: 2%;
-  }
-  
-  /* Bottom Grid Layout */
-  .summary-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 15px;
-    margin-top: 5px;
-  }
-  
-  /* Title Styling */
-  h4 {
-    margin: 10px 0;
-    font-size: 20px;
-    color: #aaa;
-    /*border-bottom: 1px solid #555;*/
-  }
-  
-  /* Individual Stat */
-  .ao-item {
-    display: flex;
-  }
-
-  .ao-title {
-    color: #aaa;
-
-  }
-  
-  /* Grid Columns */
-  .stats-best, .stats-current {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-  }
-  
+}

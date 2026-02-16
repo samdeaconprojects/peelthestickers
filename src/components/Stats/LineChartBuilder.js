@@ -1,4 +1,3 @@
-// LineChartBuilder.js
 import React, { useState } from "react";
 import PropTypes from "prop-types";
 
@@ -15,20 +14,27 @@ const LineChartBuilder = ({
   onDotClick
 }) => {
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, time: '' });
+
   const FONT_SIZE = width / 50;
+
   const maxX = Math.max(...data.map(e => e.x));
   const minX = Math.min(...data.map(e => e.x));
   const maxY = Math.max(...data.map(e => e.y));
+
   const maximumYFromData = Math.ceil(maxY / 10) * 10;
 
   const digits = parseFloat(maximumYFromData.toString()).toFixed(precision).length + 1;
   const padding = (FONT_SIZE + digits) * 3;
+
   const chartWidth = width - padding * 2;
   const chartHeight = height - padding * 2;
 
+  // ✅ prevent division by zero when only 1 point
+  const xDenom = (maxX - minX) || 1;
+
   const points = data
     .map(element => {
-      const x = ((element.x - minX) / (maxX - minX)) * chartWidth + padding;
+      const x = ((element.x - minX) / xDenom) * chartWidth + padding;
       const y = chartHeight - (element.y / maximumYFromData) * chartHeight + padding;
       return `${x},${y}`;
     })
@@ -89,7 +95,7 @@ const LineChartBuilder = ({
   const LabelsXAxis = () => {
     const y = height - padding + FONT_SIZE * 2;
     return data.map((element, index) => {
-      const x = ((element.x - minX) / (maxX - minX)) * chartWidth + padding - FONT_SIZE / 2;
+      const x = ((element.x - minX) / xDenom) * chartWidth + padding - FONT_SIZE / 2;
       return (
         <text
           key={index}
@@ -148,7 +154,7 @@ const LineChartBuilder = ({
         />
 
         {data.map((element, index) => {
-          const x = ((element.x - minX) / (maxX - minX)) * chartWidth + padding;
+          const x = ((element.x - minX) / xDenom) * chartWidth + padding;
           const y = chartHeight - (element.y / maximumYFromData) * chartHeight + padding;
           return (
             <circle

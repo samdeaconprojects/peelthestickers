@@ -1,21 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState } from "react";
 import PercentBarBuilder from "./PercentBarBuilder";
-import ChartTitle from "./ChartTitle";
-import Detail from '../Detail/Detail';
-import './Stats.css';
+import Detail from "../Detail/Detail";
+import "./Stats.css";
 
 function PercentBar({ solves, title }) {
   const [selectedSolve, setSelectedSolve] = useState(null);
 
   return (
-    <div className='percentBar' style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: "5%" }}>
-      {/*<ChartTitle text={title} />*/}
-
+    <div
+      className="percentBar"
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+      }}
+    >
       <PercentBarBuilder
-        width={150}
-        height={300}
-        solves={solves} // Just send solves; no threshold management here
-        onSliceClick={(solves) => setSelectedSolve(solves[0])}
+        solves={solves}
+        onSliceClick={(solvesArr) => setSelectedSolve(solvesArr?.[0] || null)}
       />
 
       {selectedSolve && <Detail solve={selectedSolve} onClose={() => setSelectedSolve(null)} />}
@@ -23,4 +25,4 @@ function PercentBar({ solves, title }) {
   );
 }
 
-export default PercentBar;
+export default React.memo(PercentBar);

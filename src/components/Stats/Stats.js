@@ -1,104 +1,109 @@
-import React, { useState } from 'react';
-import LineChartBuilder from "./LineChartBuilder";
-import Label from "./AxisLabel";
-import ChartTitle from "./ChartTitle";
-import './Stats.css';
-import {
-  formatTime,
-  calculateAverage,
-  getOveralls,
-  calculateAverageOfFive,
-  calculateBestAverageOfFive
-} from '../TimeList/TimeUtils';
-import LineChart from './LineChart';
-import TimeTable from './TimeTable';
-import PercentBar from './PercentBar';
-import StatsSummary from './StatsSummary';
-import BarChart from './BarChart';
-import { getSolvesBySession } from '../../services/getSolvesBySession'; 
+// src/components/Stats/Stats.js
+import React, { useMemo, useCallback, useState } from "react";
+import "./Stats.css";
+
+import LineChart from "./LineChart";
+import TimeTable from "./TimeTable";
+import PercentBar from "./PercentBar";
+import StatsSummary from "./StatsSummary";
+import BarChart from "./BarChart";
+
+import { getSolvesBySession } from "../../services/getSolvesBySession";
 
 function Stats({
   sessions,
-  sessionStats,          // (optional, fine to leave even if unused here)
+  sessionStats, // optional
   setSessions,
   currentEvent,
-  currentSession,        
-  user,                  
+  currentSession,
+  user,
   deleteTime,
-  addPost
+  addPost,
 }) {
-  const [solvesPerPage, setSolvesPerPage] = useState(100); // Default to showing 100 solves
-  const [currentPage, setCurrentPage] = useState(0); // Start on the first page
-  const [statsEvent, setStatsEvent] = useState(currentEvent); // Local state for the stats page event
+  const [solvesPerPage, setSolvesPerPage] = useState(100);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [statsEvent, setStatsEvent] = useState(currentEvent);
 
   // Normalize DynamoDB solve item into UI shape (same as in App.js)
-  const normalizeSolve = (item) => ({
-    time: item.Time,
-    scramble: item.Scramble,
-    event: item.Event,
-    penalty: item.Penalty,
-    note: item.Note || '',
-    datetime: item.DateTime,
-    tags: item.Tags || {},
-  });
-
-  // Get the solves for the selected stats event
-  const solves = sessions[statsEvent] || [];
-
-  // Calculate the range of solves to display based on the current page and solvesPerPage
-  const startIndex = Math.max(0, solves.length - solvesPerPage * (currentPage + 1));
-  const endIndex = solves.length - solvesPerPage * currentPage;
-
-  // Slice the array to get the subset of solves to display
-  const solvesToDisplay = solves.slice(startIndex, endIndex).map((solve, i) => ({
-    ...solve,
-    fullIndex: startIndex + i, // Store correct index from full session
-  }));
-
-  const handleEventChange = (event) => {
-    setStatsEvent(event.target.value);
-    setCurrentPage(0); // Reset to the first page when switching events
-  };
-
-  const handleDeleteSolve = (fullIndex) => {
-    const updatedSessions = {
-      ...sessions,
-      [statsEvent]: sessions[statsEvent].filter((_, i) => i !== fullIndex), // Use fullIndex
+  const normalizeSolve = useCallback((item) => {
+    return {
+      time: item.Time,
+      scramble: item.Scramble,
+      event: item.Event,
+      penalty: item.Penalty,
+      note: item.Note || "",
+      datetime: item.DateTime,
+      tags: item.Tags || {},
+      // Keep originalTime if your DB/service returns it for +2/DNF scenarios
+      originalTime: item.OriginalTime ?? item.originalTime,
     };
-  
-    setSessions(updatedSessions); //Updates App.js state
-    deleteTime(statsEvent, fullIndex); //Calls the backend with correct index
-  };
+  }, []);
 
-  const handlePreviousPage = () => {
+  // Solves for selected stats event
+  const solves = sessions?.[statsEvent] || [];
+
+  // Compute indices (cheap, but memo keeps referential stability & clarity)
+  const startIndex = useMemo(() => {
+    return Math.max(0, solves.length - solvesPerPage * (currentPage + 1));
+  }, [solves.length, solvesPerPage, currentPage]);
+
+  const endIndex = useMemo(() => {
+    return solves.length - solvesPerPage * currentPage;
+  }, [solves.length, solvesPerPage, currentPage]);
+
+  // Slice + add fullIndex once per relevant change
+  const solvesToDisplay = useMemo(() => {
+    const slice = solves.slice(startIndex, endIndex);
+    return slice.map((solve, i) => ({
+      ...solve,
+      fullIndex: startIndex + i,
+    }));
+  }, [solves, startIndex, endIndex]);
+
+  const handleEventChange = useCallback((event) => {
+    setStatsEvent(event.target.value);
+    setCurrentPage(0);
+  }, []);
+
+  const handleDeleteSolve = useCallback(
+    (fullIndex) => {
+      // Update sessions state immutably
+      setSessions((prev) => ({
+        ...prev,
+        [statsEvent]: (prev?.[statsEvent] || []).filter((_, i) => i !== fullIndex),
+      }));
+
+      // Backend call with correct fullIndex
+      deleteTime(statsEvent, fullIndex);
+    },
+    [setSessions, deleteTime, statsEvent]
+  );
+
+  const handlePreviousPage = useCallback(() => {
     if (currentPage < Math.floor(solves.length / solvesPerPage) - 1) {
-      setCurrentPage(currentPage + 1);
+      setCurrentPage((p) => p + 1);
     }
-  };
+  }, [currentPage, solves.length, solvesPerPage]);
 
-  const handleNextPage = () => {
-    if (currentPage > 0) {
-      setCurrentPage(currentPage - 1);
-    }
-  };
+  const handleNextPage = useCallback(() => {
+    if (currentPage > 0) setCurrentPage((p) => p - 1);
+  }, [currentPage]);
 
-  const handleZoomIn = () => {
-    if (solvesPerPage > 50) { // Ensure there's a lower limit
-      setSolvesPerPage(solvesPerPage - 50);
-      setCurrentPage(0);
-    }
-  };
+  const handleZoomIn = useCallback(() => {
+    setSolvesPerPage((prev) => (prev > 50 ? prev - 50 : prev));
+    setCurrentPage(0);
+  }, []);
 
-  const handleZoomOut = () => {
-    if (solvesPerPage < solves.length) { // Ensure it doesn't exceed the total solves
-      setSolvesPerPage(solvesPerPage + 50);
-      setCurrentPage(0);
-    }
-  };
+  const handleZoomOut = useCallback(() => {
+    setSolvesPerPage((prev) => {
+      const next = prev + 50;
+      return Math.min(next, solves.length || next);
+    });
+    setCurrentPage(0);
+  }, [solves.length]);
 
-  // 🔹 NEW: truly load *all* solves from DynamoDB for this event/session
-  const handleShowAll = async () => {
-    // If we don't have a signed-in user, just fall back to current in-memory array
+  // Load *all* solves from DynamoDB for this event/session
+  const handleShowAll = useCallback(async () => {
     if (!user?.UserID) {
       setSolvesPerPage(solves.length);
       setCurrentPage(0);
@@ -106,12 +111,13 @@ function Stats({
     }
 
     try {
-      const sessionId = currentSession || 'main';
+      const sessionId = currentSession || "main";
       const fullItems = await getSolvesBySession(
         user.UserID,
         statsEvent.toUpperCase(),
         sessionId
       );
+
       const normalized = fullItems.map(normalizeSolve);
 
       setSessions((prev) => ({
@@ -122,81 +128,91 @@ function Stats({
       setSolvesPerPage(normalized.length);
       setCurrentPage(0);
     } catch (err) {
-      console.error('Failed to load all solves for Stats:', err);
-      // Still show whatever we already have
+      console.error("Failed to load all solves for Stats:", err);
       setSolvesPerPage(solves.length);
       setCurrentPage(0);
     }
-  };
+  }, [user?.UserID, solves.length, currentSession, statsEvent, normalizeSolve, setSessions]);
+
+  // Optional: plug in your precomputed sessionStats here if you want
+  const overallStatsForEvent = useMemo(() => {
+    // Example later:
+    // return sessionStats?.[statsEvent]?.[currentSession || "main"] ?? null;
+    return null;
+  }, [sessionStats, statsEvent, currentSession]);
 
   return (
-    <div className="Page">
+    <div className="Page statsPageRoot">
       <div className="stats-options">
         <select onChange={handleEventChange} value={statsEvent}>
-          {Object.keys(sessions).map(eventKey => (
+          {Object.keys(sessions || {}).map((eventKey) => (
             <option key={eventKey} value={eventKey}>
               {eventKey}
             </option>
           ))}
         </select>
+
         <button
           onClick={handlePreviousPage}
           disabled={currentPage >= Math.floor(solves.length / solvesPerPage) - 1}
         >
           Older ▲
         </button>
-        <button
-          onClick={handleNextPage}
-          disabled={currentPage === 0}
-        >
+
+        <button onClick={handleNextPage} disabled={currentPage === 0}>
           Newer ▼
         </button>
-        <button
-          onClick={handleZoomIn}
-          disabled={solvesPerPage <= 50}
-        >
+
+        <button onClick={handleZoomIn} disabled={solvesPerPage <= 50}>
           Zoom +
         </button>
+
         <button
           onClick={handleZoomOut}
-          disabled={solvesPerPage >= solves.length}
+          disabled={solves.length > 0 && solvesPerPage >= solves.length}
         >
           Zoom -
         </button>
+
         <button
           onClick={handleShowAll}
-          disabled={solvesPerPage === solves.length && solves.length > 0}
+          disabled={solves.length > 0 && solvesPerPage === solves.length}
         >
           Show All
         </button>
       </div>
 
+      {/* Scroll container */}
       <div className="stats-page">
-        <div className="stats-grid">
-          <div className="stats-item">
-            <StatsSummary
-              solves={solvesToDisplay}
-              overallStats={null} // or sessionStats?.[statsEvent]?.[currentSession || 'main']
-            />
+        <div className="stats-grid stats-grid--figma">
+          {/* Header */}
+          <div className="stats-item stats-item--header">
+            <StatsSummary solves={solvesToDisplay} overallStats={overallStatsForEvent} />
           </div>
-          <div className="stats-item">
+
+          {/* Charts */}
+          <div className="stats-item stats-item--line">
             <LineChart
               solves={solvesToDisplay}
               title={`Current Avg: ${statsEvent}`}
-              deleteTime={(index) => handleDeleteSolve(index)}
+              deleteTime={handleDeleteSolve}
               addPost={addPost}
             />
           </div>
-          <div className="stats-item">
+
+          <div className="stats-item stats-item--percent">
             <PercentBar solves={solvesToDisplay} title="Solves Distribution by Time" />
           </div>
-          <div className="stats-item">
+
+          <div className="stats-item stats-item--bar">
             <BarChart solves={solvesToDisplay} />
           </div>
-          <div className="stats-item">
+
+          {/* Table (just another stats item at the bottom) */}
+          <div className="stats-item stats-item--table">
             <TimeTable
               solves={solvesToDisplay}
-              deleteTime={(index) => handleDeleteSolve(index)}
+              deleteTime={handleDeleteSolve}
               addPost={addPost}
             />
           </div>

@@ -1,127 +1,204 @@
+/* src/components/Stats/Stats.css */
+
 td:nth-child(13) {
-    background-color: #2EC4B6; /* Different background for the average column */
-  }
-
-  .HorizontalGuides {
-    opacity: 20%;
-  }
-
-  .VerticalGuides {
-    opacity: 20%;
-  }
-
-.chartTitle {
-    display: flex;
-    margin-left: 40px;
-    color: white;
+  background-color: #2EC4B6;
 }
 
-.Label {
-    align-items: center;
+.HorizontalGuides { opacity: 20%; }
+.VerticalGuides { opacity: 20%; }
+
+.chartTitle {
+  display: flex;
+  margin-left: 40px;
+  color: white;
+}
+
+.Label { align-items: center; }
+
+/* -------------------------------------------------
+   ROOT LAYOUT + SCROLL
+-------------------------------------------------- */
+.statsPageRoot {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
 }
 
 .stats-page {
-    display: flex;
-    justify-content: center;
-    padding: 20px;
-    overflow-y: auto;
-    -ms-overflow-style: none;  /* Internet Explorer 10+ */
-    scrollbar-width: none;  /* Firefox */
+  flex: 1;
+  min-height: 0;
+
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  padding: 18px 18px 110px; /* smaller + still enough bottom room */
+  box-sizing: border-box;
+
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.stats-page::-webkit-scrollbar {
+  display: none;
 }
 
-.stats-page::-webkit-scrollbar { 
-  display: none;  /* Safari and Chrome */
+/* -------------------------------------------------
+   GRID (make it slightly narrower + less tall)
+-------------------------------------------------- */
+.stats-grid {
+  width: 100%;
+  max-width: 1220px;        /* ✅ less wide */
+  margin: 0 auto;
+  box-sizing: border-box;
+
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  grid-template-areas:
+    "header header"
+    "line   percent"
+    "line   bar"
+    "table  table";
+  gap: 16px;                /* ✅ tighter */
+  align-items: stretch;
 }
 
-  .stats-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 20px; /* This will add a gap between both rows and columns */
-    width: 100%;
-  }
-  
-  .stats-item {
-    background-color: rgba(100, 100, 100, 0.1);
-    border: 2px solid rgba(200, 200, 200,0.3);
-    border-radius: 10px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    width: 100%;
-    max-height: 550px;
-    overflow-y: scroll;
+/* -------------------------------------------------
+   CARD BASE
+-------------------------------------------------- */
+.stats-item {
+  background-color: rgba(100, 100, 100, 0.1);
+  border: 2px solid rgba(200, 200, 200, 0.3);
+  border-radius: 10px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
 
-  min-height: 350px;   /* or whatever works */
-  flex: 0 0 auto;      /* don’t shrink when PlayerBar resizes */
+/* Areas */
+.stats-item--header  { grid-area: header; }
+.stats-item--line    { grid-area: line; }
+.stats-item--percent { grid-area: percent; }
+.stats-item--bar     { grid-area: bar; }
+.stats-item--table   { grid-area: table; }
 
+/* -------------------------------------------------
+   HEADER (don’t clip)
+-------------------------------------------------- */
+.stats-item--header {
+  padding: 10px 12px;
+  overflow: hidden;
+}
 
-  }
+/* -------------------------------------------------
+   ✅ LINE CHART FIX (the important part)
+   Make the chart actually fill the big card.
+-------------------------------------------------- */
+.stats-item--line {
+  padding: 12px;
+  min-height: 460px;          /* ✅ smaller than before */
+  height: 460px;              /* ✅ explicit height helps ResponsiveContainer */
+  display: block;             /* ✅ don’t use flex here */
+  overflow: hidden;
+}
 
-  /*
-  .stats-item:hover {
-    background: rgba(200, 200, 200,0.05);
-    scale: 1.01;
-    transition: 200ms;
-  }
-*/ 
-  .stats-item::-webkit-scrollbar { 
-    display: none;  /* Safari and Chrome */
-  }
+/* Force the chart wrapper inside to stretch */
+.stats-item--line > * {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  min-height: 0;
+}
 
+/* -------------------------------------------------
+   RIGHT COLUMN CHARTS (a little shorter)
+-------------------------------------------------- */
+.stats-item--percent,
+.stats-item--bar {
+  padding: 12px;
+  min-height: 220px;
+  height: 220px;              /* ✅ explicit height helps responsive libs */
+  display: block;
+  overflow: hidden;
+}
 
-  /*Pie Chart*/
+/* Force children to fill */
+.stats-item--percent > *,
+.stats-item--bar > * {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  min-height: 0;
+}
 
-  .pie-chart-input {
-    height: 40px;
-    width: 80px; /* Adjust the width of the input */
-    padding: 8px;
-    font-size: 14px;
-    border: 1px solid #ccc; /* Add a subtle border */
-    border-radius: 5px; /* Rounded corners */
-    outline: none;
-    margin-left: 10px;
-    transition: border-color 0.3s ease;
-  
-    /* Add a focus effect */
-    box-shadow: none;
-  }
-  
-  .pie-chart-input:focus {
-    border-color: #2EC4B6; 
-    box-shadow: 0 0 5px rgba(46, 196, 182, 0.5); /* Add a glowing effect */
-  }
+/* -------------------------------------------------
+   TABLE
+-------------------------------------------------- */
+.stats-item--table {
+  padding: 10px 12px;
+  overflow: hidden;
+}
 
-  /* Bar Chart */
+/* -------------------------------------------------
+   OPTIONS ROW
+-------------------------------------------------- */
+.stats-options {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+  margin-left: 20px;
+  align-items: center;
+}
 
-  
-  
-  .stats-summary {
-    display: flex;
-    flex-direction: column;
-    margin: 20px 0;
-  }
-  
-  .stat-item {
-    margin-bottom: 10px;
-    font-family: 'Jost', sans-serif;
-    font-size: 16px;
-  }
-  
-  .stats-options {
-    display: flex;
-    gap: 10px;
-    margin-top: 20px;
-    margin-left: 20px;
-    align-items: center;
-  }
-  
+/* keeping your global input rule (watch other pages) */
 input {
   height: 25%;
   width: 50%;
 }
-  
-  
-  @media (max-width: 768px) {
-    .stats-grid {
-      grid-template-columns: 1fr; /* Single column layout for smaller screens */
-    }
+
+/* Pie chart input */
+.pie-chart-input {
+  height: 40px;
+  width: 80px;
+  padding: 8px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  outline: none;
+  margin-left: 10px;
+  transition: border-color 0.3s ease;
+  box-shadow: none;
+}
+
+.pie-chart-input:focus {
+  border-color: #2EC4B6;
+  box-shadow: 0 0 5px rgba(46, 196, 182, 0.5);
+}
+
+/* -------------------------------------------------
+   RESPONSIVE
+-------------------------------------------------- */
+@media (max-width: 900px) {
+  .stats-grid {
+    max-width: 100%;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "header"
+      "line"
+      "percent"
+      "bar"
+      "table";
   }
-  
+
+  .stats-item--line {
+    height: 400px;
+    min-height: 400px;
+  }
+
+  .stats-item--percent,
+  .stats-item--bar {
+    height: 220px;
+    min-height: 220px;
+  }
+}
