@@ -2,15 +2,11 @@
 import { getSessions } from "./getSessions";
 import { recomputeSessionStats } from "./recomputeSessionStats";
 
-/**
- * Recompute Stats for all sessions of a given user.
- * Useful as a one-off backfill or admin tool.
- */
 export const recomputeAllSessionStatsForUser = async (userID) => {
   const sessionItems = await getSessions(userID);
 
   for (const session of sessionItems) {
-    const event = session.Event;
+    const event = (session.Event || "").toUpperCase();
     const sessionID = session.SessionID;
 
     if (!event || !sessionID) continue;

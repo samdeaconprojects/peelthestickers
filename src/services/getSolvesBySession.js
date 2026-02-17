@@ -1,12 +1,50 @@
 import dynamoDB from "../components/SignIn/awsConfig.js";
 
 /**
- * Fetch ALL solves for a given session, safely paging past DynamoDB's 1 MB limit.
- * Returns solves sorted oldest -> newest (so your existing Stats slicing & indices work exactly as before).
+ * Fetch ONE PAGE of solves for a given session, using DynamoDB paging.
+ * Returns:
+ *  - items: newest -> oldest (ScanIndexForward:false)
+ *  - lastKey: LastEvaluatedKey (or null)
  *
- * Usage in App (unchanged from your old "grab everything" approach):
- *   const solves = await getSolvesBySession(userID, currentEvent, currentSessionID);
- *   setSessions(prev => ({ ...prev, [currentEvent]: solves }));
+ * You can reverse(items) in the caller if you want oldest -> newest UI order.
+ */
+export const getSolvesBySessionPage = async (
+  userID,
+  event,
+  sessionID,
+  limit = 200,
+  cursor = null
+) => {
+  const normalizedEvent = (event || "").toUpperCase();
+
+  try {
+    const params = {
+      TableName: "PTS",
+      IndexName: "GSI1",
+      KeyConditionExpression: "GSI1PK = :gsi1pk",
+      ExpressionAttributeValues: {
+        ":gsi1pk": `SESSION#${userID}#${normalizedEvent}#${sessionID}`,
+      },
+      ScanIndexForward: false, // newest first
+      Limit: limit,
+      ExclusiveStartKey: cursor || undefined,
+    };
+
+    const result = await dynamoDB.query(params).promise();
+
+    return {
+      items: result.Items || [],
+      lastKey: result.LastEvaluatedKey || null,
+    };
+  } catch (err) {
+    console.error("❌ Error fetching solves page:", err);
+    throw err;
+  }
+};
+
+/**
+ * Fetch ALL solves for a given session, safely paging past DynamoDB's 1 MB limit.
+ * Returns solves sorted oldest -> newest (so your UI slicing/indices work).
  */
 export const getSolvesBySession = async (userID, event, sessionID) => {
   const normalizedEvent = (event || "").toUpperCase();
@@ -22,20 +60,18 @@ export const getSolvesBySession = async (userID, event, sessionID) => {
         ExpressionAttributeValues: {
           ":gsi1pk": `SESSION#${userID}#${normalizedEvent}#${sessionID}`,
         },
-        // Newest first to make paging cheaper, then we'll reverse:
-        ScanIndexForward: false,
-        Limit: 1000,            // tune page size as you like (1000 is fine)
+        ScanIndexForward: false, // newest first
+        Limit: 1000,
         ExclusiveStartKey: cursor || undefined,
       };
 
       const result = await dynamoDB.query(params).promise();
-      if (result.Items && result.Items.length) {
-        all.push(...result.Items);
-      }
+      if (result.Items && result.Items.length) all.push(...result.Items);
+
       cursor = result.LastEvaluatedKey || null;
     } while (cursor);
 
-    // Your UI expects oldest -> newest. We fetched newest-first above, so reverse:
+    // reverse to oldest -> newest
     return all.reverse();
   } catch (err) {
     console.error("❌ Error fetching solves (paged):", err);
@@ -44,8 +80,7 @@ export const getSolvesBySession = async (userID, event, sessionID) => {
 };
 
 /**
- * If you later want a "quick" last-N fetch for other screens,
- * you can use this helper. Not required for restoring old Stats behavior.
+ * Quick helper: last N solves (oldest -> newest).
  */
 export const getLastNSolvesBySession = async (userID, event, sessionID, n = 100) => {
   const normalizedEvent = (event || "").toUpperCase();
@@ -64,7 +99,6 @@ export const getLastNSolvesBySession = async (userID, event, sessionID, n = 100)
 
     const result = await dynamoDB.query(params).promise();
     const items = result.Items || [];
-    // Return oldest -> newest for consistency with your UI:
     return items.reverse();
   } catch (err) {
     console.error("❌ Error fetching last-N solves:", err);

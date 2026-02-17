@@ -2,50 +2,134 @@ import React, { useMemo } from "react";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
 import "./StatsSummary.css";
 
-const calculateMedianTime = (times) => {
-  const sorted = times.slice().sort((a, b) => a - b);
+function solveMsAdjusted(s) {
+  if (!s) return null;
+
+  const base =
+    typeof s.originalTime === "number" && isFinite(s.originalTime)
+      ? s.originalTime
+      : typeof s.time === "number" && isFinite(s.time)
+      ? s.time
+      : null;
+
+  if (base == null) return null;
+
+  if (s.penalty === "+2") return base + 2000;
+  if (s.penalty === "DNF") return null;
+
+  return base;
+}
+
+function toTimesForWCA(solves) {
+  return (Array.isArray(solves) ? solves : []).map((s) => {
+    if (!s) return "DNF";
+
+    const base =
+      typeof s.originalTime === "number" && isFinite(s.originalTime)
+        ? s.originalTime
+        : typeof s.time === "number" && isFinite(s.time)
+        ? s.time
+        : null;
+
+    if (s.penalty === "DNF") return "DNF";
+    if (base == null) return "DNF";
+    if (s.penalty === "+2") return base + 2000;
+    return base;
+  });
+}
+
+function meanMs(nums) {
+  if (!nums.length) return null;
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
+}
+
+function medianMs(nums) {
+  if (!nums.length) return null;
+  const sorted = [...nums].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-};
+}
 
-const calculateStandardDeviation = (times) => {
-  if (times.length < 2) return null;
-  const avg = times.reduce((s, t) => s + t, 0) / times.length;
-  const variance = times.reduce((s, t) => s + Math.pow(t - avg, 2), 0) / times.length;
+function stdDevMs(nums) {
+  if (nums.length < 2) return null;
+  const avg = meanMs(nums);
+  const variance = nums.reduce((sum, x) => sum + (x - avg) ** 2, 0) / nums.length;
   return Math.sqrt(variance);
-};
-
-function bestWindowAverageDNFAware(timesWithDNF, n) {
-  // Uses calculateAverage on sliding windows of the provided list
-  // (DNF-aware because list can contain "DNF")
-  if (!Array.isArray(timesWithDNF) || timesWithDNF.length < n) return null;
-
-  let best = Infinity;
-  for (let i = 0; i <= timesWithDNF.length - n; i++) {
-    const window = timesWithDNF.slice(i, i + n);
-    const out = calculateAverage(window, true);
-    const avg = out?.average;
-    if (typeof avg === "number" && isFinite(avg) && avg < best) best = avg;
-  }
-  return isFinite(best) ? best : null;
 }
 
-function bestWindowAverageNumericOnly(numericTimes, n) {
-  if (!Array.isArray(numericTimes) || numericTimes.length < n) return null;
-
-  let best = Infinity;
-  for (let i = 0; i <= numericTimes.length - n; i++) {
-    const window = numericTimes.slice(i, i + n);
-    const out = calculateAverage(window, true);
-    const avg = out?.average;
-    if (typeof avg === "number" && isFinite(avg) && avg < best) best = avg;
-  }
-  return isFinite(best) ? best : null;
+function mo3FromTimes(times3) {
+  if (times3.length < 3) return null;
+  if (times3.some((t) => t === "DNF")) return "DNF";
+  const nums = times3.filter((t) => typeof t === "number" && isFinite(t));
+  if (nums.length !== 3) return null;
+  return meanMs(nums);
 }
 
-function safeFmt(msOrNA) {
-  if (msOrNA == null) return "—";
-  return formatTime(msOrNA);
+function bestMo3(times) {
+  if (times.length < 3) return null;
+  let best = Infinity;
+  let found = false;
+  for (let i = 0; i <= times.length - 3; i++) {
+    const v = mo3FromTimes(times.slice(i, i + 3));
+    if (typeof v === "number" && isFinite(v)) {
+      found = true;
+      best = Math.min(best, v);
+    }
+  }
+  return found ? best : null;
+}
+
+function bestAoUsingCalculateAverage(times, n) {
+  if (times.length < n) return null;
+  let best = Infinity;
+  let found = false;
+
+  for (let i = 0; i <= times.length - n; i++) {
+    const window = times.slice(i, i + n);
+    const out = calculateAverage(window, true)?.average;
+    if (out === "DNF" || out == null) continue;
+    if (typeof out === "number" && isFinite(out)) {
+      found = true;
+      best = Math.min(best, out);
+    }
+  }
+
+  return found ? best : null;
+}
+
+function currentAoUsingCalculateAverage(times, n) {
+  if (times.length < n) return null;
+  const window = times.slice(-n);
+  const out = calculateAverage(window, true)?.average;
+  if (out === "DNF") return "DNF";
+  return out ?? null;
+}
+
+function bestRollingMean(nums, n) {
+  if (nums.length < n) return null;
+  let best = Infinity;
+  let found = false;
+
+  let sum = 0;
+  for (let i = 0; i < nums.length; i++) {
+    sum += nums[i];
+    if (i >= n) sum -= nums[i - n];
+    if (i >= n - 1) {
+      const avg = sum / n;
+      if (isFinite(avg)) {
+        found = true;
+        best = Math.min(best, avg);
+      }
+    }
+  }
+
+  return found ? best : null;
+}
+
+function displayMaybe(msOrDnf) {
+  if (msOrDnf === "DNF") return "DNF";
+  if (msOrDnf == null) return "—";
+  return formatTime(msOrDnf);
 }
 
 function StatsSummary({ solves, overallStats }) {
@@ -53,142 +137,170 @@ function StatsSummary({ solves, overallStats }) {
     const input = Array.isArray(solves) ? solves : [];
     if (input.length === 0) return null;
 
-    // timesWithDNF: DNF -> "DNF", else numeric ms
-    const timesWithDNF = input.map((s) => (s?.penalty === "DNF" ? "DNF" : s?.time));
+    const numeric = input
+      .map(solveMsAdjusted)
+      .filter((x) => typeof x === "number" && isFinite(x));
 
-    // numeric-only times for mean/median/stddev and larger bests
-    const numericTimes = input
-      .filter((s) => s?.penalty !== "DNF" && typeof s?.time === "number" && isFinite(s.time))
-      .map((s) => s.time);
+    const timesForWCA = toTimesForWCA(input);
 
-    const mean =
-      numericTimes.length > 0
-        ? numericTimes.reduce((sum, t) => sum + t, 0) / numericTimes.length
-        : null;
+    const bestSingleInView = numeric.length ? Math.min(...numeric) : null;
 
-    const median = numericTimes.length > 0 ? calculateMedianTime(numericTimes) : null;
+    const meanInView = meanMs(numeric);
+    const medianInView = medianMs(numeric);
+    const stdDevInView = stdDevMs(numeric);
 
-    const stdDev = numericTimes.length > 1 ? calculateStandardDeviation(numericTimes) : null;
-
-    const bestSingle = numericTimes.length > 0 ? Math.min(...numericTimes) : null;
-
-    // ---------- Right-side mini panels ----------
-    // "Current" in Figma: mo3/ao5/ao12/ao50/ao100 (computed from the *visible solves*)
     const current = {
-      mo3: timesWithDNF.length >= 3 ? calculateAverage(timesWithDNF.slice(-3), true)?.average ?? null : null,
-      ao5: timesWithDNF.length >= 5 ? calculateAverage(timesWithDNF.slice(-5), true)?.average ?? null : null,
-      ao12: timesWithDNF.length >= 12 ? calculateAverage(timesWithDNF.slice(-12), true)?.average ?? null : null,
-      ao50: numericTimes.length >= 50 ? calculateAverage(numericTimes.slice(-50), true)?.average ?? null : null,
-      ao100: numericTimes.length >= 100 ? calculateAverage(numericTimes.slice(-100), true)?.average ?? null : null,
+      mo3: mo3FromTimes(timesForWCA.slice(-3)),
+      ao5: currentAoUsingCalculateAverage(timesForWCA, 5),
+      ao12: currentAoUsingCalculateAverage(timesForWCA, 12),
+      ao50: numeric.length >= 50 ? meanMs(numeric.slice(-50)) : null,
+      ao100: numeric.length >= 100 ? meanMs(numeric.slice(-100)) : null,
     };
 
-    // "Best in view" (best sliding window inside visible solves)
     const bestInView = {
-      mo3: bestWindowAverageDNFAware(timesWithDNF, 3),
-      ao5: bestWindowAverageDNFAware(timesWithDNF, 5),
-      ao12: bestWindowAverageDNFAware(timesWithDNF, 12),
-      ao50: bestWindowAverageNumericOnly(numericTimes, 50),
-      ao100: bestWindowAverageNumericOnly(numericTimes, 100),
-    };
-
-    // "Overall" (prefer precomputed overallStats when available; fall back to view)
-    const overall = {
-      single: overallStats?.bestSingleMs ?? bestSingle,
-      mean: overallStats?.overallAvgMs ?? mean,
-      ao5: overallStats?.bestAo5Ms ?? null,
-      ao12: overallStats?.bestAo12Ms ?? null,
-      // If you later add these to SESSIONSTATS, they’ll auto-show
-      ao50: overallStats?.bestAo50Ms ?? null,
-      ao100: overallStats?.bestAo100Ms ?? null,
+      mo3: bestMo3(timesForWCA),
+      ao5: bestAoUsingCalculateAverage(timesForWCA, 5),
+      ao12: bestAoUsingCalculateAverage(timesForWCA, 12),
+      ao50: numeric.length >= 50 ? bestRollingMean(numeric, 50) : null,
+      ao100: numeric.length >= 100 ? bestRollingMean(numeric, 100) : null,
     };
 
     return {
-      mean,
-      median,
-      stdDev,
-      bestSingle,
+      bestSingleInView,
+      meanInView,
+      medianInView,
+      stdDevInView,
       current,
       bestInView,
-      overall,
-      solveCountView: input.length,
     };
-  }, [solves, overallStats]);
+  }, [solves]);
 
-  if (!computed) return <div className="statsSummaryEmpty">No solves available</div>;
+  if (!computed) {
+    return <div className="statsSummaryEmpty">No solves available</div>;
+  }
 
-  const totalSolveCount =
-    overallStats && overallStats.solveCount != null ? overallStats.solveCount : computed.solveCountView;
+  // ✅ in-view count (last 100 by default)
+  const inViewCount = Array.isArray(solves) ? solves.length : 0;
 
-  const meanToDisplay =
-    overallStats && overallStats.overallAvgMs != null ? overallStats.overallAvgMs : computed.mean;
+  // ✅ overall only from cached stats
+  const overall = {
+    solveCount: overallStats?.solveCount ?? null,
+    single: overallStats?.bestSingleMs ?? null,
+    mean: overallStats?.overallAvgMs ?? overallStats?.meanMs ?? null,
+    ao5: overallStats?.bestAo5Ms ?? overallStats?.bestAo5 ?? null,
+    ao12: overallStats?.bestAo12Ms ?? overallStats?.bestAo12 ?? null,
+    ao50: overallStats?.bestAo50Ms ?? overallStats?.bestAo50 ?? null,
+    ao100: overallStats?.bestAo100Ms ?? overallStats?.bestAo100 ?? null,
+  };
 
-  const bestSingleToDisplay =
-    overallStats && overallStats.bestSingleMs != null ? overallStats.bestSingleMs : computed.bestSingle;
+  const meanToShow = overall.mean ?? computed.meanInView;
+  const bestSingleToShow = overall.single ?? computed.bestSingleInView;
 
   return (
     <div className="statsSummaryBar">
-      {/* LEFT: count */}
       <div className="ssCount">
-        <div className="ssCountValue">{totalSolveCount}</div>
-        <div className="ssCountLabel">solves</div>
+        <div>
+          <div className="ssCountValue">{inViewCount}</div>
+          <div className="ssCountLabel">solves</div>
+        </div>
 
         <div className="ssBestSingle">
-          <div className="ssBestSingleValue">{safeFmt(bestSingleToDisplay)}</div>
-          <div className="ssBestSingleLabel">best single</div>
+          <div className="ssBestSingleValue">{displayMaybe(bestSingleToShow)}</div>
+          <div className="ssBestSingleLabel">BEST SINGLE</div>
         </div>
       </div>
 
-      {/* MIDDLE: mean/median/stddev */}
       <div className="ssMainStats">
-        <div className="ssStat">
+        <div>
           <div className="ssStatLabel">MEAN</div>
-          <div className="ssStatValue">{safeFmt(meanToDisplay)}</div>
+          <div className="ssStatValue">{displayMaybe(meanToShow)}</div>
         </div>
-
-        <div className="ssStat">
+        <div>
           <div className="ssStatLabel">MEDIAN</div>
-          <div className="ssStatValue">{safeFmt(computed.median)}</div>
+          <div className="ssStatValue">{displayMaybe(computed.medianInView)}</div>
         </div>
-
-        <div className="ssStat">
+        <div>
           <div className="ssStatLabel">ST. DEV</div>
-          <div className="ssStatValue">{safeFmt(computed.stdDev)}</div>
+          <div className="ssStatValue">{displayMaybe(computed.stdDevInView)}</div>
         </div>
       </div>
 
-      {/* RIGHT: 3 mini panels (Figma-like) */}
       <div className="ssPanels">
         <div className="ssPanel ssPanel--current">
           <div className="ssPanelTitle">Current</div>
           <div className="ssPanelGrid">
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.current.mo3)}</span><span className="ssLbl">mo3</span></div>
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.current.ao5)}</span><span className="ssLbl">ao5</span></div>
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.current.ao12)}</span><span className="ssLbl">ao12</span></div>
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.current.ao50)}</span><span className="ssLbl">ao50</span></div>
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.current.ao100)}</span><span className="ssLbl">ao100</span></div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(computed.current.mo3)}</div>
+              <div className="ssLbl">mo3</div>
+            </div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(computed.current.ao5)}</div>
+              <div className="ssLbl">ao5</div>
+            </div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(computed.current.ao12)}</div>
+              <div className="ssLbl">ao12</div>
+            </div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(computed.current.ao50)}</div>
+              <div className="ssLbl">ao50</div>
+            </div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(computed.current.ao100)}</div>
+              <div className="ssLbl">ao100</div>
+            </div>
           </div>
         </div>
 
         <div className="ssPanel ssPanel--best">
           <div className="ssPanelTitle">Best in view</div>
           <div className="ssPanelGrid">
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.bestInView.mo3)}</span><span className="ssLbl">mo3</span></div>
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.bestInView.ao5)}</span><span className="ssLbl">ao5</span></div>
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.bestInView.ao12)}</span><span className="ssLbl">ao12</span></div>
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.bestInView.ao50)}</span><span className="ssLbl">ao50</span></div>
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.bestInView.ao100)}</span><span className="ssLbl">ao100</span></div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(computed.bestInView.mo3)}</div>
+              <div className="ssLbl">mo3</div>
+            </div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(computed.bestInView.ao5)}</div>
+              <div className="ssLbl">ao5</div>
+            </div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(computed.bestInView.ao12)}</div>
+              <div className="ssLbl">ao12</div>
+            </div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(computed.bestInView.ao50)}</div>
+              <div className="ssLbl">ao50</div>
+            </div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(computed.bestInView.ao100)}</div>
+              <div className="ssLbl">ao100</div>
+            </div>
           </div>
         </div>
 
         <div className="ssPanel ssPanel--overall">
           <div className="ssPanelTitle">Overall</div>
           <div className="ssPanelGrid">
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.overall.single)}</span><span className="ssLbl">single</span></div>
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.overall.mean)}</span><span className="ssLbl">mean</span></div>
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.overall.ao5)}</span><span className="ssLbl">ao5</span></div>
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.overall.ao12)}</span><span className="ssLbl">ao12</span></div>
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.overall.ao50)}</span><span className="ssLbl">ao50</span></div>
-            <div className="ssRow"><span className="ssKey">{safeFmt(computed.overall.ao100)}</span><span className="ssLbl">ao100</span></div>
+            <div className="ssRow">
+              <div className="ssKey">{overall.solveCount ?? "—"}</div>
+              <div className="ssLbl">solves</div>
+            </div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(overall.single)}</div>
+              <div className="ssLbl">single</div>
+            </div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(overall.mean)}</div>
+              <div className="ssLbl">mean</div>
+            </div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(overall.ao5)}</div>
+              <div className="ssLbl">ao5</div>
+            </div>
+            <div className="ssRow">
+              <div className="ssKey">{displayMaybe(overall.ao12)}</div>
+              <div className="ssLbl">ao12</div>
+            </div>
           </div>
         </div>
       </div>

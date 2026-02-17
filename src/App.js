@@ -1008,6 +1008,7 @@ function App() {
                 <Stats
                   sessions={sessions}
                   sessionStats={sessionStats}
+                  sessionsList={sessionsList}
                   setSessions={setSessions}
                   currentEvent={currentEvent}
                   currentSession={currentSession}

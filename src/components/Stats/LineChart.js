@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState, useEffect } from "react";
 import LineChartBuilder from "./LineChartBuilder";
 import Label from "./AxisLabel";
 import Detail from "../Detail/Detail";
@@ -24,15 +24,8 @@ function safeDateFromSolve(s) {
 }
 
 function formatBucketLabel(mode, key) {
-  // key formats:
-  // day:   YYYY-MM-DD
-  // week:  YYYY-W##
-  // month: YYYY-MM
-  // year:  YYYY
   if (!key) return "";
-
   if (mode === "day") {
-    // show MM/DD
     const [y, m, d] = key.split("-");
     return `${m}/${d}`;
   }
@@ -41,7 +34,6 @@ function formatBucketLabel(mode, key) {
     return `${m}/${y.slice(2)}`;
   }
   if (mode === "week") {
-    // show W##
     const parts = key.split("-W");
     return parts.length === 2 ? `W${parts[1]}` : key;
   }
@@ -79,16 +71,12 @@ function groupByDate(solves, mode) {
     map.get(key).push(s);
   }
 
-  // Keep chronological order (Map preserves insertion, but solves might not be sorted)
   const keys = Array.from(map.keys()).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
   return keys
     .map((key) => {
       const arr = map.get(key) || [];
 
-      // Same rule as your new version:
-      // - DNFs only count if originalTime is numeric
-      // - otherwise time must be numeric
       const valid = arr.filter((solve) => {
         if (solve.penalty === "DNF") {
           return typeof solve.originalTime === "number" && isFinite(solve.originalTime);
@@ -104,65 +92,91 @@ function groupByDate(solves, mode) {
           return sum + base;
         }, 0) / valid.length;
 
-      // last solve in bucket for detail click
       const lastSolve = valid[valid.length - 1];
 
       return {
         isBucket: true,
         bucketKey: key,
         bucketLabel: formatBucketLabel(mode, key),
-        time: avgMs, // store ms here, consistent with solve.time units
+        time: avgMs, // ms
         solve: lastSolve,
-        // keep fullIndex for delete/detail compatibility when possible
         fullIndex: lastSolve?.fullIndex,
       };
     })
     .filter(Boolean);
 }
 
+/* -----------------------------
+   ROLLING AVERAGES (AoN)
+----------------------------- */
+function rollingAverageSeconds(data, windowSize) {
+  const out = new Array(data.length).fill(null);
+  let sum = 0;
+
+  for (let i = 0; i < data.length; i++) {
+    const v = data[i]?.y;
+    if (typeof v !== "number" || !isFinite(v)) {
+      sum = 0;
+      continue;
+    }
+
+    sum += v;
+    if (i >= windowSize) sum -= data[i - windowSize]?.y;
+
+    if (i >= windowSize - 1) out[i] = sum / windowSize;
+  }
+  return out;
+}
+
 function LineChart({ solves, title, deleteTime, addPost }) {
   const [selectedSolve, setSelectedSolve] = useState(null);
   const [selectedSolveIndex, setSelectedSolveIndex] = useState(null);
 
-  // ✅ bring back selector
-  // last100, all, day, week, month, year
-  const [viewMode, setViewMode] = useState("last100");
+  const [showAo5, setShowAo5] = useState(false);
+  const [showAo12, setShowAo12] = useState(false);
 
-  const computed = useMemo(() => {
+  // Track if user manually picked a view (so we don't override)
+  const userPickedView = useRef(false);
+
+  // ✅ baseValid == "current view" (what Stats passed in)
+  const baseValid = useMemo(() => {
     const input = Array.isArray(solves) ? solves : [];
-
-    // Base “valid solves” rule (same as your new version)
-    const baseValid = input.filter((solve) => {
+    return input.filter((solve) => {
       if (solve.penalty === "DNF") {
         return typeof solve.originalTime === "number" && isFinite(solve.originalTime);
       }
       return typeof solve.time === "number" && isFinite(solve.time);
     });
+  }, [solves]);
 
-    // Decide what we plot
+  // ✅ DEFAULT: current view (unless 500+ => day buckets)
+  const [viewMode, setViewMode] = useState(() => (baseValid.length >= 500 ? "day" : "current"));
+
+  useEffect(() => {
+    if (userPickedView.current) return;
+    setViewMode(baseValid.length >= 500 ? "day" : "current");
+  }, [baseValid.length]);
+
+  const computed = useMemo(() => {
     let processed = [];
 
-    if (viewMode === "last100") {
-      processed = baseValid.slice(-100);
-    } else if (viewMode === "all") {
-      if (baseValid.length > 5000) {
-        // keep your warning behavior
+    if (viewMode === "current") {
+      processed = baseValid; // ✅ no slicing; show exactly what's in Stats view
+      if (processed.length > 5000) {
         // eslint-disable-next-line no-alert
         alert("⚠ Rendering more than 5000 solves may be slow");
       }
-      processed = baseValid;
+    } else if (viewMode === "last100") {
+      processed = baseValid.slice(-100);
     } else {
-      // date-bucketed series (day/week/month/year)
       processed = groupByDate(baseValid, viewMode);
     }
 
     if (processed.length === 0) {
-      return { data: [], solveCountText: "Solve Count: 0" };
+      return { data: [], solveCountText: "Solve Count: 0", extraSeries: [] };
     }
 
-    // Convert to ms array for min/max/avg
     const timesMs = processed.map((item) => {
-      // bucket item has item.time already in ms
       if (item.isBucket) return item.time;
       return item.penalty === "DNF" ? item.originalTime : item.time;
     });
@@ -174,11 +188,8 @@ function LineChart({ solves, title, deleteTime, addPost }) {
 
     const getColor = (timeMs) => {
       const ratio = (timeMs - minTime) / denom;
-      if (timeMs <= averageTime) {
-        return `rgb(${255 * ratio}, 255, 0)`; // Green -> Yellow
-      } else {
-        return `rgb(255, ${255 * (1 - ratio)}, 0)`; // Yellow -> Red
-      }
+      if (timeMs <= averageTime) return `rgb(${255 * ratio}, 255, 0)`;
+      return `rgb(255, ${255 * (1 - ratio)}, 0)`;
     };
 
     const data = processed.map((item, index) => {
@@ -188,11 +199,7 @@ function LineChart({ solves, title, deleteTime, addPost }) {
           ? item.originalTime
           : item.time;
 
-      const label =
-        item.isBucket
-          ? item.bucketLabel
-          : `${index + 1}`;
-
+      const label = item.isBucket ? item.bucketLabel : `${index + 1}`;
       const solveForDetail = item.isBucket ? item.solve : item;
 
       return {
@@ -207,32 +214,85 @@ function LineChart({ solves, title, deleteTime, addPost }) {
       };
     });
 
+    // ✅ Ao overlays only on solve-level views: current + last100
+    const extraSeries = [];
+    const solveLevel = viewMode === "current" || viewMode === "last100";
+
+    if (solveLevel && showAo5) {
+      const ao5 = rollingAverageSeconds(data, 5);
+      extraSeries.push({
+        id: "ao5",
+        label: "Ao5",
+        stroke: "#3B82F6",
+        points: data.map((d, i) => ({ x: d.x, y: ao5[i] })),
+      });
+    }
+
+    if (solveLevel && showAo12) {
+      const ao12 = rollingAverageSeconds(data, 12);
+      extraSeries.push({
+        id: "ao12",
+        label: "Ao12",
+        stroke: "#A855F7",
+        points: data.map((d, i) => ({ x: d.x, y: ao12[i] })),
+      });
+    }
+
     return {
       data,
       solveCountText: `Solve Count: ${data.length}`,
+      extraSeries,
     };
-  }, [solves, viewMode]);
+  }, [baseValid, viewMode, showAo5, showAo12]);
+
+  const solveLevel = viewMode === "current" || viewMode === "last100";
 
   return (
     <div className="lineChart">
-      {/* ✅ selector (like the old version) */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-        <select value={viewMode} onChange={(e) => setViewMode(e.target.value)}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+        <select
+          value={viewMode}
+          onChange={(e) => {
+            userPickedView.current = true;
+            setViewMode(e.target.value);
+          }}
+        >
+          <option value="current">Current View</option>
           <option value="last100">Last 100</option>
-          <option value="all">Show All</option>
           <option value="day">By Day</option>
           <option value="week">By Week</option>
           <option value="month">By Month</option>
           <option value="year">By Year</option>
         </select>
+
+        <label style={{ display: "flex", gap: 6, alignItems: "center", opacity: solveLevel ? 1 : 0.4 }}>
+          <input
+            type="checkbox"
+            checked={showAo5}
+            disabled={!solveLevel}
+            onChange={(e) => setShowAo5(e.target.checked)}
+          />
+          Ao5 line
+        </label>
+
+        <label style={{ display: "flex", gap: 6, alignItems: "center", opacity: solveLevel ? 1 : 0.4 }}>
+          <input
+            type="checkbox"
+            checked={showAo12}
+            disabled={!solveLevel}
+            onChange={(e) => setShowAo12(e.target.checked)}
+          />
+          Ao12 line
+        </label>
       </div>
 
-      <div className="chartTitle">{/* {title} if you want */}</div>
+      <div className="chartTitle">{/* {title} */}</div>
 
       <LineChartBuilder
-        width={500}
-        height={300}
+        width={560}
+        height={340}
         data={computed.data}
+        extraSeries={computed.extraSeries}
         horizontalGuides={5}
         precision={2}
         verticalGuides={7}

@@ -25,6 +25,14 @@ td:nth-child(13) {
   min-height: 0;
 }
 
+/* ✅ Keeps header stable and prevents “jump” */
+.statsStatusLine{
+  margin: 6px 18px 0;
+  opacity: 0.65;
+  font-weight: 800;
+  font-size: 12px;
+}
+
 .stats-page {
   flex: 1;
   min-height: 0;
@@ -32,22 +40,170 @@ td:nth-child(13) {
   overflow-y: auto;
   overflow-x: hidden;
 
-  padding: 18px 18px 110px; /* smaller + still enough bottom room */
+  padding: 18px 18px 110px;
   box-sizing: border-box;
 
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
-.stats-page::-webkit-scrollbar {
-  display: none;
+.stats-page::-webkit-scrollbar { display: none; }
+
+/* -------------------------------------------------
+   ✅ FIGMA TOP BAR
+-------------------------------------------------- */
+.statsTopBar{
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 0 18px;
+  box-sizing: border-box;
+}
+
+.statsTopLeft{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.statsSelect{
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: rgba(0,0,0,0.25);
+  border: 2px solid rgba(255,255,255,0.20);
+  color: white;
+  font-weight: 900;
+  outline: none;
+}
+
+.statsSessionWrap{
+  position: relative;
+}
+
+.statsSessionBtn{
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: rgba(0,0,0,0.25);
+  border: 2px solid rgba(255,255,255,0.20);
+  color: white;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.statsCaret{
+  opacity: 0.7;
+  font-size: 12px;
+}
+
+.statsSessionMenu{
+  position: absolute;
+  top: 38px;
+  left: 0;
+  min-width: 240px;
+  padding: 6px;
+  border-radius: 10px;
+  background: rgba(10, 14, 18, 0.98);
+  border: 2px solid rgba(255,255,255,0.14);
+  z-index: 50;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+}
+
+.statsSessionEmpty{
+  padding: 10px;
+  opacity: 0.7;
+  font-weight: 800;
+}
+
+.statsSessionItem{
+  width: 100%;
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-items: center;
+  gap: 8px;
+
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: white;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.statsSessionItem:hover{
+  background: rgba(255,255,255,0.06);
+}
+
+.statsSessionItem .check{
+  width: 24px;
+  text-align: center;
+  color: #2EC4B6;
+  font-weight: 900;
+}
+
+.statsSessionItem.active{
+  background: rgba(46,196,182,0.10);
+  border: 1px solid rgba(46,196,182,0.25);
+}
+
+.statsTopMiddle{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.statsTopMeta{
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.statsTopCount{
+  font-size: 16px;
+  font-weight: 900;
+  color: white;
+}
+
+.statsTopCountLabel{
+  font-size: 12px;
+  font-weight: 900;
+  opacity: 0.7;
+}
+
+.statsTopRange{
+  font-size: 12px;
+  font-weight: 900;
+  opacity: 0.65;
+}
+
+.statsTopRight{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.statsTopRight button{
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
 }
 
 /* -------------------------------------------------
-   GRID (make it slightly narrower + less tall)
+   GRID (slightly narrower + less tall)
 -------------------------------------------------- */
 .stats-grid {
   width: 100%;
-  max-width: 1220px;        /* ✅ less wide */
+  max-width: 1220px;
   margin: 0 auto;
   box-sizing: border-box;
 
@@ -58,7 +214,7 @@ td:nth-child(13) {
     "line   percent"
     "line   bar"
     "table  table";
-  gap: 16px;                /* ✅ tighter */
+  gap: 16px;
   align-items: stretch;
 }
 
@@ -83,27 +239,21 @@ td:nth-child(13) {
 .stats-item--bar     { grid-area: bar; }
 .stats-item--table   { grid-area: table; }
 
-/* -------------------------------------------------
-   HEADER (don’t clip)
--------------------------------------------------- */
+/* Header */
 .stats-item--header {
   padding: 10px 12px;
   overflow: hidden;
 }
 
-/* -------------------------------------------------
-   ✅ LINE CHART FIX (the important part)
-   Make the chart actually fill the big card.
--------------------------------------------------- */
+/* ✅ Line chart fill fix */
 .stats-item--line {
   padding: 12px;
-  min-height: 460px;          /* ✅ smaller than before */
-  height: 460px;              /* ✅ explicit height helps ResponsiveContainer */
-  display: block;             /* ✅ don’t use flex here */
+  min-height: 460px;
+  height: 460px;
+  display: block;
   overflow: hidden;
 }
 
-/* Force the chart wrapper inside to stretch */
 .stats-item--line > * {
   width: 100% !important;
   height: 100% !important;
@@ -111,19 +261,16 @@ td:nth-child(13) {
   min-height: 0;
 }
 
-/* -------------------------------------------------
-   RIGHT COLUMN CHARTS (a little shorter)
--------------------------------------------------- */
+/* Right column charts */
 .stats-item--percent,
 .stats-item--bar {
   padding: 12px;
   min-height: 220px;
-  height: 220px;              /* ✅ explicit height helps responsive libs */
+  height: 220px;
   display: block;
   overflow: hidden;
 }
 
-/* Force children to fill */
 .stats-item--percent > *,
 .stats-item--bar > * {
   width: 100% !important;
@@ -132,26 +279,40 @@ td:nth-child(13) {
   min-height: 0;
 }
 
-/* -------------------------------------------------
-   TABLE
--------------------------------------------------- */
+/* Table */
 .stats-item--table {
   padding: 10px 12px;
   overflow: hidden;
+  min-height: 240px;
 }
 
 /* -------------------------------------------------
-   OPTIONS ROW
+   LOADING OVERLAY (prevents “flash”)
 -------------------------------------------------- */
-.stats-options {
-  display: flex;
-  gap: 10px;
-  margin-top: 20px;
-  margin-left: 20px;
-  align-items: center;
+.stats-grid--loading {
+  position: relative;
 }
 
-/* keeping your global input rule (watch other pages) */
+.statsLoadingOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 10px 14px;
+  color: rgba(255,255,255,0.75);
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.25), rgba(0,0,0,0));
+  border-radius: 12px;
+}
+
+.stats-item--minh { min-height: 160px; }
+.stats-item--line.stats-item--minh { min-height: 320px; }
+
+/* -------------------------------------------------
+   keeping your global input rule (watch other pages)
+-------------------------------------------------- */
 input {
   height: 25%;
   width: 50%;
@@ -180,6 +341,17 @@ input {
    RESPONSIVE
 -------------------------------------------------- */
 @media (max-width: 900px) {
+  .statsTopBar{
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .statsTopMiddle{
+    justify-content: flex-start;
+  }
+  .statsTopRight{
+    flex-wrap: wrap;
+  }
+
   .stats-grid {
     max-width: 100%;
     grid-template-columns: 1fr;

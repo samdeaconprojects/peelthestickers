@@ -5,43 +5,41 @@ import { buildSessionStatsFromSolves } from "./sessionStatsUtils.js";
 
 /**
  * Recompute Stats for ONE session from ALL its solves.
- * - userID: e.g. "tucktest1"
- * - event: e.g. "333"
- * - sessionID: e.g. "main"
+ * Writes to SESSIONSTATS item (PK=USER#id, SK=SESSIONSTATS#EVENT#sessionID)
  */
 export const recomputeSessionStats = async (userID, event, sessionID) => {
   const normalizedEvent = (event || "").toUpperCase();
+  const sid = sessionID || "main";
 
-  // 1. Load all solves, oldest -> newest (your helper already does this)
-  const solves = await getSolvesBySession(userID, normalizedEvent, sessionID);
+  // 1) Load all solves
+  const solves = await getSolvesBySession(userID, normalizedEvent, sid);
 
-  // 2. Build Stats from scratch
+  // 2) Build stats from scratch
   const stats = buildSessionStatsFromSolves(solves);
 
-  // 3. Update the SESSION item with the Stats attribute
-  const params = {
-    TableName: "PTS",
-    Key: {
-      PK: `USER#${userID}`,
-      SK: `SESSION#${normalizedEvent}#${sessionID}`,
-    },
-    UpdateExpression: "SET #Stats = :stats",
-    ExpressionAttributeNames: {
-      "#Stats": "Stats",
-    },
-    ExpressionAttributeValues: {
-      ":stats": stats,
-    },
-    ReturnValues: "ALL_NEW",
+  // 3) Write SESSIONSTATS item (this is what Stats page should read)
+  const now = new Date().toISOString();
+
+  const item = {
+    PK: `USER#${userID}`,
+    SK: `SESSIONSTATS#${normalizedEvent}#${sid}`,
+
+    Event: normalizedEvent,
+    SessionID: sid,
+    DateTime: now,       // you already use DateTime on these items in your snapshot
+    stale: false,
+
+    // spread your computed fields (solveCount, sumMs, bestAo5, bestSingleMs, buffers, etc.)
+    ...stats,
   };
 
-  const result = await dynamoDB.update(params).promise();
-  console.log("✅ Recomputed Stats for session", {
-    userID,
-    event: normalizedEvent,
-    sessionID,
-    stats,
-  });
+  await dynamoDB
+    .put({
+      TableName: "PTS",
+      Item: item,
+    })
+    .promise();
 
-  return result.Attributes;
+  console.log("✅ Recomputed SESSIONSTATS", { userID, event: normalizedEvent, sessionID: sid });
+  return item;
 };
