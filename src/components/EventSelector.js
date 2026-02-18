@@ -119,13 +119,14 @@ function EventSelector({
     return [
       { label: "WCA Events", events: wcaEvents },
       { label: "Relay Events", events: relayEvents },
-      userID && customEvents.length > 0 && {
-        label: "Custom Events",
-        events: customEvents.map((e) => ({
-          id: e.EventID || e.id,
-          name: e.EventName || e.name || e.EventID || e.id,
-        })),
-      },
+      userID &&
+        customEvents.length > 0 && {
+          label: "Custom Events",
+          events: customEvents.map((e) => ({
+            id: e.EventID || e.id,
+            name: e.EventName || e.name || e.EventID || e.id,
+          })),
+        },
     ].filter(Boolean);
   }, [wcaEvents, relayEvents, customEvents, userID]);
 
@@ -147,6 +148,28 @@ function EventSelector({
         raw: s,
       }));
   }, [sessions, currentEvent]);
+
+  // ✅ NEW: group "import" sessions separately so they don't clutter
+  const [importSessionsForEvent, regularSessionsForEvent] = useMemo(() => {
+    const imports = [];
+    const regular = [];
+
+    (normalSessionsForEvent || []).forEach((s) => {
+      const sid = String(s.id || "");
+      const st = String(s.raw?.SessionType || s.raw?.sessionType || "").toUpperCase();
+      const nm = String(s.name || "").toLowerCase();
+
+      const isImport =
+        st === "IMPORT" ||
+        sid.startsWith("import_") ||
+        sid.startsWith("import-") ||
+        nm.startsWith("import");
+
+      (isImport ? imports : regular).push(s);
+    });
+
+    return [imports, regular];
+  }, [normalSessionsForEvent]);
 
   // -----------------------------
   // Shared session grouping
@@ -368,10 +391,30 @@ function EventSelector({
 
                 {userID && (
                   <div className="event-group">
-                    <h4>Sessions</h4>
+                    {/* ✅ NEW: Imports section */}
+                    {importSessionsForEvent.length > 0 && (
+                      <>
+                        <h4>Imports</h4>
+                        <div className="event-list">
+                          {importSessionsForEvent.map((s) => (
+                            <div
+                              key={s.id}
+                              className={`event-item ${currentSession === s.id ? "active" : ""}`}
+                              onClick={() => handleSelectSession(s.id)}
+                            >
+                              {s.name}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+
+                    <h4 style={{ marginTop: importSessionsForEvent.length > 0 ? 10 : 0 }}>
+                      Sessions
+                    </h4>
 
                     <div className="event-list">
-                      {normalSessionsForEvent.map((s) => (
+                      {regularSessionsForEvent.map((s) => (
                         <div
                           key={s.id}
                           className={`event-item ${currentSession === s.id ? "active" : ""}`}

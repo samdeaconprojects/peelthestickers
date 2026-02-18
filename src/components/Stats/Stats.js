@@ -15,10 +15,17 @@ import {
 import { getSessionStats } from "../../services/getSessionStats";
 import { recomputeSessionStats } from "../../services/recomputeSessionStats";
 
+// ✅ NEW: import modal + batch import service
+import ImportSolvesModal from "./ImportSolvesModal";
+import { importSolvesBatch } from "../../services/importSolvesBatch";
+
+// ✅ NEW: allow creating destination sessions for imports
+import { createSession } from "../../services/createSession";
+
 function Stats({
   sessions,
-  sessionsList = [], // ✅ NEW: needed for session dropdown
-  sessionStats, // optional (unused for now)
+  sessionsList = [],
+  sessionStats,
   setSessions,
   currentEvent,
   currentSession,
@@ -50,13 +57,13 @@ function Stats({
   const [loadingOverallStats, setLoadingOverallStats] = useState(false);
 
   // -----------------------------
-  // Incremental paging state (Older loads next page)
+  // Incremental paging state
   // -----------------------------
   const [loadingInitial, setLoadingInitial] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingAllSolves, setLoadingAllSolves] = useState(false);
 
-  const [pageCursor, setPageCursor] = useState(null); // LastEvaluatedKey
+  const [pageCursor, setPageCursor] = useState(null);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
   const [isAllLoaded, setIsAllLoaded] = useState(false);
 
@@ -64,7 +71,7 @@ function Stats({
   const requestTokenRef = useRef(0);
 
   // -----------------------------
-  // Session dropdown UI (checkmark menu)
+  // Session dropdown UI
   // -----------------------------
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const sessionMenuWrapRef = useRef(null);
@@ -82,11 +89,16 @@ function Stats({
   }, [sessionMenuOpen]);
 
   // -----------------------------
+  // ✅ NEW: Import modal state
+  // -----------------------------
+  const [showImport, setShowImport] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+
+  // -----------------------------
   // Normalize DynamoDB solve item into UI shape
   // -----------------------------
   const normalizeSolve = useCallback((item) => {
-    // already normalized?
-    if (item && item.datetime) return item;
+    if (item && item.datetime) return item; // already normalized
 
     return {
       time: item.Time,
@@ -100,11 +112,13 @@ function Stats({
     };
   }, []);
 
-  // Solves currently in app state for statsEvent
-  const solves = sessions?.[statsEvent] || [];
+  // ✅ FIX: memoize solves so hooks deps don't thrash
+  const solves = useMemo(() => {
+    return sessions?.[statsEvent] || [];
+  }, [sessions, statsEvent]);
 
   // -----------------------------
-  // Build list of sessions available for this event (for the dropdown)
+  // Sessions available for dropdown (for this event)
   // -----------------------------
   const sessionsForEvent = useMemo(() => {
     const ev = String(statsEvent || "").toUpperCase();
@@ -116,7 +130,6 @@ function Stats({
         SessionName: s.SessionName || s.Name || s.SessionID || "main",
       }));
 
-    // Deduplicate by SessionID
     const seen = new Set();
     const deduped = [];
     for (const s of list) {
@@ -125,7 +138,6 @@ function Stats({
       deduped.push(s);
     }
 
-    // Ensure main exists first if present
     deduped.sort((a, b) => {
       if (a.SessionID === "main") return -1;
       if (b.SessionID === "main") return 1;
@@ -135,12 +147,9 @@ function Stats({
     return deduped;
   }, [sessionsList, statsEvent]);
 
-  // Ensure statsSession defaults to main when possible for the chosen event
+  // Ensure statsSession valid for this event
   useEffect(() => {
-    const ev = String(statsEvent || "").toUpperCase();
     const hasMain = sessionsForEvent.some((s) => s.SessionID === "main");
-
-    // If current session isn't valid for this event, pick main or first available
     const valid = sessionsForEvent.some((s) => s.SessionID === statsSession);
     if (!valid) {
       setStatsSession(hasMain ? "main" : (sessionsForEvent[0]?.SessionID || "main"));
@@ -148,12 +157,11 @@ function Stats({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statsEvent, sessionsForEvent]);
 
-  // If user navigates to /stats with currentEvent/currentSession changed externally, sync without wiping UI
+  // Sync when navigating with external event/session
   useEffect(() => {
     setStatsEvent(currentEvent);
     setStatsSession(currentSession || "main");
 
-    // reset view + paging state (data will swap when new fetch returns)
     setSolvesPerPage(DEFAULT_IN_VIEW);
     setCurrentPage(0);
     setPageCursor(null);
@@ -163,7 +171,7 @@ function Stats({
   }, [currentEvent, currentSession]);
 
   // -----------------------------
-  // Load overall stats from SESSIONSTATS (never derived from solves)
+  // Load overall stats (SESSIONSTATS)
   // -----------------------------
   useEffect(() => {
     const userID = user?.UserID;
@@ -194,8 +202,6 @@ function Stats({
 
   // -----------------------------
   // Initial solves load for statsEvent/sessionId
-  // - Needed because App.js only loads solves for currentEvent
-  // - Uses paged fetch (last 200)
   // -----------------------------
   const loadInitialSolves = useCallback(async () => {
     const userID = user?.UserID;
@@ -217,9 +223,8 @@ function Stats({
 
       const normalizedOldestToNewest = (items || [])
         .map(normalizeSolve)
-        .reverse(); // UI expects oldest -> newest
+        .reverse();
 
-      // Swap solves for this event (don’t blank the UI first)
       setSessions((prev) => ({
         ...prev,
         [statsEvent]: normalizedOldestToNewest,
@@ -246,14 +251,13 @@ function Stats({
     setSessions,
   ]);
 
-  // Trigger initial load when statsEvent/session changes
   useEffect(() => {
     if (!user?.UserID) return;
     loadInitialSolves();
   }, [user?.UserID, statsEvent, sessionId, loadInitialSolves]);
 
   // -----------------------------
-  // Paging math (CEIL pages)
+  // Paging math
   // -----------------------------
   const totalPages = useMemo(() => {
     const per = Math.max(1, solvesPerPage);
@@ -266,7 +270,6 @@ function Stats({
     if (currentPage > maxPage) setCurrentPage(maxPage);
   }, [currentPage, maxPage]);
 
-  // Indices for paging from the end (newest)
   const startIndex = useMemo(() => {
     return Math.max(0, solves.length - solvesPerPage * (currentPage + 1));
   }, [solves.length, solvesPerPage, currentPage]);
@@ -287,7 +290,7 @@ function Stats({
   }, [solves, startIndex, endIndex]);
 
   // -----------------------------
-  // Incremental “Older” fetch (next 200 older)
+  // Incremental “Older” fetch
   // -----------------------------
   const fetchNextOlderPage = useCallback(async () => {
     const userID = user?.UserID;
@@ -310,7 +313,6 @@ function Stats({
 
       const pageOldestToNewest = (items || []).map(normalizeSolve).reverse();
 
-      // Prepend older solves so indices stay consistent (oldest -> newest)
       setSessions((prev) => {
         const existing = prev?.[statsEvent] || [];
         return {
@@ -340,7 +342,7 @@ function Stats({
   ]);
 
   // -----------------------------
-  // Top bar meta: showing / overall + date range
+  // Top bar meta
   // -----------------------------
   const overallCount = useMemo(() => {
     return (
@@ -348,6 +350,7 @@ function Stats({
       overallStatsForEvent?.Count ??
       overallStatsForEvent?.TotalSolves ??
       overallStatsForEvent?.Solves ??
+      overallStatsForEvent?.solveCount ??
       null
     );
   }, [overallStatsForEvent]);
@@ -388,7 +391,6 @@ function Stats({
       setStatsEvent(next);
       setSessionMenuOpen(false);
 
-      // Session will be validated by effect; reset view/paging now
       setSolvesPerPage(DEFAULT_IN_VIEW);
       setCurrentPage(0);
 
@@ -404,7 +406,6 @@ function Stats({
       setStatsSession(sid);
       setSessionMenuOpen(false);
 
-      // reset view/paging (data swaps when fetch returns)
       setSolvesPerPage(DEFAULT_IN_VIEW);
       setCurrentPage(0);
 
@@ -426,8 +427,6 @@ function Stats({
     [setSessions, deleteTime, statsEvent]
   );
 
-  // Older ▲ (go back in time)
-  // If we’re at the oldest loaded page and there are older solves, fetch next page then advance
   const handlePreviousPage = useCallback(async () => {
     if (currentPage < maxPage) {
       setCurrentPage((p) => Math.min(maxPage, p + 1));
@@ -438,10 +437,8 @@ function Stats({
       const beforeLen = solves.length;
       await fetchNextOlderPage();
 
-      // Advance one page (new data increases maxPage)
       setCurrentPage((p) => p + 1);
 
-      // If nothing actually arrived, revert
       setTimeout(() => {
         const afterLen = (sessions?.[statsEvent] || []).length;
         if (afterLen === beforeLen) {
@@ -462,7 +459,6 @@ function Stats({
     statsEvent,
   ]);
 
-  // Newer ▼ (towards latest)
   const handleNextPage = useCallback(() => {
     setCurrentPage((p) => Math.max(0, p - 1));
   }, []);
@@ -472,7 +468,6 @@ function Stats({
     setCurrentPage(0);
   }, []);
 
-  // Zoom out: if at cap of loaded solves and more exist, fetch next page then expand
   const handleZoomOut = useCallback(async () => {
     if (solvesPerPage < solves.length) {
       setSolvesPerPage((prev) => Math.min(prev + 50, solves.length));
@@ -504,7 +499,6 @@ function Stats({
     statsEvent,
   ]);
 
-  // Show All: load ALL solves (explicit)
   const handleShowAll = useCallback(async () => {
     const userID = user?.UserID;
     if (!userID) return;
@@ -527,7 +521,7 @@ function Stats({
         [statsEvent]: normalized,
       }));
 
-      setSolvesPerPage(Math.max(DEFAULT_IN_VIEW, Math.min(normalized.length, normalized.length)));
+      setSolvesPerPage(Math.max(DEFAULT_IN_VIEW, normalized.length));
       setCurrentPage(0);
 
       setIsAllLoaded(true);
@@ -540,7 +534,6 @@ function Stats({
     }
   }, [user?.UserID, statsEvent, sessionId, normalizeSolve, setSessions, DEFAULT_IN_VIEW]);
 
-  // Recompute overall stats (SESSIONSTATS)
   const handleRecomputeOverall = useCallback(async () => {
     if (!user?.UserID) return;
 
@@ -567,6 +560,155 @@ function Stats({
     }
   }, [user?.UserID, statsEvent, sessionId]);
 
+  /* -----------------------------
+     ✅ NEW: helpers for import destinations
+  ----------------------------- */
+
+  const slugify = (s) =>
+    String(s || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-_]/g, "");
+
+  // creates a session for a given event, returns the sessionID
+  const createImportSession = useCallback(
+    async (evUpper, desiredName) => {
+      const userID = user?.UserID;
+      if (!userID) throw new Error("No user");
+
+      const cleanEvent = String(evUpper || "").toUpperCase();
+      const baseName = String(desiredName || "").trim() || `Import ${new Date().toLocaleString()}`;
+      const sid = `import_${slugify(baseName)}_${Date.now()}`;
+
+      // createSession has multiple signatures across your app; try the richer one first, then fall back
+      try {
+        await createSession(userID, cleanEvent, sid, baseName);
+      } catch (e) {
+        // fallback: old signature (userID, event, name)
+        try {
+          await createSession(userID, cleanEvent, baseName);
+        } catch (e2) {
+          console.error("createImportSession failed:", e, e2);
+          throw e2;
+        }
+      }
+
+      return sid;
+    },
+    [user?.UserID]
+  );
+
+  // -----------------------------
+  // ✅ NEW: Import handler (writes to DB + updates local sessions)
+  // -----------------------------
+  const handleImportSolves = useCallback(
+    async ({ parsedSolves, destination }) => {
+      const userID = user?.UserID;
+      if (!userID) return;
+
+      // destination can be:
+      //  - { kind: "existing", sessionID }
+      //  - { kind: "new", sessionName }
+      const destKind = destination?.kind || "existing";
+      const destExistingID = destination?.sessionID ? String(destination.sessionID) : null;
+      const destNewName = destination?.sessionName ? String(destination.sessionName) : "";
+
+      // normalize input (keep per-solve event if present; csTimer can include it)
+      const normalized = (parsedSolves || [])
+        .map((s) => {
+          const ev = String(s.event || statsEvent || "").toUpperCase();
+          const time = Number(s.time);
+          if (!Number.isFinite(time) || time < 0) return null;
+
+          return {
+            time,
+            scramble: s.scramble || "",
+            event: ev,
+            penalty: s.penalty ?? null,
+            note: s.note ?? "",
+            datetime: s.datetime || new Date().toISOString(),
+            tags: s.tags || {},
+            originalTime: s.originalTime ?? undefined,
+          };
+        })
+        .filter(Boolean);
+
+      if (normalized.length === 0) return;
+
+      // group by event (because Dynamo writes are event partitioned in your schema)
+      const byEvent = new Map();
+      for (const s of normalized) {
+        const ev = s.event;
+        if (!byEvent.has(ev)) byEvent.set(ev, []);
+        byEvent.get(ev).push(s);
+      }
+
+      setImportBusy(true);
+      try {
+        const results = [];
+
+        // If creating a NEW import session, you must create it per-event
+        // because sessions are scoped to an event.
+        for (const [ev, solvesForEv] of byEvent.entries()) {
+          let destSessionForThisEvent = String(sessionId || "main");
+
+          if (destKind === "existing") {
+            destSessionForThisEvent = destExistingID || String(sessionId || "main");
+          } else {
+            // destKind === "new"
+            destSessionForThisEvent = await createImportSession(ev, destNewName || `Import ${ev}`);
+          }
+
+          const res = await importSolvesBatch(userID, ev, destSessionForThisEvent, solvesForEv);
+          results.push({ ev, destSessionForThisEvent, res });
+        }
+
+        // Update local UI sessions state for each event that got imported
+        setSessions((prev) => {
+          const next = { ...(prev || {}) };
+
+          for (const { ev, res } of results) {
+            const added = res?.addedSolves || [];
+
+            const existing = next[ev] || [];
+            const merged = [...existing, ...added];
+
+            merged.sort((a, b) => {
+              const ta = new Date(a.datetime).getTime();
+              const tb = new Date(b.datetime).getTime();
+              return ta - tb;
+            });
+
+            next[ev] = merged;
+          }
+
+          return next;
+        });
+
+        // Refresh overall stats for CURRENT view only (statsEvent + chosen dest if existing, else keep current)
+        try {
+          const overallEv = String(statsEvent || "").toUpperCase();
+          const overallSid =
+            destKind === "existing"
+              ? (destExistingID || String(sessionId || "main"))
+              : String(sessionId || "main");
+
+          const item = await getSessionStats(userID, overallEv, overallSid);
+          setOverallStatsForEvent(item || null);
+        } catch (_) {}
+
+        setShowImport(false);
+      } catch (e) {
+        console.error("Import failed:", e);
+        alert("Import failed. Check console for details.");
+      } finally {
+        setImportBusy(false);
+      }
+    },
+    [user?.UserID, statsEvent, sessionId, setSessions, createImportSession]
+  );
+
   // Button states
   const canOlder =
     currentPage < maxPage ||
@@ -590,14 +732,9 @@ function Stats({
     return "Showing recent solves";
   }, [loadingInitial, loadingAllSolves, loadingMore, isAllLoaded, hasMoreOlder]);
 
-  // -----------------------------
-  // Render
-  // -----------------------------
   return (
     <div className="Page statsPageRoot">
-      {/* ✅ Figma-style top bar */}
       <div className="statsTopBar">
-        {/* LEFT */}
         <div className="statsTopLeft">
           <select className="statsSelect" onChange={handleEventChange} value={statsEvent}>
             {Object.keys(sessions || {}).map((eventKey) => (
@@ -644,7 +781,6 @@ function Stats({
           </div>
         </div>
 
-        {/* MIDDLE */}
         <div className="statsTopMiddle">
           <div className="statsTopMeta">
             <span className="statsTopCount">
@@ -657,7 +793,6 @@ function Stats({
           {dateRangeText && <div className="statsTopRange">{dateRangeText}</div>}
         </div>
 
-        {/* RIGHT */}
         <div className="statsTopRight">
           <button onClick={handlePreviousPage} disabled={!canOlder}>
             {loadingMore ? "Loading…" : "Older ▲"}
@@ -682,17 +817,23 @@ function Stats({
           <button onClick={handleRecomputeOverall} disabled={loadingOverallStats}>
             {loadingOverallStats ? "Recomputing…" : "Recompute Overall"}
           </button>
+
+          {/* ✅ NEW: Import button */}
+          <button
+            onClick={() => setShowImport(true)}
+            disabled={!user?.UserID || importBusy}
+            title={!user?.UserID ? "Sign in to import" : "Import solves into this session"}
+          >
+            {importBusy ? "Importing…" : "Import"}
+          </button>
         </div>
       </div>
 
-      {/* tiny status line (optional) */}
       <div className="statsStatusLine">{headerStatusText}</div>
 
       <div className="stats-page">
         <div className={`stats-grid stats-grid--figma ${loadingInitial ? "stats-grid--loading" : ""}`}>
-          {loadingInitial && (
-            <div className="statsLoadingOverlay">Loading…</div>
-          )}
+          {loadingInitial && <div className="statsLoadingOverlay">Loading…</div>}
 
           <div className="stats-item stats-item--header stats-item--minh">
             <StatsSummary solves={solvesToDisplay} overallStats={overallStatsForEvent} />
@@ -724,6 +865,20 @@ function Stats({
           </div>
         </div>
       </div>
+
+      {/* ✅ NEW: Import modal */}
+      {showImport && (
+        <ImportSolvesModal
+          event={String(statsEvent || "").toUpperCase()}
+          sessionID={String(sessionId || "main")}
+          onClose={() => setShowImport(false)}
+          onImport={handleImportSolves}
+          busy={importBusy}
+          // (ImportSolvesModal can ignore these if you didn't add them yet)
+          sessionsForEvent={sessionsForEvent}
+          defaultDestination={{ kind: "new", sessionName: "" }}
+        />
+      )}
     </div>
   );
 }
