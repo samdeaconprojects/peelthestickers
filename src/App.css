@@ -31,7 +31,7 @@
 }
 
 .navAndPage.reducedHeight {
-  height: calc(100% - 160px);
+  height: calc(100% - 150px);
 }
 
 .toggle-bar {
@@ -39,12 +39,12 @@
   bottom: 0;
   right: 0;
   padding: 10px;
-  z-index: 2000;
+  z-index: 500;
 }
 
 button {
   position: relative;
-  z-index: 2000;
+  z-index: 500;
   height: 35px;
   background-color: transparent;
   border: solid #FFFFFF 2px;
@@ -155,6 +155,19 @@ body {
   width: 100%;
   padding-top: 6px;
   padding-bottom: 6px;
+}
+
+.tagIcon {
+  scale: 30%;
+  right: 20px;
+  bottom: 35px;
+  position: relative;
+  opacity: 70%;
+}
+
+.tagIcon:hover {
+  opacity: 100%;
+  transition: 0.2s ease-out; 
 }
 
 /* left slot already 13% */

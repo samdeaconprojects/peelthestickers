@@ -1,5 +1,5 @@
 // src/App.js
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import "./App.css";
 import Timer from "./components/Timer/Timer";
 import TimeList from "./components/TimeList/TimeList";
@@ -35,11 +35,445 @@ import { updateSolve } from "./services/updateSolve";
 import { updateUser } from "./services/updateUser";
 import { sendMessage } from "./services/sendMessage";
 
+import tagIcon from "./assets/ptstag.svg";
+
 import { DEFAULT_EVENTS } from "./defaultEvents";
 import {
   calculateBestAverageOfFive,
   calculateAverage,
 } from "./components/TimeList/TimeUtils";
+
+/* -------------------------------------------------------------------------- */
+/*                            INLINE TAG BAR (HOME)                           */
+/* -------------------------------------------------------------------------- */
+/**
+ * Drop-in TagBar:
+ * - CubeModel and CrossColor are dropdowns (options stored in DynamoDB user profile as TagOptions)
+ * - Custom tags allow spaces
+ * - Prevents spacebar from triggering timer while interacting
+ *
+ * tags shape:
+ * {
+ *   CubeModel: "Gan 13",
+ *   CrossColor: "White",
+ *   Custom: { "my tag": "some value" }
+ * }
+ *
+ * tagOptions shape (stored on user profile):
+ * {
+ *   CubeModels: ["GAN 12", "GAN 13", ...],
+ *   CrossColors: ["White", "Yellow", ...]
+ * }
+ */
+function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
+  const wrapRef = useRef(null);
+  const safeTags = tags || {};
+  const custom = safeTags.Custom || {};
+
+  const cubeOptions = Array.isArray(tagOptions?.CubeModels)
+    ? tagOptions.CubeModels
+    : [];
+  const crossOptions = Array.isArray(tagOptions?.CrossColors)
+    ? tagOptions.CrossColors
+    : [];
+
+  const [addingCube, setAddingCube] = useState(false);
+  const [addingCross, setAddingCross] = useState(false);
+  const [newCube, setNewCube] = useState("");
+  const [newCross, setNewCross] = useState("");
+
+  const [addingCustom, setAddingCustom] = useState(false);
+  const [newKey, setNewKey] = useState("");
+  const [newVal, setNewVal] = useState("");
+
+  const ADD_CUBE = "__ADD_CUBE__";
+  const ADD_CROSS = "__ADD_CROSS__";
+
+  // Prevent Timer / global key handlers while typing here
+  const stopKeys = (e) => {
+    e.stopPropagation();
+  };
+
+  useEffect(() => {
+    const onDown = (e) => {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target)) {
+        setAddingCube(false);
+        setAddingCross(false);
+        setAddingCustom(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+
+  const setField = (field, value) => {
+    const v = String(value ?? "").trim(); // allows spaces inside, trims ends
+    const next = { ...(safeTags || {}) };
+    if (!v) delete next[field];
+    else next[field] = v;
+    onChange?.(next);
+  };
+
+  const removeCustom = (k) => {
+    const next = { ...(safeTags || {}) };
+    const c = { ...(next.Custom || {}) };
+    delete c[k];
+    if (Object.keys(c).length === 0) delete next.Custom;
+    else next.Custom = c;
+    onChange?.(next);
+  };
+
+  const addCustom = () => {
+    const k = String(newKey ?? "").trim(); // ✅ spaces allowed
+    const v = String(newVal ?? "").trim();
+    if (!k) return;
+
+    const next = { ...(safeTags || {}) };
+    const c = { ...(next.Custom || {}) };
+    c[k] = v || "true";
+    next.Custom = c;
+
+    onChange?.(next);
+    setNewKey("");
+    setNewVal("");
+    setAddingCustom(false);
+  };
+
+  const pillStyle = (isSet) => ({
+    width: "120px",
+    height: "30px",
+    borderRadius: "8px",
+    border: `2px solid ${
+      isSet ? "rgba(172, 172, 172, 0.95)" : "rgba(172, 172, 172, 0.75)"
+    }`,
+    background: "transparent",
+    color: "white",
+    fontSize: "14px",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "0 10px",
+    boxSizing: "border-box",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  });
+
+  const selectStyle = {
+    width: "120px",
+    height: "34px",
+    borderRadius: "8px",
+    border: "2px solid rgba(172, 172, 172, 0.75)",
+    background: "rgba(0,0,0,0.15)",
+    color: "white",
+    fontSize: "14px",
+    padding: "0 10px",
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
+  const inputStyle = {
+    width: "120px",
+    height: "30px",
+    borderRadius: "8px",
+    border: "2px solid rgba(172, 172, 172, 0.95)",
+    background: "rgba(0,0,0,0.25)",
+    color: "white",
+    fontSize: "14px",
+    padding: "0 10px",
+    boxSizing: "border-box",
+    outline: "none",
+  };
+
+  const addBtnStyle = {
+    width: "120px",
+    height: "30px",
+    borderRadius: "8px",
+    border: "2px solid rgba(172, 172, 172, 0.6)",
+    background: "transparent",
+    color: "white",
+    cursor: "pointer",
+    opacity: 0.9,
+  };
+
+  const addCubeOption = () => {
+    const v = String(newCube ?? "").trim();
+    if (!v) return;
+
+    const next = {
+      ...(tagOptions || {}),
+      CubeModels: Array.from(new Set([v, ...(cubeOptions || [])])),
+    };
+    onTagOptionsChange?.(next);
+    setField("CubeModel", v);
+
+    setNewCube("");
+    setAddingCube(false);
+  };
+
+  const addCrossOption = () => {
+    const v = String(newCross ?? "").trim();
+    if (!v) return;
+
+    const next = {
+      ...(tagOptions || {}),
+      CrossColors: Array.from(new Set([v, ...(crossOptions || [])])),
+    };
+    onTagOptionsChange?.(next);
+    setField("CrossColor", v);
+
+    setNewCross("");
+    setAddingCross(false);
+  };
+
+  return (
+    <div
+      ref={wrapRef}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "6px",
+        alignItems: "flex-end", // ✅ vertical column aligned
+        marginTop: "6px",
+        width: "170px", // ✅ keep everything a single vertical stack width
+      }}
+      onKeyDownCapture={stopKeys}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {/* Cube Model dropdown */}
+      <div
+        style={{
+          width: "170px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "6px",
+          alignItems: "flex-end",
+        }}
+      >
+        <select
+          style={selectStyle}
+          value={safeTags?.CubeModel || ""}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === ADD_CUBE) {
+              setAddingCube(true);
+              return; // don't change field
+            }
+            setField("CubeModel", v);
+          }}
+          onKeyDownCapture={stopKeys}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <option value="">Cube Model</option>
+          {(cubeOptions || []).map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+          <option disabled value="__DIVIDER_CUBE__">
+            ──────────
+          </option>
+          <option value={ADD_CUBE}>+ Add Cube Model…</option>
+        </select>
+
+        {addingCube && (
+          <>
+            <input
+              style={inputStyle}
+              value={newCube}
+              onChange={(e) => setNewCube(e.target.value)} // ✅ spaces allowed
+              placeholder="Add Cube Model"
+              autoFocus
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") addCubeOption();
+                if (e.key === "Escape") setAddingCube(false);
+              }}
+              onKeyDownCapture={stopKeys}
+            />
+            <button type="button" style={addBtnStyle} onClick={addCubeOption}>
+              Add
+            </button>
+            <button
+              type="button"
+              style={addBtnStyle}
+              onClick={() => setAddingCube(false)}
+            >
+              Cancel
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Cross Color dropdown */}
+      <div
+        style={{
+          width: "170px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "6px",
+          alignItems: "flex-end",
+        }}
+      >
+        <select
+          style={selectStyle}
+          value={safeTags?.CrossColor || ""}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === ADD_CROSS) {
+              setAddingCross(true);
+              return; // don't change field
+            }
+            setField("CrossColor", v);
+          }}
+          onKeyDownCapture={stopKeys}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <option value="">Cross Color</option>
+          {(crossOptions || []).map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+          <option disabled value="__DIVIDER_CROSS__">
+            ──────────
+          </option>
+          <option value={ADD_CROSS}>+ Add Cross Color…</option>
+        </select>
+
+        {addingCross && (
+          <>
+            <input
+              style={inputStyle}
+              value={newCross}
+              onChange={(e) => setNewCross(e.target.value)} // ✅ spaces allowed
+              placeholder="Add Cross Color"
+              autoFocus
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") addCrossOption();
+                if (e.key === "Escape") setAddingCross(false);
+              }}
+              onKeyDownCapture={stopKeys}
+            />
+            <button type="button" style={addBtnStyle} onClick={addCrossOption}>
+              Add
+            </button>
+            <button
+              type="button"
+              style={addBtnStyle}
+              onClick={() => setAddingCross(false)}
+            >
+              Cancel
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* custom tags list */}
+      {Object.entries(custom).map(([k, v]) => (
+        <div
+          key={`custom-${k}`}
+          style={{
+            width: "170px",
+            display: "flex",
+            justifyContent: "flex-end",
+          }}
+        >
+          <div
+            style={{
+              ...pillStyle(true),
+              justifyContent: "space-between",
+              gap: "8px",
+            }}
+            title={`${k}=${v}`}
+          >
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+              {k}
+              {v && v !== "true" ? `: ${v}` : ""}
+            </span>
+            <button
+              type="button"
+              onClick={() => removeCustom(k)}
+              title="Remove"
+              style={{
+                border: "none",
+                background: "transparent",
+                color: "white",
+                cursor: "pointer",
+                fontSize: "18px",
+                lineHeight: 1,
+                opacity: 0.9,
+                height: "auto",
+              }}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {/* add custom */}
+      {addingCustom ? (
+        <div
+          style={{
+            width: "220px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "6px",
+            alignItems: "stretch",
+          }}
+        >
+          <input
+            style={inputStyle}
+            value={newKey}
+            onChange={(e) => setNewKey(e.target.value)} // ✅ spaces allowed
+            placeholder="tag name (spaces ok)"
+            autoFocus
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") addCustom();
+              if (e.key === "Escape") setAddingCustom(false);
+            }}
+            onKeyDownCapture={stopKeys}
+          />
+          <input
+            style={inputStyle}
+            value={newVal}
+            onChange={(e) => setNewVal(e.target.value)} // ✅ spaces allowed
+            placeholder="value"
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") addCustom();
+              if (e.key === "Escape") setAddingCustom(false);
+            }}
+            onKeyDownCapture={stopKeys}
+          />
+          <button type="button" onClick={addCustom} style={addBtnStyle}>
+            Add
+          </button>
+          <button
+            type="button"
+            onClick={() => setAddingCustom(false)}
+            style={addBtnStyle}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAddingCustom(true)}
+          style={addBtnStyle}
+        >
+          + Tag
+        </button>
+      )}
+    </div>
+  );
+}
 
 function App() {
   const [sessionsList, setSessionsList] = useState([]); // all sessions for user
@@ -74,7 +508,6 @@ function App() {
   // forces Social to refresh messages when it changes
   const [socialRefreshTick, setSocialRefreshTick] = useState(0);
 
-
   // Relay session support
   const [activeSessionObj, setActiveSessionObj] = useState(null);
   const [relayLegIndex, setRelayLegIndex] = useState(0);
@@ -82,13 +515,99 @@ function App() {
   const [relayScrambles, setRelayScrambles] = useState([]);
   const [relayLegs, setRelayLegs] = useState([]);
 
+  // ✅ tags shown under EventSelector (Timer page only), stored per eventKey
+  const [tagsByEvent, setTagsByEvent] = useState({});
+
+  // ✅ tag dropdown options (stored on user profile as TagOptions)
+  const [tagOptions, setTagOptions] = useState({
+    CubeModels: [],
+    CrossColors: ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
+  });
+
   const location = useLocation();
   const isHomePage = location.pathname === "/";
   const { settings } = useSettings();
 
+  // --------------------------------------------------------------------------
+  // ✅ Global DB indicator (spinner -> check / x)
+  // --------------------------------------------------------------------------
+  const [dbStatus, setDbStatus] = useState({
+    phase: "idle", // "idle" | "loading" | "success" | "error"
+    op: "",
+    tick: 0,
+  });
+
+  const dbSuccessTimeoutRef = useRef(null);
+  const dbErrorTimeoutRef = useRef(null);
+
+  const setDbPhase = (phase, op = "") => {
+    setDbStatus((prev) => ({
+      phase,
+      op,
+      tick: (prev.tick || 0) + 1,
+    }));
+  };
+
+  const runDb = async (opLabel, fn) => {
+    try {
+      if (dbSuccessTimeoutRef.current) clearTimeout(dbSuccessTimeoutRef.current);
+      if (dbErrorTimeoutRef.current) clearTimeout(dbErrorTimeoutRef.current);
+
+      setDbPhase("loading", opLabel);
+
+      const res = await fn();
+
+      setDbPhase("success", opLabel);
+      dbSuccessTimeoutRef.current = setTimeout(() => {
+        setDbPhase("idle", "");
+      }, 900);
+
+      return res;
+    } catch (err) {
+      console.error(`DB op failed (${opLabel}):`, err);
+
+      setDbPhase("error", opLabel);
+      dbErrorTimeoutRef.current = setTimeout(() => {
+        setDbPhase("idle", "");
+      }, 1400);
+
+      throw err;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (dbSuccessTimeoutRef.current) clearTimeout(dbSuccessTimeoutRef.current);
+      if (dbErrorTimeoutRef.current) clearTimeout(dbErrorTimeoutRef.current);
+    };
+  }, []);
+
   // Normalize only for relay so we always read/write solves under sessions["RELAY"]
   const eventKey =
     String(currentEvent || "").toUpperCase() === "RELAY" ? "RELAY" : currentEvent;
+
+  // current tags for this event (Timer page only)
+  const currentTags =
+    tagsByEvent[eventKey] || {
+      CubeModel: "",
+      CrossColor: "",
+      Custom: {},
+    };
+
+  // build tag payload (merges currentTags into baseTags)
+  const buildTagPayload = (baseTags = {}) => {
+    const t = currentTags || {};
+    const payload = { ...(baseTags || {}) };
+
+    if (t.CubeModel) payload.CubeModel = t.CubeModel;
+    if (t.CrossColor) payload.CrossColor = t.CrossColor;
+
+    if (t.Custom && Object.keys(t.Custom).length) {
+      payload.Custom = { ...(t.Custom || {}) };
+    }
+
+    return payload;
+  };
 
   useEffect(() => {
     if (!scrambles[currentEvent]) {
@@ -315,29 +834,31 @@ function App() {
 
   const handleSignUp = async (username, password) => {
     try {
-      await createUser({
-        userID: username,
-        name: username,
-        username: username,
-        color: "#0E171D",
-        profileEvent: "333",
-        profileScramble: generateScramble("333"),
-        chosenStats: [],
-        headerStats: [],
-        wcaid: null,
-        cubeCollection: [],
-        settings: {
-          primaryColor: "#0E171D",
-          secondaryColor: "#ffffff",
-          timerInput: "Keyboard",
-        },
-        Friends: [],
-      });
+      await runDb("Creating account", async () => {
+        await createUser({
+          userID: username,
+          name: username,
+          username: username,
+          color: "#0E171D",
+          profileEvent: "333",
+          profileScramble: generateScramble("333"),
+          chosenStats: [],
+          headerStats: [],
+          wcaid: null,
+          cubeCollection: [],
+          settings: {
+            primaryColor: "#0E171D",
+            secondaryColor: "#ffffff",
+            timerInput: "Keyboard",
+          },
+          Friends: [],
+        });
 
-      const createSessionPromises = DEFAULT_EVENTS.map((event) =>
-        createSession(username, event, "main", "Main Session")
-      );
-      await Promise.all(createSessionPromises);
+        const createSessionPromises = DEFAULT_EVENTS.map((event) =>
+          createSession(username, event, "main", "Main Session")
+        );
+        await Promise.all(createSessionPromises);
+      });
 
       alert("User created successfully!");
 
@@ -366,6 +887,27 @@ function App() {
         Friends: profile.Friends || [],
       };
 
+      // ✅ load tag options from DB profile (fallback to current defaults)
+      const dbTagOptions =
+        profile.TagOptions ||
+        profile.tagOptions ||
+        profile.Settings?.TagOptions ||
+        profile.Settings?.tagOptions ||
+        null;
+
+      if (dbTagOptions) {
+        setTagOptions((prev) => ({
+          ...(prev || {}),
+          ...(dbTagOptions || {}),
+          CubeModels: Array.isArray(dbTagOptions?.CubeModels)
+            ? dbTagOptions.CubeModels
+            : prev.CubeModels,
+          CrossColors: Array.isArray(dbTagOptions?.CrossColors)
+            ? dbTagOptions.CrossColors
+            : prev.CrossColors,
+        }));
+      }
+
       setUser(userWithData);
       setIsSignedIn(true);
       setShowSignInPopup(false);
@@ -382,10 +924,13 @@ function App() {
       );
 
       if (missingEvents.length > 0) {
-        const createMissing = missingEvents.map((event) =>
-          createSession(userID, event, "main", "Main Session")
-        );
-        await Promise.all(createMissing);
+        await runDb("Creating sessions", async () => {
+          const createMissing = missingEvents.map((event) =>
+            createSession(userID, event, "main", "Main Session")
+          );
+          await Promise.all(createMissing);
+        });
+
         sessionItems = await getSessions(userID);
         setSessionsList(sessionItems); // refresh
       }
@@ -410,47 +955,104 @@ function App() {
     }
   };
 
+  // ✅ persist tag option lists to DB profile
+  const persistTagOptions = async (nextOptions) => {
+    if (!isSignedIn || !user?.UserID) return;
+    try {
+      await runDb("Saving tag options", () =>
+        updateUser(user.UserID, { TagOptions: nextOptions })
+      );
+      // also reflect in user state if you rely on it elsewhere
+      setUser((prev) => (prev ? { ...prev, TagOptions: nextOptions } : prev));
+    } catch (err) {
+      console.error("Failed to persist TagOptions:", err);
+    }
+  };
+
   const addSolve = async (newTime) => {
-  // -----------------------
-  // RELAY MODE
-  // -----------------------
-  const isRelay =
-    String(currentEvent || "").toUpperCase() === "RELAY" &&
-    activeSessionObj?.SessionType === "RELAY" &&
-    Array.isArray(relayLegs) &&
-    relayLegs.length > 0;
+    // -----------------------
+    // RELAY MODE
+    // -----------------------
+    const isRelay =
+      String(currentEvent || "").toUpperCase() === "RELAY" &&
+      activeSessionObj?.SessionType === "RELAY" &&
+      Array.isArray(relayLegs) &&
+      relayLegs.length > 0;
 
-  if (isRelay) {
-    const timestamp = new Date().toISOString();
+    if (isRelay) {
+      const timestamp = new Date().toISOString();
 
-    const relayTags = {
-      IsRelay: true,
-      RelayLegs: relayLegs,
-      RelayScrambles: relayScrambles,
-    };
+      // merge TagBar tags into relay tags
+      const relayTags = buildTagPayload({
+        IsRelay: true,
+        RelayLegs: relayLegs,
+        RelayScrambles: relayScrambles,
+      });
 
-    // If user wants per-leg timing, keep current behavior
-    if ((settings?.relayMode || "total") === "legs") {
-      const legIdx = relayLegIndex;
+      // If user wants per-leg timing, keep current behavior
+      if ((settings?.relayMode || "total") === "legs") {
+        const legIdx = relayLegIndex;
 
-      const nextLegTimes = [...relayLegTimes, newTime];
-      setRelayLegTimes(nextLegTimes);
+        const nextLegTimes = [...relayLegTimes, newTime];
+        setRelayLegTimes(nextLegTimes);
 
-      const isLastLeg = legIdx >= relayLegs.length - 1;
+        const isLastLeg = legIdx >= relayLegs.length - 1;
 
-      // still in-progress -> advance to next leg
-      if (!isLastLeg) {
-        setRelayLegIndex(legIdx + 1);
+        // still in-progress -> advance to next leg
+        if (!isLastLeg) {
+          setRelayLegIndex(legIdx + 1);
+          return;
+        }
+
+        // completed legs -> save ONE solve with total + leg breakdown
+        const totalMs = nextLegTimes.reduce((a, b) => a + b, 0);
+
+        const fullRelayTags = buildTagPayload({
+          ...relayTags,
+          RelayLegTimes: nextLegTimes,
+        });
+
+        const newSolve = {
+          time: totalMs,
+          scramble: "Relay",
+          event: "RELAY",
+          penalty: null,
+          note: "",
+          datetime: timestamp,
+          tags: fullRelayTags,
+        };
+
+        // update local UI immediately (store under sessions["RELAY"])
+        setSessions((prev) => ({
+          ...prev,
+          RELAY: [...(prev.RELAY || []), newSolve],
+        }));
+
+        if (isSignedIn && user) {
+          try {
+            await runDb("Saving solve", () =>
+              addSolveToDB(
+                user.UserID,
+                currentSession,
+                "RELAY",
+                totalMs,
+                "Relay",
+                null,
+                "",
+                fullRelayTags
+              )
+            );
+          } catch (err) {
+            console.error("Error adding relay solve:", err);
+          }
+        }
+
+        resetRelaySet();
         return;
       }
 
-      // completed legs -> save ONE solve with total + leg breakdown
-      const totalMs = nextLegTimes.reduce((a, b) => a + b, 0);
-
-      const fullRelayTags = {
-        ...relayTags,
-        RelayLegTimes: nextLegTimes,
-      };
+      // Default: total-time relay (normal start/stop saves immediately)
+      const totalMs = newTime;
 
       const newSolve = {
         time: totalMs,
@@ -459,10 +1061,9 @@ function App() {
         penalty: null,
         note: "",
         datetime: timestamp,
-        tags: fullRelayTags,
+        tags: relayTags,
       };
 
-      // update local UI immediately (store under sessions["RELAY"])
       setSessions((prev) => ({
         ...prev,
         RELAY: [...(prev.RELAY || []), newSolve],
@@ -470,15 +1071,17 @@ function App() {
 
       if (isSignedIn && user) {
         try {
-          await addSolveToDB(
-            user.UserID,
-            currentSession,
-            "RELAY",
-            totalMs,
-            "Relay",
-            null,
-            "",
-            fullRelayTags
+          await runDb("Saving solve", () =>
+            addSolveToDB(
+              user.UserID,
+              currentSession,
+              "RELAY",
+              totalMs,
+              "Relay",
+              null,
+              "",
+              relayTags
+            )
           );
         } catch (err) {
           console.error("Error adding relay solve:", err);
@@ -489,116 +1092,81 @@ function App() {
       return;
     }
 
-    // Default: total-time relay (normal start/stop saves immediately)
-    const totalMs = newTime;
+    // -----------------------
+    // NORMAL / SHARED MODE
+    // -----------------------
+    let scramble;
 
+    // SHARED SESSION MODE
+    let activeSharedID = null;
+    let solveIndexForBroadcast = null;
+
+    if (sharedSession) {
+      scramble = sharedSession.scrambles[sharedIndex];
+
+      // save index BEFORE advancing
+      solveIndexForBroadcast = sharedIndex;
+      activeSharedID = sharedSession.sharedID;
+
+      const nextIndex = sharedIndex + 1;
+      setSharedIndex(nextIndex);
+
+      if (nextIndex >= sharedSession.scrambles.length) {
+        console.log("Shared session completed");
+        setSharedSession(null);
+      }
+
+      // keeps your existing behavior (forces rerender path)
+      setScrambles((prev) => ({
+        ...prev,
+        [currentEvent]: [...(prev[currentEvent] || [])],
+      }));
+    } else {
+      // NORMAL MODE
+      scramble = getNextScramble();
+    }
+
+    const timestamp = new Date().toISOString();
+
+    console.log("Adding solve:", {
+      event: currentEvent,
+      sessionID: currentSession,
+      time: newTime,
+      scramble,
+    });
+
+    // merge TagBar tags into solve tags
     const newSolve = {
-      time: totalMs,
-      scramble: "Relay",
-      event: "RELAY",
+      time: newTime,
+      scramble,
+      event: currentEvent,
       penalty: null,
       note: "",
       datetime: timestamp,
-      tags: relayTags,
+      tags: sharedSession
+        ? buildTagPayload({
+            Shared: true, // ✅ requested default tag for shared averages
+            IsShared: true,
+            SharedID: sharedSession.sharedID,
+            SharedIndex: sharedIndex,
+          })
+        : buildTagPayload({}),
     };
 
+    // update local UI immediately
     setSessions((prev) => ({
       ...prev,
-      RELAY: [...(prev.RELAY || []), newSolve],
+      [currentEvent]: [...(prev[currentEvent] || []), newSolve],
     }));
 
-    if (isSignedIn && user) {
-      try {
-        await addSolveToDB(
-          user.UserID,
-          currentSession,
-          "RELAY",
-          totalMs,
-          "Relay",
-          null,
-          "",
-          relayTags
-        );
-      } catch (err) {
-        console.error("Error adding relay solve:", err);
-      }
-    }
-
-    resetRelaySet();
-    return;
-  }
-
-  // -----------------------
-  // NORMAL / SHARED MODE
-  // -----------------------
-  let scramble;
-
-  // SHARED SESSION MODE
-  let activeSharedID = null;
-  let solveIndexForBroadcast = null;
-
-  if (sharedSession) {
-    scramble = sharedSession.scrambles[sharedIndex];
-
-    // save index BEFORE advancing
-    solveIndexForBroadcast = sharedIndex;
-    activeSharedID = sharedSession.sharedID;
-
-    const nextIndex = sharedIndex + 1;
-    setSharedIndex(nextIndex);
-
-    if (nextIndex >= sharedSession.scrambles.length) {
-      console.log("Shared session completed");
-      setSharedSession(null);
-    }
-
-    // keeps your existing behavior (forces rerender path)
-    setScrambles((prev) => ({
-      ...prev,
-      [currentEvent]: [...(prev[currentEvent] || [])],
-    }));
-  } else {
-    // NORMAL MODE
-    scramble = getNextScramble();
-  }
-
-  const timestamp = new Date().toISOString();
-
-  console.log("Adding solve:", {
-    event: currentEvent,
-    sessionID: currentSession,
-    time: newTime,
-    scramble,
-  });
-
-  const newSolve = {
-    time: newTime,
-    scramble,
-    event: currentEvent,
-    penalty: null,
-    note: "",
-    datetime: timestamp,
-    tags: sharedSession
-      ? {
-          IsShared: true,
-          SharedID: sharedSession.sharedID,
-          SharedIndex: sharedIndex,
-        }
-      : {},
-  };
-
-  // update local UI immediately
-  setSessions((prev) => ({
-    ...prev,
-    [currentEvent]: [...(prev[currentEvent] || []), newSolve],
-  }));
-
-  // -----------------------------
-  // SAVE TO DATABASE
-  // -----------------------------
-  if (isSignedIn && user) {
-    try {
-      await addSolveToDB(
+    // -----------------------------
+// SAVE TO DATABASE
+// -----------------------------
+if (isSignedIn && user) {
+  // A) DB WRITE ONLY (this controls spinner → check / x)
+  try {
+    await runDb("Saving solve", () =>
+      addSolveToDB(
         user.UserID,
         currentSession,
         currentEvent,
@@ -607,30 +1175,35 @@ function App() {
         null,
         "",
         newSolve.tags
-      );
+      )
+    );
+  } catch (err) {
+    console.error("Error adding solve (DB write failed):", err);
+    return; // ❌ stop here — do NOT run broadcast if DB write failed
+  }
 
-      // BROADCAST BACK TO CHAT (so scoreboard updates)
-      if (activeSharedID) {
-        const messageText = `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
+  // B) NON-CRITICAL SIDE EFFECT (never flip check → x)
+  if (activeSharedID) {
+    try {
+      const messageText = `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
 
-        const conversationID = activeSharedID
-          .replace("SHARED#", "")
-          .split("#")
-          .slice(0, 2)
-          .sort()
-          .join("#");
+      const conversationID = activeSharedID
+        .replace("SHARED#", "")
+        .split("#")
+        .slice(0, 2)
+        .sort()
+        .join("#");
+      await sendMessage(conversationID, user.UserID, messageText);
 
-        await sendMessage(conversationID, user.UserID, messageText);
-
-        // ✅ triggers Social to refetch (you’ll wire this in Social.js)
-        setSocialRefreshTick((t) => t + 1);
-      }
+      setSocialRefreshTick((t) => t + 1);
     } catch (err) {
-      console.error("Error adding solve:", err);
+      console.warn("Shared broadcast failed (solve still saved):", err);
+      // do NOT show red X
     }
   }
-};
+}
 
+  };
 
   const applyPenalty = async (timestamp, penalty, updatedTime) => {
     const updatedSessions = { ...sessions };
@@ -653,12 +1226,14 @@ function App() {
 
     if (isSignedIn && user?.UserID) {
       try {
-        await updateSolve(user.UserID, timestamp, {
-          Penalty: penalty,
-          Time: updatedTime,
-          OriginalTime: updatedSolves.find((s) => s.datetime === timestamp)
-            ?.originalTime,
-        });
+        await runDb("Updating solve", () =>
+          updateSolve(user.UserID, timestamp, {
+            Penalty: penalty,
+            Time: updatedTime,
+            OriginalTime: updatedSolves.find((s) => s.datetime === timestamp)
+              ?.originalTime,
+          })
+        );
       } catch (err) {
         console.error("Failed to update DynamoDB penalty:", err);
       }
@@ -673,7 +1248,7 @@ function App() {
 
     if (isSignedIn && user) {
       try {
-        await deleteSolve(user.UserID, solve.datetime);
+        await runDb("Deleting solve", () => deleteSolve(user.UserID, solve.datetime));
       } catch (err) {
         alert("Failed to delete solve");
         console.error(err);
@@ -686,7 +1261,9 @@ function App() {
     if (!user) return;
 
     try {
-      await createPost(user.UserID, note, event, solveList, comments);
+      await runDb("Creating post", () =>
+        createPost(user.UserID, note, event, solveList, comments)
+      );
       const posts = await getPosts(user.UserID);
       setUser((prev) => ({
         ...prev,
@@ -701,7 +1278,7 @@ function App() {
     if (!user) return;
 
     try {
-      await deletePostFromDB(user.UserID, timestamp);
+      await runDb("Deleting post", () => deletePostFromDB(user.UserID, timestamp));
     } catch (err) {
       console.error("Error deleting post:", err);
     }
@@ -710,7 +1287,9 @@ function App() {
   const handleUpdateComments = async (timestamp, comments) => {
     if (!user) return;
     try {
-      await updatePostComments(user.UserID, timestamp, comments);
+      await runDb("Updating comments", () =>
+        updatePostComments(user.UserID, timestamp, comments)
+      );
       const fresh = await getPosts(user.UserID);
       setUser((prev) => ({ ...prev, Posts: fresh }));
     } catch (err) {
@@ -819,6 +1398,7 @@ function App() {
           isSignedIn={isSignedIn}
           handleSettingsClick={() => setShowSettingsPopup(true)}
           name={user?.Name || ""}
+          dbStatus={dbStatus}
         />
 
         <div className="main-content">
@@ -899,28 +1479,66 @@ function App() {
                       </div>
 
                       <div className="event-hud">
-                        <EventSelector
-                          currentEvent={currentEvent}
-                          handleEventChange={handleEventChange}
-                          currentSession={currentSession}
-                          setCurrentSession={setCurrentSession}
-                          sessions={sessionsList}
-                          customEvents={customEvents}
-                          userID={user?.UserID}
-                          onSessionChange={() => {
-                            setSharedSession(null);
-                            setSharedIndex(0);
+                        {/*  force column layout so tags are BELOW selector */}
+                        <div
+                          style={{
+                            position: "relative",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            width: "100%",
+                          }}
+                        >
+                          <EventSelector
+                            currentEvent={currentEvent}
+                            handleEventChange={handleEventChange}
+                            currentSession={currentSession}
+                            setCurrentSession={setCurrentSession}
+                            sessions={sessionsList}
+                            customEvents={customEvents}
+                            userID={user?.UserID}
+                            onSessionChange={() => {
+                              setSharedSession(null);
+                              setSharedIndex(0);
 
-                            // reset relay progress when changing sessions
-                            setRelayLegIndex(0);
-                            setRelayLegTimes([]);
-                            setRelayScrambles([]);
-                            setRelayLegs([]);
-                          }}
-                          onSelectSessionObj={(sessionObj) => {
-                            setActiveSessionObj(sessionObj);
-                          }}
-                        />
+                              // reset relay progress when changing sessions
+                              setRelayLegIndex(0);
+                              setRelayLegTimes([]);
+                              setRelayScrambles([]);
+                              setRelayLegs([]);
+                            }}
+                            onSelectSessionObj={(sessionObj) => {
+                              setActiveSessionObj(sessionObj);
+                            }}
+                          />
+
+                          <div
+                            style={{
+                              position: "absolute",
+                              top: "52px",
+                              right: "0px",
+                              left: "10px",
+                              display: "flex",
+                              pointerEvents: "auto",
+                            }}
+                          >
+                            <TagBarInline
+                              tags={currentTags}
+                              onChange={(next) =>
+                                setTagsByEvent((prev) => ({
+                                  ...(prev || {}),
+                                  [eventKey]: next,
+                                }))
+                              }
+                              tagOptions={tagOptions}
+                              onTagOptionsChange={(nextOptions) => {
+                                setTagOptions(nextOptions);
+                                persistTagOptions(nextOptions);
+                              }}
+                            />
+                            <img src={tagIcon} alt="tagIcon" className="tagIcon" />
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>

@@ -1,0 +1,106 @@
+.tagBarWrap{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  align-items:flex-end;
+  justify-content: center;
+  margin-top:10px;
+}
+
+.tagPillWrap{
+  width: 140px;
+  display:flex;
+  justify-content:flex-end;
+}
+
+.tagPill{
+  width: 140px;
+  height: 34px;
+  border-radius: 8px;
+  border: 2px solid rgba(255,255,255,0.75);
+  background: transparent;
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding: 0 10px;
+  box-sizing: border-box;
+}
+
+.tagPill--set{
+  border-color: rgba(255,255,255,0.95);
+}
+
+.tagPill--add{
+  opacity: 0.85;
+}
+
+.tagPill--custom{
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px;
+}
+
+.tagPillText{
+  overflow:hidden;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+}
+
+.tagPillX{
+  border:none;
+  background: transparent;
+  color: white;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.tagPillInput{
+  width: 140px;
+  height: 34px;
+  border-radius: 8px;
+  border: 2px solid rgba(255,255,255,0.95);
+  background: rgba(0,0,0,0.25);
+  color: white;
+  font-size: 14px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.tagAddRow{
+  width: 220px;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  align-items: stretch;
+}
+
+.tagAddInput{
+  height: 34px;
+  border-radius: 8px;
+  border: 2px solid rgba(255,255,255,0.6);
+  background: rgba(0,0,0,0.25);
+  color: white;
+  font-size: 14px;
+  padding: 0 10px;
+  outline: none;
+}
+
+.tagAddBtn{
+  height: 34px;
+  border-radius: 8px;
+  border: 2px solid rgba(255,255,255,0.85);
+  background: rgba(255,255,255,0.08);
+  color: white;
+  cursor: pointer;
+}
+
+.tagAddBtn--ghost{
+  background: transparent;
+  opacity: 0.85;
+}

@@ -66,18 +66,7 @@ function PlayerBar({
         <div className="playerbar-timer">
           <Timer addTime={addTime} />
         </div>
-        <div className="playerbar-selector">
-          <EventSelector
-            currentEvent={currentEvent}
-            handleEventChange={handleEventChange}
-            currentSession={currentSession}
-            setCurrentSession={setCurrentSession}
-            sessions={sessionsList}
-            customEvents={customEvents}
-            userID={user?.UserID}
-            dropUp={true}
-          />
-        </div>
+        
       </div>
 
       {/* MIDDLE: Scramble + TimeList */}
@@ -107,6 +96,20 @@ function PlayerBar({
       </div>
 
       {/* RIGHT: Puzzle SVG */}
+            <div className="playerbar-right">
+
+      <div className="playerbar-selector">
+          <EventSelector
+            currentEvent={currentEvent}
+            handleEventChange={handleEventChange}
+            currentSession={currentSession}
+            setCurrentSession={setCurrentSession}
+            sessions={sessionsList}
+            customEvents={customEvents}
+            userID={user?.UserID}
+            dropUp={true}
+          />
+        </div>
       <div className="playerbar-cube">
         <PuzzleSVG
           event={currentEvent}
@@ -114,6 +117,7 @@ function PlayerBar({
           isMusicPlayer={true}
           isTimerCube={false}
         />
+      </div>
       </div>
     </div>
   );

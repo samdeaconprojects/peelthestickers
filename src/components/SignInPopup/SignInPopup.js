@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react";
 import "./SignInPopup.css";
 //import ptsLogo from '../../assets/ptslongoneline.svg'; 300px width?
-import ptsLogo from '../../assets/ptsyrg.svg';
+//import ptsLogo from '../../assets/ptsyrg.svg';
+import ptsLogo from '../../assets/LogoStrokeWide.svg';
+
 
 
 function SignInPopup({ onSignIn, onSignUp, onClose }) {

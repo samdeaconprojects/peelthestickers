@@ -22,6 +22,180 @@ import { importSolvesBatch } from "../../services/importSolvesBatch";
 // ✅ NEW: allow creating destination sessions for imports
 import { createSession } from "../../services/createSession";
 
+/* -------------------------------------------------------------------------- */
+/*                              TAG/TIME HELPERS                              */
+/* -------------------------------------------------------------------------- */
+
+const TAG_NONE = "__none__";
+const TAG_SHARED = "__shared__";
+const TAG_IMPORTS = "__imports__";
+const TAG_CUSTOM_PREFIX = "custom:"; // custom:<key>
+
+const GROUP_RAW = "__raw__";
+const GROUP_DAY = "day";
+const GROUP_WEEK = "week";
+const GROUP_MONTH = "month";
+const GROUP_YEAR = "year";
+
+function isFiniteDate(d) {
+  return d instanceof Date && Number.isFinite(d.getTime());
+}
+
+function startOfDay(d) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function startOfMonth(d) {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function startOfYear(d) {
+  return new Date(d.getFullYear(), 0, 1);
+}
+
+// ISO week start (Monday)
+function startOfISOWeek(d) {
+  const date = new Date(d);
+  const day = date.getDay(); // 0=Sun..6=Sat
+  const diff = (day === 0 ? -6 : 1) - day; // shift to Monday
+  date.setDate(date.getDate() + diff);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function toISO(d) {
+  try {
+    return d.toISOString();
+  } catch {
+    return "";
+  }
+}
+
+function safeUpper(s) {
+  return String(s || "").toUpperCase();
+}
+
+function solveHasSharedTag(tags) {
+  if (!tags) return false;
+  return !!(
+    tags.IsShared ||
+    tags.isShared ||
+    tags.SharedID ||
+    tags.sharedID ||
+    tags.SharedIndex != null ||
+    tags.sharedIndex != null
+  );
+}
+
+function solveHasImportTag(tags) {
+  if (!tags) return false;
+  const src = String(tags.Source || tags.source || "").toLowerCase();
+  return !!(
+    tags.Imports ||
+    tags.imports ||
+    tags.Imported ||
+    tags.imported ||
+    tags.IsImport ||
+    tags.isImport ||
+    tags.IsImported ||
+    tags.isImported ||
+    tags.Import === true ||
+    tags.import === true ||
+    src === "import"
+  );
+}
+
+function getTagValueForKey(solve, tagKey) {
+  const tags = solve?.tags || solve?.Tags || {};
+  if (!tags) return "";
+
+  if (tagKey === "CubeModel") return String(tags.CubeModel || "");
+  if (tagKey === "CrossColor") return String(tags.CrossColor || "");
+
+  if (tagKey.startsWith(TAG_CUSTOM_PREFIX)) {
+    const k = tagKey.slice(TAG_CUSTOM_PREFIX.length);
+    const c = tags.Custom || tags.custom || {};
+    const v = c?.[k];
+    if (v == null) return "";
+    return String(v);
+  }
+
+  // fallback: direct tag field
+  const v = tags?.[tagKey];
+  if (v == null) return "";
+  return String(v);
+}
+
+function groupSolvesByPeriod(solves, grouping) {
+  if (!Array.isArray(solves) || solves.length === 0) return [];
+  if (!grouping || grouping === GROUP_RAW) return solves;
+
+  const bucketMap = new Map();
+
+  for (const s of solves) {
+    const iso = s?.datetime;
+    const d = new Date(iso);
+    if (!isFiniteDate(d)) continue;
+
+    let start;
+    if (grouping === GROUP_DAY) start = startOfDay(d);
+    else if (grouping === GROUP_WEEK) start = startOfISOWeek(d);
+    else if (grouping === GROUP_MONTH) start = startOfMonth(d);
+    else if (grouping === GROUP_YEAR) start = startOfYear(d);
+    else start = d;
+
+    const key = toISO(start);
+    if (!key) continue;
+
+    const entry = bucketMap.get(key) || {
+      key,
+      datetime: key,
+      count: 0,
+      sum: 0,
+      validCount: 0,
+      // keep representative fields so downstream components don't explode
+      event: s?.event,
+      scramble: "",
+      penalty: null,
+      note: "",
+      tags: { Bucket: grouping },
+      // keep earliest original time for compatibility
+      originalTime: undefined,
+    };
+
+    entry.count += 1;
+
+    const t = Number(s?.time);
+    const isDNF = String(s?.penalty || "").toUpperCase() === "DNF";
+    if (Number.isFinite(t) && t >= 0 && !isDNF) {
+      entry.sum += t;
+      entry.validCount += 1;
+    }
+
+    bucketMap.set(key, entry);
+  }
+
+  const out = Array.from(bucketMap.values())
+    .map((b) => {
+      const avg = b.validCount > 0 ? b.sum / b.validCount : null;
+      return {
+        time: avg == null ? 0 : avg, // keep numeric for charts
+        scramble: "",
+        event: b.event,
+        penalty: b.validCount > 0 ? null : "DNF", // if all were DNF/invalid, mark bucket DNF-ish
+        note: `(${b.count} solves)`,
+        datetime: b.datetime,
+        tags: b.tags,
+        originalTime: b.originalTime,
+        __bucketCount: b.count,
+        __bucketValid: b.validCount,
+      };
+    })
+    .sort((a, b) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
+
+  return out;
+}
+
 function Stats({
   sessions,
   sessionsList = [],
@@ -43,6 +217,13 @@ function Stats({
   const [statsSession, setStatsSession] = useState(currentSession || "main");
 
   const sessionId = useMemo(() => statsSession || "main", [statsSession]);
+
+  // -----------------------------
+  // ✅ NEW: Tag filter + time grouping
+  // -----------------------------
+  const [tagFilterKey, setTagFilterKey] = useState(TAG_NONE);
+  const [tagFilterValue, setTagFilterValue] = useState("");
+  const [timeGrouping, setTimeGrouping] = useState(GROUP_RAW);
 
   // -----------------------------
   // View controls
@@ -167,6 +348,11 @@ function Stats({
     setPageCursor(null);
     setHasMoreOlder(false);
     setIsAllLoaded(false);
+
+    // ✅ reset tag/time filters when external navigation happens
+    setTagFilterKey(TAG_NONE);
+    setTagFilterValue("");
+    setTimeGrouping(GROUP_RAW);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentEvent, currentSession]);
 
@@ -257,7 +443,7 @@ function Stats({
   }, [user?.UserID, statsEvent, sessionId, loadInitialSolves]);
 
   // -----------------------------
-  // Paging math
+  // Paging math (RAW solves paging stays the same)
   // -----------------------------
   const totalPages = useMemo(() => {
     const per = Math.max(1, solvesPerPage);
@@ -281,13 +467,147 @@ function Stats({
     );
   }, [solves.length, solvesPerPage, currentPage]);
 
-  const solvesToDisplay = useMemo(() => {
+  const solvesToDisplayRaw = useMemo(() => {
     const slice = solves.slice(startIndex, endIndex);
     return slice.map((solve, i) => ({
       ...solve,
       fullIndex: startIndex + i,
     }));
   }, [solves, startIndex, endIndex]);
+
+  /* -------------------------------------------------------------------------- */
+  /*                         ✅ NEW: TAG OPTIONS + FILTERING                    */
+  /* -------------------------------------------------------------------------- */
+
+  // Discover tag keys/values from ALL loaded solves for this event/session view.
+  // (So the dropdowns are stable even when paging)
+  const discoveredTagInfo = useMemo(() => {
+    const info = {
+      cubeModels: new Set(),
+      crossColors: new Set(),
+      customKeys: new Set(),
+      customValuesByKey: new Map(), // key -> Set(values)
+      hasAnyShared: false,
+      hasAnyImports: false,
+    };
+
+    for (const s of solves || []) {
+      const tags = s?.tags || s?.Tags || {};
+      if (!tags) continue;
+
+      const cm = tags.CubeModel;
+      if (cm) info.cubeModels.add(String(cm));
+
+      const cc = tags.CrossColor;
+      if (cc) info.crossColors.add(String(cc));
+
+      if (solveHasSharedTag(tags)) info.hasAnyShared = true;
+      if (solveHasImportTag(tags)) info.hasAnyImports = true;
+
+      const custom = tags.Custom || tags.custom || null;
+      if (custom && typeof custom === "object") {
+        for (const k of Object.keys(custom)) {
+          info.customKeys.add(String(k));
+          const v = custom[k];
+          if (!info.customValuesByKey.has(k)) info.customValuesByKey.set(k, new Set());
+          if (v != null) info.customValuesByKey.get(k).add(String(v));
+        }
+      }
+    }
+
+    return info;
+  }, [solves]);
+
+  const tagKeyOptions = useMemo(() => {
+    const opts = [{ value: TAG_NONE, label: "All tags" }];
+
+    // core tags
+    opts.push({ value: "CubeModel", label: "Cube Model" });
+    opts.push({ value: "CrossColor", label: "Cross Color" });
+
+    // boolean tags (only show if we’ve seen them, but keep safe if not)
+    opts.push({ value: TAG_SHARED, label: "Shared" });
+    opts.push({ value: TAG_IMPORTS, label: "Imports" });
+
+    // custom keys
+    const custom = Array.from(discoveredTagInfo.customKeys || []).sort((a, b) =>
+      String(a).localeCompare(String(b))
+    );
+    for (const k of custom) {
+      opts.push({ value: `${TAG_CUSTOM_PREFIX}${k}`, label: `Tag: ${k}` });
+    }
+
+    return opts;
+  }, [discoveredTagInfo.customKeys]);
+
+  const tagValueOptions = useMemo(() => {
+    // For Shared/Imports we don’t need a value dropdown
+    if (tagFilterKey === TAG_NONE || tagFilterKey === TAG_SHARED || tagFilterKey === TAG_IMPORTS)
+      return [];
+
+    let values = [];
+    if (tagFilterKey === "CubeModel") {
+      values = Array.from(discoveredTagInfo.cubeModels || []);
+    } else if (tagFilterKey === "CrossColor") {
+      values = Array.from(discoveredTagInfo.crossColors || []);
+    } else if (tagFilterKey.startsWith(TAG_CUSTOM_PREFIX)) {
+      const k = tagFilterKey.slice(TAG_CUSTOM_PREFIX.length);
+      const set = discoveredTagInfo.customValuesByKey.get(k);
+      values = set ? Array.from(set) : [];
+    }
+
+    values.sort((a, b) => String(a).localeCompare(String(b)));
+
+    return [{ value: "", label: "All" }, ...values.map((v) => ({ value: v, label: v }))];
+  }, [
+    tagFilterKey,
+    discoveredTagInfo.cubeModels,
+    discoveredTagInfo.crossColors,
+    discoveredTagInfo.customValuesByKey,
+  ]);
+
+  // If the tagKey changes, reset value (so you don’t get stuck on a stale value)
+  useEffect(() => {
+    setTagFilterValue("");
+  }, [tagFilterKey]);
+
+  const filteredSolvesRaw = useMemo(() => {
+    const arr = solvesToDisplayRaw || [];
+    if (tagFilterKey === TAG_NONE) return arr;
+
+    if (tagFilterKey === TAG_SHARED) {
+      return arr.filter((s) => solveHasSharedTag(s?.tags || s?.Tags || {}));
+    }
+
+    if (tagFilterKey === TAG_IMPORTS) {
+      return arr.filter((s) => solveHasImportTag(s?.tags || s?.Tags || {}));
+    }
+
+    // value-based tags
+    const desired = String(tagFilterValue || "").trim();
+    if (!desired) {
+      // "All" values, but still require the tag to exist (so it actually filters)
+      return arr.filter((s) => {
+        const v = getTagValueForKey(s, tagFilterKey);
+        return !!String(v || "").trim();
+      });
+    }
+
+    return arr.filter((s) => {
+      const v = getTagValueForKey(s, tagFilterKey);
+      return String(v || "") === desired;
+    });
+  }, [solvesToDisplayRaw, tagFilterKey, tagFilterValue]);
+
+  /* -------------------------------------------------------------------------- */
+  /*                       ✅ NEW: TIME GROUPING (BUCKETS)                      */
+  /* -------------------------------------------------------------------------- */
+
+  const solvesToDisplay = useMemo(() => {
+    // Apply tag filter first, then bucket/group
+    const filtered = filteredSolvesRaw || [];
+    return groupSolvesByPeriod(filtered, timeGrouping);
+  }, [filteredSolvesRaw, timeGrouping]);
 
   // -----------------------------
   // Incremental “Older” fetch
@@ -356,8 +676,9 @@ function Stats({
   }, [overallStatsForEvent]);
 
   const showingCount = useMemo(() => {
-    return Math.min(solvesPerPage, solves.length || 0);
-  }, [solvesPerPage, solves.length]);
+    // after filtering/grouping, this is the displayed list count
+    return solvesToDisplay?.length || 0;
+  }, [solvesToDisplay]);
 
   const dateRangeText = useMemo(() => {
     if (!solvesToDisplay || solvesToDisplay.length === 0) return "";
@@ -367,7 +688,7 @@ function Stats({
 
     const fmt = (iso) => {
       const d = new Date(iso);
-      if (!isFinite(d)) return "";
+      if (!isFiniteDate(d)) return "";
       return d.toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",
@@ -397,6 +718,11 @@ function Stats({
       setPageCursor(null);
       setHasMoreOlder(false);
       setIsAllLoaded(false);
+
+      // ✅ reset tag/time when switching event
+      setTagFilterKey(TAG_NONE);
+      setTagFilterValue("");
+      setTimeGrouping(GROUP_RAW);
     },
     [DEFAULT_IN_VIEW]
   );
@@ -412,19 +738,28 @@ function Stats({
       setPageCursor(null);
       setHasMoreOlder(false);
       setIsAllLoaded(false);
+
+      // ✅ reset tag/time when switching session
+      setTagFilterKey(TAG_NONE);
+      setTagFilterValue("");
+      setTimeGrouping(GROUP_RAW);
     },
     [DEFAULT_IN_VIEW]
   );
 
   const handleDeleteSolve = useCallback(
     (fullIndex) => {
+      // If you’re viewing grouped buckets, deleting doesn’t make sense.
+      // We’ll only allow delete when RAW grouping is active.
+      if (timeGrouping !== GROUP_RAW) return;
+
       setSessions((prev) => ({
         ...prev,
         [statsEvent]: (prev?.[statsEvent] || []).filter((_, i) => i !== fullIndex),
       }));
       deleteTime(statsEvent, fullIndex);
     },
-    [setSessions, deleteTime, statsEvent]
+    [setSessions, deleteTime, statsEvent, timeGrouping]
   );
 
   const handlePreviousPage = useCallback(async () => {
@@ -779,6 +1114,50 @@ function Stats({
               </div>
             )}
           </div>
+
+          {/* ✅ NEW: Tag filter */}
+          <select
+            className="statsSelect"
+            value={tagFilterKey}
+            onChange={(e) => setTagFilterKey(e.target.value)}
+            title="Filter stats by tag"
+          >
+            {tagKeyOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+
+          {/* ✅ NEW: Tag value (only when needed) */}
+          {tagValueOptions.length > 0 && (
+            <select
+              className="statsSelect"
+              value={tagFilterValue}
+              onChange={(e) => setTagFilterValue(e.target.value)}
+              title="Tag value"
+            >
+              {tagValueOptions.map((o) => (
+                <option key={`${o.value}`} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {/* ✅ NEW: Time grouping */}
+          <select
+            className="statsSelect"
+            value={timeGrouping}
+            onChange={(e) => setTimeGrouping(e.target.value)}
+            title="Group stats by time"
+          >
+            <option value={GROUP_RAW}>Raw</option>
+            <option value={GROUP_DAY}>Day</option>
+            <option value={GROUP_WEEK}>Week</option>
+            <option value={GROUP_MONTH}>Month</option>
+            <option value={GROUP_YEAR}>Year</option>
+          </select>
         </div>
 
         <div className="statsTopMiddle">
@@ -787,7 +1166,9 @@ function Stats({
               {showingCount}
               {overallCount != null ? `/${overallCount}` : ""}
             </span>
-            <span className="statsTopCountLabel">solves</span>
+            <span className="statsTopCountLabel">
+              {timeGrouping === GROUP_RAW ? "solves" : "buckets"}
+            </span>
           </div>
 
           {dateRangeText && <div className="statsTopRange">{dateRangeText}</div>}
@@ -874,7 +1255,6 @@ function Stats({
           onClose={() => setShowImport(false)}
           onImport={handleImportSolves}
           busy={importBusy}
-          // (ImportSolvesModal can ignore these if you didn't add them yet)
           sessionsForEvent={sessionsForEvent}
           defaultDestination={{ kind: "new", sessionName: "" }}
         />

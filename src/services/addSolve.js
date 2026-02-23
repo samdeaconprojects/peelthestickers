@@ -11,18 +11,22 @@ function computeWcaAverage(timesMs) {
   let dnfCount = 0;
 
   for (const s of timesMs) {
-    if (s?.penalty === "DNF") { dnfCount++; continue; }
+    if (s?.penalty === "DNF") {
+      dnfCount++;
+      continue;
+    }
     let t = s.ms;
     if (s?.penalty === "+2") t += 2000;
     values.push(t);
   }
+
   if (dnfCount > 0) return { ms: null, dnf: true };
   if (values.length < 3) return { ms: null, dnf: true };
 
-  values.sort((a,b)=>a-b);
+  values.sort((a, b) => a - b);
   values.shift(); // drop best
-  values.pop();   // drop worst
-  const sum = values.reduce((a,b)=>a+b, 0);
+  values.pop(); // drop worst
+  const sum = values.reduce((a, b) => a + b, 0);
   return { ms: Math.round(sum / values.length), dnf: false };
 }
 
@@ -64,7 +68,10 @@ function normalizeArgs(userID, a1, a2, a3, a4, a5, a6, a7) {
     const opts = a2 || {};
 
     const rawEvent = solve.event ?? solve.Event ?? opts.event;
-    if (!rawEvent) throw new Error("addSolve: 'event' is required (pass in solve.event or opts.event)");
+    if (!rawEvent)
+      throw new Error(
+        "addSolve: 'event' is required (pass in solve.event or opts.event)"
+      );
     const event = String(rawEvent).toUpperCase();
 
     const sessionID = (solve.sessionID ?? opts.sessionID ?? "main").toString();
@@ -72,7 +79,10 @@ function normalizeArgs(userID, a1, a2, a3, a4, a5, a6, a7) {
     // Support both ms and time fields
     const msRaw = solve.ms ?? solve.time;
     const ms = Number(msRaw);
-    if (!Number.isFinite(ms) || ms < 0) throw new Error("addSolve: 'ms' (milliseconds) must be a non-negative number");
+    if (!Number.isFinite(ms) || ms < 0)
+      throw new Error(
+        "addSolve: 'ms' (milliseconds) must be a non-negative number"
+      );
 
     const penalty = solve.penalty ?? null;
     const scramble = solve.scramble ?? null;
@@ -86,11 +96,15 @@ function normalizeArgs(userID, a1, a2, a3, a4, a5, a6, a7) {
   // OLD style: positional args
   const sessionID = (a1 ?? "main").toString();
   const rawEvent = a2;
-  if (!rawEvent) throw new Error("addSolve: 'event' is required (third arg in old signature)");
+  if (!rawEvent)
+    throw new Error("addSolve: 'event' is required (third arg in old signature)");
   const event = String(rawEvent).toUpperCase();
 
   const ms = Number(a3);
-  if (!Number.isFinite(ms) || ms < 0) throw new Error("addSolve: time (fourth arg) must be a non-negative number");
+  if (!Number.isFinite(ms) || ms < 0)
+    throw new Error(
+      "addSolve: time (fourth arg) must be a non-negative number"
+    );
 
   const scramble = a4 ?? null;
   const penalty = a5 ?? null;
@@ -129,98 +143,124 @@ export const addSolve = async (userID, a1, a2, a3, a4, a5, a6, a7) => {
     DateTime: ts,
   };
 
-   // Relay support: store legs/scrambles/times as top-level attributes (sparse)
+  // Relay support: store legs/scrambles/times as top-level attributes (sparse)
   if (tags?.IsRelay) {
     if (Array.isArray(tags.RelayLegs)) solveItem.RelayLegs = tags.RelayLegs;
-    if (Array.isArray(tags.RelayScrambles)) solveItem.RelayScrambles = tags.RelayScrambles;
-    if (Array.isArray(tags.RelayLegTimes)) solveItem.RelayLegTimes = tags.RelayLegTimes;
+    if (Array.isArray(tags.RelayScrambles))
+      solveItem.RelayScrambles = tags.RelayScrambles;
+    if (Array.isArray(tags.RelayLegTimes))
+      solveItem.RelayLegTimes = tags.RelayLegTimes;
     solveItem.SessionType = "RELAY"; // optional convenience
   }
 
-
+  // ✅ This is the ONLY part that should be allowed to fail the solve write.
   await dynamoDB.put({ TableName: "PTS", Item: solveItem }).promise();
 
-  // 2) Update SessionStats incrementally (optimistic concurrency)
+  // 2) Update SessionStats incrementally (BEST EFFORT — do not fail the solve write)
   const statsKey = {
     PK: `USER#${userID}`,
     SK: `SESSIONSTATS#${event}#${sessionID}`,
   };
 
-  const existing = await getSessionStats(userID, event, sessionID);
-  const stats = existing ? { ...existing } : {
-    ...statsKey,
-    solveCount: 0,
-    sumMs: 0,
-    bestSingleMs: null,
-    worstSingleMs: null,
-    bestAo5: null,
-    bestAo12: null,
-    bestAo50: null,
-    bestAo100: null,
-    bestAo1000: null,
-    buffers: {},
-    version: 0,
-    stale: false,
+  const updateStatsOnce = async () => {
+    const existing = await getSessionStats(userID, event, sessionID);
+
+    const stats = existing
+      ? { ...existing }
+      : {
+          ...statsKey,
+          solveCount: 0,
+          sumMs: 0,
+          bestSingleMs: null,
+          worstSingleMs: null,
+          bestAo5: null,
+          bestAo12: null,
+          bestAo50: null,
+          bestAo100: null,
+          bestAo1000: null,
+          buffers: {},
+          version: 0,
+          stale: false,
+        };
+
+    stats.solveCount += 1;
+
+    if (penalty !== "DNF") {
+      stats.sumMs += ms;
+      if (stats.bestSingleMs == null || ms < stats.bestSingleMs)
+        stats.bestSingleMs = ms;
+      if (stats.worstSingleMs == null || ms > stats.worstSingleMs)
+        stats.worstSingleMs = ms;
+    }
+
+    stats.lastSolveTS = ts;
+    updateRollingAverages(stats, { ms, penalty });
+
+    const newVersion = (existing?.version ?? 0) + 1;
+
+    const params = {
+      TableName: "PTS",
+      Key: statsKey,
+      UpdateExpression: `
+        SET solveCount = :c,
+            sumMs = :s,
+            bestSingleMs = :b,
+            worstSingleMs = :w,
+            bestAo5 = :a5,
+            bestAo12 = :a12,
+            bestAo50 = :a50,
+            bestAo100 = :a100,
+            bestAo1000 = :a1000,
+            buffers = :buf,
+            lastSolveTS = :ts,
+            version = :v,
+            stale = :st
+      `,
+      ConditionExpression: "attribute_not_exists(version) OR version = :prevV",
+      ExpressionAttributeValues: {
+        ":c": stats.solveCount,
+        ":s": stats.sumMs,
+        ":b": stats.bestSingleMs,
+        ":w": stats.worstSingleMs,
+        ":a5": stats.bestAo5,
+        ":a12": stats.bestAo12,
+        ":a50": stats.bestAo50,
+        ":a100": stats.bestAo100,
+        ":a1000": stats.bestAo1000,
+        ":buf": stats.buffers,
+        ":ts": stats.lastSolveTS,
+        ":v": newVersion,
+        ":prevV": existing?.version ?? 0,
+        ":st": !!stats.stale,
+      },
+    };
+
+    await dynamoDB.update(params).promise();
+    return true;
   };
 
-  stats.solveCount += 1;
-  if (penalty !== "DNF") {
-    stats.sumMs += ms;
-    if (stats.bestSingleMs == null || ms < stats.bestSingleMs) stats.bestSingleMs = ms;
-    if (stats.worstSingleMs == null || ms > stats.worstSingleMs) stats.worstSingleMs = ms;
-  }
-  stats.lastSolveTS = ts;
-  updateRollingAverages(stats, { ms, penalty });
-
-  const newVersion = (existing?.version ?? 0) + 1;
-
-  const params = {
-    TableName: "PTS",
-    Key: statsKey,
-    UpdateExpression: `
-      SET solveCount = :c,
-          sumMs = :s,
-          bestSingleMs = :b,
-          worstSingleMs = :w,
-          bestAo5 = :a5,
-          bestAo12 = :a12,
-          bestAo50 = :a50,
-          bestAo100 = :a100,
-          bestAo1000 = :a1000,
-          buffers = :buf,
-          lastSolveTS = :ts,
-          version = :v,
-          stale = :st
-    `,
-    ConditionExpression: "attribute_not_exists(version) OR version = :prevV",
-    ExpressionAttributeValues: {
-      ":c": stats.solveCount,
-      ":s": stats.sumMs,
-      ":b": stats.bestSingleMs,
-      ":w": stats.worstSingleMs,
-      ":a5": stats.bestAo5,
-      ":a12": stats.bestAo12,
-      ":a50": stats.bestAo50,
-      ":a100": stats.bestAo100,
-      ":a1000": stats.bestAo1000,
-      ":buf": stats.buffers,
-      ":ts": stats.lastSolveTS,
-      ":v": newVersion,
-      ":prevV": existing?.version ?? 0,
-      ":st": !!stats.stale,
-    },
-  };
+  let statsUpdated = false;
 
   try {
-    await dynamoDB.update(params).promise();
-  } catch (e) {
-    if (e.code === "ConditionalCheckFailedException") {
-      // If two solves post at exactly the same time, caller can retry once.
-      throw new Error("AddSolve conflict: please retry once.");
+    // retry once on optimistic-lock conflicts
+    try {
+      statsUpdated = await updateStatsOnce();
+    } catch (e) {
+      if (e && e.code === "ConditionalCheckFailedException") {
+        statsUpdated = await updateStatsOnce();
+      } else {
+        throw e;
+      }
     }
-    throw e;
+  } catch (e) {
+    // IMPORTANT: do not fail the solve write
+    console.warn(
+      "SESSIONSTATS update failed (solve still saved):",
+      e && e.code,
+      (e && e.message) || e
+    );
+    statsUpdated = false;
   }
 
-  // Optionally return the created item metadata so the caller can reconcile if needed
-  return { ts, event, sessionID, ms, penalty, scramble, note, tags };
+  return { ts, event, sessionID, ms, penalty, scramble, note, tags, statsUpdated };
 };

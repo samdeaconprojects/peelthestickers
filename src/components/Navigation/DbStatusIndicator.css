@@ -1,0 +1,90 @@
+.db-indicator-spacer {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-left: 10px;
+  opacity: 0;
+}
+
+.db-indicator-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 10px;
+  width: 14px;
+  height: 14px;
+  position: relative;
+}
+
+/* Spinner */
+.db-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.25);
+  border-top-color: rgba(255,255,255,0.95);
+  animation: dbSpin 0.7s linear infinite;
+}
+
+@keyframes dbSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Check */
+.db-check {
+  width: 14px;
+  height: 14px;
+  position: relative;
+  animation: dbPop 180ms ease-out;
+}
+
+.db-check::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 6px;
+  width: 4px;
+  height: 2px;
+  border-left: 2px solid rgba(46,196,182,1);
+  border-bottom: 2px solid rgba(46,196,182,1);
+  transform: rotate(-45deg);
+}
+
+.db-check::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 3px;
+  width: 7px;
+  height: 2px;
+  border-bottom: 2px solid rgba(46,196,182,1);
+  transform: rotate(45deg);
+}
+
+/* X */
+.db-x {
+  width: 14px;
+  height: 14px;
+  position: relative;
+  animation: dbPop 180ms ease-out;
+}
+
+.db-x::before,
+.db-x::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 6px;
+  width: 12px;
+  height: 2px;
+  background: rgba(255, 77, 77, 1);
+  transform-origin: center;
+}
+
+.db-x::before { transform: rotate(45deg); }
+.db-x::after  { transform: rotate(-45deg); }
+
+@keyframes dbPop {
+  from { transform: scale(0.85); opacity: 0.2; }
+  to   { transform: scale(1); opacity: 1; }
+}

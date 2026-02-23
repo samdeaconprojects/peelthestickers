@@ -38,6 +38,29 @@ function Timer({ addTime }) {
     inspectionBeepsRef.current = !!settings.inspectionBeeps;
   }, [settings.inspectionBeeps]);
 
+  // ✅ NEW: hold-to-ready timeout (green)
+  const holdTimeoutRef = useRef(null);
+
+  // ✅ NEW: cancel out of pre-start hold/inspection (Escape)
+  const cancelPreStart = () => {
+    if (holdTimeoutRef.current) {
+      clearTimeout(holdTimeoutRef.current);
+      holdTimeoutRef.current = null;
+    }
+
+    setIsSpacebarHeld(false);
+    setCanStart(false);
+
+    // cancel inspection if it was running
+    stopInspectionInterval();
+    setIsInspecting(false);
+    setInspectionElapsed(0);
+    inspectionStartRef.current = null;
+
+    // clear any pending inspection penalty
+    inspectionExtraMsRef.current = 0;
+  };
+
   // -------------------------
   // Simple beep helper (WebAudio)
   // -------------------------
@@ -204,11 +227,36 @@ function Timer({ addTime }) {
 
     if (isTyping) return;
 
+    // ✅ NEW: Escape cancels pre-start hold or inspection (before solve starts)
+    if (settings.timerInput === 'Keyboard' && event.key === 'Escape') {
+      if (!timerOn && (isSpacebarHeld || isInspecting)) {
+        event.preventDefault();
+        cancelPreStart();
+      }
+      return;
+    }
+
     if (settings.timerInput === 'Keyboard') {
       if (event.code === 'Space') {
         event.preventDefault();
-        if (timerOn) stopTimer();
+
+        //  ignore auto-repeat while holding space
+        if (event.repeat) return;
+
+        // If timer is running, Space stops immediately (existing behavior)
+        if (timerOn) {
+          stopTimer();
+          return;
+        }
+
+        //  NEW: "hold to ready" behavior
         setIsSpacebarHeld(true);
+        setCanStart(false);
+
+        if (holdTimeoutRef.current) clearTimeout(holdTimeoutRef.current);
+        holdTimeoutRef.current = setTimeout(() => {
+          setCanStart(true); // becomes "ready" (green)
+        }, 0);
       }
     } else {
       const flashKeypadButton = (val) => {
@@ -251,12 +299,17 @@ function Timer({ addTime }) {
       event.preventDefault();
       setIsSpacebarHeld(false);
 
+      if (holdTimeoutRef.current) {
+        clearTimeout(holdTimeoutRef.current);
+        holdTimeoutRef.current = null;
+      }
+
       if (ignoreNextKeyUp.current) {
         ignoreNextKeyUp.current = false;
         return;
       }
 
-      // If timer is not running, Space-release is a "start intent"
+      // ✅ NEW: only start if we reached "ready" (green)
       if (!timerOn && canStart) {
         const inspectionOn = !!settings.inspectionEnabled;
 
@@ -264,14 +317,15 @@ function Timer({ addTime }) {
           startTimer();
         } else {
           // Inspection flow:
-          // 1st space-release -> start inspection
-          // 2nd space-release -> start timer (and apply +2 if inspection >= 15s)
+          // 1st ready release -> start inspection
+          // 2nd ready release -> start timer (and apply +2 if inspection >= 15s)
           if (!isInspecting) startInspection();
           else commitInspectionAndStartTimer();
         }
       }
 
-      setTimeout(() => setCanStart(true), 200);
+      // ✅ NEW: after release, reset ready so you must hold again next time
+      setCanStart(false);
     }
   };
 
@@ -305,12 +359,14 @@ function Timer({ addTime }) {
       document.removeEventListener('keyup', handleKeyUp);
     };
     // NOTE: include isInspecting so key-up behavior sees current inspection state
-  }, [settings.timerInput, manualTime, timerOn, isInspecting, settings.inspectionEnabled]);
+  }, [settings.timerInput, manualTime, timerOn, isInspecting, settings.inspectionEnabled, isSpacebarHeld, canStart]);
 
   useEffect(() => {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       stopInspectionInterval();
+      // ✅ NEW: clear hold timeout
+      if (holdTimeoutRef.current) clearTimeout(holdTimeoutRef.current);
     };
   }, []);
 
@@ -352,7 +408,7 @@ function Timer({ addTime }) {
     return formatMs(timeToDisplay);
   };
 
-  // ✅ Inspection color phases (8 / 12 / 15)
+  //  Inspection color phases (8 / 12 / 15)
   const getInspectionColor = () => {
     const ms = inspectionElapsed;
     if (ms >= 15000) return "#ff4d4d"; // 15+ red
@@ -363,6 +419,16 @@ function Timer({ addTime }) {
 
   // ✅ Fullscreen inspection option
   const fullscreenInspectionOn = !!settings.inspectionFullscreen;
+
+  // ✅ NEW: Ready-green state while holding space before start
+  const readyGreen = isSpacebarHeld && canStart && !timerOn && !isInspecting;
+
+  //  NEW: Decide display color (inspection colors take priority)
+  const timerColorStyle = isInspecting
+    ? { color: getInspectionColor(), transition: "color 120ms linear" }
+    : readyGreen
+    ? { color: "#2EC4B6", transition: "color 120ms linear" }
+    : undefined;
 
   return (
     <div className='timer-display'>
@@ -403,7 +469,7 @@ function Timer({ addTime }) {
             <>
               <p
                 className='Timer'
-                style={isInspecting ? { color: getInspectionColor(), transition: "color 120ms linear" } : undefined}
+                style={timerColorStyle}
               >
                 {formatTime()}
               </p>

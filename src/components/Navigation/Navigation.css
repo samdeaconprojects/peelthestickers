@@ -32,6 +32,7 @@
 .logo {
   max-width: 55px;
   margin-top: 10px;
+  margin-left: 25px;
 }
 
 .profile, .stats, .social, .settings {

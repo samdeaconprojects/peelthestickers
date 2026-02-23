@@ -10,7 +10,7 @@
   bottom: 0;
   left: 0;
   right: 0;
-  height: 160px;
+  height: 150px;
   z-index: 1000;
 
   background-color: #181F23;
@@ -42,6 +42,8 @@
 .playerbar-selector {
   display: flex;
   align-items: center;
+  margin-right: 100px;
+
 }
 
 /* MIDDLE: scramble + timelist centered and stable */
