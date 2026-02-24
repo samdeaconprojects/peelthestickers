@@ -127,6 +127,28 @@ function Settings({ userID, onClose, onProfileUpdate }) {
                         </select>
                     </div>
 
+                    <div className="setting-item">
+                      <label>Disable On-Screen Keypad</label>
+                      <input
+                        type="checkbox"
+                        checked={!!settings.disableKeypad}
+                        onChange={(e) => updateSettings({ disableKeypad: e.target.checked })}
+                      />
+                    </div>
+
+                    <div className="setting-item">
+                      <label>Time Color Mode</label>
+                      <select
+                        value={settings.timeColorMode || "binary"}
+                        onChange={(e) => updateSettings({ timeColorMode: e.target.value })}
+                      >
+                        <option value="binary">Binary (only best/worst)</option>
+                        <option value="continuous">True spectrum (by time)</option>
+                        <option value="bucket">Bucket spectrum (5 bands)</option>
+                        <option value="index">Index spectrum (evenly distributed)</option>
+                      </select>
+                    </div>
+
                     {/* NEW: Time color mode */}
                     <div className="setting-item">
                       <label>Time Color Mode</label>

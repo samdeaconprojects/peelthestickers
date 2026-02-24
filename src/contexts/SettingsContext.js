@@ -27,6 +27,10 @@ export const SettingsProvider = ({ children }) => {
     timerInput: 'Keyboard',
     horizontalTimeList: true, // default to horizontal
 
+    // ✅ NEW: if true, do NOT show the on-screen keypad grid in manual entry modes
+    // Type mode will also force-hide the keypad regardless (Timer.js).
+    disableKeypad: false,
+
     // NEW: Time color modes:
     // "binary"     => only best/worst (existing behavior)
     // "continuous" => true spectrum by time (each solve can be different)

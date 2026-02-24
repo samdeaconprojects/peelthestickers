@@ -1,8 +1,9 @@
+// src/components/Timer/Timer.js
 import React, { useState, useEffect, useRef } from 'react';
 import './Timer.css';
 import { useSettings } from '../../contexts/SettingsContext';
 
-function Timer({ addTime }) {
+function Timer({ addTime, inPlayerBar = false }) {
   const { settings } = useSettings();
 
   const [manualTime, setManualTime] = useState('');
@@ -17,6 +18,12 @@ function Timer({ addTime }) {
   // -------------------------
   const [isInspecting, setIsInspecting] = useState(false);
   const [inspectionElapsed, setInspectionElapsed] = useState(0); // ms since inspection start
+
+  // ✅ never show keypad in PlayerBar
+  const showKeypad = !inPlayerBar && !settings?.disableKeypad;
+
+  // ✅ PlayerBar should keep the "timer look", but still allow typing if Timer Input !== Keyboard
+  const forceKeyboardView = !!inPlayerBar;
 
   const inspectionIntervalRef = useRef(null);
   const inspectionStartRef = useRef(null);
@@ -430,9 +437,14 @@ function Timer({ addTime }) {
     ? { color: "#2EC4B6", transition: "color 120ms linear" }
     : undefined;
 
+  // ✅ placeholder opacity for "Type"
+  const typePlaceholderStyle = manualTime
+    ? { opacity: 1, transition: "opacity 120ms linear" }
+    : { opacity: 0.35, transition: "opacity 120ms linear" };
+
   return (
     <div className='timer-display'>
-      {settings.timerInput === 'Keyboard' ? (
+      {(settings.timerInput === 'Keyboard' || forceKeyboardView) ? (
         <div style={{ textAlign: "center" }}>
           {/* Fullscreen overlay during inspection (optional) */}
           {isInspecting && fullscreenInspectionOn ? (
@@ -469,9 +481,15 @@ function Timer({ addTime }) {
             <>
               <p
                 className='Timer'
-                style={timerColorStyle}
+                style={
+                  settings.timerInput === "Keyboard"
+                    ? timerColorStyle
+                    : typePlaceholderStyle
+                }
               >
-                {formatTime()}
+                {settings.timerInput === "Keyboard"
+                  ? formatTime()
+                  : (manualTime || "Type")}
               </p>
 
               {/* Tiny hint under the time while inspecting */}
@@ -486,30 +504,35 @@ function Timer({ addTime }) {
         </div>
       ) : (
         <div className="manual-entry-container">
-          <div className="manual-display">{manualTime || '0.00'}</div>
-          <div className="keypad-grid">
-            {['0','1','2','3','4','5','6','7','8','9'].map((val, i) => (
-              <button
-                id={`keypad-${val}`}
-                key={val}
-                style={{ gridColumn: i + 1 }}
-                onClick={() => handlePadClick(val)}
-              >
-                {val}
-              </button>
-            ))}
-
-            <button id="keypad-." style={{ gridColumn: 4 }} onClick={() => handlePadClick('.')}>.</button>
-            <button id="keypad-⌫" style={{ gridColumn: 5 }} onClick={() => handlePadClick('⌫')}>⌫</button>
-            <button id="keypad-:" style={{ gridColumn: 6 }} onClick={() => handlePadClick(':')}>:</button>
-            <button
-              id="keypad-Enter"
-              style={{ gridColumn: '7 / span 2' }}
-              onClick={() => handlePadClick('Enter')}
-            >
-              Enter
-            </button>
+          <div className="manual-display" style={typePlaceholderStyle}>
+            {manualTime || 'Type'}
           </div>
+
+          {showKeypad && (
+            <div className="keypad-grid">
+              {['0','1','2','3','4','5','6','7','8','9'].map((val, i) => (
+                <button
+                  id={`keypad-${val}`}
+                  key={val}
+                  style={{ gridColumn: i + 1 }}
+                  onClick={() => handlePadClick(val)}
+                >
+                  {val}
+                </button>
+              ))}
+
+              <button id="keypad-." style={{ gridColumn: 4 }} onClick={() => handlePadClick('.')}>.</button>
+              <button id="keypad-⌫" style={{ gridColumn: 5 }} onClick={() => handlePadClick('⌫')}>⌫</button>
+              <button id="keypad-:" style={{ gridColumn: 6 }} onClick={() => handlePadClick(':')}>:</button>
+              <button
+                id="keypad-Enter"
+                style={{ gridColumn: '7 / span 2' }}
+                onClick={() => handlePadClick('Enter')}
+              >
+                Enter
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

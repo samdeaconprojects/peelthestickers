@@ -64,7 +64,7 @@ function PlayerBar({
       {/* LEFT: Timer + EventSelector */}
       <div className="playerbar-left">
         <div className="playerbar-timer">
-          <Timer addTime={addTime} />
+          <Timer addTime={addTime} inPlayerBar={true} />
         </div>
         
       </div>
@@ -73,14 +73,13 @@ function PlayerBar({
       <div className="playerbar-center">
         <div className="scramble-box">
           <Scramble
-  onScrambleClick={onScrambleClick}
-  scramble={scramble}
-  currentEvent={currentEvent}
-  isMusicPlayer={true}
-  onForwardScramble={goForwardScramble}
-  onBackwardScramble={goBackwardScramble}
-/>
-
+            onScrambleClick={onScrambleClick}
+            scramble={scramble}
+            currentEvent={currentEvent}
+            isMusicPlayer={true}
+            onForwardScramble={goForwardScramble}
+            onBackwardScramble={goBackwardScramble}
+          />
         </div>
         <div className="playerbar-timelist">
           <TimeList
@@ -96,9 +95,8 @@ function PlayerBar({
       </div>
 
       {/* RIGHT: Puzzle SVG */}
-            <div className="playerbar-right">
-
-      <div className="playerbar-selector">
+      <div className="playerbar-right">
+        <div className="playerbar-selector">
           <EventSelector
             currentEvent={currentEvent}
             handleEventChange={handleEventChange}
@@ -110,14 +108,14 @@ function PlayerBar({
             dropUp={true}
           />
         </div>
-      <div className="playerbar-cube">
-        <PuzzleSVG
-          event={currentEvent}
-          scramble={scramble}
-          isMusicPlayer={true}
-          isTimerCube={false}
-        />
-      </div>
+        <div className="playerbar-cube">
+          <PuzzleSVG
+            event={currentEvent}
+            scramble={scramble}
+            isMusicPlayer={true}
+            isTimerCube={false}
+          />
+        </div>
       </div>
     </div>
   );
