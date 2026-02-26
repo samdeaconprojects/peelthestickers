@@ -56,7 +56,7 @@ function buildRank01Map(items) {
   return out;
 }
 
-function TimeList({ user, applyPenalty, solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPost }) {
+function TimeList({ user, applyPenalty, solves = [], deleteTime, rowsToShow = 3, inPlayerBar, addPost, setSessions }) {
   const solvesSafe = Array.isArray(solves) ? solves : [];
 
   const { settings } = useSettings();
@@ -435,6 +435,7 @@ function TimeList({ user, applyPenalty, solves = [], deleteTime, rowsToShow = 3,
               deleteTime={() => deleteTime(selectedSolveIndex)}
               addPost={addPost}
               applyPenalty={applyPenalty}
+              setSessions={setSessions}
             />
           )}
           {selectedSolveList && (
@@ -452,6 +453,7 @@ function TimeList({ user, applyPenalty, solves = [], deleteTime, rowsToShow = 3,
                   comments: [],
                 })
               }
+              setSessions={setSessions}
             />
           )}
         </div>
@@ -468,6 +470,7 @@ function TimeList({ user, applyPenalty, solves = [], deleteTime, rowsToShow = 3,
               deleteTime={() => deleteTime(selectedSolveIndex)}
               addPost={addPost}
               applyPenalty={applyPenalty}
+              setSessions={setSessions}
             />
           )}
           {selectedSolveList && (
@@ -478,6 +481,7 @@ function TimeList({ user, applyPenalty, solves = [], deleteTime, rowsToShow = 3,
               deleteTime={() => deleteTime(selectedSolveIndex)}
               addPost={addPost}
               applyPenalty={applyPenalty}
+              setSessions={setSessions}
             />
           )}
         </div>

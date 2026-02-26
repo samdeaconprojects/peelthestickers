@@ -518,18 +518,26 @@ function App() {
   // ✅ tags shown under EventSelector (Timer page only), stored per eventKey
   const [tagsByEvent, setTagsByEvent] = useState({});
 
-  // ✅ tag dropdown options (stored on user profile as TagOptions)
+  //  tag dropdown options (stored on user profile as TagOptions)
   const [tagOptions, setTagOptions] = useState({
     CubeModels: [],
     CrossColors: ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
   });
+
+  // -----------------------------
+  //  Practice Mode (local-only)
+  // -----------------------------
+  const [practiceMode, setPracticeMode] = useState(false);
+  const [practiceSolves, setPracticeSolves] = useState([]);
+  const [showPracticeExit, setShowPracticeExit] = useState(false);
+  const [practiceSaveTargetSession, setPracticeSaveTargetSession] = useState("main");
 
   const location = useLocation();
   const isHomePage = location.pathname === "/";
   const { settings } = useSettings();
 
   // --------------------------------------------------------------------------
-  // ✅ Global DB indicator (spinner -> check / x)
+  //  Global DB indicator (spinner -> check / x)
   // --------------------------------------------------------------------------
   const [dbStatus, setDbStatus] = useState({
     phase: "idle", // "idle" | "loading" | "success" | "error"
@@ -832,6 +840,90 @@ function App() {
     console.log("Merging shared session:", session);
   };
 
+  // -----------------------------
+  // ✅ Practice mode helpers
+  // -----------------------------
+  const clearPractice = () => {
+    setPracticeSolves([]);
+  };
+
+  const deletePracticeTime = (index) => {
+    setPracticeSolves((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const startPractice = () => {
+    // optional: cancel shared/relay state so practice is clean
+    setSharedSession(null);
+    setSharedIndex(0);
+
+    setActiveSessionObj(null);
+    setRelayLegIndex(0);
+    setRelayLegTimes([]);
+    setRelayScrambles([]);
+    setRelayLegs([]);
+
+    setPracticeSaveTargetSession(currentSession || "main");
+    setPracticeMode(true);
+    clearPractice();
+  };
+
+  const requestEndPractice = () => {
+    if ((practiceSolves || []).length > 0) {
+      setShowPracticeExit(true); // keep practiceMode ON until decision
+    } else {
+      setPracticeMode(false);
+      clearPractice();
+    }
+  };
+
+  const discardPractice = () => {
+    setShowPracticeExit(false);
+    setPracticeMode(false);
+    clearPractice();
+  };
+
+  const savePracticeToSession = async () => {
+    if (!isSignedIn || !user?.UserID) {
+      discardPractice();
+      return;
+    }
+
+    const targetSessionID = practiceSaveTargetSession || currentSession || "main";
+    const ev = String(currentEvent || "").toUpperCase();
+
+    const solvesToSave = [...(practiceSolves || [])];
+
+    try {
+      await runDb("Saving practice solves", async () => {
+        for (const s of solvesToSave) {
+          await addSolveToDB(
+            user.UserID,
+            targetSessionID,
+            ev,
+            s.time,
+            s.scramble,
+            s.penalty ?? null,
+            s.note ?? "",
+            s.tags ?? {}
+          );
+        }
+      });
+
+      // merge into local UI
+      setSessions((prev) => ({
+        ...prev,
+        [ev]: [...(prev[ev] || []), ...solvesToSave],
+      }));
+
+      setShowPracticeExit(false);
+      setPracticeMode(false);
+      clearPractice();
+    } catch (err) {
+      console.error("Failed saving practice solves:", err);
+      // keep modal open
+    }
+  };
+
   const handleSignUp = async (username, password) => {
     try {
       await runDb("Creating account", async () => {
@@ -970,6 +1062,27 @@ function App() {
   };
 
   const addSolve = async (newTime) => {
+    // -----------------------
+    // ✅ PRACTICE MODE (local only)
+    // -----------------------
+    if (practiceMode) {
+      const scramble = getNextScramble();
+      const timestamp = new Date().toISOString();
+
+      const newSolve = {
+        time: newTime,
+        scramble,
+        event: currentEvent,
+        penalty: null,
+        note: "",
+        datetime: timestamp,
+        tags: buildTagPayload({ Practice: true }),
+      };
+
+      setPracticeSolves((prev) => [...(prev || []), newSolve]);
+      return; // ✅ do not write to DB
+    }
+
     // -----------------------
     // RELAY MODE
     // -----------------------
@@ -1160,52 +1273,69 @@ function App() {
     }));
 
     // -----------------------------
-// SAVE TO DATABASE
-// -----------------------------
-if (isSignedIn && user) {
-  // A) DB WRITE ONLY (this controls spinner → check / x)
-  try {
-    await runDb("Saving solve", () =>
-      addSolveToDB(
-        user.UserID,
-        currentSession,
-        currentEvent,
-        newTime,
-        scramble,
-        null,
-        "",
-        newSolve.tags
-      )
-    );
-  } catch (err) {
-    console.error("Error adding solve (DB write failed):", err);
-    return; // ❌ stop here — do NOT run broadcast if DB write failed
-  }
+    // SAVE TO DATABASE
+    // -----------------------------
+    if (isSignedIn && user) {
+      // A) DB WRITE ONLY (this controls spinner → check / x)
+      try {
+        await runDb("Saving solve", () =>
+          addSolveToDB(
+            user.UserID,
+            currentSession,
+            currentEvent,
+            newTime,
+            scramble,
+            null,
+            "",
+            newSolve.tags
+          )
+        );
+      } catch (err) {
+        console.error("Error adding solve (DB write failed):", err);
+        return; // ❌ stop here — do NOT run broadcast if DB write failed
+      }
 
-  // B) NON-CRITICAL SIDE EFFECT (never flip check → x)
-  if (activeSharedID) {
-    try {
-      const messageText = `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
+      // B) NON-CRITICAL SIDE EFFECT (never flip check → x)
+      if (activeSharedID) {
+        try {
+          const messageText = `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
 
-      const conversationID = activeSharedID
-        .replace("SHARED#", "")
-        .split("#")
-        .slice(0, 2)
-        .sort()
-        .join("#");
-      await sendMessage(conversationID, user.UserID, messageText);
+          const conversationID = activeSharedID
+            .replace("SHARED#", "")
+            .split("#")
+            .slice(0, 2)
+            .sort()
+            .join("#");
+          await sendMessage(conversationID, user.UserID, messageText);
 
-      setSocialRefreshTick((t) => t + 1);
-    } catch (err) {
-      console.warn("Shared broadcast failed (solve still saved):", err);
-      // do NOT show red X
+          setSocialRefreshTick((t) => t + 1);
+        } catch (err) {
+          console.warn("Shared broadcast failed (solve still saved):", err);
+          // do NOT show red X
+        }
+      }
     }
-  }
-}
-
   };
 
   const applyPenalty = async (timestamp, penalty, updatedTime) => {
+    // ✅ Practice mode: local-only penalty updates
+    if (practiceMode) {
+      setPracticeSolves((prev) =>
+        (prev || []).map((solve) => {
+          if (solve.datetime === timestamp) {
+            return {
+              ...solve,
+              penalty,
+              time: updatedTime,
+              originalTime: solve.originalTime ?? solve.time,
+            };
+          }
+          return solve;
+        })
+      );
+      return;
+    }
+
     const updatedSessions = { ...sessions };
     const eventSolves = updatedSessions[eventKey] || [];
 
@@ -1340,7 +1470,14 @@ if (isSignedIn && user) {
     }
   };
 
-  const currentSolves = sessions[eventKey] || [];
+  const currentSolves = practiceMode
+    ? (practiceSolves || [])
+    : (sessions[eventKey] || []);
+
+  const solvesSourceForDetail = practiceMode
+    ? (practiceSolves || [])
+    : (sessions[eventKey] || []);
+
   const avgOfFive = calculateAverage(
     currentSolves.slice(-5).map((s) => s.time),
     true
@@ -1489,28 +1626,90 @@ if (isSignedIn && user) {
                             width: "100%",
                           }}
                         >
-                          <EventSelector
-                            currentEvent={currentEvent}
-                            handleEventChange={handleEventChange}
-                            currentSession={currentSession}
-                            setCurrentSession={setCurrentSession}
-                            sessions={sessionsList}
-                            customEvents={customEvents}
-                            userID={user?.UserID}
-                            onSessionChange={() => {
-                              setSharedSession(null);
-                              setSharedIndex(0);
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "10px",
+                              justifyContent: "center",
+                              width: "100%",
+                            }}
+                          >
+                            <EventSelector
+                              currentEvent={currentEvent}
+                              handleEventChange={handleEventChange}
+                              currentSession={currentSession}
+                              setCurrentSession={setCurrentSession}
+                              sessions={sessionsList}
+                              customEvents={customEvents}
+                              userID={user?.UserID}
+                              onSessionChange={() => {
+                                setSharedSession(null);
+                                setSharedIndex(0);
 
-                              // reset relay progress when changing sessions
-                              setRelayLegIndex(0);
-                              setRelayLegTimes([]);
-                              setRelayScrambles([]);
-                              setRelayLegs([]);
-                            }}
-                            onSelectSessionObj={(sessionObj) => {
-                              setActiveSessionObj(sessionObj);
-                            }}
-                          />
+                                // reset relay progress when changing sessions
+                                setRelayLegIndex(0);
+                                setRelayLegTimes([]);
+                                setRelayScrambles([]);
+                                setRelayLegs([]);
+                              }}
+                              onSelectSessionObj={(sessionObj) => {
+                                setActiveSessionObj(sessionObj);
+                              }}
+                            />
+
+                            {/* Practice Mode toggle */}
+                            <div
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => e.stopPropagation()}
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "center",
+                                gap: "8px",
+                                userSelect: "none",
+                              }}
+                            >
+                              <span style={{ fontSize: "12px", opacity: 0.85 }}>
+                                Practice
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!practiceMode) startPractice();
+                                  else requestEndPractice();
+                                }}
+                                style={{
+                                  width: "44px",
+                                  height: "24px",
+                                  borderRadius: "999px",
+                                  border: "1px solid rgba(255,255,255,0.25)",
+                                  background: practiceMode
+                                    ? "#2EC4B6"
+                                    : "rgba(255,255,255,0.12)",
+                                  position: "relative",
+                                  cursor: "pointer",
+                                  padding: 0,
+                                }}
+                                aria-pressed={practiceMode}
+                                title={practiceMode ? "End Practice" : "Start Practice"}
+                              >
+                                <div
+                                  style={{
+                                    width: "20px",
+                                    height: "20px",
+                                    borderRadius: "999px",
+                                    background: "white",
+                                    position: "absolute",
+                                    top: "1px",
+                                    left: practiceMode ? "22px" : "2px",
+                                    transition: "left 140ms ease",
+                                  }}
+                                />
+                              </button>
+                            </div>
+                          </div>
 
                           <div
                             style={{
@@ -1554,13 +1753,18 @@ if (isSignedIn && user) {
                     user={user}
                     applyPenalty={applyPenalty}
                     solves={currentSolves}
-                    deleteTime={(index) => deleteTime(eventKey, index)}
+                    deleteTime={(index) =>
+                      practiceMode
+                        ? deletePracticeTime(index)
+                        : deleteTime(eventKey, index)
+                    }
                     addPost={addPost}
                     rowsToShow={3}
                     onAverageClick={(solveArray) => {
                       setSelectedAverageSolves(solveArray);
                       setSelectedAverageIndex(0);
                     }}
+                    setSessions={setSessions}
                   />
 
                   {selectedAverageSolves.length > 0 && (
@@ -1570,14 +1774,18 @@ if (isSignedIn && user) {
                         setSelectedAverageSolves([]);
                         setSelectedAverageIndex(0);
                       }}
-                      deleteTime={() =>
-                        deleteTime(
-                          eventKey,
-                          sessions[eventKey].indexOf(
-                            selectedAverageSolves[selectedAverageIndex]
-                          )
-                        )
-                      }
+                      deleteTime={() => {
+                        const idx = solvesSourceForDetail.indexOf(
+                          selectedAverageSolves[selectedAverageIndex]
+                        );
+                        if (idx < 0) return;
+
+                        if (practiceMode) {
+                          deletePracticeTime(idx);
+                        } else {
+                          deleteTime(eventKey, idx);
+                        }
+                      }}
                       addPost={addPost}
                       showNavButtons={true}
                       onPrev={() => setSelectedAverageIndex((i) => Math.max(0, i - 1))}
@@ -1588,6 +1796,7 @@ if (isSignedIn && user) {
                       }
                       applyPenalty={applyPenalty}
                       userID={user?.UserID}
+                      setSessions={setSessions}
                     />
                   )}
                 </>
@@ -1706,6 +1915,124 @@ if (isSignedIn && user) {
           onClose={() => setShowSettingsPopup(false)}
           onProfileUpdate={(fresh) => setUser((prev) => ({ ...prev, ...fresh }))}
         />
+      )}
+
+      {/*  Practice Exit Modal */}
+      {showPracticeExit && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+          }}
+          onMouseDown={() => setShowPracticeExit(false)}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: "420px",
+              maxWidth: "92vw",
+              background: "#181F23",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: "14px",
+              padding: "16px",
+              boxSizing: "border-box",
+            }}
+          >
+            <div style={{ fontSize: "16px", fontWeight: 700, marginBottom: "6px" }}>
+              Save practice solves?
+            </div>
+
+            <div style={{ fontSize: "13px", opacity: 0.85, marginBottom: "12px" }}>
+              You have <b>{practiceSolves.length}</b> practice solves. Save them to a
+              session, or discard them.
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                marginBottom: "14px",
+              }}
+            >
+              <div style={{ fontSize: "12px", opacity: 0.8, width: "70px" }}>
+                Save to
+              </div>
+
+              <select
+                value={practiceSaveTargetSession}
+                onChange={(e) => setPracticeSaveTargetSession(e.target.value)}
+                style={{
+                  flex: 1,
+                  height: "34px",
+                  borderRadius: "8px",
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  background: "rgba(0,0,0,0.2)",
+                  color: "white",
+                  padding: "0 10px",
+                  outline: "none",
+                }}
+              >
+                {(sessionsList || [])
+                  .filter(
+                    (s) =>
+                      String(s.Event || "").toUpperCase() ===
+                      String(currentEvent || "").toUpperCase()
+                  )
+                  .map((s) => (
+                    <option
+                      key={`${s.SessionID}-${s.SessionName || ""}`}
+                      value={s.SessionID}
+                    >
+                      {s.SessionName || s.SessionID}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              <button
+                type="button"
+                onClick={discardPractice}
+                style={{
+                  height: "34px",
+                  padding: "0 12px",
+                  borderRadius: "8px",
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  background: "transparent",
+                  color: "white",
+                  cursor: "pointer",
+                  opacity: 0.9,
+                }}
+              >
+                Don’t Save
+              </button>
+
+              <button
+                type="button"
+                onClick={savePracticeToSession}
+                style={{
+                  height: "34px",
+                  padding: "0 12px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "#2EC4B6",
+                  color: "#0E171D",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

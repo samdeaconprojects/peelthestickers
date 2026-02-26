@@ -19,8 +19,14 @@
   border-radius: 12px;
   max-width: 80%;
   text-align: center;
-  height: 240px;
+
+  /* ✅ FIX: allow content to stay inside + scroll */
   width: 600px;
+  max-height: 80vh;
+  height: auto;
+  overflow: auto;
+
+  position: relative;
 }
 
 .closePopup {
@@ -46,6 +52,10 @@
   flex-direction: column;
 }
 
+.detailScrollList {
+  gap: 16px;
+}
+
 .detailTime{
   font-size: 46pt;
 }
@@ -57,6 +67,14 @@
   margin-right: auto;
   margin-left: auto;
   margin-bottom: 5px;
+}
+
+/* ✅ NEW: date row */
+.detailDateRow {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-top: -6px;
+  margin-bottom: 6px;
 }
 
 .detailCube{
@@ -79,8 +97,178 @@
   text-align: left;
   padding: 8px;
   color: #FFFFFF;
-  resize: none; /* Disable resizing */
-  outline: none; /* Optional: Remove the default focus outline */
+  resize: none;
+  outline: none;
+}
+
+.detailNoteButtonsRow {
+  width: 85%;
+  margin: 6px auto 0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.detailSaveNoteBtn {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.35);
+  color: white;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.detailSaveNoteBtn:hover {
+  opacity: 1;
+}
+
+/* ✅ TAGS BLOCK (inside popup) */
+.detailTagsBlock {
+  width: 85%;
+  margin: 10px auto 0;
+  text-align: left;
+  background: rgba(0,0,0,0.10);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.detailTagsHeaderRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.detailTagsLabel {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.detailSaveTagsBtn {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.35);
+  color: white;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.detailSaveTagsBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.detailSaveTagsBtn:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.detailTagRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.detailTagKey {
+  width: 90px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.detailTagInput {
+  flex: 1;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(61,61,61,0.8);
+  color: white;
+  padding: 0 10px;
+  outline: none;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.detailCustomWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  margin-bottom: 10px;
+}
+
+.detailCustomRow,
+.detailCustomAddRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.detailCustomKey {
+  flex: 1;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(61,61,61,0.8);
+  color: white;
+  padding: 0 10px;
+  outline: none;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.detailCustomVal {
+  flex: 1;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(61,61,61,0.8);
+  color: white;
+  padding: 0 10px;
+  outline: none;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.detailCustomRemove {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: transparent;
+  color: white;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.detailCustomRemove:hover {
+  opacity: 1;
+}
+
+.detailCustomAddBtn {
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: transparent;
+  color: white;
+  cursor: pointer;
+  opacity: 0.9;
+  padding: 0 10px;
+}
+
+.detailCustomAddBtn:hover {
+  opacity: 1;
+}
+
+.detailTagsError {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #F64258;
+  opacity: 0.95;
 }
 
 .delete-button {
