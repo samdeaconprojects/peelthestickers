@@ -84,7 +84,7 @@ useEffect(() => {
   const id = setInterval(() => {
     handleRefreshMessages();
     console.log("REFRESHING IN SOCIAL SHARED?");
-  }, 10000);
+  }, 100000);//10000
 
   return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps

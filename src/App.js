@@ -1370,22 +1370,45 @@ function App() {
     }
   };
 
-  const deleteTime = async (eventKeyParam, index) => {
-    const originalSessions = { ...sessions };
-    const solve = sessions[eventKeyParam][index];
-    const updated = sessions[eventKeyParam].filter((_, idx) => idx !== index);
-    setSessions({ ...sessions, [eventKeyParam]: updated });
+  const deleteTime = async (eventKeyParam, solveOrIndex) => {
+  const ev = eventKeyParam;
 
-    if (isSignedIn && user) {
-      try {
-        await runDb("Deleting solve", () => deleteSolve(user.UserID, solve.datetime));
-      } catch (err) {
-        alert("Failed to delete solve");
-        console.error(err);
-        setSessions(originalSessions);
-      }
+  // Figure out the datetime we intend to delete
+  let datetimeToDelete = null;
+
+  if (typeof solveOrIndex === "string") {
+    datetimeToDelete = solveOrIndex; // already a datetime
+  } else if (typeof solveOrIndex === "number") {
+    // fallback: resolve index -> datetime using CURRENT state (best effort)
+    const s = sessions?.[ev]?.[solveOrIndex];
+    datetimeToDelete = s?.datetime;
+  } else if (solveOrIndex && typeof solveOrIndex === "object") {
+    datetimeToDelete = solveOrIndex.datetime;
+  }
+
+  if (!datetimeToDelete) return;
+
+  // ✅ Functional update + filter by datetime (no stale closure issues)
+  setSessions((prev) => {
+    const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
+    return {
+      ...(prev || {}),
+      [ev]: arr.filter((s) => s?.datetime !== datetimeToDelete),
+    };
+  });
+
+  if (isSignedIn && user) {
+    try {
+      await runDb("Deleting solve", () => deleteSolve(user.UserID, datetimeToDelete));
+    } catch (err) {
+      alert("Failed to delete solve");
+      console.error(err);
+
+      // optional: re-fetch current session solves here, or keep it simple
+      // (your old rollback relied on closure state and gets messy in bulk)
     }
-  };
+  }
+};
 
   const addPost = async ({ note, event, solveList = [], comments = [] }) => {
     if (!user) return;
@@ -1765,6 +1788,13 @@ function App() {
                       setSelectedAverageIndex(0);
                     }}
                     setSessions={setSessions}
+
+                    //  NEW: needed so TimeList can offer real move dropdowns
+                    sessionsList={sessionsList}
+                    currentEvent={currentEvent}
+                    currentSession={currentSession}
+                    eventKey={eventKey}
+                    practiceMode={practiceMode}
                   />
 
                   {selectedAverageSolves.length > 0 && (
