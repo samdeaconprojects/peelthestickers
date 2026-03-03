@@ -1,51 +1,35 @@
-import dynamoDB from "../components/SignIn/awsConfig";
+// src/services/createSession.js
+import { apiPost } from "./api.js";
 
 /**
  * Supports BOTH:
  *  - createSession(userID, event, sessionName)
  *  - createSession(userID, event, sessionID, sessionName, opts)
- *
- * opts:
- *  - sessionType: "RELAY"
- *  - relayLegs: string[]
  */
 export const createSession = async (userID, event, a3, a4, opts = {}) => {
-  const normalizedEvent = String(event).toUpperCase();
+  const id = String(userID || "").trim();
+  const ev = String(event || "").toUpperCase();
+  if (!id) throw new Error("createSession: userID required");
+  if (!ev) throw new Error("createSession: event required");
 
   let sessionID;
   let sessionName;
 
-  // old style: (userID, event, sessionName)
   if (typeof a4 === "undefined") {
     sessionName = a3;
     sessionID = String(sessionName).toLowerCase().replace(/\s+/g, "-");
   } else {
-    // new style: (userID, event, sessionID, sessionName, opts)
     sessionID = a3;
     sessionName = a4;
   }
 
-  const item = {
-    PK: `USER#${userID}`,
-    SK: `SESSION#${normalizedEvent}#${sessionID}`,
-    Event: normalizedEvent,
-    SessionID: sessionID,
-    SessionName: sessionName,
-    CreatedAt: new Date().toISOString(),
-  };
+  const data = await apiPost("/api/session", {
+    userID: id,
+    event: ev,
+    sessionID,
+    sessionName,
+    opts,
+  });
 
-  // Relay session metadata (sparse attributes)
-  if (opts?.sessionType === "RELAY") {
-    item.SessionType = "RELAY";
-    item.RelayLegs = Array.isArray(opts.relayLegs) ? opts.relayLegs : [];
-  }
-
-  try {
-    await dynamoDB.put({ TableName: "PTS", Item: item }).promise();
-    console.log(` Created session "${sessionName}" for ${normalizedEvent}`);
-    return item;
-  } catch (err) {
-    console.error(" Error creating session:", err);
-    throw err;
-  }
+  return data?.item;
 };

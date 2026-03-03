@@ -1,8 +1,6 @@
 // src/services/moveSolvesToSession.js
-import dynamoDB from "../components/SignIn/awsConfig";
 import { batchWrite, putReq } from "./batchWrite";
-
-const TABLE_NAME = "PTS";
+import { apiPost } from "./api";
 
 /**
  * Normalizes a UI solve or DynamoDB solve item into a DynamoDB-ish item
@@ -18,7 +16,6 @@ const TABLE_NAME = "PTS";
 function toDbSolveItem(userID, solve, eventOverrideUpper, sessionID) {
   if (!userID) throw new Error("toDbSolveItem: userID required");
 
-  // If already DB item (has PK/SK), start from it
   const isDb = !!solve?.PK && !!solve?.SK;
 
   const datetime =
@@ -31,16 +28,9 @@ function toDbSolveItem(userID, solve, eventOverrideUpper, sessionID) {
     new Date().toISOString();
 
   const eventUpper = String(eventOverrideUpper || solve?.event || solve?.Event || "").toUpperCase();
-  if (!eventUpper) throw new Error("moveSolvesToSession: event is required (solve.event or event param)");
+  if (!eventUpper) throw new Error("moveSolvesToSession: event is required (solve.event or opts.event)");
 
-  const ms =
-    Number(
-      solve?.time ??
-        solve?.Time ??
-        solve?.TimeMs ??
-        solve?.ms
-    );
-
+  const ms = Number(solve?.time ?? solve?.Time ?? solve?.TimeMs ?? solve?.ms);
   if (!Number.isFinite(ms) || ms < 0) {
     throw new Error("moveSolvesToSession: each solve must have a valid time in ms");
   }
@@ -51,15 +41,12 @@ function toDbSolveItem(userID, solve, eventOverrideUpper, sessionID) {
   const tags = solve?.tags ?? solve?.Tags ?? {};
   const originalTime = solve?.originalTime ?? solve?.OriginalTime;
 
-  // Build/merge a final item that matches your addSolve.js conventions
   const PK = `USER#${userID}`;
   const SK = isDb ? solve.SK : `SOLVE#${datetime}`;
-
   const base = isDb ? { ...solve } : {};
 
   const item = {
     ...base,
-
     PK,
     SK,
 
@@ -77,51 +64,33 @@ function toDbSolveItem(userID, solve, eventOverrideUpper, sessionID) {
     CreatedAt: solve?.CreatedAt || datetime,
     Tags: tags,
 
-    // legacy-friendly fields (your UI uses these)
+    // legacy-friendly
     Time: ms,
     DateTime: datetime,
   };
 
-  if (originalTime != null) {
-    item.OriginalTime = originalTime;
-  }
+  if (originalTime != null) item.OriginalTime = originalTime;
 
   return item;
 }
 
 /**
- * Marks SESSIONSTATS as stale so your UI can still show something
- * and you can recompute explicitly (recommended after bulk moves/copies).
+ * Mark SESSIONSTATS stale via the server API.
  */
-async function markSessionStatsStale(userID, eventUpper, sessionID) {
-  const Key = {
-    PK: `USER#${userID}`,
-    SK: `SESSIONSTATS#${eventUpper}#${sessionID}`,
-  };
-
-  const params = {
-    TableName: TABLE_NAME,
-    Key,
-    UpdateExpression: "SET stale = :t, staleAt = :ts",
-    ExpressionAttributeValues: {
-      ":t": true,
-      ":ts": new Date().toISOString(),
-    },
-  };
-
-  try {
-    await dynamoDB.update(params).promise();
-  } catch (e) {
-    // If SESSIONSTATS doesn't exist yet, ignore (you can recompute later)
-    console.warn("markSessionStatsStale failed (ok to ignore if missing):", e?.message || e);
-  }
+async function markSessionStatsStale(userID, eventUpper, sessionID, reason) {
+  await apiPost("/api/markSessionStatsStale", {
+    userID,
+    event: eventUpper,
+    sessionID,
+    reason: reason || "bulk_move",
+  });
 }
 
 /**
  * Move or copy a batch of solves to another session.
  *
  * - "move" (default): overwrites the existing solve items (same PK/SK) with new SessionID + GSI1PK
- * - "copy": creates *new* solve items with NEW timestamps (so they exist in both sessions)
+ * - "copy": creates new solve items with NEW timestamps (so they exist in both sessions)
  *
  * @param {string} userID
  * @param {Array<object>} solves - UI solves or DB items
@@ -131,34 +100,33 @@ async function markSessionStatsStale(userID, eventUpper, sessionID) {
  * @param {string} opts.toSessionID - destination sessionID
  * @param {"move"|"copy"} [opts.mode="move"]
  * @param {boolean} [opts.markStatsStale=true]
- * @param {boolean} [opts.debug=false]
  */
 export async function moveSolvesToSession(userID, solves = [], opts = {}) {
   const eventUpper = String(opts.event || "").toUpperCase();
-  const fromSessionID = (opts.fromSessionID || "main").toString();
-  const toSessionID = (opts.toSessionID || "main").toString();
+  const fromSessionID = String(opts.fromSessionID || "main");
+  const toSessionID = String(opts.toSessionID || "main");
   const mode = opts.mode || "move";
   const markStatsStale = opts.markStatsStale !== false;
-  const debug = !!opts.debug;
 
   if (!userID) throw new Error("moveSolvesToSession: userID required");
   if (!eventUpper) throw new Error("moveSolvesToSession: opts.event required");
+
   if (!Array.isArray(solves) || solves.length === 0) {
     return { ok: true, mode, moved: 0 };
   }
 
-  // Build PutRequests
   const putRequests = solves.map((s) => {
     if (mode === "copy") {
-      // copy => new timestamp (new SK) so it becomes a distinct solve in destination
       const newTs = new Date().toISOString();
       const clone = { ...s, datetime: newTs, DateTime: newTs, CreatedAt: newTs };
       const item = toDbSolveItem(userID, clone, eventUpper, toSessionID);
-      // force unique SK even if caller passed SK
+
+      // force unique keys for the copy
       item.SK = `SOLVE#${newTs}`;
       item.GSI1SK = newTs;
       item.DateTime = newTs;
       item.CreatedAt = newTs;
+
       return putReq(item);
     }
 
@@ -167,22 +135,19 @@ export async function moveSolvesToSession(userID, solves = [], opts = {}) {
     return putReq(item);
   });
 
-  const res = await batchWrite(putRequests, { debug });
+  const res = await batchWrite({ requests: putRequests });
 
   if (markStatsStale) {
-    // Bulk moves/copies invalidate aggregates.
-    // Mark both sessions stale so you can recompute via your existing button/service.
     await Promise.all([
-      markSessionStatsStale(userID, eventUpper, fromSessionID),
-      markSessionStatsStale(userID, eventUpper, toSessionID),
+      markSessionStatsStale(userID, eventUpper, fromSessionID, "bulk_move"),
+      markSessionStatsStale(userID, eventUpper, toSessionID, mode === "copy" ? "bulk_copy" : "bulk_move"),
     ]);
   }
 
   return {
-    ok: res.ok,
+    ok: !!res?.ok,
     mode,
-    attempted: res.attempted,
-    processed: res.processed,
+    wrote: res?.wrote ?? 0,
     moved: solves.length,
   };
 }

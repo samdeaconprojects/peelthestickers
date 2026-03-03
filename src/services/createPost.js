@@ -1,27 +1,17 @@
-import dynamoDB from "../components/SignIn/awsConfig";
-import { v4 as uuidv4 } from "uuid";
+// src/services/createPost.js
+import { apiPost } from "./api.js";
 
 export const createPost = async (userID, note, event, solveList, comments) => {
-  const timestamp = new Date().toISOString();
+  const id = String(userID || "").trim();
+  if (!id) throw new Error("createPost: userID required");
 
-  const params = {
-    TableName: "PTS",
-    Item: {
-      PK: `USER#${userID}`,
-      SK: `POST#${timestamp}`,
-      Note: note,
-      Event: event,
-      SolveList: solveList,
-      Comments: comments,
-      DateTime: timestamp
-    }
-  };
+  const data = await apiPost("/api/post", {
+    userID: id,
+    note,
+    event,
+    solveList,
+    comments,
+  });
 
-  try {
-    await dynamoDB.put(params).promise();
-    console.log("Post created.");
-  } catch (err) {
-    console.error("Error creating post:", err);
-    throw err;
-  }
+  return data?.item;
 };

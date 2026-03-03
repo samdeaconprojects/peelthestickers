@@ -1,49 +1,72 @@
-import React, { useState } from 'react';
-import dynamoDB from './awsConfig'; // Adjust the path if necessary
+// src/components/SignIn/SignIn.js
+import React, { useState } from "react";
 
 function SignIn({ onSignIn }) {
-  const [userID, setUserID] = useState('');
-  const [errorMessage, setErrorMessage] = useState(''); // Track error message for better UX
+  const [userID, setUserID] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleSignIn = async () => {
-    const params = {
-      TableName: 'PTSDev',
-      Key: {
-        UserID: String(userID)
-      }
-    };
+    const id = String(userID || "").trim();
+    if (!id) {
+      setErrorMessage("Enter a UserID");
+      return;
+    }
+
+    setLoading(true);
+    setErrorMessage("");
 
     try {
-      const result = await dynamoDB.get(params).promise();
+      // CRA proxy routes this to http://localhost:5000
+      const res = await fetch(`/api/user/${encodeURIComponent(id)}`, {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+      });
 
-      console.log('DynamoDB result:', result); // Log to check if we are getting a result
-
-      if (result.Item) {
-        // Pass the user data to the parent component (App.js)
-        onSignIn(result.Item);
-      } else {
-        setErrorMessage('User not found!'); // Set an error message if the user is not found
+      if (res.status === 404) {
+        setErrorMessage("User not found!");
+        return;
       }
-    } catch (error) {
-      console.error('Error signing in:', error);
-      setErrorMessage('An error occurred while signing in.');
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(txt || `Request failed (${res.status})`);
+      }
+
+      const data = await res.json();
+      if (data?.user) {
+        onSignIn(data.user);
+      } else {
+        setErrorMessage("User not found!");
+      }
+    } catch (err) {
+      console.error("Error signing in:", err);
+      setErrorMessage("An error occurred while signing in.");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <div>
       <h2>Sign In</h2>
+
       <input
         type="text"
         value={userID}
         onChange={(e) => {
           setUserID(e.target.value);
-          setErrorMessage(''); // Reset the error message on input change
+          setErrorMessage("");
         }}
         placeholder="Enter your UserID"
+        disabled={loading}
       />
-      <button onClick={handleSignIn}>Sign In</button>
-      {errorMessage && <p style={{ color: 'red' }}>{errorMessage}</p>}
+
+      <button onClick={handleSignIn} disabled={loading}>
+        {loading ? "Signing in..." : "Sign In"}
+      </button>
+
+      {errorMessage && <p style={{ color: "red" }}>{errorMessage}</p>}
     </div>
   );
 }

@@ -1,36 +1,14 @@
-import dynamoDB from "../components/SignIn/awsConfig";
+// src/services/updateSolvePenalty.js
+import { apiPut } from "./api.js";
 
 export const updateSolvePenalty = async (userID, solveTimestamp, originalTime, penalty) => {
-  let updatedTime = originalTime;
-  if (penalty === '+2') updatedTime += 2000;
-  if (penalty === 'DNF') updatedTime = Number.MAX_SAFE_INTEGER;
+  const id = String(userID || "").trim();
+  const ts = String(solveTimestamp || "").trim();
+  if (!id) throw new Error("updateSolvePenalty: userID required");
+  if (!ts) throw new Error("updateSolvePenalty: solveTimestamp required");
 
-  const params = {
-    TableName: "PTS",
-    Key: {
-      PK: `USER#${userID}`,
-      SK: `SOLVE#${solveTimestamp}`,
-    },
-    UpdateExpression: `
-      SET Penalty = :penalty,
-          #Time = :updatedTime,
-          OriginalTime = if_not_exists(OriginalTime, :originalTime)
-    `,
-    ExpressionAttributeNames: {
-      "#Time": "Time",
-    },
-    ExpressionAttributeValues: {
-      ":penalty": penalty,
-      ":updatedTime": updatedTime,
-      ":originalTime": originalTime,
-    },
-  };
-
-  try {
-    await dynamoDB.update(params).promise();
-    console.log("✅ Solve penalty updated:", { userID, solveTimestamp, penalty });
-  } catch (err) {
-    console.error("❌ Penalty update failed:", err);
-    throw err;
-  }
+  return apiPut(`/api/solvePenalty/${encodeURIComponent(id)}/${encodeURIComponent(ts)}`, {
+    originalTime,
+    penalty,
+  });
 };

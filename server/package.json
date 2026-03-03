@@ -1,0 +1,21 @@
+{
+  "name": "pts-server",
+  "version": "1.0.0",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "deleteStats": "node scripts/deleteSessionStats.js",
+    "printStats": "node scripts/printSessionStats.js",
+    "recomputeStats": "node scripts/recomputeSessionStats.js",
+    "backfillStats": "node scripts/backfillSessionStats.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.600.0",
+    "@aws-sdk/lib-dynamodb": "^3.600.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+  
+}

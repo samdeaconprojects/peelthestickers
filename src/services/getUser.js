@@ -1,19 +1,9 @@
-import dynamoDB from "../components/SignIn/awsConfig";
+// src/services/getUser.js
+import { apiGet } from "./api.js";
 
 export const getUser = async (userID) => {
-  const params = {
-    TableName: "PTS",
-    Key: {
-      PK: `USER#${userID}`,
-      SK: "PROFILE"
-    }
-  };
-
-  try {
-    const result = await dynamoDB.get(params).promise();
-    return result.Item;
-  } catch (err) {
-    console.error("Error fetching user:", err);
-    throw err;
-  }
+  const id = String(userID || "").trim();
+  if (!id) throw new Error("getUser: userID required");
+  const data = await apiGet(`/api/user/${encodeURIComponent(id)}`);
+  return data?.user ?? null;
 };

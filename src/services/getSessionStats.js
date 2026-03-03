@@ -1,22 +1,17 @@
-import dynamoDB from "../components/SignIn/awsConfig";
+// src/services/getSessionStats.js
+import { apiGet } from "./api.js";
 
 export const getSessionStats = async (userID, event, sessionID) => {
-  const normalizedEvent = String(event || "").toUpperCase();
-  const sid = sessionID || "main";
+  const id = String(userID || "").trim();
+  const ev = String(event || "").toUpperCase();
+  const sid = String(sessionID || "main");
 
-  const params = {
-    TableName: "PTS",
-    Key: {
-      PK: `USER#${userID}`,
-      SK: `SESSIONSTATS#${normalizedEvent}#${sid}`,
-    },
-  };
+  if (!id) throw new Error("getSessionStats: userID required");
+  if (!ev) throw new Error("getSessionStats: event required");
 
-  try {
-    const { Item } = await dynamoDB.get(params).promise();
-    return Item || null;
-  } catch (err) {
-    console.error("Error fetching session stats:", err);
-    throw err;
-  }
+  const data = await apiGet(
+    `/api/sessionStats/${encodeURIComponent(id)}?event=${encodeURIComponent(ev)}&sessionID=${encodeURIComponent(sid)}`
+  );
+
+  return data?.item ?? null;
 };

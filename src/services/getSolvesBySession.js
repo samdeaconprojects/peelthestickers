@@ -1,13 +1,6 @@
-import dynamoDB from "../components/SignIn/awsConfig.js";
+// src/services/getSolvesBySession.js
+import { apiGet } from "./api.js";
 
-/**
- * Fetch ONE PAGE of solves for a given session, using DynamoDB paging.
- * Returns:
- *  - items: newest -> oldest (ScanIndexForward:false)
- *  - lastKey: LastEvaluatedKey (or null)
- *
- * You can reverse(items) in the caller if you want oldest -> newest UI order.
- */
 export const getSolvesBySessionPage = async (
   userID,
   event,
@@ -15,93 +8,54 @@ export const getSolvesBySessionPage = async (
   limit = 200,
   cursor = null
 ) => {
-  const normalizedEvent = (event || "").toUpperCase();
+  const id = String(userID || "").trim();
+  const ev = String(event || "").toUpperCase();
+  const sid = String(sessionID || "main");
+  if (!id) throw new Error("getSolvesBySessionPage: userID required");
+  if (!ev) throw new Error("getSolvesBySessionPage: event required");
 
-  try {
-    const params = {
-      TableName: "PTS",
-      IndexName: "GSI1",
-      KeyConditionExpression: "GSI1PK = :gsi1pk",
-      ExpressionAttributeValues: {
-        ":gsi1pk": `SESSION#${userID}#${normalizedEvent}#${sessionID}`,
-      },
-      ScanIndexForward: false, // newest first
-      Limit: limit,
-      ExclusiveStartKey: cursor || undefined,
-    };
+  const qs = new URLSearchParams({
+    event: ev,
+    sessionID: sid,
+    limit: String(limit),
+  });
 
-    const result = await dynamoDB.query(params).promise();
+  if (cursor) qs.set("cursor", encodeURIComponent(JSON.stringify(cursor)));
 
-    return {
-      items: result.Items || [],
-      lastKey: result.LastEvaluatedKey || null,
-    };
-  } catch (err) {
-    console.error("❌ Error fetching solves page:", err);
-    throw err;
-  }
+  const data = await apiGet(`/api/solves/${encodeURIComponent(id)}?${qs.toString()}`);
+
+  return {
+    items: data?.items || [],
+    lastKey: data?.lastKey || null,
+  };
 };
 
-/**
- * Fetch ALL solves for a given session, safely paging past DynamoDB's 1 MB limit.
- * Returns solves sorted oldest -> newest (so your UI slicing/indices work).
- */
 export const getSolvesBySession = async (userID, event, sessionID) => {
-  const normalizedEvent = (event || "").toUpperCase();
+  // server can page; client loops until done
   let cursor = null;
   const all = [];
+  do {
+    const { items, lastKey } = await getSolvesBySessionPage(userID, event, sessionID, 1000, cursor);
+    if (items?.length) all.push(...items);
+    cursor = lastKey || null;
+  } while (cursor);
 
-  try {
-    do {
-      const params = {
-        TableName: "PTS",
-        IndexName: "GSI1",
-        KeyConditionExpression: "GSI1PK = :gsi1pk",
-        ExpressionAttributeValues: {
-          ":gsi1pk": `SESSION#${userID}#${normalizedEvent}#${sessionID}`,
-        },
-        ScanIndexForward: false, // newest first
-        Limit: 1000,
-        ExclusiveStartKey: cursor || undefined,
-      };
-
-      const result = await dynamoDB.query(params).promise();
-      if (result.Items && result.Items.length) all.push(...result.Items);
-
-      cursor = result.LastEvaluatedKey || null;
-    } while (cursor);
-
-    // reverse to oldest -> newest
-    return all.reverse();
-  } catch (err) {
-    console.error("❌ Error fetching solves (paged):", err);
-    throw err;
-  }
+  // server returns newest->oldest; normalize to oldest->newest like your old code
+  return all.reverse();
 };
 
-/**
- * Quick helper: last N solves (oldest -> newest).
- */
 export const getLastNSolvesBySession = async (userID, event, sessionID, n = 100) => {
-  const normalizedEvent = (event || "").toUpperCase();
+  const id = String(userID || "").trim();
+  const ev = String(event || "").toUpperCase();
+  const sid = String(sessionID || "main");
 
-  try {
-    const params = {
-      TableName: "PTS",
-      IndexName: "GSI1",
-      KeyConditionExpression: "GSI1PK = :gsi1pk",
-      ExpressionAttributeValues: {
-        ":gsi1pk": `SESSION#${userID}#${normalizedEvent}#${sessionID}`,
-      },
-      ScanIndexForward: false, // newest first
-      Limit: n,
-    };
+  const qs = new URLSearchParams({
+    event: ev,
+    sessionID: sid,
+    n: String(n),
+  });
 
-    const result = await dynamoDB.query(params).promise();
-    const items = result.Items || [];
-    return items.reverse();
-  } catch (err) {
-    console.error("❌ Error fetching last-N solves:", err);
-    throw err;
-  }
+  const data = await apiGet(`/api/solvesLastN/${encodeURIComponent(id)}?${qs.toString()}`);
+  // return oldest->newest (same as your previous helper)
+  return (data?.items || []).reverse();
 };

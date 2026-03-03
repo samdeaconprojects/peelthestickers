@@ -1,45 +1,51 @@
 // src/services/recomputeSessionStats.js
-import dynamoDB from "../components/SignIn/awsConfig.js";
-import { getSolvesBySession } from "./getSolvesBySession.js";
-import { buildSessionStatsFromSolves } from "./sessionStatsUtils.js";
 
 /**
  * Recompute Stats for ONE session from ALL its solves.
- * Writes to SESSIONSTATS item (PK=USER#id, SK=SESSIONSTATS#EVENT#sessionID)
+ * This now calls your local API (CRA proxy -> http://localhost:5000).
+ *
+ * Server should:
+ *  - load all solves for the session
+ *  - build stats
+ *  - write SESSIONSTATS item
+ *  - return the written item
  */
 export const recomputeSessionStats = async (userID, event, sessionID) => {
-  const normalizedEvent = (event || "").toUpperCase();
-  const sid = sessionID || "main";
+  const id = String(userID || "").trim();
+  const normalizedEvent = String(event || "").toUpperCase();
+  const sid = String(sessionID || "main");
 
-  // 1) Load all solves
-  const solves = await getSolvesBySession(userID, normalizedEvent, sid);
+  if (!id) throw new Error("recomputeSessionStats: userID is required");
+  if (!normalizedEvent) throw new Error("recomputeSessionStats: event is required");
 
-  // 2) Build stats from scratch
-  const stats = buildSessionStatsFromSolves(solves);
+  const res = await fetch("/api/recomputeSessionStats", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      userID: id,
+      event: normalizedEvent,
+      sessionID: sid,
+    }),
+  });
 
-  // 3) Write SESSIONSTATS item (this is what Stats page should read)
-  const now = new Date().toISOString();
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(txt || `recomputeSessionStats failed (${res.status})`);
+  }
 
-  const item = {
-    PK: `USER#${userID}`,
-    SK: `SESSIONSTATS#${normalizedEvent}#${sid}`,
+  const data = await res.json();
+  if (!data?.item) {
+    throw new Error("recomputeSessionStats: server returned no item");
+  }
 
-    Event: normalizedEvent,
-    SessionID: sid,
-    DateTime: now,       // you already use DateTime on these items in your snapshot
-    stale: false,
+  console.log("✅ Recomputed SESSIONSTATS (server)", {
+    userID: id,
+    event: normalizedEvent,
+    sessionID: sid,
+  });
 
-    // spread your computed fields (solveCount, sumMs, bestAo5, bestSingleMs, buffers, etc.)
-    ...stats,
-  };
-
-  await dynamoDB
-    .put({
-      TableName: "PTS",
-      Item: item,
-    })
-    .promise();
-
-  console.log("✅ Recomputed SESSIONSTATS", { userID, event: normalizedEvent, sessionID: sid });
-  return item;
+  return data.item;
 };
