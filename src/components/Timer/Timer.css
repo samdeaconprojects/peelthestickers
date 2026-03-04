@@ -17,6 +17,51 @@
   letter-spacing: 12px;
 }
 
+/* GAN controls shown subtly above timer */
+.gan-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+
+  margin-bottom: 6px;
+
+  opacity: 0.35;
+  transition: opacity 0.2s ease;
+}
+
+.gan-controls:hover {
+  opacity: 0.8;
+}
+
+/* small subtle connect button */
+.gan-controls button {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.25);
+  color: white;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.gan-controls button:hover {
+  border-color: rgba(255,255,255,0.6);
+}
+
+/* status dot */
+.gan-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+/* dot states */
+.gan-dot.disconnected { background: rgba(255,255,255,0.25); }
+.gan-dot.connecting   { background: rgba(255,208,0,0.9); }
+.gan-dot.connected    { background: rgba(46,196,182,0.95); }
+.gan-dot.error        { background: rgba(255,77,77,0.95); }
+
 /* Manual entry mode */
 .manual-entry-container {
   display: flex;

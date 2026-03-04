@@ -13,14 +13,14 @@
   -webkit-appearance: none !important;
 
   background: none !important;
-  border: none !important;          /*  kills App.css outline */
+  border: none !important;          /* kills App.css outline */
   outline: none !important;
   box-shadow: none !important;
 
-  padding: 0 !important;            /*  stop App.css padding effects */
+  padding: 0 !important;            /* stop App.css padding effects */
   margin: 0 !important;
 
-  width: 36px;                      /*  smaller hit box */
+  width: 36px;                      /* smaller hit box */
   height: 36px;
   display: grid;
   place-items: center;
@@ -42,26 +42,32 @@
   opacity: 1;
 }
 
-/* no visible outline, but still keyboard friendly if you want later */
+/* no visible outline */
 .scramble-nav-btn:focus,
 .scramble-nav-btn:focus-visible {
   outline: none !important;
   box-shadow: none !important;
 }
 
-/* icon size: "half" what you had */
+/* icon size */
 .scramble-nav-icon {
-  width: 20px;     /*  smaller */
+  width: 20px;
   height: 20px;
   display: block;
   pointer-events: none;
   user-select: none;
 }
 
-/* optional tiny nudge if SVG looks optically off */
+/* optional tiny nudge */
 .scramble-prev-button .scramble-nav-icon {
   transform: translateX(-1px);
 }
 .scramble-next-button .scramble-nav-icon {
   transform: translateX(1px);
+}
+
+/* Prevent move tokens like F' from wrapping mid-token */
+.scramble-text span {
+  white-space: nowrap;
+  display: inline-block;
 }

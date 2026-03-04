@@ -3,7 +3,121 @@ import React, { useState, useEffect, useRef } from 'react';
 import './Timer.css';
 import { useSettings } from '../../contexts/SettingsContext';
 
-function Timer({ addTime, inPlayerBar = false }) {
+import { GanTimerClient, GanTimerState } from '../../smart/ganTimerClient';
+import { GanCubeClient } from '../../smart/ganCubeClient';
+
+function parseDisplayTimeToMs(displayTime) {
+  if (displayTime == null) return null;
+
+  const n = Number(displayTime);
+  if (Number.isFinite(n)) {
+    if (n > 1000) return Math.round(n);
+    return Math.round(n * 1000);
+  }
+
+  const s = String(displayTime).trim();
+  if (!s) return null;
+
+  if (s.includes(':')) {
+    const [mStr, secStrRaw] = s.split(':');
+    const m = Number(mStr);
+    const sec = Number(secStrRaw);
+    if (!Number.isFinite(m) || !Number.isFinite(sec)) return null;
+    return Math.round(m * 60000 + sec * 1000);
+  }
+
+  const sec = Number(s);
+  if (!Number.isFinite(sec)) return null;
+  return Math.round(sec * 1000);
+}
+
+function normalizeGanRecordedTimeToMs(ev) {
+  const raw = ev?.recordedTime ?? ev?.time ?? ev?.ms;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+
+  if (n > 1000) return Math.round(n);
+  return Math.round(n * 1000);
+}
+
+/**
+ * Returns true if facelets represent a solved cube (each face is uniform).
+ * Works regardless of whether the cube uses U/R/F/D/L/B letters or color letters.
+ */
+function isFaceletsSolved(facelets) {
+  if (!facelets) return false;
+  const s = String(facelets).trim();
+  if (s.length !== 54) return false;
+
+  // 6 faces * 9 stickers
+  for (let f = 0; f < 6; f++) {
+    const start = f * 9;
+    const c = s[start];
+    if (!c) return false;
+    for (let i = 1; i < 9; i++) {
+      if (s[start + i] !== c) return false;
+    }
+  }
+  return true;
+}
+
+// Normalize move tokens so scramble tokens can match cube tokens.
+function normalizeMoveToken(m) {
+  if (!m) return "";
+  let s = String(m).trim();
+
+  // normalize apostrophes
+  s = s.replace(/’/g, "'");
+
+  // common “inverse” notations from some libs
+  // Ri / Rp / R-  -> R'
+  if (/[iIpP-]$/.test(s) && !s.endsWith("2")) {
+    s = s.slice(0, -1) + "'";
+  }
+
+  // remove spaces
+  s = s.replace(/\s+/g, "");
+
+  return s;
+}
+
+/**
+ * Step-based scramble tokens:
+ * returns an array of "expected step options".
+ * Each entry is an array of acceptable move strings for that quarter-turn step.
+ *
+ * Examples:
+ *  - "D'"  -> [["D'"]]
+ *  - "B"   -> [["B"]]
+ *  - "B2"  -> [["B","B'"], ["B","B'"]]  (either direction is fine for a 180)
+ */
+function tokenizeScramble(scramble) {
+  const tokens = String(scramble || "")
+    .trim()
+    .split(/\s+/)
+    .map((t) => normalizeMoveToken(t))
+    .filter(Boolean);
+
+  const steps = [];
+
+  for (const tok of tokens) {
+    if (tok.endsWith("2")) {
+      const base = tok.slice(0, -1);
+      const face = base.endsWith("'") ? base.slice(0, -1) : base;
+      steps.push([face, `${face}'`]);
+      steps.push([face, `${face}'`]);
+    } else if (tok.endsWith("'")) {
+      const face = tok.slice(0, -1);
+      steps.push([`${face}'`]);
+    } else {
+      steps.push([tok]);
+    }
+  }
+
+  return steps;
+}
+
+function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
   const { settings } = useSettings();
 
   const [manualTime, setManualTime] = useState('');
@@ -14,15 +128,72 @@ function Timer({ addTime, inPlayerBar = false }) {
   const [canStart, setCanStart] = useState(true);
 
   // -------------------------
+  // GAN TIMER
+  // -------------------------
+  const isGanMode = settings?.timerInput === 'GAN Bluetooth';
+  const [ganConnected, setGanConnected] = useState(false);
+  const [ganConnecting, setGanConnecting] = useState(false);
+  const [ganStatus, setGanStatus] = useState('');
+  const [ganAwaitingFinal, setGanAwaitingFinal] = useState(false);
+  const [ganReady, setGanReady] = useState(false);
+  const [ganDot, setGanDot] = useState('disconnected');
+
+  const ganClientRef = useRef(null);
+  const ganSaveLockRef = useRef(false);
+  const ganReadFallbackLockRef = useRef(false);
+
+  // -------------------------
+  // GAN CUBE
+  // -------------------------
+  const isCubeMode = settings?.timerInput === 'GAN Cube';
+  const [cubeConnected, setCubeConnected] = useState(false);
+  const [cubeConnecting, setCubeConnecting] = useState(false);
+  const [cubeDot, setCubeDot] = useState('disconnected');
+
+  // cube readiness/solve state (UI)
+  const [cubeArmed, setCubeArmed] = useState(false);   // green “ready”
+  const [cubeSolving, setCubeSolving] = useState(false);
+
+  const cubeClientRef = useRef(null);
+
+  // timing samples for elapsed ms (ONLY solution moves)
+  const cubeSamplesRef = useRef([]); // [{cubeTs, hostTs}]
+
+  // move log for solution (move + timestamps + facelets snapshot)
+  const cubeMoveLogRef = useRef([]); // [{move, cubeTs, hostTs, facelets}]
+
+  // latest facelets from cube
+  const cubeFaceletsRef = useRef(null);
+
+  // refs to avoid stale state inside bluetooth callbacks
+  // phases:
+  //   awaiting_scramble: not tracking / no scramble tokens
+  //   scrambling: matching displayed scramble tokens
+  //   armed: scramble fully matched; next move starts solve
+  //   solving: solving; stop when facelets solved
+  const cubePhaseRef = useRef('awaiting_scramble');
+  const cubeArmedRef = useRef(false);
+  const cubeSolvingRef = useRef(false);
+
+  // scramble matching refs
+  const scrambleTokensRef = useRef([]); // now step-options: Array<Array<string>>
+  const scrambleIndexRef = useRef(0);
+  const scrambleTextRef = useRef("");
+  const lastProgressEmitRef = useRef(-1);
+
+  const cubeIdleTimeoutRef = useRef(null);
+  const cubeSaveLockRef = useRef(false);
+
+  // throttled facelets requests (some cubes only emit facelets on request)
+  const lastFaceletsReqHostTsRef = useRef(0);
+
+  // -------------------------
   // Inspection state
   // -------------------------
   const [isInspecting, setIsInspecting] = useState(false);
-  const [inspectionElapsed, setInspectionElapsed] = useState(0); // ms since inspection start
+  const [inspectionElapsed, setInspectionElapsed] = useState(0);
 
-  // ✅ never show keypad in PlayerBar
   const showKeypad = !inPlayerBar && !settings?.disableKeypad;
-
-  // ✅ PlayerBar should keep the "timer look", but still allow typing if Timer Input !== Keyboard
   const forceKeyboardView = !!inPlayerBar;
 
   const inspectionIntervalRef = useRef(null);
@@ -31,24 +202,26 @@ function Timer({ addTime, inPlayerBar = false }) {
   const beep8FiredRef = useRef(false);
   const beep12FiredRef = useRef(false);
 
-  // If inspection ran long, we apply +2 by adding 2000ms to the solve time when stopping.
   const inspectionExtraMsRef = useRef(0);
 
   const intervalRef = useRef();
   const startRef = useRef();
   const ignoreNextKeyUp = useRef(false);
 
-  const keypadButtons = ['7','8','9','4','5','6','1','2','3','0','.','⌫',':','Enter'];
-
   const inspectionBeepsRef = useRef(!!settings.inspectionBeeps);
   useEffect(() => {
     inspectionBeepsRef.current = !!settings.inspectionBeeps;
   }, [settings.inspectionBeeps]);
 
-  // ✅ NEW: hold-to-ready timeout (green)
   const holdTimeoutRef = useRef(null);
 
-  // ✅ NEW: cancel out of pre-start hold/inspection (Escape)
+  const stopInspectionInterval = () => {
+    if (inspectionIntervalRef.current) {
+      clearInterval(inspectionIntervalRef.current);
+      inspectionIntervalRef.current = null;
+    }
+  };
+
   const cancelPreStart = () => {
     if (holdTimeoutRef.current) {
       clearTimeout(holdTimeoutRef.current);
@@ -58,13 +231,11 @@ function Timer({ addTime, inPlayerBar = false }) {
     setIsSpacebarHeld(false);
     setCanStart(false);
 
-    // cancel inspection if it was running
     stopInspectionInterval();
     setIsInspecting(false);
     setInspectionElapsed(0);
     inspectionStartRef.current = null;
 
-    // clear any pending inspection penalty
     inspectionExtraMsRef.current = 0;
   };
 
@@ -100,42 +271,49 @@ function Timer({ addTime, inPlayerBar = false }) {
 
       for (let i = 0; i < count; i++) playOne(i * 0.13);
 
-      // close shortly after last beep
       setTimeout(() => {
         try { ctx.close(); } catch (_) {}
       }, 400);
-    } catch (_) {
-      // ignore audio failures silently
-    }
+    } catch (_) {}
   };
 
   // -------------------------
-  // Timer start/stop
+  // Local stopwatch for live display
+  // -------------------------
+  const startLocalStopwatch = () => {
+    startRef.current = Date.now();
+    setElapsedTime(0);
+    setTimerOn(true);
+
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
+      setElapsedTime(Date.now() - startRef.current);
+    }, 10);
+  };
+
+  const stopLocalStopwatch = () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = null;
+    setTimerOn(false);
+  };
+
+  // -------------------------
+  // Keyboard timer start/stop
   // -------------------------
   const startTimer = () => {
-    if (canStart && !timerOn) {
-      startRef.current = Date.now();
-      setElapsedTime(0);
-      setTimerOn(true);
-      intervalRef.current = setInterval(() => {
-        setElapsedTime(Date.now() - startRef.current);
-      }, 10);
-    }
+    if (canStart && !timerOn) startLocalStopwatch();
   };
 
   const stopTimer = () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
 
     const finalElapsedTime = Date.now() - startRef.current;
-
-    // Apply inspection +2 if earned
     const finalWithInspection = finalElapsedTime + (inspectionExtraMsRef.current || 0);
 
     setTimerOn(false);
     setElapsedTime(finalWithInspection);
     setLastTime(finalWithInspection);
 
-    // reset inspection extra for next solve
     inspectionExtraMsRef.current = 0;
 
     ignoreNextKeyUp.current = true;
@@ -145,15 +323,7 @@ function Timer({ addTime, inPlayerBar = false }) {
   // -------------------------
   // Inspection start/stop
   // -------------------------
-  const stopInspectionInterval = () => {
-    if (inspectionIntervalRef.current) {
-      clearInterval(inspectionIntervalRef.current);
-      inspectionIntervalRef.current = null;
-    }
-  };
-
   const startInspection = () => {
-    // reset flags + state
     setIsInspecting(true);
     setInspectionElapsed(0);
     inspectionStartRef.current = Date.now();
@@ -167,28 +337,19 @@ function Timer({ addTime, inPlayerBar = false }) {
       const ms = Date.now() - inspectionStartRef.current;
       setInspectionElapsed(ms);
 
-      // Beep at 8s (single)
       if (!beep8FiredRef.current && ms >= 8000) {
         beep8FiredRef.current = true;
         beep(1);
       }
-
-      // Beep at 12s (double)
       if (!beep12FiredRef.current && ms >= 12000) {
         beep12FiredRef.current = true;
         beep(2);
       }
-
-      // WCA: after 15s -> +2 (we apply if you START the solve after 15s)
-      // We don’t auto-stop inspection; we just note it when you start the timer.
     }, 25);
   };
 
   const commitInspectionAndStartTimer = () => {
-    // decide +2 based on inspection time at the moment you start the solve
     const ms = Date.now() - (inspectionStartRef.current || Date.now());
-
-    // If started after 15.00s, apply +2 (basic behavior)
     inspectionExtraMsRef.current = ms >= 15000 ? 2000 : 0;
 
     stopInspectionInterval();
@@ -223,6 +384,591 @@ function Timer({ addTime, inPlayerBar = false }) {
   };
 
   // -------------------------
+  // GAN TIMER finalization helper
+  // -------------------------
+  const finalizeGanSolve = (ms) => {
+    if (!Number.isFinite(ms) || ms < 0) return;
+
+    setGanAwaitingFinal(false);
+    stopLocalStopwatch();
+
+    setElapsedTime(ms);
+    setLastTime(ms);
+
+    if (!ganSaveLockRef.current) {
+      ganSaveLockRef.current = true;
+      addTime(ms);
+    }
+  };
+
+  const tryFallbackReadFromTimer = async () => {
+    if (ganReadFallbackLockRef.current) return;
+    ganReadFallbackLockRef.current = true;
+
+    try {
+      const rec = await ganClientRef.current?.getRecordedTimes?.();
+      const ms = parseDisplayTimeToMs(rec?.displayTime);
+
+      if (ms != null) {
+        finalizeGanSolve(ms);
+      } else {
+        const pt0 = rec?.previousTimes?.[0];
+        const ms2 = parseDisplayTimeToMs(pt0);
+        if (ms2 != null) finalizeGanSolve(ms2);
+      }
+    } catch (e) {
+      console.error("GAN getRecordedTimes fallback failed:", e);
+    }
+  };
+
+  // -------------------------
+  // GAN TIMER connect / disconnect
+  // -------------------------
+  const connectGan = async () => {
+    if (ganConnecting) return;
+
+    setGanStatus('');
+    setGanConnecting(true);
+    setGanDot('connecting');
+
+    try {
+      if (!ganClientRef.current) ganClientRef.current = new GanTimerClient();
+
+      await ganClientRef.current.connect({
+        onState: async (ev) => {
+          if (ev?.state === GanTimerState.IDLE) setGanStatus('Idle');
+          if (ev?.state === GanTimerState.RUNNING) setGanStatus('Solving…');
+          if (ev?.state === GanTimerState.STOPPED) setGanStatus('Stopped');
+          if (ev?.state === GanTimerState.FINISHED) setGanStatus('Finished');
+          if (ev?.state === GanTimerState.DISCONNECT) setGanStatus('Disconnected');
+
+          if (ev?.state === GanTimerState.GET_SET) setGanReady(true);
+          if (
+            ev?.state === GanTimerState.HANDS_ON ||
+            ev?.state === GanTimerState.HANDS_OFF ||
+            ev?.state === GanTimerState.IDLE
+          ) {
+            setGanReady(false);
+          }
+
+          if (ev?.state === GanTimerState.RUNNING) {
+            ganSaveLockRef.current = false;
+            ganReadFallbackLockRef.current = false;
+
+            setGanReady(false);
+
+            stopInspectionInterval();
+            setIsInspecting(false);
+            setInspectionElapsed(0);
+            inspectionExtraMsRef.current = 0;
+
+            setGanAwaitingFinal(false);
+            startLocalStopwatch();
+          }
+
+          if (ev?.state === GanTimerState.STOPPED || ev?.state === GanTimerState.FINISHED) {
+            stopLocalStopwatch();
+
+            const ms = normalizeGanRecordedTimeToMs(ev);
+
+            if (ms != null) {
+              finalizeGanSolve(ms);
+            } else {
+              setGanAwaitingFinal(true);
+              await tryFallbackReadFromTimer();
+            }
+          }
+
+          if (ev?.state === GanTimerState.DISCONNECT) {
+            setGanConnected(false);
+            setGanConnecting(false);
+            setGanAwaitingFinal(false);
+            setGanReady(false);
+            setGanDot('disconnected');
+
+            ganSaveLockRef.current = false;
+            ganReadFallbackLockRef.current = false;
+            stopLocalStopwatch();
+          }
+        },
+
+        onSolve: ({ ms }) => {
+          finalizeGanSolve(ms);
+        },
+
+        onDisconnect: () => {
+          setGanConnected(false);
+          setGanConnecting(false);
+          setGanAwaitingFinal(false);
+          setGanReady(false);
+          setGanDot('disconnected');
+
+          ganSaveLockRef.current = false;
+          ganReadFallbackLockRef.current = false;
+          stopLocalStopwatch();
+        },
+
+        onError: (err) => {
+          console.error('GAN timer error:', err);
+          setGanStatus('Error');
+          setGanConnected(false);
+          setGanConnecting(false);
+          setGanAwaitingFinal(false);
+          setGanReady(false);
+          setGanDot('error');
+
+          ganSaveLockRef.current = false;
+          ganReadFallbackLockRef.current = false;
+          stopLocalStopwatch();
+        }
+      });
+
+      setGanConnected(true);
+      setGanStatus('Connected');
+      setGanDot('connected');
+    } catch (e) {
+      console.error('GAN connect failed:', e);
+      setGanStatus('Connect failed');
+      setGanConnected(false);
+      setGanDot('error');
+    } finally {
+      setGanConnecting(false);
+    }
+  };
+
+  const disconnectGan = async () => {
+    try {
+      await ganClientRef.current?.disconnect?.();
+    } catch (_) {}
+
+    setGanConnected(false);
+    setGanConnecting(false);
+    setGanStatus('');
+    setGanAwaitingFinal(false);
+    setGanReady(false);
+    setGanDot('disconnected');
+
+    ganSaveLockRef.current = false;
+    ganReadFallbackLockRef.current = false;
+    stopLocalStopwatch();
+  };
+
+  useEffect(() => {
+    if (!isGanMode && ganConnected) disconnectGan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGanMode]);
+
+  // -------------------------
+  // Cube scramble tokens update (from displayed scramble)
+  // -------------------------
+  useEffect(() => {
+    const txt = String(activeScramble || "").trim();
+    const tokens = tokenizeScramble(txt); // step-options now
+
+    scrambleTextRef.current = txt;
+    scrambleTokensRef.current = tokens;
+
+    // reset matching whenever displayed scramble changes
+    scrambleIndexRef.current = 0;
+    lastProgressEmitRef.current = -1;
+
+    // If cube mode is active, start tracking scramble immediately.
+    // (User can scramble; we won't arm until all tokens are matched.)
+    if (isCubeMode && tokens.length) {
+      cubePhaseRef.current = 'scrambling';
+      cubeArmedRef.current = false;
+      setCubeArmed(false);
+
+      // emit 0 progress so UI clears previous completion marks
+      try {
+        window.dispatchEvent(
+          new CustomEvent('pts:cubeScrambleProgress', {
+            detail: { scramble: txt, progress: 0, total: tokens.length },
+          })
+        );
+      } catch (_) {}
+    } else if (isCubeMode) {
+      cubePhaseRef.current = 'awaiting_scramble';
+      cubeArmedRef.current = false;
+      setCubeArmed(false);
+      try {
+        window.dispatchEvent(
+          new CustomEvent('pts:cubeScrambleProgress', {
+            detail: { scramble: txt, progress: 0, total: tokens.length },
+          })
+        );
+      } catch (_) {}
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeScramble, isCubeMode]);
+
+  // -------------------------
+  // GAN CUBE helpers
+  // -------------------------
+  const clearCubeIdleTimer = () => {
+    if (cubeIdleTimeoutRef.current) {
+      clearTimeout(cubeIdleTimeoutRef.current);
+      cubeIdleTimeoutRef.current = null;
+    }
+  };
+
+  const emitCubeSolveEvent = (payload) => {
+    try {
+      window.dispatchEvent(new CustomEvent('pts:cubeSolve', { detail: payload }));
+    } catch (_) {}
+  };
+
+  const finalizeCubeSolve = (reason = 'unknown') => {
+    clearCubeIdleTimer();
+
+    const samples = cubeSamplesRef.current || [];
+    const ms = cubeClientRef.current?.computeElapsedMs?.(samples);
+
+    const moves = cubeMoveLogRef.current || [];
+    const finalFacelets = cubeFaceletsRef.current;
+
+    cubeSolvingRef.current = false;
+    cubeArmedRef.current = true;
+    cubePhaseRef.current = 'armed';
+
+    setCubeSolving(false);
+    setCubeArmed(true);
+
+    stopLocalStopwatch();
+
+    if (Number.isFinite(ms) && ms >= 0) {
+      setElapsedTime(ms);
+      setLastTime(ms);
+
+      emitCubeSolveEvent({
+        ms,
+        reason,
+        moves,
+        finalFacelets,
+        startedAtHostTs: moves?.[0]?.hostTs ?? null,
+        endedAtHostTs: moves?.[moves.length - 1]?.hostTs ?? null,
+      });
+
+      if (!cubeSaveLockRef.current) {
+        cubeSaveLockRef.current = true;
+        addTime(ms);
+      }
+    } else {
+      emitCubeSolveEvent({ ms: null, reason, moves, finalFacelets });
+    }
+  };
+
+  const scheduleCubeAutoStop = () => {
+    clearCubeIdleTimer();
+    const idleMs = Number(settings?.cubeStopIdleMs ?? 1200) || 1200;
+    cubeIdleTimeoutRef.current = setTimeout(() => {
+      if (cubeSolvingRef.current) finalizeCubeSolve('idle');
+    }, Math.max(200, idleMs));
+  };
+
+  const maybeRequestFaceletsThrottled = (hostTs) => {
+    const now = Number.isFinite(hostTs) ? hostTs : Date.now();
+    const minGap = 80; // ms
+    if (now - (lastFaceletsReqHostTsRef.current || 0) < minGap) return;
+    lastFaceletsReqHostTsRef.current = now;
+    cubeClientRef.current?.requestFacelets?.();
+  };
+
+  const emitScrambleProgress = (progress, total) => {
+    if (progress === lastProgressEmitRef.current) return;
+    lastProgressEmitRef.current = progress;
+
+    try {
+      window.dispatchEvent(
+        new CustomEvent('pts:cubeScrambleProgress', {
+          detail: {
+            scramble: scrambleTextRef.current || "",
+            progress,
+            total,
+          },
+        })
+      );
+    } catch (_) {}
+  };
+
+  const connectCube = async () => {
+    if (cubeConnecting) return;
+
+    setCubeConnecting(true);
+    setCubeDot('connecting');
+
+    try {
+      if (!cubeClientRef.current) cubeClientRef.current = new GanCubeClient();
+
+      cubeSamplesRef.current = [];
+      cubeMoveLogRef.current = [];
+      cubeFaceletsRef.current = null;
+
+      cubeSaveLockRef.current = false;
+
+      cubePhaseRef.current = (scrambleTokensRef.current?.length ? 'scrambling' : 'awaiting_scramble');
+      cubeArmedRef.current = false;
+      cubeSolvingRef.current = false;
+
+      setCubeArmed(false);
+      setCubeSolving(false);
+
+      scrambleIndexRef.current = 0;
+      lastProgressEmitRef.current = -1;
+      emitScrambleProgress(0, scrambleTokensRef.current.length);
+
+      await cubeClientRef.current.connect({
+        onFacelets: ({ facelets }) => {
+          cubeFaceletsRef.current = facelets;
+
+          const solved = isFaceletsSolved(facelets);
+
+          // If we're solving and we detect solved, finalize immediately.
+          if (cubePhaseRef.current === 'solving' && solved) {
+            finalizeCubeSolve('solved');
+            return;
+          }
+
+          // If cube is solved and we're not solving, keep in scramble tracking mode but NOT armed.
+          if (solved && cubePhaseRef.current !== 'solving') {
+            cubeArmedRef.current = false;
+            setCubeArmed(false);
+
+            // if scramble tokens exist, we allow scrambling, but we reset matching if user returns solved
+            if (scrambleTokensRef.current.length) {
+              cubePhaseRef.current = 'scrambling';
+              scrambleIndexRef.current = 0;
+              emitScrambleProgress(0, scrambleTokensRef.current.length);
+            } else {
+              cubePhaseRef.current = 'awaiting_scramble';
+            }
+          }
+        },
+
+        onMove: ({ move, cubeTs, hostTs }) => {
+          maybeRequestFaceletsThrottled(hostTs);
+
+          const faceletsSnap = cubeFaceletsRef.current;
+          const solvedNow = isFaceletsSolved(faceletsSnap);
+
+          const mv = normalizeMoveToken(move);
+          if (!mv) return;
+
+          // -----------------------------
+          // SCRAMBLE MATCHING PHASE
+          // -----------------------------
+          if (cubePhaseRef.current === 'scrambling') {
+            const tokens = scrambleTokensRef.current || [];
+            if (!tokens.length) return;
+
+            const idx = scrambleIndexRef.current;
+
+            const expectedOptions = tokens[idx] || null;
+
+            if (expectedOptions && expectedOptions.includes(mv)) {
+              const nextIdx = idx + 1;
+              scrambleIndexRef.current = nextIdx;
+              emitScrambleProgress(nextIdx, tokens.length);
+
+              // completed the entire displayed scramble
+              if (nextIdx >= tokens.length) {
+                cubePhaseRef.current = 'armed';
+                cubeArmedRef.current = true;
+                setCubeArmed(true);
+
+                // clear solution logs so scramble is never included
+                cubeSamplesRef.current = [];
+                cubeMoveLogRef.current = [];
+                cubeSaveLockRef.current = false;
+
+                // IMPORTANT: Do NOT start timer here.
+                // The *next* move after scramble completion starts the solve.
+              }
+              return;
+            }
+
+            // mismatch: simple, predictable behavior:
+            // if this move matches the first token, restart from 1, else restart to 0.
+            const firstOptions = tokens[0] || [];
+            if (firstOptions.includes(mv)) {
+              scrambleIndexRef.current = 1;
+              emitScrambleProgress(1, tokens.length);
+            } else {
+              scrambleIndexRef.current = 0;
+              emitScrambleProgress(0, tokens.length);
+            }
+            return;
+          }
+
+          // -----------------------------
+          // ARMED -> first move starts solve
+          // -----------------------------
+          if (cubePhaseRef.current === 'armed') {
+            if (!settings?.cubeAutoStart) return;
+
+            // Disable inspection in cube mode
+            stopInspectionInterval();
+            setIsInspecting(false);
+            setInspectionElapsed(0);
+            inspectionExtraMsRef.current = 0;
+
+            cubePhaseRef.current = 'solving';
+            cubeSolvingRef.current = true;
+            cubeArmedRef.current = false;
+
+            setCubeSolving(true);
+            setCubeArmed(false);
+
+            cubeSamplesRef.current = [];
+            cubeMoveLogRef.current = [];
+            cubeSaveLockRef.current = false;
+
+            cubeSamplesRef.current.push({ cubeTs, hostTs });
+            cubeMoveLogRef.current.push({
+              move: mv,
+              cubeTs,
+              hostTs,
+              facelets: faceletsSnap ?? null,
+            });
+
+            startLocalStopwatch();
+
+            if (!!settings?.cubeAutoStop) scheduleCubeAutoStop();
+            return;
+          }
+
+          // -----------------------------
+          // SOLVING
+          // -----------------------------
+          if (cubePhaseRef.current === 'solving') {
+            cubeSamplesRef.current.push({ cubeTs, hostTs });
+            cubeMoveLogRef.current.push({
+              move: mv,
+              cubeTs,
+              hostTs,
+              facelets: faceletsSnap ?? null,
+            });
+
+            if (!!settings?.cubeAutoStop) scheduleCubeAutoStop();
+            return;
+          }
+
+          // -----------------------------
+          // awaiting_scramble: if we have tokens, go to scrambling automatically
+          // -----------------------------
+          if (cubePhaseRef.current === 'awaiting_scramble') {
+            const tokens = scrambleTokensRef.current || [];
+            if (tokens.length) {
+              cubePhaseRef.current = 'scrambling';
+              scrambleIndexRef.current = 0;
+              emitScrambleProgress(0, tokens.length);
+            }
+          }
+        },
+
+        onDisconnect: () => {
+          clearCubeIdleTimer();
+
+          setCubeConnected(false);
+          setCubeConnecting(false);
+          setCubeDot('disconnected');
+
+          cubePhaseRef.current = 'awaiting_scramble';
+          cubeArmedRef.current = false;
+          cubeSolvingRef.current = false;
+
+          setCubeArmed(false);
+          setCubeSolving(false);
+
+          cubeSamplesRef.current = [];
+          cubeMoveLogRef.current = [];
+          cubeFaceletsRef.current = null;
+
+          cubeSaveLockRef.current = false;
+
+          scrambleIndexRef.current = 0;
+          emitScrambleProgress(0, scrambleTokensRef.current.length);
+
+          stopLocalStopwatch();
+        },
+
+        onError: (err) => {
+          console.error('GAN cube error:', err);
+          clearCubeIdleTimer();
+
+          setCubeConnected(false);
+          setCubeConnecting(false);
+          setCubeDot('error');
+
+          cubePhaseRef.current = 'awaiting_scramble';
+          cubeArmedRef.current = false;
+          cubeSolvingRef.current = false;
+
+          setCubeArmed(false);
+          setCubeSolving(false);
+
+          cubeSamplesRef.current = [];
+          cubeMoveLogRef.current = [];
+          cubeFaceletsRef.current = null;
+
+          cubeSaveLockRef.current = false;
+
+          scrambleIndexRef.current = 0;
+          emitScrambleProgress(0, scrambleTokensRef.current.length);
+
+          stopLocalStopwatch();
+        }
+      });
+
+      setCubeConnected(true);
+      setCubeDot('connected');
+
+      lastFaceletsReqHostTsRef.current = 0;
+      cubeClientRef.current?.requestFacelets?.();
+    } catch (e) {
+      console.error('GAN cube connect failed:', e);
+      setCubeConnected(false);
+      setCubeDot('error');
+    } finally {
+      setCubeConnecting(false);
+    }
+  };
+
+  const disconnectCube = async () => {
+    clearCubeIdleTimer();
+    try {
+      await cubeClientRef.current?.disconnect?.();
+    } catch (_) {}
+
+    setCubeConnected(false);
+    setCubeConnecting(false);
+    setCubeDot('disconnected');
+
+    cubePhaseRef.current = 'awaiting_scramble';
+    cubeArmedRef.current = false;
+    cubeSolvingRef.current = false;
+
+    setCubeArmed(false);
+    setCubeSolving(false);
+
+    cubeSamplesRef.current = [];
+    cubeMoveLogRef.current = [];
+    cubeFaceletsRef.current = null;
+
+    cubeSaveLockRef.current = false;
+
+    scrambleIndexRef.current = 0;
+    emitScrambleProgress(0, scrambleTokensRef.current.length);
+
+    stopLocalStopwatch();
+  };
+
+  useEffect(() => {
+    if (!isCubeMode && cubeConnected) disconnectCube();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCubeMode]);
+
+  // -------------------------
   // Keyboard handlers
   // -------------------------
   const handleKeyDown = (event) => {
@@ -234,7 +980,6 @@ function Timer({ addTime, inPlayerBar = false }) {
 
     if (isTyping) return;
 
-    // ✅ NEW: Escape cancels pre-start hold or inspection (before solve starts)
     if (settings.timerInput === 'Keyboard' && event.key === 'Escape') {
       if (!timerOn && (isSpacebarHeld || isInspecting)) {
         event.preventDefault();
@@ -243,26 +988,25 @@ function Timer({ addTime, inPlayerBar = false }) {
       return;
     }
 
+    // GAN modes ignore keyboard timing
+    if (isGanMode || isCubeMode) return;
+
     if (settings.timerInput === 'Keyboard') {
       if (event.code === 'Space') {
         event.preventDefault();
-
-        //  ignore auto-repeat while holding space
         if (event.repeat) return;
 
-        // If timer is running, Space stops immediately (existing behavior)
         if (timerOn) {
           stopTimer();
           return;
         }
 
-        //  NEW: "hold to ready" behavior
         setIsSpacebarHeld(true);
         setCanStart(false);
 
         if (holdTimeoutRef.current) clearTimeout(holdTimeoutRef.current);
         holdTimeoutRef.current = setTimeout(() => {
-          setCanStart(true); // becomes "ready" (green)
+          setCanStart(true);
         }, 0);
       }
     } else {
@@ -300,7 +1044,10 @@ function Timer({ addTime, inPlayerBar = false }) {
       target.tagName === 'TEXTAREA' ||
       target.isContentEditable;
 
-    if (isTyping || settings.timerInput !== 'Keyboard') return;
+    if (isTyping) return;
+
+    if (isGanMode || isCubeMode) return;
+    if (settings.timerInput !== 'Keyboard') return;
 
     if (event.code === 'Space') {
       event.preventDefault();
@@ -316,22 +1063,15 @@ function Timer({ addTime, inPlayerBar = false }) {
         return;
       }
 
-      // ✅ NEW: only start if we reached "ready" (green)
       if (!timerOn && canStart) {
         const inspectionOn = !!settings.inspectionEnabled;
-
-        if (!inspectionOn) {
-          startTimer();
-        } else {
-          // Inspection flow:
-          // 1st ready release -> start inspection
-          // 2nd ready release -> start timer (and apply +2 if inspection >= 15s)
+        if (!inspectionOn) startTimer();
+        else {
           if (!isInspecting) startInspection();
           else commitInspectionAndStartTimer();
         }
       }
 
-      // ✅ NEW: after release, reset ready so you must hold again next time
       setCanStart(false);
     }
   };
@@ -346,13 +1086,9 @@ function Timer({ addTime, inPlayerBar = false }) {
       setTimeout(() => button.classList.remove('keypad-flash'), 150);
     }
 
-    if (val === '⌫') {
-      setManualTime(prev => prev.slice(0, -1));
-    } else if (val === 'Enter') {
-      handleSubmitManualTime();
-    } else {
-      setManualTime(prev => prev + val);
-    }
+    if (val === '⌫') setManualTime(prev => prev.slice(0, -1));
+    else if (val === 'Enter') handleSubmitManualTime();
+    else setManualTime(prev => prev + val);
   };
 
   // -------------------------
@@ -365,15 +1101,17 @@ function Timer({ addTime, inPlayerBar = false }) {
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('keyup', handleKeyUp);
     };
-    // NOTE: include isInspecting so key-up behavior sees current inspection state
-  }, [settings.timerInput, manualTime, timerOn, isInspecting, settings.inspectionEnabled, isSpacebarHeld, canStart]);
+  }, [settings.timerInput, manualTime, timerOn, isInspecting, settings.inspectionEnabled, isSpacebarHeld, canStart, isGanMode, isCubeMode]);
 
   useEffect(() => {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       stopInspectionInterval();
-      // ✅ NEW: clear hold timeout
       if (holdTimeoutRef.current) clearTimeout(holdTimeoutRef.current);
+
+      try { ganClientRef.current?.disconnect?.(); } catch (_) {}
+      try { cubeClientRef.current?.disconnect?.(); } catch (_) {}
+      clearCubeIdleTimer();
     };
   }, []);
 
@@ -392,17 +1130,12 @@ function Timer({ addTime, inPlayerBar = false }) {
       : `${seconds}.${formattedMilliseconds}`;
   };
 
-  // ✅ whole-number inspection display
   const formatInspection = () => {
     const mode = settings.inspectionCountDirection || "down";
     const ms = inspectionElapsed;
 
-    if (mode === "up") {
-      const secsUp = Math.floor(ms / 1000);
-      return `${secsUp}`;
-    }
+    if (mode === "up") return `${Math.floor(ms / 1000)}`;
 
-    // countdown from 15
     const remainingMs = 15000 - ms;
     const remainingSecs = Math.ceil(remainingMs / 1000);
     return `${remainingSecs}`;
@@ -410,49 +1143,115 @@ function Timer({ addTime, inPlayerBar = false }) {
 
   const formatTime = () => {
     if (isInspecting) return formatInspection();
-
     const timeToDisplay = timerOn ? elapsedTime : lastTime;
     return formatMs(timeToDisplay);
   };
 
-  //  Inspection color phases (8 / 12 / 15)
   const getInspectionColor = () => {
     const ms = inspectionElapsed;
-    if (ms >= 15000) return "#ff4d4d"; // 15+ red
-    if (ms >= 12000) return "#ff9f1a"; // 12–15 orange
-    if (ms >= 8000)  return "#ffd000"; // 8–12 yellow
-    return "#ffffff";                  // 0–8 white
+    if (ms >= 15000) return "#ff4d4d";
+    if (ms >= 12000) return "#ff9f1a";
+    if (ms >= 8000)  return "#ffd000";
+    return "#ffffff";
   };
 
-  // ✅ Fullscreen inspection option
   const fullscreenInspectionOn = !!settings.inspectionFullscreen;
 
-  // ✅ NEW: Ready-green state while holding space before start
   const readyGreen = isSpacebarHeld && canStart && !timerOn && !isInspecting;
 
-  //  NEW: Decide display color (inspection colors take priority)
   const timerColorStyle = isInspecting
     ? { color: getInspectionColor(), transition: "color 120ms linear" }
     : readyGreen
     ? { color: "#2EC4B6", transition: "color 120ms linear" }
     : undefined;
 
-  // ✅ placeholder opacity for "Type"
   const typePlaceholderStyle = manualTime
     ? { opacity: 1, transition: "opacity 120ms linear" }
     : { opacity: 0.35, transition: "opacity 120ms linear" };
 
+  const ganGreenStyle =
+    isGanMode && ganConnected && ganReady && !timerOn
+      ? { color: "#2EC4B6", transition: "color 120ms linear" }
+      : undefined;
+
+  const cubeGreenStyle =
+    isCubeMode && cubeConnected && cubeArmed && !timerOn
+      ? { color: "#2EC4B6", transition: "color 120ms linear" }
+      : undefined;
+
+  const showGanControls = isGanMode && !inPlayerBar;
+  const showCubeControls = isCubeMode && !inPlayerBar;
+
+  const showKeyboardOrGanOrCube =
+    settings.timerInput === 'Keyboard' || forceKeyboardView || isGanMode || isCubeMode;
+
   return (
-    <div className='timer-display'>
-      {(settings.timerInput === 'Keyboard' || forceKeyboardView) ? (
+    <div className="timer-display">
+
+      {showKeyboardOrGanOrCube ? (
         <div style={{ textAlign: "center" }}>
-          {/* Fullscreen overlay during inspection (optional) */}
-          {isInspecting && fullscreenInspectionOn ? (
+
+          {/* GAN Timer controls */}
+          {showGanControls && (
+            <div className="gan-controls">
+              {!ganConnected ? (
+                <button
+                  onClick={connectGan}
+                  disabled={ganConnecting}
+                  style={{ opacity: ganConnecting ? 0.6 : 1 }}
+                >
+                  {ganConnecting ? "Connecting…" : "Connect GAN"}
+                </button>
+              ) : (
+                <button onClick={disconnectGan}>Disconnect</button>
+              )}
+
+              <span
+                className={`gan-dot ${ganDot}`}
+                title={
+                  ganDot === "connected" ? "GAN connected" :
+                  ganDot === "connecting" ? "Connecting…" :
+                  ganDot === "error" ? "GAN error" :
+                  "GAN disconnected"
+                }
+              />
+            </div>
+          )}
+
+          {/* GAN Cube controls */}
+          {showCubeControls && (
+            <div className="gan-controls">
+              {!cubeConnected ? (
+                <button
+                  onClick={connectCube}
+                  disabled={cubeConnecting}
+                  style={{ opacity: cubeConnecting ? 0.6 : 1 }}
+                >
+                  {cubeConnecting ? "Connecting…" : "Connect Cube"}
+                </button>
+              ) : (
+                <button onClick={disconnectCube}>Disconnect</button>
+              )}
+
+              <span
+                className={`gan-dot ${cubeDot}`}
+                title={
+                  cubeDot === "connected" ? "Cube connected" :
+                  cubeDot === "connecting" ? "Connecting…" :
+                  cubeDot === "error" ? "Cube error" :
+                  "Cube disconnected"
+                }
+              />
+            </div>
+          )}
+
+          {/* FULLSCREEN INSPECTION */}
+          {isInspecting && fullscreenInspectionOn && !isGanMode && !isCubeMode ? (
             <div
               style={{
                 position: "fixed",
                 inset: 0,
-                background: settings.primaryColor,   // ✅ CHANGED: use primary color
+                background: settings.primaryColor,
                 zIndex: 9999,
                 display: "flex",
                 alignItems: "center",
@@ -472,40 +1271,48 @@ function Timer({ addTime, inPlayerBar = false }) {
               >
                 {formatTime()}
               </div>
-              <div style={{ fontSize: "14px", opacity: 0.3, marginTop: "16px", marginRight: "60px" }}>
+
+              <div
+                style={{
+                  fontSize: "14px",
+                  opacity: 0.3,
+                  marginTop: "16px",
+                  marginRight: "60px"
+                }}
+              >
                 Inspection — press Space to start
                 {inspectionElapsed >= 15000 ? " (+2)" : ""}
               </div>
+
             </div>
           ) : (
             <>
+              {/* MAIN TIMER DISPLAY */}
               <p
-                className='Timer'
+                className="Timer"
                 style={
-                  settings.timerInput === "Keyboard"
+                  isGanMode
+                    ? ganGreenStyle
+                    : isCubeMode
+                    ? cubeGreenStyle
+                    : (settings.timerInput === "Keyboard")
                     ? timerColorStyle
                     : typePlaceholderStyle
                 }
               >
-                {settings.timerInput === "Keyboard"
+                {(isGanMode || isCubeMode)
+                  ? formatTime()
+                  : settings.timerInput === "Keyboard"
                   ? formatTime()
                   : (manualTime || "Type")}
               </p>
-
-              {/* Tiny hint under the time while inspecting */}
-              {isInspecting && (
-                <div style={{ fontSize: "12px", opacity: 0.8, marginTop: "-10px" }}>
-                  Inspection — press Space to start
-                  {inspectionElapsed >= 15000 ? " (+2)" : ""}
-                </div>
-              )}
             </>
           )}
         </div>
       ) : (
         <div className="manual-entry-container">
           <div className="manual-display" style={typePlaceholderStyle}>
-            {manualTime || 'Type'}
+            {manualTime || "Type"}
           </div>
 
           {showKeypad && (
@@ -535,6 +1342,7 @@ function Timer({ addTime, inPlayerBar = false }) {
           )}
         </div>
       )}
+
     </div>
   );
 }

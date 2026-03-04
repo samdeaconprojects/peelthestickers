@@ -24,30 +24,32 @@ export const SettingsProvider = ({ children }) => {
   const [settings, setSettings] = useState({
     primaryColor: '#0E171D',
     secondaryColor: '#ffffff',
-    timerInput: 'Keyboard',
+    timerInput: 'Keyboard', // Keyboard | Type | Stackmat | GAN Bluetooth | GAN Cube
+
     horizontalTimeList: true, // default to horizontal
 
-    // ✅ NEW: if true, do NOT show the on-screen keypad grid in manual entry modes
-    // Type mode will also force-hide the keypad regardless (Timer.js).
+    // ✅ if true, do NOT show the on-screen keypad grid in manual entry modes
     disableKeypad: false,
 
-    // NEW: Time color modes:
-    // "binary"     => only best/worst (existing behavior)
-    // "continuous" => true spectrum by time (each solve can be different)
-    // "bucket"     => 5-band spectrum by time
-    // "index"      => evenly distributed colors by index (ignores outliers)
+    // Time color modes:
+    // "binary" | "continuous" | "bucket" | "index"
     timeColorMode: "index",
 
     eventKeyBindings: defaultEventBindings,
 
-    //  Inspection settings
+    // Inspection settings
     inspectionEnabled: false,
     inspectionCountDirection: "up",
     inspectionBeeps: true,
     inspectionFullscreen: true,
 
     // Relay settings
-    relayMode: "total", // "total" (default) | "legs"
+    relayMode: "total", // "total" | "legs"
+
+    // ✅ GAN Cube settings
+    cubeAutoStart: true,   // start timing on first MOVE
+    cubeAutoStop: true,    // stop & save after inactivity
+    cubeStopIdleMs: 1200,  // idle window to consider "stopped"
   });
 
   const updateSettings = (newSettings) => {

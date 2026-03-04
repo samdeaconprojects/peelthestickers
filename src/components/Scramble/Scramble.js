@@ -1,8 +1,14 @@
-import React from "react";
+import React, { useMemo } from "react";
 import "./Scramble.css";
 
 import ForwardSVG from "../../assets/ForwardSVG.svg";
 import BackwardSVG from "../../assets/BackwardSVG.svg";
+
+function stepsInToken(tok) {
+  const t = String(tok || "").trim();
+  if (!t) return 0;
+  return t.endsWith("2") ? 2 : 1;
+}
 
 function Scramble({
   onScrambleClick,
@@ -11,6 +17,7 @@ function Scramble({
   scramble,
   currentEvent,
   isMusicPlayer,
+  scrambleProgress = 0, // ✅ now treated as STEP progress
 }) {
   let fontSize, maxWidth;
 
@@ -50,6 +57,13 @@ function Scramble({
       maxWidth = 80;
   }
 
+  const tokens = useMemo(() => {
+    return String(scramble || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+  }, [scramble]);
+
   return (
     <div className="scramble-container">
       <button
@@ -66,7 +80,36 @@ function Scramble({
         style={{ fontSize: `${fontSize}pt`, maxWidth: `${maxWidth}%` }}
         onClick={() => onScrambleClick(scramble)}
       >
-        {scramble}
+        {tokens.length ? (
+          (() => {
+            // mark tokens done by consuming steps from scrambleProgress
+            let remaining = Math.max(0, Number(scrambleProgress || 0));
+
+            return tokens.map((t, i) => {
+              const need = stepsInToken(t);
+              const done = remaining >= need;
+              remaining -= need;
+
+              return (
+  <span
+    key={`${t}-${i}`}
+    style={{
+      opacity: done ? 0.35 : 1,
+      textDecoration: done ? "line-through" : "none",
+      transition: "opacity 120ms linear",
+      marginRight: i === tokens.length - 1 ? 0 : 8,
+      whiteSpace: "nowrap", //  prevents F and ' splitting
+      display: "inline-block", //  extra safety across browsers
+    }}
+  >
+    {t}
+  </span>
+);
+            });
+          })()
+        ) : (
+          scramble
+        )}
       </p>
 
       <button

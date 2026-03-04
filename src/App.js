@@ -1,5 +1,5 @@
 // src/App.js
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import "./App.css";
 import Timer from "./components/Timer/Timer";
 import TimeList from "./components/TimeList/TimeList";
@@ -34,6 +34,7 @@ import { createUser } from "./services/createUser";
 import { updateSolve } from "./services/updateSolve";
 import { updateUser } from "./services/updateUser";
 import { sendMessage } from "./services/sendMessage";
+import { setGanCurrentScramble } from "./smart/ganScrambleProgress";
 
 import tagIcon from "./assets/ptstag.svg";
 
@@ -44,27 +45,73 @@ import {
 } from "./components/TimeList/TimeUtils";
 
 /* -------------------------------------------------------------------------- */
-/*                            INLINE TAG BAR (HOME)                           */
+/*                         SMART-CUBE SCRAMBLE HELPERS                         */
 /* -------------------------------------------------------------------------- */
 /**
- * Drop-in TagBar:
- * - CubeModel and CrossColor are dropdowns (options stored in DynamoDB user profile as TagOptions)
- * - Custom tags allow spaces
- * - Prevents spacebar from triggering timer while interacting
- *
- * tags shape:
- * {
- *   CubeModel: "Gan 13",
- *   CrossColor: "White",
- *   Custom: { "my tag": "some value" }
- * }
- *
- * tagOptions shape (stored on user profile):
- * {
- *   CubeModels: ["GAN 12", "GAN 13", ...],
- *   CrossColors: ["White", "Yellow", ...]
- * }
+ * Turn a scramble string into a list of expected "steps".
+ * Key behavior:
+ * - "L2" becomes ["L","L"] (2 physical turns)
+ * - We ALSO allow "L'","L'" as an alternative when matching, handled elsewhere.
  */
+function expandScrambleToSteps(scramble) {
+  const tokens = String(scramble || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const steps = [];
+
+  for (const tok of tokens) {
+    const t = String(tok).trim();
+    if (!t) continue;
+
+    // Examples: "L", "L'", "L2"
+    // We treat any "X2" as two same-direction quarter-turn steps: "X","X"
+    if (t.endsWith("2")) {
+      const base = t.slice(0, -1); // "L" or "Rw" etc.
+      if (base) {
+        steps.push(base);
+        steps.push(base);
+      } else {
+        // fallback (shouldn't happen)
+        steps.push(t);
+      }
+    } else {
+      steps.push(t);
+    }
+  }
+
+  return steps;
+}
+
+/**
+ * Convert "token progress" (how many *scramble tokens* completed)
+ * into "step progress" (how many *physical quarter-turn steps* completed),
+ * where each X2 token counts as 2 steps.
+ *
+ * If your cube integration emits token-based progress, this makes the UI right.
+ * If your cube integration already emits step-based progress, you can set
+ * scrambleProgressMode below to "steps" and bypass this conversion.
+ */
+function tokenProgressToStepProgress(scramble, tokenProgress) {
+  const tokens = String(scramble || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const p = Math.max(0, Math.min(tokens.length, Number(tokenProgress || 0)));
+
+  let steps = 0;
+  for (let i = 0; i < p; i++) {
+    const t = tokens[i];
+    steps += String(t).trim().endsWith("2") ? 2 : 1;
+  }
+  return steps;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                            INLINE TAG BAR (HOME)                           */
+/* -------------------------------------------------------------------------- */
 function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
   const wrapRef = useRef(null);
   const safeTags = tags || {};
@@ -89,7 +136,6 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
   const ADD_CUBE = "__ADD_CUBE__";
   const ADD_CROSS = "__ADD_CROSS__";
 
-  // Prevent Timer / global key handlers while typing here
   const stopKeys = (e) => {
     e.stopPropagation();
   };
@@ -108,7 +154,7 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
   }, []);
 
   const setField = (field, value) => {
-    const v = String(value ?? "").trim(); // allows spaces inside, trims ends
+    const v = String(value ?? "").trim();
     const next = { ...(safeTags || {}) };
     if (!v) delete next[field];
     else next[field] = v;
@@ -125,7 +171,7 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
   };
 
   const addCustom = () => {
-    const k = String(newKey ?? "").trim(); // ✅ spaces allowed
+    const k = String(newKey ?? "").trim();
     const v = String(newVal ?? "").trim();
     if (!k) return;
 
@@ -235,9 +281,9 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
         display: "flex",
         flexDirection: "column",
         gap: "6px",
-        alignItems: "flex-end", // ✅ vertical column aligned
+        alignItems: "flex-end",
         marginTop: "6px",
-        width: "170px", // ✅ keep everything a single vertical stack width
+        width: "170px",
       }}
       onKeyDownCapture={stopKeys}
       onMouseDown={(e) => e.stopPropagation()}
@@ -259,7 +305,7 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
             const v = e.target.value;
             if (v === ADD_CUBE) {
               setAddingCube(true);
-              return; // don't change field
+              return;
             }
             setField("CubeModel", v);
           }}
@@ -283,7 +329,7 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
             <input
               style={inputStyle}
               value={newCube}
-              onChange={(e) => setNewCube(e.target.value)} // ✅ spaces allowed
+              onChange={(e) => setNewCube(e.target.value)}
               placeholder="Add Cube Model"
               autoFocus
               onKeyDown={(e) => {
@@ -324,7 +370,7 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
             const v = e.target.value;
             if (v === ADD_CROSS) {
               setAddingCross(true);
-              return; // don't change field
+              return;
             }
             setField("CrossColor", v);
           }}
@@ -348,7 +394,7 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
             <input
               style={inputStyle}
               value={newCross}
-              onChange={(e) => setNewCross(e.target.value)} // ✅ spaces allowed
+              onChange={(e) => setNewCross(e.target.value)}
               placeholder="Add Cross Color"
               autoFocus
               onKeyDown={(e) => {
@@ -429,7 +475,7 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
           <input
             style={inputStyle}
             value={newKey}
-            onChange={(e) => setNewKey(e.target.value)} // ✅ spaces allowed
+            onChange={(e) => setNewKey(e.target.value)}
             placeholder="tag name (spaces ok)"
             autoFocus
             onKeyDown={(e) => {
@@ -442,7 +488,7 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
           <input
             style={inputStyle}
             value={newVal}
-            onChange={(e) => setNewVal(e.target.value)} // ✅ spaces allowed
+            onChange={(e) => setNewVal(e.target.value)}
             placeholder="value"
             onKeyDown={(e) => {
               e.stopPropagation();
@@ -476,11 +522,11 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
 }
 
 function App() {
-  const [sessionsList, setSessionsList] = useState([]); // all sessions for user
-  const [customEvents, setCustomEvents] = useState([]); // all custom events for user
-  const [currentSession, setCurrentSession] = useState("main"); // selected session
+  const [sessionsList, setSessionsList] = useState([]);
+  const [customEvents, setCustomEvents] = useState([]);
+  const [currentSession, setCurrentSession] = useState("main");
   const [currentEvent, setCurrentEvent] = useState("333");
-  const [sessionStats, setSessionStats] = useState({}); // overall stats per session
+  const [sessionStats, setSessionStats] = useState({});
 
   const [scrambles, setScrambles] = useState({});
   const [sessions, setSessions] = useState({
@@ -492,7 +538,7 @@ function App() {
     "777": [],
     "333OH": [],
     "333BLD": [],
-    "RELAY": [],
+    RELAY: [],
   });
   const [showPlayerBar, setShowPlayerBar] = useState(true);
   const [showDetail, setShowDetail] = useState(false);
@@ -505,28 +551,21 @@ function App() {
   const [sharedSession, setSharedSession] = useState(null);
   const [sharedIndex, setSharedIndex] = useState(0);
 
-  // forces Social to refresh messages when it changes
   const [socialRefreshTick, setSocialRefreshTick] = useState(0);
 
-  // Relay session support
   const [activeSessionObj, setActiveSessionObj] = useState(null);
   const [relayLegIndex, setRelayLegIndex] = useState(0);
   const [relayLegTimes, setRelayLegTimes] = useState([]);
   const [relayScrambles, setRelayScrambles] = useState([]);
   const [relayLegs, setRelayLegs] = useState([]);
 
-  // ✅ tags shown under EventSelector (Timer page only), stored per eventKey
   const [tagsByEvent, setTagsByEvent] = useState({});
 
-  //  tag dropdown options (stored on user profile as TagOptions)
   const [tagOptions, setTagOptions] = useState({
     CubeModels: [],
     CrossColors: ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
   });
 
-  // -----------------------------
-  //  Practice Mode (local-only)
-  // -----------------------------
   const [practiceMode, setPracticeMode] = useState(false);
   const [practiceSolves, setPracticeSolves] = useState([]);
   const [showPracticeExit, setShowPracticeExit] = useState(false);
@@ -536,11 +575,11 @@ function App() {
   const isHomePage = location.pathname === "/";
   const { settings } = useSettings();
 
-  // --------------------------------------------------------------------------
-  //  Global DB indicator (spinner -> check / x)
-  // --------------------------------------------------------------------------
+  const [scrambleProgress, setScrambleProgress] = useState(0);
+  const [scrambleProgressTotal, setScrambleProgressTotal] = useState(0);
+
   const [dbStatus, setDbStatus] = useState({
-    phase: "idle", // "idle" | "loading" | "success" | "error"
+    phase: "idle",
     op: "",
     tick: 0,
   });
@@ -590,11 +629,83 @@ function App() {
     };
   }, []);
 
-  // Normalize only for relay so we always read/write solves under sessions["RELAY"]
   const eventKey =
     String(currentEvent || "").toUpperCase() === "RELAY" ? "RELAY" : currentEvent;
 
-  // current tags for this event (Timer page only)
+  const isRelayActive =
+    String(currentEvent || "").toUpperCase() === "RELAY" &&
+    activeSessionObj?.SessionType === "RELAY" &&
+    relayLegs.length > 0;
+
+  const relayCurrentEvent = isRelayActive ? relayLegs[relayLegIndex] : null;
+  const relayCurrentScramble = isRelayActive
+    ? relayScrambles[relayLegIndex] || ""
+    : "";
+
+  const displayedScramble = useMemo(() => {
+    return sharedSession
+      ? sharedSession.scrambles[sharedIndex] || ""
+      : isRelayActive
+      ? relayCurrentScramble
+      : scrambles[currentEvent]?.[0] || "";
+  }, [
+    sharedSession,
+    sharedIndex,
+    isRelayActive,
+    relayCurrentScramble,
+    scrambles,
+    currentEvent,
+  ]);
+
+  const displayedSvgEvent = useMemo(() => {
+    return isRelayActive ? relayCurrentEvent : currentEvent;
+  }, [isRelayActive, relayCurrentEvent, currentEvent]);
+
+  // ✅ if your cube integration emits TOKEN progress (per scramble token), keep "tokens".
+  // ✅ if it emits STEP progress (each quarter turn), change to "steps".
+  const scrambleProgressMode = "steps";
+
+  useEffect(() => {
+    const norm = (x) =>
+      String(x || "")
+        .trim()
+        .replace(/\s+/g, " ");
+
+    const onProg = (e) => {
+      const d = e?.detail || {};
+      const s = norm(d.scramble);
+      const shown = norm(displayedScramble);
+
+      // If emitter includes scramble string, require match.
+      // If not, accept it as "current".
+      if (s && shown && s !== shown) return;
+
+      const rawProgress = Number(d.progress || 0);
+
+      const stepP =
+        scrambleProgressMode === "steps"
+          ? Math.max(0, rawProgress)
+          : tokenProgressToStepProgress(displayedScramble, rawProgress);
+
+      const totalSteps = expandScrambleToSteps(displayedScramble).length;
+
+      setScrambleProgress(Number.isFinite(stepP) ? stepP : 0);
+      setScrambleProgressTotal(Number.isFinite(totalSteps) ? totalSteps : 0);
+    };
+
+    window.addEventListener("pts:cubeScrambleProgress", onProg);
+    return () => window.removeEventListener("pts:cubeScrambleProgress", onProg);
+  }, [displayedScramble]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setScrambleProgress(0);
+    setScrambleProgressTotal(expandScrambleToSteps(displayedScramble).length);
+  }, [displayedScramble]);
+
+  useEffect(() => {
+  setGanCurrentScramble(displayedScramble);
+}, [displayedScramble]);
+
   const currentTags =
     tagsByEvent[eventKey] || {
       CubeModel: "",
@@ -602,7 +713,6 @@ function App() {
       Custom: {},
     };
 
-  // build tag payload (merges currentTags into baseTags)
   const buildTagPayload = (baseTags = {}) => {
     const t = currentTags || {};
     const payload = { ...(baseTags || {}) };
@@ -621,7 +731,7 @@ function App() {
     if (!scrambles[currentEvent]) {
       preloadScrambles(currentEvent);
     }
-  }, [currentEvent]);
+  }, [currentEvent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -643,7 +753,6 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [settings.eventKeyBindings]);
 
-  // Refetch solves whenever event or session changes
   useEffect(() => {
     if (!isSignedIn || !user?.UserID) return;
 
@@ -652,7 +761,6 @@ function App() {
         const normalizedEvent = eventKey.toUpperCase();
         const sessionId = currentSession || "main";
 
-        // Only fetch the latest 200 solves by default (tune N as you like)
         const solves = await getLastNSolvesBySession(
           user.UserID,
           normalizedEvent,
@@ -685,7 +793,6 @@ function App() {
     console.log("Loaded Shared Session:", sessionID);
   }, [sharedSession]);
 
-  // When a relay session is selected, prep relay legs + scrambles
   useEffect(() => {
     const isRelay =
       String(currentEvent || "").toUpperCase() === "RELAY" &&
@@ -712,28 +819,27 @@ function App() {
   };
 
   const getNextScramble = () => {
-    const eventScrambles = scrambles[currentEvent] || [];
-    const nextScramble = eventScrambles[0] || generateScramble(currentEvent);
+  const ev = currentEvent; // capture
+  const nextScramble = (scrambles[ev]?.[0]) || generateScramble(ev);
 
-    setScrambles((prevScrambles) => {
-      const updatedScrambles = { ...prevScrambles };
-      updatedScrambles[currentEvent] = eventScrambles.slice(1);
+  setScrambles((prev) => {
+    const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
 
-      if (updatedScrambles[currentEvent].length < 5) {
-        setTimeout(() => {
-          updatedScrambles[currentEvent] = [
-            ...updatedScrambles[currentEvent],
-            ...Array.from({ length: 10 }, () => generateScramble(currentEvent)),
-          ];
-          setScrambles(updatedScrambles);
-        }, 0);
-      }
+    // consume the first scramble
+    const rest = arr.length ? arr.slice(1) : [];
 
-      return updatedScrambles;
-    });
+    // keep a buffer
+    const need = rest.length < 5 ? 10 : 0;
+    const refill = need ? Array.from({ length: need }, () => generateScramble(ev)) : [];
 
-    return nextScramble;
-  };
+    return {
+      ...(prev || {}),
+      [ev]: [...rest, ...refill],
+    };
+  });
+
+  return nextScramble;
+};
 
   const skipToNextScramble = () => {
     const eventScrambles = scrambles[currentEvent] || [];
@@ -747,7 +853,6 @@ function App() {
     });
   };
 
-  // New relay set: regenerate scrambles + clear leg progress
   const resetRelaySet = () => {
     const legs = Array.isArray(relayLegs) ? relayLegs : [];
     if (!legs.length) return;
@@ -757,7 +862,6 @@ function App() {
     setRelayScrambles(legs.map((ev) => generateScramble(ev)));
   };
 
-  // Next Scramble (works for normal + shared + relay)
   const goForwardScramble = () => {
     const isRelay =
       String(currentEvent || "").toUpperCase() === "RELAY" &&
@@ -775,7 +879,6 @@ function App() {
     }
   };
 
-  // Previous Scramble (works for normal + shared + relay)
   const goBackwardScramble = () => {
     const isRelay =
       String(currentEvent || "").toUpperCase() === "RELAY" &&
@@ -789,7 +892,6 @@ function App() {
     if (sharedSession) {
       setSharedIndex((i) => Math.max(i - 1, 0));
     } else {
-      // normal scrambles: prepend a fresh scramble and stay stable
       setScrambles((prev) => {
         const arr = prev[currentEvent] || [];
         return {
@@ -804,7 +906,8 @@ function App() {
     const baseTags = item.Tags || {};
 
     const relayLegsLocal = item.RelayLegs || baseTags.RelayLegs || null;
-    const relayScramblesLocal = item.RelayScrambles || baseTags.RelayScrambles || null;
+    const relayScramblesLocal =
+      item.RelayScrambles || baseTags.RelayScrambles || null;
     const relayLegTimesLocal = item.RelayLegTimes || baseTags.RelayLegTimes || null;
 
     const mergedTags =
@@ -827,7 +930,6 @@ function App() {
       datetime: item.DateTime,
       tags: mergedTags,
 
-      // relay extras (for later UI/detail)
       relayLegs: relayLegsLocal,
       relayScrambles: relayScramblesLocal,
       relayLegTimes: relayLegTimesLocal,
@@ -835,14 +937,9 @@ function App() {
   };
 
   const mergeSharedSession = (session) => {
-    // merge into whatever session the user has selected
-    // e.g., push solves into DynamoDB and local state
     console.log("Merging shared session:", session);
   };
 
-  // -----------------------------
-  // ✅ Practice mode helpers
-  // -----------------------------
   const clearPractice = () => {
     setPracticeSolves([]);
   };
@@ -852,7 +949,6 @@ function App() {
   };
 
   const startPractice = () => {
-    // optional: cancel shared/relay state so practice is clean
     setSharedSession(null);
     setSharedIndex(0);
 
@@ -869,7 +965,7 @@ function App() {
 
   const requestEndPractice = () => {
     if ((practiceSolves || []).length > 0) {
-      setShowPracticeExit(true); // keep practiceMode ON until decision
+      setShowPracticeExit(true);
     } else {
       setPracticeMode(false);
       clearPractice();
@@ -909,7 +1005,6 @@ function App() {
         }
       });
 
-      // merge into local UI
       setSessions((prev) => ({
         ...prev,
         [ev]: [...(prev[ev] || []), ...solvesToSave],
@@ -920,7 +1015,6 @@ function App() {
       clearPractice();
     } catch (err) {
       console.error("Failed saving practice solves:", err);
-      // keep modal open
     }
   };
 
@@ -979,12 +1073,11 @@ function App() {
         Friends: profile.Friends || [],
       };
 
-      // ✅ load tag options from DB profile (fallback to current defaults)
       const dbTagOptions =
         profile.TagOptions ||
         profile.tagOptions ||
         profile.Settings?.TagOptions ||
-        profile.Settings?.tagOptions ||
+        profile.Settings?.tagoptions ||
         null;
 
       if (dbTagOptions) {
@@ -1024,7 +1117,7 @@ function App() {
         });
 
         sessionItems = await getSessions(userID);
-        setSessionsList(sessionItems); // refresh
+        setSessionsList(sessionItems);
       }
 
       const statsByEvent = {};
@@ -1041,20 +1134,17 @@ function App() {
       }
 
       setSessionStats(statsByEvent);
-      //  Do not setSessions(...) here – solves will load on demand
     } catch (error) {
       console.error("Sign-in error:", error);
     }
   };
 
-  // ✅ persist tag option lists to DB profile
   const persistTagOptions = async (nextOptions) => {
     if (!isSignedIn || !user?.UserID) return;
     try {
       await runDb("Saving tag options", () =>
         updateUser(user.UserID, { TagOptions: nextOptions })
       );
-      // also reflect in user state if you rely on it elsewhere
       setUser((prev) => (prev ? { ...prev, TagOptions: nextOptions } : prev));
     } catch (err) {
       console.error("Failed to persist TagOptions:", err);
@@ -1062,9 +1152,6 @@ function App() {
   };
 
   const addSolve = async (newTime) => {
-    // -----------------------
-    // ✅ PRACTICE MODE (local only)
-    // -----------------------
     if (practiceMode) {
       const scramble = getNextScramble();
       const timestamp = new Date().toISOString();
@@ -1080,12 +1167,9 @@ function App() {
       };
 
       setPracticeSolves((prev) => [...(prev || []), newSolve]);
-      return; // ✅ do not write to DB
+      return;
     }
 
-    // -----------------------
-    // RELAY MODE
-    // -----------------------
     const isRelay =
       String(currentEvent || "").toUpperCase() === "RELAY" &&
       activeSessionObj?.SessionType === "RELAY" &&
@@ -1095,14 +1179,12 @@ function App() {
     if (isRelay) {
       const timestamp = new Date().toISOString();
 
-      // merge TagBar tags into relay tags
       const relayTags = buildTagPayload({
         IsRelay: true,
         RelayLegs: relayLegs,
         RelayScrambles: relayScrambles,
       });
 
-      // If user wants per-leg timing, keep current behavior
       if ((settings?.relayMode || "total") === "legs") {
         const legIdx = relayLegIndex;
 
@@ -1111,13 +1193,11 @@ function App() {
 
         const isLastLeg = legIdx >= relayLegs.length - 1;
 
-        // still in-progress -> advance to next leg
         if (!isLastLeg) {
           setRelayLegIndex(legIdx + 1);
           return;
         }
 
-        // completed legs -> save ONE solve with total + leg breakdown
         const totalMs = nextLegTimes.reduce((a, b) => a + b, 0);
 
         const fullRelayTags = buildTagPayload({
@@ -1135,7 +1215,6 @@ function App() {
           tags: fullRelayTags,
         };
 
-        // update local UI immediately (store under sessions["RELAY"])
         setSessions((prev) => ({
           ...prev,
           RELAY: [...(prev.RELAY || []), newSolve],
@@ -1164,7 +1243,6 @@ function App() {
         return;
       }
 
-      // Default: total-time relay (normal start/stop saves immediately)
       const totalMs = newTime;
 
       const newSolve = {
@@ -1205,19 +1283,14 @@ function App() {
       return;
     }
 
-    // -----------------------
-    // NORMAL / SHARED MODE
-    // -----------------------
     let scramble;
 
-    // SHARED SESSION MODE
     let activeSharedID = null;
     let solveIndexForBroadcast = null;
 
     if (sharedSession) {
       scramble = sharedSession.scrambles[sharedIndex];
 
-      // save index BEFORE advancing
       solveIndexForBroadcast = sharedIndex;
       activeSharedID = sharedSession.sharedID;
 
@@ -1229,26 +1302,16 @@ function App() {
         setSharedSession(null);
       }
 
-      // keeps your existing behavior (forces rerender path)
       setScrambles((prev) => ({
         ...prev,
         [currentEvent]: [...(prev[currentEvent] || [])],
       }));
     } else {
-      // NORMAL MODE
       scramble = getNextScramble();
     }
 
     const timestamp = new Date().toISOString();
 
-    console.log("Adding solve:", {
-      event: currentEvent,
-      sessionID: currentSession,
-      time: newTime,
-      scramble,
-    });
-
-    // merge TagBar tags into solve tags
     const newSolve = {
       time: newTime,
       scramble,
@@ -1258,7 +1321,7 @@ function App() {
       datetime: timestamp,
       tags: sharedSession
         ? buildTagPayload({
-            Shared: true, // ✅ requested default tag for shared averages
+            Shared: true,
             IsShared: true,
             SharedID: sharedSession.sharedID,
             SharedIndex: sharedIndex,
@@ -1266,17 +1329,12 @@ function App() {
         : buildTagPayload({}),
     };
 
-    // update local UI immediately
     setSessions((prev) => ({
       ...prev,
       [currentEvent]: [...(prev[currentEvent] || []), newSolve],
     }));
 
-    // -----------------------------
-    // SAVE TO DATABASE
-    // -----------------------------
     if (isSignedIn && user) {
-      // A) DB WRITE ONLY (this controls spinner → check / x)
       try {
         await runDb("Saving solve", () =>
           addSolveToDB(
@@ -1292,10 +1350,9 @@ function App() {
         );
       } catch (err) {
         console.error("Error adding solve (DB write failed):", err);
-        return; // ❌ stop here — do NOT run broadcast if DB write failed
+        return;
       }
 
-      // B) NON-CRITICAL SIDE EFFECT (never flip check → x)
       if (activeSharedID) {
         try {
           const messageText = `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
@@ -1311,14 +1368,12 @@ function App() {
           setSocialRefreshTick((t) => t + 1);
         } catch (err) {
           console.warn("Shared broadcast failed (solve still saved):", err);
-          // do NOT show red X
         }
       }
     }
   };
 
   const applyPenalty = async (timestamp, penalty, updatedTime) => {
-    // ✅ Practice mode: local-only penalty updates
     if (practiceMode) {
       setPracticeSolves((prev) =>
         (prev || []).map((solve) => {
@@ -1371,44 +1426,38 @@ function App() {
   };
 
   const deleteTime = async (eventKeyParam, solveOrIndex) => {
-  const ev = eventKeyParam;
+    const ev = eventKeyParam;
 
-  // Figure out the datetime we intend to delete
-  let datetimeToDelete = null;
+    let datetimeToDelete = null;
 
-  if (typeof solveOrIndex === "string") {
-    datetimeToDelete = solveOrIndex; // already a datetime
-  } else if (typeof solveOrIndex === "number") {
-    // fallback: resolve index -> datetime using CURRENT state (best effort)
-    const s = sessions?.[ev]?.[solveOrIndex];
-    datetimeToDelete = s?.datetime;
-  } else if (solveOrIndex && typeof solveOrIndex === "object") {
-    datetimeToDelete = solveOrIndex.datetime;
-  }
-
-  if (!datetimeToDelete) return;
-
-  // ✅ Functional update + filter by datetime (no stale closure issues)
-  setSessions((prev) => {
-    const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
-    return {
-      ...(prev || {}),
-      [ev]: arr.filter((s) => s?.datetime !== datetimeToDelete),
-    };
-  });
-
-  if (isSignedIn && user) {
-    try {
-      await runDb("Deleting solve", () => deleteSolve(user.UserID, datetimeToDelete));
-    } catch (err) {
-      alert("Failed to delete solve");
-      console.error(err);
-
-      // optional: re-fetch current session solves here, or keep it simple
-      // (your old rollback relied on closure state and gets messy in bulk)
+    if (typeof solveOrIndex === "string") {
+      datetimeToDelete = solveOrIndex;
+    } else if (typeof solveOrIndex === "number") {
+      const s = sessions?.[ev]?.[solveOrIndex];
+      datetimeToDelete = s?.datetime;
+    } else if (solveOrIndex && typeof solveOrIndex === "object") {
+      datetimeToDelete = solveOrIndex.datetime;
     }
-  }
-};
+
+    if (!datetimeToDelete) return;
+
+    setSessions((prev) => {
+      const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
+      return {
+        ...(prev || {}),
+        [ev]: arr.filter((s) => s?.datetime !== datetimeToDelete),
+      };
+    });
+
+    if (isSignedIn && user) {
+      try {
+        await runDb("Deleting solve", () => deleteSolve(user.UserID, datetimeToDelete));
+      } catch (err) {
+        alert("Failed to delete solve");
+        console.error(err);
+      }
+    }
+  };
 
   const addPost = async ({ note, event, solveList = [], comments = [] }) => {
     if (!user) return;
@@ -1456,7 +1505,6 @@ function App() {
     setSharedSession(null);
     setSharedIndex(0);
 
-    // reset relay state when switching events
     setActiveSessionObj(null);
     setRelayLegIndex(0);
     setRelayLegTimes([]);
@@ -1493,14 +1541,12 @@ function App() {
     }
   };
 
-  const currentSolves = practiceMode
-    ? (practiceSolves || [])
-    : (sessions[eventKey] || []);
-
+  const currentSolves = practiceMode ? practiceSolves || [] : sessions[eventKey] || [];
   const solvesSourceForDetail = practiceMode
-    ? (practiceSolves || [])
-    : (sessions[eventKey] || []);
+    ? practiceSolves || []
+    : sessions[eventKey] || [];
 
+  // (you compute averages but don’t use them directly here — leaving as-is)
   const avgOfFive = calculateAverage(
     currentSolves.slice(-5).map((s) => s.time),
     true
@@ -1526,25 +1572,6 @@ function App() {
           )
         )
       : "N/A";
-
-  // figure out what scramble + svg should show
-  const isRelayActive =
-    String(currentEvent || "").toUpperCase() === "RELAY" &&
-    activeSessionObj?.SessionType === "RELAY" &&
-    relayLegs.length > 0;
-
-  const relayCurrentEvent = isRelayActive ? relayLegs[relayLegIndex] : null;
-  const relayCurrentScramble = isRelayActive
-    ? relayScrambles[relayLegIndex] || ""
-    : "";
-
-  const displayedScramble = sharedSession
-    ? sharedSession.scrambles[sharedIndex] || ""
-    : isRelayActive
-    ? relayCurrentScramble
-    : scrambles[currentEvent]?.[0] || "";
-
-  const displayedSvgEvent = isRelayActive ? relayCurrentEvent : currentEvent;
 
   return (
     <div className={`App ${!isHomePage ? "music-player-mode" : ""}`}>
@@ -1583,9 +1610,10 @@ function App() {
                         onScrambleClick={onScrambleClick}
                         onForwardScramble={goForwardScramble}
                         onBackwardScramble={goBackwardScramble}
+                        scrambleProgress={scrambleProgress}
+                        scrambleProgressTotal={scrambleProgressTotal}
                       />
 
-                      {/*  Relay leg buttons (under the scramble) */}
                       {isRelayActive && (
                         <div
                           style={{
@@ -1639,7 +1667,6 @@ function App() {
                       </div>
 
                       <div className="event-hud">
-                        {/*  force column layout so tags are BELOW selector */}
                         <div
                           style={{
                             position: "relative",
@@ -1670,7 +1697,6 @@ function App() {
                                 setSharedSession(null);
                                 setSharedIndex(0);
 
-                                // reset relay progress when changing sessions
                                 setRelayLegIndex(0);
                                 setRelayLegTimes([]);
                                 setRelayScrambles([]);
@@ -1681,7 +1707,6 @@ function App() {
                               }}
                             />
 
-                            {/* Practice Mode toggle */}
                             <div
                               onMouseDown={(e) => e.stopPropagation()}
                               onClick={(e) => e.stopPropagation()}
@@ -1765,7 +1790,7 @@ function App() {
                     </div>
                   </div>
 
-                  <Timer addTime={addSolve} />
+                  <Timer addTime={addSolve} activeScramble={displayedScramble} />
 
                   <AveragesDisplay
                     currentSolves={currentSolves}
@@ -1788,8 +1813,6 @@ function App() {
                       setSelectedAverageIndex(0);
                     }}
                     setSessions={setSessions}
-
-                    //  NEW: needed so TimeList can offer real move dropdowns
                     sessionsList={sessionsList}
                     currentEvent={currentEvent}
                     currentSession={currentSession}
@@ -1870,7 +1893,9 @@ function App() {
                   currentEvent={currentEvent}
                   currentSession={currentSession}
                   user={user}
-                  deleteTime={(eventKeyParam, index) => deleteTime(eventKeyParam, index)}
+                  deleteTime={(eventKeyParam, index) =>
+                    deleteTime(eventKeyParam, index)
+                  }
                   addPost={addPost}
                 />
               }
@@ -1947,7 +1972,6 @@ function App() {
         />
       )}
 
-      {/*  Practice Exit Modal */}
       {showPracticeExit && (
         <div
           style={{
