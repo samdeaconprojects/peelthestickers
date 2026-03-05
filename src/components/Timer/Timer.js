@@ -5,6 +5,7 @@ import { useSettings } from '../../contexts/SettingsContext';
 
 import { GanTimerClient, GanTimerState } from '../../smart/ganTimerClient';
 import { GanCubeClient } from '../../smart/ganCubeClient';
+import { computeBasicCFOPSplits } from '../../smart/solveSplits';
 
 function parseDisplayTimeToMs(displayTime) {
   if (displayTime == null) return null;
@@ -49,7 +50,6 @@ function isFaceletsSolved(facelets) {
   const s = String(facelets).trim();
   if (s.length !== 54) return false;
 
-  // 6 faces * 9 stickers
   for (let f = 0; f < 6; f++) {
     const start = f * 9;
     const c = s[start];
@@ -66,18 +66,14 @@ function normalizeMoveToken(m) {
   if (!m) return "";
   let s = String(m).trim();
 
-  // normalize apostrophes
   s = s.replace(/’/g, "'");
 
-  // common “inverse” notations from some libs
   // Ri / Rp / R-  -> R'
   if (/[iIpP-]$/.test(s) && !s.endsWith("2")) {
     s = s.slice(0, -1) + "'";
   }
 
-  // remove spaces
   s = s.replace(/\s+/g, "");
-
   return s;
 }
 
@@ -86,10 +82,9 @@ function normalizeMoveToken(m) {
  * returns an array of "expected step options".
  * Each entry is an array of acceptable move strings for that quarter-turn step.
  *
- * Examples:
  *  - "D'"  -> [["D'"]]
  *  - "B"   -> [["B"]]
- *  - "B2"  -> [["B","B'"], ["B","B'"]]  (either direction is fine for a 180)
+ *  - "B2"  -> [["B","B'"], ["B","B'"]]
  */
 function tokenizeScramble(scramble) {
   const tokens = String(scramble || "")
@@ -119,6 +114,13 @@ function tokenizeScramble(scramble) {
 
 function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
   const { settings } = useSettings();
+
+  // ✅ NEW: keep latest addTime in a ref so Bluetooth callbacks always save
+  // to the CURRENT session/event (not whatever it was when you connected).
+  const addTimeRef = useRef(addTime);
+  useEffect(() => {
+    addTimeRef.current = addTime;
+  }, [addTime]);
 
   const [manualTime, setManualTime] = useState('');
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -150,33 +152,39 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
   const [cubeConnecting, setCubeConnecting] = useState(false);
   const [cubeDot, setCubeDot] = useState('disconnected');
 
-  // cube readiness/solve state (UI)
-  const [cubeArmed, setCubeArmed] = useState(false);   // green “ready”
+  const [cubeArmed, setCubeArmed] = useState(false);
   const [cubeSolving, setCubeSolving] = useState(false);
+
+  // ✅ NEW: catch-and-recover state (prevents whole app crash on rare gan-web-bluetooth internal error)
+  const [cubeFatalError, setCubeFatalError] = useState(null);
 
   const cubeClientRef = useRef(null);
 
   // timing samples for elapsed ms (ONLY solution moves)
   const cubeSamplesRef = useRef([]); // [{cubeTs, hostTs}]
 
-  // move log for solution (move + timestamps + facelets snapshot)
+  // move log for solution
   const cubeMoveLogRef = useRef([]); // [{move, cubeTs, hostTs, facelets}]
 
   // latest facelets from cube
   const cubeFaceletsRef = useRef(null);
 
-  // refs to avoid stale state inside bluetooth callbacks
+  // ✅ FIFO queue of move indices waiting for facelets
+  const pendingFaceletsQueueRef = useRef([]);
+  const faceletsRequestInFlightRef = useRef(false);
+  const faceletsRequestAgainRef = useRef(false);
+
   // phases:
-  //   awaiting_scramble: not tracking / no scramble tokens
-  //   scrambling: matching displayed scramble tokens
-  //   armed: scramble fully matched; next move starts solve
-  //   solving: solving; stop when facelets solved
+  //   awaiting_scramble
+  //   scrambling
+  //   armed
+  //   solving
+  //   finalizing
   const cubePhaseRef = useRef('awaiting_scramble');
   const cubeArmedRef = useRef(false);
   const cubeSolvingRef = useRef(false);
 
-  // scramble matching refs
-  const scrambleTokensRef = useRef([]); // now step-options: Array<Array<string>>
+  const scrambleTokensRef = useRef([]);
   const scrambleIndexRef = useRef(0);
   const scrambleTextRef = useRef("");
   const lastProgressEmitRef = useRef(-1);
@@ -184,8 +192,8 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
   const cubeIdleTimeoutRef = useRef(null);
   const cubeSaveLockRef = useRef(false);
 
-  // throttled facelets requests (some cubes only emit facelets on request)
-  const lastFaceletsReqHostTsRef = useRef(0);
+  const cubeFinalizingRef = useRef(false);
+  const solveScrambleRef = useRef("");
 
   // -------------------------
   // Inspection state
@@ -317,7 +325,9 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
     inspectionExtraMsRef.current = 0;
 
     ignoreNextKeyUp.current = true;
-    addTime(finalWithInspection);
+
+    // ✅ use ref (not strictly necessary here, but keeps behavior consistent)
+    addTimeRef.current?.(finalWithInspection);
   };
 
   // -------------------------
@@ -379,7 +389,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
 
   const handleSubmitManualTime = () => {
     const ms = parseShorthandTime(manualTime);
-    if (!isNaN(ms)) addTime(ms);
+    if (!isNaN(ms)) addTimeRef.current?.(ms);
     setManualTime('');
   };
 
@@ -397,7 +407,8 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
 
     if (!ganSaveLockRef.current) {
       ganSaveLockRef.current = true;
-      addTime(ms);
+      // ✅ use ref so save always targets the current session/event
+      addTimeRef.current?.(ms);
     }
   };
 
@@ -563,23 +574,19 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
   // -------------------------
   useEffect(() => {
     const txt = String(activeScramble || "").trim();
-    const tokens = tokenizeScramble(txt); // step-options now
+    const tokens = tokenizeScramble(txt);
 
     scrambleTextRef.current = txt;
     scrambleTokensRef.current = tokens;
 
-    // reset matching whenever displayed scramble changes
     scrambleIndexRef.current = 0;
     lastProgressEmitRef.current = -1;
 
-    // If cube mode is active, start tracking scramble immediately.
-    // (User can scramble; we won't arm until all tokens are matched.)
     if (isCubeMode && tokens.length) {
       cubePhaseRef.current = 'scrambling';
       cubeArmedRef.current = false;
       setCubeArmed(false);
 
-      // emit 0 progress so UI clears previous completion marks
       try {
         window.dispatchEvent(
           new CustomEvent('pts:cubeScrambleProgress', {
@@ -618,20 +625,134 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
     } catch (_) {}
   };
 
-  const finalizeCubeSolve = (reason = 'unknown') => {
+  // ✅ Controlled facelets requests so we can align 1 FACELETS -> 1 MOVE (FIFO)
+  const requestFaceletsControlled = () => {
+    if (!cubeClientRef.current) return;
+
+    if (faceletsRequestInFlightRef.current) {
+      faceletsRequestAgainRef.current = true;
+      return;
+    }
+
+    faceletsRequestInFlightRef.current = true;
+    try {
+      cubeClientRef.current.requestFacelets?.();
+    } catch (_) {
+      faceletsRequestInFlightRef.current = false;
+    }
+  };
+
+  // ✅ NEW: resilience to rare gan-web-bluetooth internal crash (toKociembaFacelets)
+  useEffect(() => {
+    const looksLikeGanWebBluetoothCrash = (eventLike) => {
+      const msg = String(
+        eventLike?.message ||
+          eventLike?.error?.message ||
+          eventLike?.reason?.message ||
+          ""
+      );
+      const stack = String(eventLike?.error?.stack || eventLike?.reason?.stack || "");
+      return (
+        msg.includes("toKociembaFacelets") ||
+        stack.includes("toKociembaFacelets") ||
+        stack.includes("GanGen3ProtocolDriver.handleStateEvent") ||
+        stack.includes("GanCubeClassicConnection.onStateUpdate")
+      );
+    };
+
+    const hardResetCube = (label, eventLike) => {
+      if (!isCubeMode) return;
+
+      const message = String(
+        eventLike?.message ||
+          eventLike?.error?.message ||
+          eventLike?.reason?.message ||
+          "GAN cube internal error"
+      );
+
+      console.error(`⚠️ Caught ${label} (GAN cube)`, eventLike);
+
+      setCubeFatalError({ label, message });
+
+      // Stop everything and disconnect so it doesn't keep crashing
+      clearCubeIdleTimer();
+      try { cubeClientRef.current?.disconnect?.(); } catch (_) {}
+
+      setCubeConnected(false);
+      setCubeConnecting(false);
+      setCubeDot('error');
+
+      cubePhaseRef.current = 'awaiting_scramble';
+      cubeArmedRef.current = false;
+      cubeSolvingRef.current = false;
+
+      setCubeArmed(false);
+      setCubeSolving(false);
+
+      cubeSamplesRef.current = [];
+      cubeMoveLogRef.current = [];
+      cubeFaceletsRef.current = null;
+
+      pendingFaceletsQueueRef.current = [];
+      faceletsRequestInFlightRef.current = false;
+      faceletsRequestAgainRef.current = false;
+
+      cubeSaveLockRef.current = false;
+      cubeFinalizingRef.current = false;
+      solveScrambleRef.current = "";
+
+      scrambleIndexRef.current = 0;
+      emitScrambleProgress(0, scrambleTokensRef.current.length);
+
+      stopLocalStopwatch();
+    };
+
+    const onError = (e) => {
+      if (!looksLikeGanWebBluetoothCrash(e)) return;
+      try { e.preventDefault?.(); } catch (_) {}
+      hardResetCube("window.error", e);
+    };
+
+    const onRejection = (e) => {
+      if (!looksLikeGanWebBluetoothCrash(e)) return;
+      try { e.preventDefault?.(); } catch (_) {}
+      hardResetCube("unhandledrejection", e);
+    };
+
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCubeMode]);
+
+  const finalizeCubeSolve = async (reason = 'unknown') => {
+    if (cubeFinalizingRef.current) return;
+    cubeFinalizingRef.current = true;
+
+    cubePhaseRef.current = 'finalizing';
+    cubeSolvingRef.current = false;
+    setCubeSolving(false);
+
     clearCubeIdleTimer();
 
     const samples = cubeSamplesRef.current || [];
     const ms = cubeClientRef.current?.computeElapsedMs?.(samples);
 
     const moves = cubeMoveLogRef.current || [];
+
+    // ask for a fresh final facelets snapshot
+    try {
+      cubeClientRef.current?.requestFacelets?.();
+    } catch (_) {}
+    await new Promise((r) => setTimeout(r, 60));
+
     const finalFacelets = cubeFaceletsRef.current;
 
-    cubeSolvingRef.current = false;
     cubeArmedRef.current = true;
     cubePhaseRef.current = 'armed';
-
-    setCubeSolving(false);
     setCubeArmed(true);
 
     stopLocalStopwatch();
@@ -640,38 +761,50 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
       setElapsedTime(ms);
       setLastTime(ms);
 
-      emitCubeSolveEvent({
-        ms,
+      const splits = computeBasicCFOPSplits(moves, { totalMs: ms, finalFacelets });
+
+      const smartMeta = {
+        source: "GAN_CUBE",
         reason,
+        scramble: solveScrambleRef.current || scrambleTextRef.current || "",
+        ms,
         moves,
         finalFacelets,
+        splits,
         startedAtHostTs: moves?.[0]?.hostTs ?? null,
         endedAtHostTs: moves?.[moves.length - 1]?.hostTs ?? null,
-      });
+        startedAtISO: moves?.[0]?.hostTs ? new Date(moves[0].hostTs).toISOString() : null,
+        endedAtISO: moves?.[moves.length - 1]?.hostTs ? new Date(moves[moves.length - 1].hostTs).toISOString() : null,
+      };
+
+      emitCubeSolveEvent(smartMeta);
 
       if (!cubeSaveLockRef.current) {
         cubeSaveLockRef.current = true;
-        addTime(ms);
+
+        // ✅ use ref so saves follow CURRENT session/event
+        Promise.resolve(addTimeRef.current?.(ms, smartMeta)).catch((err) => {
+          console.error("addTime failed (unlocking cubeSaveLock):", err);
+          cubeSaveLockRef.current = false;
+        });
       }
     } else {
-      emitCubeSolveEvent({ ms: null, reason, moves, finalFacelets });
+      emitCubeSolveEvent({
+        ms: null,
+        reason,
+        moves,
+        finalFacelets,
+        scramble: solveScrambleRef.current || scrambleTextRef.current || "",
+      });
     }
   };
 
   const scheduleCubeAutoStop = () => {
     clearCubeIdleTimer();
-    const idleMs = Number(settings?.cubeStopIdleMs ?? 1200) || 1200;
+    const idleMs = Number(settings?.cubeStopIdleMs ?? 5000) || 5000;
     cubeIdleTimeoutRef.current = setTimeout(() => {
       if (cubeSolvingRef.current) finalizeCubeSolve('idle');
     }, Math.max(200, idleMs));
-  };
-
-  const maybeRequestFaceletsThrottled = (hostTs) => {
-    const now = Number.isFinite(hostTs) ? hostTs : Date.now();
-    const minGap = 80; // ms
-    if (now - (lastFaceletsReqHostTsRef.current || 0) < minGap) return;
-    lastFaceletsReqHostTsRef.current = now;
-    cubeClientRef.current?.requestFacelets?.();
   };
 
   const emitScrambleProgress = (progress, total) => {
@@ -694,6 +827,8 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
   const connectCube = async () => {
     if (cubeConnecting) return;
 
+    setCubeFatalError(null); // ✅ NEW: clear any previous fatal error banner
+
     setCubeConnecting(true);
     setCubeDot('connecting');
 
@@ -704,7 +839,13 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
       cubeMoveLogRef.current = [];
       cubeFaceletsRef.current = null;
 
+      pendingFaceletsQueueRef.current = [];
+      faceletsRequestInFlightRef.current = false;
+      faceletsRequestAgainRef.current = false;
+
       cubeSaveLockRef.current = false;
+      cubeFinalizingRef.current = false;
+      solveScrambleRef.current = "";
 
       cubePhaseRef.current = (scrambleTokensRef.current?.length ? 'scrambling' : 'awaiting_scramble');
       cubeArmedRef.current = false;
@@ -721,20 +862,42 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
         onFacelets: ({ facelets }) => {
           cubeFaceletsRef.current = facelets;
 
+          // Attach facelets to the oldest waiting move (FIFO)
+          if (cubePhaseRef.current === "solving") {
+            const q = pendingFaceletsQueueRef.current || [];
+            const idx = q.shift();
+            const log = cubeMoveLogRef.current || [];
+            if (idx != null && idx >= 0 && idx < log.length) {
+              log[idx].facelets = facelets;
+            }
+          }
+
+          // mark request complete
+          faceletsRequestInFlightRef.current = false;
+
+          // if more moves are waiting (or we requested again), request next
+          if (cubePhaseRef.current === "solving") {
+            if (faceletsRequestAgainRef.current || (pendingFaceletsQueueRef.current?.length > 0)) {
+              faceletsRequestAgainRef.current = false;
+              requestFaceletsControlled();
+            }
+          }
+
+          // ignore solve completion while finalizing
+          if (cubePhaseRef.current === 'finalizing') return;
+
           const solved = isFaceletsSolved(facelets);
 
-          // If we're solving and we detect solved, finalize immediately.
           if (cubePhaseRef.current === 'solving' && solved) {
             finalizeCubeSolve('solved');
             return;
           }
 
-          // If cube is solved and we're not solving, keep in scramble tracking mode but NOT armed.
+          // If cube is solved and we're not solving, track scramble but not armed.
           if (solved && cubePhaseRef.current !== 'solving') {
             cubeArmedRef.current = false;
             setCubeArmed(false);
 
-            // if scramble tokens exist, we allow scrambling, but we reset matching if user returns solved
             if (scrambleTokensRef.current.length) {
               cubePhaseRef.current = 'scrambling';
               scrambleIndexRef.current = 0;
@@ -746,23 +909,19 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
         },
 
         onMove: ({ move, cubeTs, hostTs }) => {
-          maybeRequestFaceletsThrottled(hostTs);
-
-          const faceletsSnap = cubeFaceletsRef.current;
-          const solvedNow = isFaceletsSolved(faceletsSnap);
-
           const mv = normalizeMoveToken(move);
           if (!mv) return;
 
+          if (cubePhaseRef.current === 'finalizing') return;
+
           // -----------------------------
-          // SCRAMBLE MATCHING PHASE
+          // SCRAMBLE MATCHING
           // -----------------------------
           if (cubePhaseRef.current === 'scrambling') {
             const tokens = scrambleTokensRef.current || [];
             if (!tokens.length) return;
 
             const idx = scrambleIndexRef.current;
-
             const expectedOptions = tokens[idx] || null;
 
             if (expectedOptions && expectedOptions.includes(mv)) {
@@ -770,25 +929,24 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
               scrambleIndexRef.current = nextIdx;
               emitScrambleProgress(nextIdx, tokens.length);
 
-              // completed the entire displayed scramble
               if (nextIdx >= tokens.length) {
                 cubePhaseRef.current = 'armed';
                 cubeArmedRef.current = true;
                 setCubeArmed(true);
 
-                // clear solution logs so scramble is never included
                 cubeSamplesRef.current = [];
                 cubeMoveLogRef.current = [];
                 cubeSaveLockRef.current = false;
 
-                // IMPORTANT: Do NOT start timer here.
-                // The *next* move after scramble completion starts the solve.
+                pendingFaceletsQueueRef.current = [];
+                faceletsRequestInFlightRef.current = false;
+                faceletsRequestAgainRef.current = false;
+
+                // NOTE: don't start timer here; next move starts solve.
               }
               return;
             }
 
-            // mismatch: simple, predictable behavior:
-            // if this move matches the first token, restart from 1, else restart to 0.
             const firstOptions = tokens[0] || [];
             if (firstOptions.includes(mv)) {
               scrambleIndexRef.current = 1;
@@ -806,11 +964,13 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
           if (cubePhaseRef.current === 'armed') {
             if (!settings?.cubeAutoStart) return;
 
-            // Disable inspection in cube mode
             stopInspectionInterval();
             setIsInspecting(false);
             setInspectionElapsed(0);
             inspectionExtraMsRef.current = 0;
+
+            cubeFinalizingRef.current = false;
+            solveScrambleRef.current = scrambleTextRef.current || "";
 
             cubePhaseRef.current = 'solving';
             cubeSolvingRef.current = true;
@@ -823,13 +983,22 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
             cubeMoveLogRef.current = [];
             cubeSaveLockRef.current = false;
 
+            pendingFaceletsQueueRef.current = [];
+            faceletsRequestInFlightRef.current = false;
+            faceletsRequestAgainRef.current = false;
+
             cubeSamplesRef.current.push({ cubeTs, hostTs });
+
             cubeMoveLogRef.current.push({
               move: mv,
               cubeTs,
               hostTs,
-              facelets: faceletsSnap ?? null,
+              facelets: null,
             });
+
+            const idx = cubeMoveLogRef.current.length - 1;
+            pendingFaceletsQueueRef.current.push(idx);
+            requestFaceletsControlled();
 
             startLocalStopwatch();
 
@@ -842,19 +1011,24 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
           // -----------------------------
           if (cubePhaseRef.current === 'solving') {
             cubeSamplesRef.current.push({ cubeTs, hostTs });
+
             cubeMoveLogRef.current.push({
               move: mv,
               cubeTs,
               hostTs,
-              facelets: faceletsSnap ?? null,
+              facelets: null,
             });
+
+            const idx = cubeMoveLogRef.current.length - 1;
+            pendingFaceletsQueueRef.current.push(idx);
+            requestFaceletsControlled();
 
             if (!!settings?.cubeAutoStop) scheduleCubeAutoStop();
             return;
           }
 
           // -----------------------------
-          // awaiting_scramble: if we have tokens, go to scrambling automatically
+          // awaiting_scramble -> enter scrambling if we have tokens
           // -----------------------------
           if (cubePhaseRef.current === 'awaiting_scramble') {
             const tokens = scrambleTokensRef.current || [];
@@ -884,7 +1058,13 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
           cubeMoveLogRef.current = [];
           cubeFaceletsRef.current = null;
 
+          pendingFaceletsQueueRef.current = [];
+          faceletsRequestInFlightRef.current = false;
+          faceletsRequestAgainRef.current = false;
+
           cubeSaveLockRef.current = false;
+          cubeFinalizingRef.current = false;
+          solveScrambleRef.current = "";
 
           scrambleIndexRef.current = 0;
           emitScrambleProgress(0, scrambleTokensRef.current.length);
@@ -911,7 +1091,13 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
           cubeMoveLogRef.current = [];
           cubeFaceletsRef.current = null;
 
+          pendingFaceletsQueueRef.current = [];
+          faceletsRequestInFlightRef.current = false;
+          faceletsRequestAgainRef.current = false;
+
           cubeSaveLockRef.current = false;
+          cubeFinalizingRef.current = false;
+          solveScrambleRef.current = "";
 
           scrambleIndexRef.current = 0;
           emitScrambleProgress(0, scrambleTokensRef.current.length);
@@ -923,7 +1109,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
       setCubeConnected(true);
       setCubeDot('connected');
 
-      lastFaceletsReqHostTsRef.current = 0;
+      // prime facelets once connected
       cubeClientRef.current?.requestFacelets?.();
     } catch (e) {
       console.error('GAN cube connect failed:', e);
@@ -955,7 +1141,13 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
     cubeMoveLogRef.current = [];
     cubeFaceletsRef.current = null;
 
+    pendingFaceletsQueueRef.current = [];
+    faceletsRequestInFlightRef.current = false;
+    faceletsRequestAgainRef.current = false;
+
     cubeSaveLockRef.current = false;
+    cubeFinalizingRef.current = false;
+    solveScrambleRef.current = "";
 
     scrambleIndexRef.current = 0;
     emitScrambleProgress(0, scrambleTokensRef.current.length);
@@ -988,7 +1180,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
       return;
     }
 
-    // GAN modes ignore keyboard timing
     if (isGanMode || isCubeMode) return;
 
     if (settings.timerInput === 'Keyboard') {
@@ -1187,10 +1378,8 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
 
   return (
     <div className="timer-display">
-
       {showKeyboardOrGanOrCube ? (
         <div style={{ textAlign: "center" }}>
-
           {/* GAN Timer controls */}
           {showGanControls && (
             <div className="gan-controls">
@@ -1242,6 +1431,22 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
                   "Cube disconnected"
                 }
               />
+
+              {/* ✅ NEW: tiny recover UI if the gan-web-bluetooth internal crash happened */}
+              {cubeFatalError && (
+                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
+                  Cube disconnected after an internal update error.
+                  <button
+                    style={{ marginLeft: 8 }}
+                    onClick={() => {
+                      setCubeFatalError(null);
+                      connectCube();
+                    }}
+                  >
+                    Reconnect
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -1283,7 +1488,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
                 Inspection — press Space to start
                 {inspectionElapsed >= 15000 ? " (+2)" : ""}
               </div>
-
             </div>
           ) : (
             <>
@@ -1342,7 +1546,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
           )}
         </div>
       )}
-
     </div>
   );
 }

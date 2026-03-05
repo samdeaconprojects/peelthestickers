@@ -46,10 +46,10 @@ export const SettingsProvider = ({ children }) => {
     // Relay settings
     relayMode: "total", // "total" | "legs"
 
-    // ✅ GAN Cube settings
+    // GAN Cube settings
     cubeAutoStart: true,   // start timing on first MOVE
     cubeAutoStop: true,    // stop & save after inactivity
-    cubeStopIdleMs: 1200,  // idle window to consider "stopped"
+    cubeStopIdleMs: 5000,  // idle window to consider "stopped"
   });
 
   const updateSettings = (newSettings) => {

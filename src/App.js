@@ -703,8 +703,17 @@ function App() {
   }, [displayedScramble]);
 
   useEffect(() => {
-  setGanCurrentScramble(displayedScramble);
-}, [displayedScramble]);
+    setGanCurrentScramble(displayedScramble);
+  }, [displayedScramble]);
+
+  useEffect(() => {
+  const onCubeSolve = (e) => {
+    console.log("SMART SOLVE", e.detail);
+  };
+
+  window.addEventListener("pts:cubeSolve", onCubeSolve);
+  return () => window.removeEventListener("pts:cubeSolve", onCubeSolve);
+}, []);
 
   const currentTags =
     tagsByEvent[eventKey] || {
@@ -819,27 +828,27 @@ function App() {
   };
 
   const getNextScramble = () => {
-  const ev = currentEvent; // capture
-  const nextScramble = (scrambles[ev]?.[0]) || generateScramble(ev);
+    const ev = currentEvent; // capture
+    const nextScramble = (scrambles[ev]?.[0]) || generateScramble(ev);
 
-  setScrambles((prev) => {
-    const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
+    setScrambles((prev) => {
+      const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
 
-    // consume the first scramble
-    const rest = arr.length ? arr.slice(1) : [];
+      // consume the first scramble
+      const rest = arr.length ? arr.slice(1) : [];
 
-    // keep a buffer
-    const need = rest.length < 5 ? 10 : 0;
-    const refill = need ? Array.from({ length: need }, () => generateScramble(ev)) : [];
+      // keep a buffer
+      const need = rest.length < 5 ? 10 : 0;
+      const refill = need ? Array.from({ length: need }, () => generateScramble(ev)) : [];
 
-    return {
-      ...(prev || {}),
-      [ev]: [...rest, ...refill],
-    };
-  });
+      return {
+        ...(prev || {}),
+        [ev]: [...rest, ...refill],
+      };
+    });
 
-  return nextScramble;
-};
+    return nextScramble;
+  };
 
   const skipToNextScramble = () => {
     const eventScrambles = scrambles[currentEvent] || [];
@@ -1151,7 +1160,7 @@ function App() {
     }
   };
 
-  const addSolve = async (newTime) => {
+  const addSolve = async (newTime, smartMeta = null) => {
     if (practiceMode) {
       const scramble = getNextScramble();
       const timestamp = new Date().toISOString();
@@ -1307,10 +1316,28 @@ function App() {
         [currentEvent]: [...(prev[currentEvent] || [])],
       }));
     } else {
-      scramble = getNextScramble();
+      const consumed = getNextScramble();
+      scramble = smartMeta?.scramble ? String(smartMeta.scramble).trim() : consumed;
     }
 
-    const timestamp = new Date().toISOString();
+    const timestamp =
+      smartMeta?.endedAtISO ||
+      smartMeta?.startedAtISO ||
+      new Date().toISOString();
+
+    const smartTagPayload = smartMeta
+      ? {
+          SmartCube: {
+            Source: smartMeta.source || "GAN_CUBE",
+            Reason: smartMeta.reason || "",
+            StartedAtHostTs: smartMeta.startedAtHostTs ?? null,
+            EndedAtHostTs: smartMeta.endedAtHostTs ?? null,
+            Moves: smartMeta.moves || [],
+            FinalFacelets: smartMeta.finalFacelets || null,
+            Splits: smartMeta.splits || null,
+          },
+        }
+      : {};
 
     const newSolve = {
       time: newTime,
@@ -1325,8 +1352,11 @@ function App() {
             IsShared: true,
             SharedID: sharedSession.sharedID,
             SharedIndex: sharedIndex,
+            ...smartTagPayload,
           })
-        : buildTagPayload({}),
+        : buildTagPayload({
+            ...smartTagPayload,
+          }),
     };
 
     setSessions((prev) => ({
