@@ -109,3 +109,24 @@
 .keypad-flash {
   animation: flash 0.5s ease;
 }
+
+/* Wrap just the timer + side controls without affecting Timer layout */
+.timer-center-wrap {
+  position: relative;
+  display: inline-block;   /* keeps Timer sizing/position behavior */
+  text-align: center;
+}
+
+/* Controls column positioned to the LEFT of the timer (no layout shift) */
+.gan-side-controls {
+  position: absolute;
+  right: 100%;             /* anchor to the left edge of the timer block */
+  top: 50%;
+  transform: translateY(-50%);
+  margin-right: 30px;      /* spacing between controls and timer */
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+  pointer-events: auto;
+}

@@ -28,7 +28,14 @@ export const SettingsProvider = ({ children }) => {
 
     horizontalTimeList: true, // default to horizontal
 
-    // ✅ if true, do NOT show the on-screen keypad grid in manual entry modes
+    // Horizontal list scroll behavior
+    // false = old behavior (only show 12/5 with arrow paging)
+    // true  = allow scrolling across loaded solves (your current scroll build)
+    horizontalTimeListScroll: false,
+
+    horizontalTimeListCols: "auto", // "auto" | "12" | "5"
+
+    // if true, do NOT show the on-screen keypad grid in manual entry modes
     disableKeypad: false,
 
     // Time color modes:

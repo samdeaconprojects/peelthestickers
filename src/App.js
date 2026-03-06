@@ -1848,6 +1848,8 @@ function App() {
                     currentSession={currentSession}
                     eventKey={eventKey}
                     practiceMode={practiceMode}
+
+                    
                   />
 
                   {selectedAverageSolves.length > 0 && (

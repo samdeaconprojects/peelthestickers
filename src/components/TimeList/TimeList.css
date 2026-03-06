@@ -1,87 +1,150 @@
+/* src/components/TimeList/TimeList.css */
+
 /* TimeList.css */
 .time-list-container {
   display: flex;
-  justify-content: center; /* Center horizontally */
-  align-items: flex-start; /* Align to the top */
-  width: 100%; /* Ensure it takes up the full width */
-  position: relative; /* Add relative positioning for the container */
+  justify-content: center;
+  align-items: flex-start;
+  width: 100%;
+  position: relative;
   padding-bottom: 2%;
 }
 
-
-
 .highlight {
-  background-color: #ffff99; /* Or any highlight color you prefer */
+  background-color: #ffff99;
 }
 
 .TimeList {
-  width: 100%; /* Adjust the width as necessary */
-  max-width: 1000px; /* Set a maximum width */
+  width: 100%;
+  max-width: 1000px;
   table-layout: fixed;
   border-collapse: collapse;
-  margin: 0 auto; /* Center the table horizontally */
+  margin: 0 auto;
 }
 
 .TimeList tbody {
   display: block;
-  overflow-y: hidden; /* Remove vertical scrolling */
-  overflow-x: hidden; /* Remove horizontal scrolling */
+  overflow-y: hidden;
+  overflow-x: hidden;
 }
 
 .TimeList tr {
   display: grid;
   grid-template-columns: repeat(12, 1fr) auto; /* 12 columns for solves + 1 for average */
+  gap: 6px; /* spacing belongs here */
   width: 100%;
+  align-items: stretch;
 }
 
-.TimeList td  {
+.TimeList td {
+  margin: 0;
   padding: 5px;
   text-align: center;
   border: 1px solid #50B6FF;
   border-radius: 5px;
-  margin: 3px;
+
+  display: grid;
+  place-items: center;
+
+  box-sizing: border-box;
 }
 
 .TimeList td:nth-child(13) {
-  background-color: #2EC4B6; /* Different background for the average column */
+  background-color: #2EC4B6;
 }
 
+/* -----------------------------
+   Horizontal mode
+   ----------------------------- */
+.horizontal-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+}
 
+.horizontal-nav-btn {
+  appearance: none;
+  -webkit-appearance: none;
+
+  background: none;
+  border: none;
+  outline: none;
+  box-shadow: none;
+
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+
+  cursor: pointer;
+  opacity: 0.35;
+  transition: opacity 140ms ease, transform 120ms ease;
+  color: #50B6FF;
+  font-weight: 900;
+  font-size: 18px;
+  user-select: none;
+}
+
+.horizontal-nav-btn:hover {
+  opacity: 1;
+}
+
+.horizontal-nav-btn:active {
+  transform: scale(0.94);
+  opacity: 1;
+}
+
+.horizontal-nav-btn:disabled {
+  opacity: 0.15;
+  cursor: not-allowed;
+}
+
+/* Scrollable version */
 .horizontal-time-list {
+  position: relative;
   display: flex;
   flex-direction: column;
   overflow-x: auto;
+  overflow-y: hidden;
   max-width: 100%;
-  padding: 4px 0; /* Optional: add a bit of vertical padding */
+  padding: 4px 0;
+  scrollbar-gutter: stable;
+}
+
+/* Non-scroll (paged) version */
+.horizontal-time-list.no-scroll {
+  overflow: hidden;
 }
 
 .horizontal-row {
-  display: flex;
-  flex-direction: row;
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: repeat(var(--cols), 70px) 70px; /* N columns + label */
+  column-gap: 4px;
+  justify-content: center;
   margin-bottom: 4px;
+  align-items: center;
 }
 
 .horizontal-row > .TimeItem {
-  flex: 0 0 auto;
-  min-width: 70px;
-  padding: 3px;
+  width: 70px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   text-align: center;
   border-radius: 5px;
-  margin-right: 4px;
-  padding: 3px;
+  margin: 0;
   cursor: pointer;
   border: 1px solid transparent;
-  opacity: 100%;
-
+  opacity: 1;
+  box-sizing: border-box;
 }
 
 .times-row > .TimeItem {
-
   border: 1px solid #50B6FF;
-
 }
-
 
 .horizontal-row > .ao12,
 .horizontal-row > .ao5,
@@ -100,12 +163,13 @@
 .row-label {
   font-weight: bold;
   text-align: center;
-  min-width: 70px;
-  padding: 3px;
+  width: 70px;
+  height: 30px;
+  display: grid;
+  place-items: center;
   border-radius: 5px;
-  margin-left: 4px;
-  border: 1px solid transparent; /* keeps spacing consistent */
-  background-color: transparent; /* or use a subtle color like #f8f8f8 */
+  border: 1px solid transparent;
+  background-color: transparent;
   pointer-events: none;
   color: #50B6FF;
   opacity: 70%;
@@ -116,37 +180,60 @@
   border: none;
 }
 
-
-.ao12, .ao5 {
+.ao12,
+.ao5 {
   font-size: 0.8em;
   border: transparent;
-
 }
 
-.ao12.empty, .ao5.empty {
+.ao12.empty,
+.ao5.empty {
   visibility: hidden;
 }
 
-.ao5.best-time, .ao12.best-time {
+.ao5.best-time,
+.ao12.best-time {
   color: green;
 }
 
-.ao5.worst-time, .ao12.worst-time {
+.ao5.worst-time,
+.ao12.worst-time {
   color: red;
 }
-
-.ao5, .ao12 {
-  border: transparent;
-}
-
 
 .solve-count {
   font-size: 0.7em;
   color: #999;
 }
 
+/* Optional load-more UI */
+.timelist-loadmore {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+}
 
+.timelist-loadmore-btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: transparent;
+  color: white;
+  border-radius: 10px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-weight: 800;
+  opacity: 0.95;
+}
 
+.timelist-loadmore-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* -----------------------------
+   Existing stuff you had
+   ----------------------------- */
 .scramble-popup {
   position: fixed;
   top: 0;
@@ -177,15 +264,15 @@
 
 .time-list-container {
   display: flex;
-  justify-content: center; /* Center the time list horizontally */
-  align-items: flex-start; /* Align the time list to the top */
+  justify-content: center;
+  align-items: flex-start;
   width: 100%;
-  flex-direction: row; /* Ensure the pagination buttons are next to the time list */
+  flex-direction: row;
 }
 
 .time-list-content {
   flex-grow: 1;
-  width: 100%; /* Ensure it takes up the full width */
+  width: 100%;
 }
 
 .pagination-buttons {
@@ -193,9 +280,9 @@
   flex-direction: column;
   justify-content: flex-start;
   align-items: center;
-  position: absolute; /* Absolute positioning to ensure it stays on the right */
-  right: 0; /* Align to the right of the container */
-  top: 0; /* Align to the top of the container */
+  position: absolute;
+  right: 0;
+  top: 0;
 }
 
 .pagination-buttons button {
@@ -229,8 +316,6 @@
   border: 2px dashed red;
 }
 
-
-
 .current-five {
   opacity: 0.8;
 }
@@ -238,7 +323,8 @@
 /* For smaller screens */
 @media (max-width: 1100px) {
   .TimeList tr {
-    grid-template-columns: repeat(5, 1fr) auto; /* 5 columns for solves + 1 for average */
+    grid-template-columns: repeat(5, 1fr) auto;
+    gap: 6px;
   }
 
   .TimeList {
@@ -246,6 +332,16 @@
   }
 
   .TimeList td:nth-child(6) {
-    background-color: #2EC4B6; /* Different background for the average column */
+    background-color: #2EC4B6;
+  }
+
+  .horizontal-shell {
+    gap: 6px;
+  }
+
+  .horizontal-nav-btn {
+    width: 30px;
+    height: 30px;
+    font-size: 16px;
   }
 }

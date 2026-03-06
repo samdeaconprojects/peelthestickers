@@ -229,6 +229,30 @@ function Settings({ userID, onClose, onProfileUpdate }) {
             />
           </div>
 
+          {/* horizontal list scroll toggle */}
+          <div className="setting-item">
+            <label>Enable Horizontal TimeList Scrolling</label>
+            <input
+              type="checkbox"
+              checked={!!settings.horizontalTimeListScroll}
+              onChange={(e) => updateSettings({ horizontalTimeListScroll: e.target.checked })}
+              disabled={!settings.horizontalTimeList}
+            />
+          </div>
+
+          <div className="setting-item">
+  <label>Horizontal TimeList Columns</label>
+  <select
+    value={settings.horizontalTimeListCols || "auto"}
+    onChange={(e) => updateSettings({ horizontalTimeListCols: e.target.value })}
+    disabled={!settings.horizontalTimeList} // optional: only editable when horizontal mode is on
+  >
+    <option value="auto">Auto (12 desktop, 5 small)</option>
+    <option value="12">Force 12</option>
+    <option value="5">Force 5</option>
+  </select>
+</div>
+
           <div className="setting-item">
             <label>WCA Inspection</label>
             <input

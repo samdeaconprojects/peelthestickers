@@ -1379,140 +1379,141 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
   return (
     <div className="timer-display">
       {showKeyboardOrGanOrCube ? (
-        <div style={{ textAlign: "center" }}>
-          {/* GAN Timer controls */}
-          {showGanControls && (
-            <div className="gan-controls">
-              {!ganConnected ? (
-                <button
-                  onClick={connectGan}
-                  disabled={ganConnecting}
-                  style={{ opacity: ganConnecting ? 0.6 : 1 }}
-                >
-                  {ganConnecting ? "Connecting…" : "Connect GAN"}
-                </button>
-              ) : (
-                <button onClick={disconnectGan}>Disconnect</button>
-              )}
+        <div className="timer-center-wrap">
+  <div className="gan-side-controls">
+    {/* GAN Timer controls */}
+    {showGanControls && (
+      <div className="gan-controls">
+        {!ganConnected ? (
+          <button
+            onClick={connectGan}
+            disabled={ganConnecting}
+            style={{ opacity: ganConnecting ? 0.6 : 1 }}
+          >
+            {ganConnecting ? "Connecting…" : "Connect GAN"}
+          </button>
+        ) : (
+          <button onClick={disconnectGan}>Disconnect</button>
+        )}
 
-              <span
-                className={`gan-dot ${ganDot}`}
-                title={
-                  ganDot === "connected" ? "GAN connected" :
-                  ganDot === "connecting" ? "Connecting…" :
-                  ganDot === "error" ? "GAN error" :
-                  "GAN disconnected"
-                }
-              />
-            </div>
-          )}
+        <span
+          className={`gan-dot ${ganDot}`}
+          title={
+            ganDot === "connected" ? "GAN connected" :
+            ganDot === "connecting" ? "Connecting…" :
+            ganDot === "error" ? "GAN error" :
+            "GAN disconnected"
+          }
+        />
+      </div>
+    )}
 
-          {/* GAN Cube controls */}
-          {showCubeControls && (
-            <div className="gan-controls">
-              {!cubeConnected ? (
-                <button
-                  onClick={connectCube}
-                  disabled={cubeConnecting}
-                  style={{ opacity: cubeConnecting ? 0.6 : 1 }}
-                >
-                  {cubeConnecting ? "Connecting…" : "Connect Cube"}
-                </button>
-              ) : (
-                <button onClick={disconnectCube}>Disconnect</button>
-              )}
+    {/* GAN Cube controls */}
+    {showCubeControls && (
+      <div className="gan-controls">
+        {!cubeConnected ? (
+          <button
+            onClick={connectCube}
+            disabled={cubeConnecting}
+            style={{ opacity: cubeConnecting ? 0.6 : 1 }}
+          >
+            {cubeConnecting ? "Connecting…" : "Connect Cube"}
+          </button>
+        ) : (
+          <button onClick={disconnectCube}>Disconnect</button>
+        )}
 
-              <span
-                className={`gan-dot ${cubeDot}`}
-                title={
-                  cubeDot === "connected" ? "Cube connected" :
-                  cubeDot === "connecting" ? "Connecting…" :
-                  cubeDot === "error" ? "Cube error" :
-                  "Cube disconnected"
-                }
-              />
+        <span
+          className={`gan-dot ${cubeDot}`}
+          title={
+            cubeDot === "connected" ? "Cube connected" :
+            cubeDot === "connecting" ? "Connecting…" :
+            cubeDot === "error" ? "Cube error" :
+            "Cube disconnected"
+          }
+        />
 
-              {/* ✅ NEW: tiny recover UI if the gan-web-bluetooth internal crash happened */}
-              {cubeFatalError && (
-                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
-                  Cube disconnected after an internal update error.
-                  <button
-                    style={{ marginLeft: 8 }}
-                    onClick={() => {
-                      setCubeFatalError(null);
-                      connectCube();
-                    }}
-                  >
-                    Reconnect
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* FULLSCREEN INSPECTION */}
-          {isInspecting && fullscreenInspectionOn && !isGanMode && !isCubeMode ? (
-            <div
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: settings.primaryColor,
-                zIndex: 9999,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexDirection: "column",
-                userSelect: "none",
+        {cubeFatalError && (
+          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
+            Cube disconnected after an internal update error.
+            <button
+              style={{ marginLeft: 8 }}
+              onClick={() => {
+                setCubeFatalError(null);
+                connectCube();
               }}
             >
-              <div
-                className="Timer"
-                style={{
-                  color: getInspectionColor(),
-                  transition: "color 120ms linear",
-                  fontSize: "18vw",
-                  lineHeight: 1,
-                }}
-              >
-                {formatTime()}
-              </div>
+              Reconnect
+            </button>
+          </div>
+        )}
+      </div>
+    )}
+  </div>
 
-              <div
-                style={{
-                  fontSize: "14px",
-                  opacity: 0.3,
-                  marginTop: "16px",
-                  marginRight: "60px"
-                }}
-              >
-                Inspection — press Space to start
-                {inspectionElapsed >= 15000 ? " (+2)" : ""}
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* MAIN TIMER DISPLAY */}
-              <p
-                className="Timer"
-                style={
-                  isGanMode
-                    ? ganGreenStyle
-                    : isCubeMode
-                    ? cubeGreenStyle
-                    : (settings.timerInput === "Keyboard")
-                    ? timerColorStyle
-                    : typePlaceholderStyle
-                }
-              >
-                {(isGanMode || isCubeMode)
-                  ? formatTime()
-                  : settings.timerInput === "Keyboard"
-                  ? formatTime()
-                  : (manualTime || "Type")}
-              </p>
-            </>
-          )}
-        </div>
+  {/* FULLSCREEN INSPECTION (unchanged) */}
+  {isInspecting && fullscreenInspectionOn && !isGanMode && !isCubeMode ? (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: settings.primaryColor,
+        zIndex: 9999,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "column",
+        userSelect: "none",
+      }}
+    >
+      <div
+        className="Timer"
+        style={{
+          color: getInspectionColor(),
+          transition: "color 120ms linear",
+          fontSize: "18vw",
+          lineHeight: 1,
+        }}
+      >
+        {formatTime()}
+      </div>
+
+      <div
+        style={{
+          fontSize: "14px",
+          opacity: 0.3,
+          marginTop: "16px",
+          marginRight: "60px"
+        }}
+      >
+        Inspection — press Space to start
+        {inspectionElapsed >= 15000 ? " (+2)" : ""}
+      </div>
+    </div>
+  ) : (
+    <>
+      {/* MAIN TIMER DISPLAY (unchanged) */}
+      <p
+        className="Timer"
+        style={
+          isGanMode
+            ? ganGreenStyle
+            : isCubeMode
+            ? cubeGreenStyle
+            : (settings.timerInput === "Keyboard")
+            ? timerColorStyle
+            : typePlaceholderStyle
+        }
+      >
+        {(isGanMode || isCubeMode)
+          ? formatTime()
+          : settings.timerInput === "Keyboard"
+          ? formatTime()
+          : (manualTime || "Type")}
+      </p>
+    </>
+  )}
+</div>
       ) : (
         <div className="manual-entry-container">
           <div className="manual-display" style={typePlaceholderStyle}>
