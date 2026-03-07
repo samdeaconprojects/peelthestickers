@@ -1,9 +1,13 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import "./TimeTable.css";
 import { formatTime, calculateAverage } from "../TimeList/TimeUtils";
 import TimeItem from "../TimeList/TimeItem";
 import Detail from "../Detail/Detail";
+import useSolveSelection from "../../hooks/useSolveSelection";
+import useBulkSolveActions from "../../hooks/useBulkSolveActions";
+import BulkSolveControls from "../SolveBulk/BulkSolveControls";
+import { normalizeEventCode } from "../SolveBulk/solveBulkUtils";
 
 function buildRank01Map(items) {
   const valid = items
@@ -107,7 +111,19 @@ function getPerfClassByRank01(rank01) {
   return "slowest";
 }
 
-const TimeTable = ({ solves, deleteTime, addPost }) => {
+const TimeTable = ({
+  user,
+  solves,
+  deleteTime,
+  addPost,
+  applyPenalty,
+  setSessions,
+  sessionsList = [],
+  currentEvent,
+  currentSession,
+  eventKey,
+  practiceMode = false,
+}) => {
   const [selectedSolve, setSelectedSolve] = useState(null);
   const [selectedSolveIndex, setSelectedSolveIndex] = useState(null);
 
@@ -115,6 +131,8 @@ const TimeTable = ({ solves, deleteTime, addPost }) => {
   const [sortBy, setSortBy] = useState("date");
   const [sortDirection, setSortDirection] = useState("desc");
   const [itemRowSize, setItemRowSize] = useState(12);
+
+  const selection = useSolveSelection();
 
   const showAverages = sortBy !== "time";
   const totalDisplayed = Array.isArray(solves) ? solves.length : 0;
@@ -196,6 +214,45 @@ const TimeTable = ({ solves, deleteTime, addPost }) => {
     return arr;
   }, [solves, sortBy, sortDirection]);
 
+  const bulkActions = useBulkSolveActions({
+    user,
+    solves: sortedSolves,
+    selectedIndices: selection.selectedIndices,
+    clearSelection: selection.clearSelection,
+    deleteTime,
+    addPost,
+    setSessions,
+    sessionsList,
+    currentEvent,
+    currentSession,
+    eventKey,
+    practiceMode,
+  });
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") {
+        if (selection.selectionCount > 0) {
+          e.preventDefault();
+          selection.clearSelection();
+        }
+        if (bulkActions.showBulkTags) bulkActions.setShowBulkTags(false);
+        if (bulkActions.showBulkMove) bulkActions.setShowBulkMove(false);
+        if (bulkActions.showBulkShare) bulkActions.setShowBulkShare(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selection, bulkActions]);
+
+  useEffect(() => {
+    bulkActions.setBulkMoveEvent(normalizeEventCode(currentEvent));
+  }, [currentEvent]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    bulkActions.setBulkMoveSession(String(currentSession || "main"));
+  }, [currentSession]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const overallVisibleRankMap = useMemo(() => {
     return buildRank01Map(
       sortedSolves.map((solve, idx) => ({
@@ -216,6 +273,7 @@ const TimeTable = ({ solves, deleteTime, addPost }) => {
           sortBy === "date" && sortDirection === "desc"
             ? totalDisplayed - index
             : index + 1,
+        __sortedIndex: index,
       };
     });
   }, [sortedSolves, showAverages, averagesByKey, sortBy, sortDirection, totalDisplayed]);
@@ -295,9 +353,20 @@ const TimeTable = ({ solves, deleteTime, addPost }) => {
     overallVisibleRankMap,
   ]);
 
+  const handleSolvePrimaryAction = (solve, solveIndex) => {
+    setSelectedSolve({ ...solve, userID: user?.UserID });
+    setSelectedSolveIndex(solveIndex);
+  };
+
+  const onSolveClick = (e, solve, solveIndex) => {
+    const handledAsSelection = selection.handleSelectionClick(e, solveIndex);
+    if (handledAsSelection) return;
+    handleSolvePrimaryAction(solve, solveIndex);
+  };
+
   const openDetail = (solve) => {
-    setSelectedSolve(solve);
-    setSelectedSolveIndex(solve?.fullIndex);
+    setSelectedSolve({ ...solve, userID: user?.UserID });
+    setSelectedSolveIndex(solve?.fullIndex ?? solve?.datetime ?? null);
   };
 
   const closeDetail = () => {
@@ -307,6 +376,40 @@ const TimeTable = ({ solves, deleteTime, addPost }) => {
 
   return (
     <div className="time-table-container">
+      <BulkSolveControls
+        selectionCount={selection.selectionCount}
+        clearSelection={selection.clearSelection}
+        showBulkTags={bulkActions.showBulkTags}
+        setShowBulkTags={bulkActions.setShowBulkTags}
+        showBulkMove={bulkActions.showBulkMove}
+        setShowBulkMove={bulkActions.setShowBulkMove}
+        showBulkShare={bulkActions.showBulkShare}
+        setShowBulkShare={bulkActions.setShowBulkShare}
+        openBulkTags={bulkActions.openBulkTags}
+        openBulkMove={bulkActions.openBulkMove}
+        openBulkShare={bulkActions.openBulkShare}
+        bulkTagMode={bulkActions.bulkTagMode}
+        setBulkTagMode={bulkActions.setBulkTagMode}
+        bulkCubeModel={bulkActions.bulkCubeModel}
+        setBulkCubeModel={bulkActions.setBulkCubeModel}
+        bulkCrossColor={bulkActions.bulkCrossColor}
+        setBulkCrossColor={bulkActions.setBulkCrossColor}
+        bulkCustomLines={bulkActions.bulkCustomLines}
+        setBulkCustomLines={bulkActions.setBulkCustomLines}
+        bulkMoveEvent={bulkActions.bulkMoveEvent}
+        setBulkMoveEvent={bulkActions.setBulkMoveEvent}
+        bulkMoveSession={bulkActions.bulkMoveSession}
+        setBulkMoveSession={bulkActions.setBulkMoveSession}
+        bulkShareNote={bulkActions.bulkShareNote}
+        setBulkShareNote={bulkActions.setBulkShareNote}
+        getSessionsForEvent={bulkActions.getSessionsForEvent}
+        applyBulkTags={bulkActions.applyBulkTags}
+        applyBulkMove={bulkActions.applyBulkMove}
+        applyBulkDelete={bulkActions.applyBulkDelete}
+        applyBulkShare={bulkActions.applyBulkShare}
+        enableShare={true}
+      />
+
       <div className="time-table-toolbar">
         <div className="time-table-toolbar-group">
           <button
@@ -389,12 +492,27 @@ const TimeTable = ({ solves, deleteTime, addPost }) => {
             const ms = getSolveMs(solve);
             const tablePerfClass = getPerfClassByRank01(overallVisibleRankMap[index]);
 
+            const selected = selection.isIndexSelected(index);
+            const selectStyleInline = selected
+              ? {
+                  outline: "2px solid rgba(46,196,182,0.95)",
+                  outlineOffset: "-2px",
+                  boxShadow: "0 0 0 3px rgba(46,196,182,0.18)",
+                }
+              : null;
+
             return (
               <button
                 type="button"
                 key={`${solve?.datetime || "no-date"}-${solve?.fullIndex ?? index}-${index}`}
                 className="time-items-row"
-                onClick={() => openDetail(solve)}
+                style={selectStyleInline || undefined}
+                onClick={(e) => onSolveClick(e, solve, index)}
+                onMouseDown={(e) => {
+                  if (e.shiftKey || e.ctrlKey || e.metaKey || selection.selectionCount > 0) {
+                    e.preventDefault();
+                  }
+                }}
               >
                 <div className="time-items-rank">{solve.__displayNumber}</div>
 
@@ -452,6 +570,15 @@ const TimeTable = ({ solves, deleteTime, addPost }) => {
                   const isBest = sortBy !== "time" && row.bestIdxSet.has(solveIndex);
                   const isWorst = sortBy !== "time" && row.worstIdxSet.has(solveIndex);
 
+                  const selected = selection.isIndexSelected(solve.__flatIndex);
+                  const selectStyleInline = selected
+                    ? {
+                        outline: "2px solid rgba(46,196,182,0.95)",
+                        outlineOffset: "-2px",
+                        boxShadow: "0 0 0 3px rgba(46,196,182,0.18)",
+                      }
+                    : null;
+
                   return (
                     <div
                       key={`${solve?.datetime || "no-date"}-${solve?.fullIndex ?? solveIndex}-${solveIndex}`}
@@ -462,7 +589,13 @@ const TimeTable = ({ solves, deleteTime, addPost }) => {
                         className={`timelist-row-cell TimeItem ${perfClass} ${
                           isBest ? "dashed-border-min" : ""
                         } ${isWorst ? "dashed-border-max" : ""}`}
-                        onClick={() => openDetail(solve)}
+                        style={selectStyleInline || undefined}
+                        onClick={(e) => onSolveClick(e, solve, solve.__flatIndex)}
+                        onMouseDown={(e) => {
+                          if (e.shiftKey || e.ctrlKey || e.metaKey || selection.selectionCount > 0) {
+                            e.preventDefault();
+                          }
+                        }}
                         title={formatDateTime(solve?.datetime)}
                       >
                         {formatTime(solve?.time, false, solve?.penalty)}
@@ -492,13 +625,14 @@ const TimeTable = ({ solves, deleteTime, addPost }) => {
       {selectedSolve && (
         <Detail
           solve={selectedSolve}
+          userID={user?.UserID}
           onClose={closeDetail}
-          deleteTime={
-            selectedSolveIndex != null
-              ? () => deleteTime(selectedSolveIndex)
-              : undefined
+          deleteTime={() =>
+            deleteTime(selectedSolve?.datetime ?? selectedSolveIndex ?? selectedSolve?.fullIndex)
           }
           addPost={addPost}
+          applyPenalty={applyPenalty}
+          setSessions={setSessions}
         />
       )}
     </div>
@@ -506,6 +640,9 @@ const TimeTable = ({ solves, deleteTime, addPost }) => {
 };
 
 TimeTable.propTypes = {
+  user: PropTypes.shape({
+    UserID: PropTypes.string,
+  }),
   solves: PropTypes.arrayOf(
     PropTypes.shape({
       time: PropTypes.oneOfType([PropTypes.number, PropTypes.string]).isRequired,
@@ -513,10 +650,20 @@ TimeTable.propTypes = {
       datetime: PropTypes.string,
       penalty: PropTypes.oneOfType([PropTypes.string, PropTypes.oneOf([null])]),
       fullIndex: PropTypes.number,
+      tags: PropTypes.object,
+      event: PropTypes.string,
+      sessionID: PropTypes.string,
     })
   ).isRequired,
   deleteTime: PropTypes.func.isRequired,
-  addPost: PropTypes.func.isRequired,
+  addPost: PropTypes.func,
+  applyPenalty: PropTypes.func,
+  setSessions: PropTypes.func,
+  sessionsList: PropTypes.array,
+  currentEvent: PropTypes.string,
+  currentSession: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  eventKey: PropTypes.string,
+  practiceMode: PropTypes.bool,
 };
 
 export default TimeTable;

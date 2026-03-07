@@ -1239,10 +1239,17 @@ function Stats({
 
           <div className="stats-item stats-item--table">
             <TimeTable
-              solves={solvesToDisplay}
-              deleteTime={handleDeleteSolve}
-              addPost={addPost}
-            />
+  user={user}
+  solves={solvesToDisplay}
+  deleteTime={handleDeleteSolve}
+  addPost={addPost}
+  setSessions={setSessions}
+  sessionsList={sessionsList}
+  currentEvent={statsEvent}
+  currentSession={sessionId}
+  eventKey={statsEvent}
+  practiceMode={false}
+/>
           </div>
         </div>
       </div>

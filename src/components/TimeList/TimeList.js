@@ -1,4 +1,3 @@
-// src/components/TimeList/TimeList.js
 import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react";
 import "./TimeList.css";
 import "./TimeItem.css";
@@ -6,7 +5,10 @@ import Detail from "../Detail/Detail";
 import { useSettings } from "../../contexts/SettingsContext";
 import { formatTime, calculateAverage, getOveralls } from "./TimeUtils";
 
-import { updateSolve } from "../../services/updateSolve";
+import useSolveSelection from "../../hooks/useSolveSelection";
+import useBulkSolveActions from "../../hooks/useBulkSolveActions";
+import BulkSolveControls from "../SolveBulk/BulkSolveControls";
+import { normalizeEventCode } from "../SolveBulk/solveBulkUtils";
 
 function clamp01(x) {
   if (!isFinite(x)) return 0;
@@ -54,69 +56,6 @@ function buildRank01Map(items) {
   return out;
 }
 
-function normalizeEventCode(ev) {
-  return String(ev || "").trim().toUpperCase();
-}
-
-function safeMergeTags(existing, patch, mode = "merge") {
-  const base = existing && typeof existing === "object" ? { ...existing } : {};
-  const p = patch && typeof patch === "object" ? patch : {};
-
-  if (mode === "replace") {
-    return { ...p };
-  }
-
-  // merge
-  const next = { ...base };
-
-  // special-case Custom merge if present
-  if (p.Custom && typeof p.Custom === "object" && !Array.isArray(p.Custom)) {
-    const baseCustom =
-      base.Custom && typeof base.Custom === "object" && !Array.isArray(base.Custom)
-        ? { ...base.Custom }
-        : {};
-    next.Custom = { ...baseCustom, ...p.Custom };
-    const { Custom, ...rest } = p;
-    Object.assign(next, rest);
-    return next;
-  }
-
-  Object.assign(next, p);
-  return next;
-}
-
-function parseCustomLines(linesText) {
-  // format:
-  // key=value
-  // key2=true
-  // "key with spaces"=value
-  const out = {};
-  const raw = String(linesText || "")
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  for (const line of raw) {
-    const idx = line.indexOf("=");
-    if (idx === -1) {
-      // "key" implies true
-      out[line] = "true";
-      continue;
-    }
-    const k = line.slice(0, idx).trim();
-    const v = line.slice(idx + 1).trim();
-    if (!k) continue;
-    out[k] = v || "true";
-  }
-  return out;
-}
-
-function buildGsi1pk(userID, ev, sessionID) {
-  const E = normalizeEventCode(ev);
-  const S = String(sessionID || "main").trim() || "main";
-  return `SESSION#${userID}#${E}#${S}`;
-}
-
 function TimeList({
   user,
   applyPenalty,
@@ -127,14 +66,12 @@ function TimeList({
   addPost,
   setSessions,
 
-  // props from App.js
   sessionsList = [],
   currentEvent,
   currentSession,
   eventKey,
   practiceMode,
 
-  // OPTIONAL load-more support (for scroll mode only, if wired)
   onLoadMore,
   canLoadMore = true,
   isLoadingMore = false,
@@ -142,19 +79,13 @@ function TimeList({
 }) {
   const { settings } = useSettings();
 
-  // ✅ Memoize solvesSafe to keep deps sane
   const solvesSafe = useMemo(() => {
     return Array.isArray(solves) ? solves : [];
   }, [solves]);
 
   const isHorizontal = inPlayerBar ? false : settings.horizontalTimeList;
-
-  // ✅ NEW: scroll toggle for horizontal list
   const horizontalScrollEnabled = !!settings.horizontalTimeListScroll;
 
-  // Modes:
-  // "binary" | "continuous" | "bucket" | "index"
-  // also accept old "spectrum" as "bucket"
   const timeColorModeRaw = settings?.timeColorMode || "binary";
   const timeColorMode = timeColorModeRaw === "spectrum" ? "bucket" : timeColorModeRaw;
 
@@ -163,67 +94,35 @@ function TimeList({
   const [selectedSolveIndex, setSelectedSolveIndex] = useState(null);
   const [selectedSolveList, setSelectedSolveList] = useState(null);
   const [currentPage, setCurrentPage] = useState(0);
-
-  // ✅ NEW: horizontal paging (used when scroll disabled)
   const [horizontalPage, setHorizontalPage] = useState(0);
 
-  // -----------------------------
-  // Multi-select state
-  // -----------------------------
-  const [selectedIndices, setSelectedIndices] = useState(() => new Set());
-  const [anchorIndex, setAnchorIndex] = useState(null);
+  const selection = useSolveSelection();
 
-  const [showBulkTags, setShowBulkTags] = useState(false);
-  const [showBulkMove, setShowBulkMove] = useState(false);
+  const bulkActions = useBulkSolveActions({
+    user,
+    solves: solvesSafe,
+    selectedIndices: selection.selectedIndices,
+    clearSelection: selection.clearSelection,
+    deleteTime,
+    addPost,
+    setSessions,
+    sessionsList,
+    currentEvent,
+    currentSession,
+    eventKey,
+    practiceMode,
+  });
 
-  // bulk share
-  const [showBulkShare, setShowBulkShare] = useState(false);
-  const [bulkShareNote, setBulkShareNote] = useState("");
-
-  const [bulkTagMode, setBulkTagMode] = useState("merge"); // merge | replace
-  const [bulkCubeModel, setBulkCubeModel] = useState("");
-  const [bulkCrossColor, setBulkCrossColor] = useState("");
-  const [bulkCustomLines, setBulkCustomLines] = useState("");
-
-  const [bulkMoveEvent, setBulkMoveEvent] = useState(() => normalizeEventCode(currentEvent));
-  const [bulkMoveSession, setBulkMoveSession] = useState(() => String(currentSession || "main"));
-
-  const selectionCount = selectedIndices.size;
-
-  const clearSelection = () => {
-    setSelectedIndices(new Set());
-    setAnchorIndex(null);
-  };
-
-  const selectedSolvesByIndex = useMemo(() => {
-    if (!selectionCount) return [];
-    const out = [];
-    selectedIndices.forEach((idx) => {
-      if (idx >= 0 && idx < solvesSafe.length) out.push({ idx, solve: solvesSafe[idx] });
-    });
-    out.sort((a, b) => a.idx - b.idx);
-    return out;
-  }, [selectionCount, selectedIndices, solvesSafe]);
-
-  // Horizontal scroll container ref (scroll mode only)
   const horizontalScrollRef = useRef(null);
-
-  // Preserve scroll when older solves are prepended (scroll mode only)
   const pendingPrependRef = useRef(false);
   const prevLenRef = useRef(solvesSafe.length);
   const prevScrollLeftRef = useRef(0);
-
-  // Track "am I pinned to the right?" (scroll mode only)
   const isNearRightRef = useRef(true);
 
-  // Column sizing (must match TimeList.css)
   const COL_W = 70;
   const COL_GAP = 4;
   const COL_STEP = COL_W + COL_GAP;
 
-  // ✅ NEW: Horizontal visible count can be forced by setting:
-  // settings.horizontalTimeListCols = "auto" | "12" | "5"
-  // Default ("auto") preserves your current behavior: 12 desktop, 5 small.
   const horizontalColsSetting = String(settings?.horizontalTimeListCols || "auto").toLowerCase();
   const horizontalCount =
     horizontalColsSetting === "12"
@@ -234,13 +133,11 @@ function TimeList({
       ? 12
       : 5;
 
-  // constrain viewport width when scroll is enabled (so it feels like “12 wide”)
   const horizontalMaxWidthPx = useMemo(() => {
-    const cols = horizontalCount + 1; // plus label column
+    const cols = horizontalCount + 1;
     return cols * COL_STEP + 10;
   }, [horizontalCount, COL_STEP]);
 
-  // always run hooks; never early-return before them
   useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener("resize", handleResize);
@@ -252,40 +149,34 @@ function TimeList({
     return () => window.removeEventListener("resize", handleResize);
   }, [windowWidth, solvesSafe.length, rowsToShow]);
 
-  // Escape clears selection
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.key === "Escape") {
-        if (selectionCount > 0) {
+        if (selection.selectionCount > 0) {
           e.preventDefault();
-          clearSelection();
+          selection.clearSelection();
         }
-        if (showBulkTags) setShowBulkTags(false);
-        if (showBulkMove) setShowBulkMove(false);
-        if (showBulkShare) setShowBulkShare(false);
+        if (bulkActions.showBulkTags) bulkActions.setShowBulkTags(false);
+        if (bulkActions.showBulkMove) bulkActions.setShowBulkMove(false);
+        if (bulkActions.showBulkShare) bulkActions.setShowBulkShare(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectionCount, showBulkTags, showBulkMove, showBulkShare]);
-
-  // keep move defaults in sync when event/session changes
-  useEffect(() => {
-    setBulkMoveEvent(normalizeEventCode(currentEvent));
-  }, [currentEvent]);
+  }, [selection, bulkActions]);
 
   useEffect(() => {
-    setBulkMoveSession(String(currentSession || "main"));
-  }, [currentSession]);
+    bulkActions.setBulkMoveEvent(normalizeEventCode(currentEvent));
+  }, [currentEvent]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ✅ reset horizontal paging when session/event changes OR when count changes
+  useEffect(() => {
+    bulkActions.setBulkMoveSession(String(currentSession || "main"));
+  }, [currentSession]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     setHorizontalPage(0);
   }, [eventKey, currentSession, horizontalCount, horizontalScrollEnabled]);
 
-  // -----------------------------
-  // SAFE overall best/worst (prevents the getOveralls crash)
-  // -----------------------------
   const times = useMemo(() => solvesSafe.map((s) => s?.time), [solvesSafe]);
 
   const overallCalc = useMemo(() => {
@@ -343,7 +234,6 @@ function TimeList({
     return times.length > 5 ? Array.from({ length: 5 }, (_, i) => times.length - 5 + i) : [];
   }, [times.length]);
 
-  // INDEX MODE: rank colors by TIME within the visible window
   const visibleRank01ByGlobalIndex = useMemo(() => {
     const items = visibleSolves.map((s, localIdx) => ({
       key: startIndex + localIdx,
@@ -352,9 +242,6 @@ function TimeList({
     return buildRank01Map(items);
   }, [visibleSolves, startIndex]);
 
-  // -----------------------------
-  // Solve count base (global indexing)
-  // -----------------------------
   const derivedTotalSolveCount = useMemo(() => {
     const n0 = Number(totalSolveCount);
     if (Number.isFinite(n0) && n0 >= 0) return n0;
@@ -388,11 +275,6 @@ function TimeList({
     return base > 0 ? base : 0;
   }, [derivedTotalSolveCount, solvesSafe.length]);
 
-  // -----------------------------
-  // Horizontal solves: two modes
-  // - scroll enabled: render all loaded solves
-  // - scroll disabled: render a single window of horizontalCount and page by arrows
-  // -----------------------------
   const pagedWindow = useMemo(() => {
     const total = solvesSafe.length;
     const pageSize = horizontalCount;
@@ -406,13 +288,10 @@ function TimeList({
 
   const horizontalSolves = useMemo(() => {
     if (!isHorizontal) return [];
-    if (horizontalScrollEnabled) return solvesSafe; // ALL loaded
-    return solvesSafe.slice(pagedWindow.start, pagedWindow.end); // windowed
+    if (horizontalScrollEnabled) return solvesSafe;
+    return solvesSafe.slice(pagedWindow.start, pagedWindow.end);
   }, [isHorizontal, horizontalScrollEnabled, solvesSafe, pagedWindow.start, pagedWindow.end]);
 
-  // Rank map for horizontal display:
-  // - scroll enabled: key = index in array (0..n-1)
-  // - scroll disabled: key = global index in solvesSafe
   const horizontalRank01ByKey = useMemo(() => {
     if (!isHorizontal) return {};
     if (horizontalScrollEnabled) {
@@ -420,7 +299,7 @@ function TimeList({
       return buildRank01Map(items);
     } else {
       const items = horizontalSolves.map((s, i) => ({
-        key: pagedWindow.start + i, // global index
+        key: pagedWindow.start + i,
         time: s?.time,
       }));
       return buildRank01Map(items);
@@ -430,22 +309,19 @@ function TimeList({
   const getPerfClassAndStyle = (value, min, max, rank01) => {
     if (timeColorMode === "binary") return { perfClass: "", perfStyle: null };
 
-    // INDEX MODE: rank-based hue
     if (timeColorMode === "index") {
       const h = hueGreenToRed(rank01);
       const c = hslColor(h, 100, 55);
       return { perfClass: "", perfStyle: { border: `2px solid ${c}` } };
     }
 
-    // Need valid numeric range for by-time modes
     if (typeof value !== "number" || !isFinite(value)) return { perfClass: "", perfStyle: null };
     if (typeof min !== "number" || !isFinite(min)) return { perfClass: "", perfStyle: null };
     if (typeof max !== "number" || !isFinite(max)) return { perfClass: "", perfStyle: null };
     if (max <= min) return { perfClass: "", perfStyle: null };
 
-    const t = clamp01((value - min) / (max - min)); // 0 fast -> 1 slow
+    const t = clamp01((value - min) / (max - min));
 
-    // BUCKET MODE: CSS classes
     if (timeColorMode === "bucket") {
       if (t <= 0.2) return { perfClass: "overall-border-min", perfStyle: null };
       if (t <= 0.4) return { perfClass: "faster", perfStyle: null };
@@ -454,35 +330,9 @@ function TimeList({
       return { perfClass: "overall-border-max", perfStyle: null };
     }
 
-    // CONTINUOUS MODE: true spectrum by time min/max
     const h = hueGreenToRed(t);
     const c = hslColor(h, 100, 55);
     return { perfClass: "", perfStyle: { border: `2px solid ${c}` } };
-  };
-
-  // -----------------------------
-  // Selection interaction rules
-  // -----------------------------
-  const toggleIndex = (idx) => {
-    setSelectedIndices((prev) => {
-      const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else next.add(idx);
-      return next;
-    });
-    setAnchorIndex(idx);
-  };
-
-  const rangeSelect = (idx) => {
-    const a = anchorIndex == null ? idx : anchorIndex;
-    const lo = Math.min(a, idx);
-    const hi = Math.max(a, idx);
-
-    setSelectedIndices((prev) => {
-      const next = new Set(prev);
-      for (let i = lo; i <= hi; i++) next.add(i);
-      return next;
-    });
   };
 
   const handleSolvePrimaryAction = (solve, solveIndex) => {
@@ -511,37 +361,11 @@ function TimeList({
   };
 
   const onSolveClick = (e, solve, solveIndex) => {
-    const isShift = !!e.shiftKey;
-    const isToggle = !!(e.ctrlKey || e.metaKey);
-    const hasSelection = selectionCount > 0;
-
-    if (isShift) {
-      e.preventDefault();
-      if (anchorIndex == null) setAnchorIndex(solveIndex);
-      rangeSelect(solveIndex);
-      return;
-    }
-
-    if (isToggle) {
-      e.preventDefault();
-      toggleIndex(solveIndex);
-      return;
-    }
-
-    if (hasSelection) {
-      e.preventDefault();
-      toggleIndex(solveIndex);
-      return;
-    }
-
+    const handledAsSelection = selection.handleSelectionClick(e, solveIndex);
+    if (handledAsSelection) return;
     handleSolvePrimaryAction(solve, solveIndex);
   };
 
-  const isIndexSelected = (idx) => selectedIndices.has(idx);
-
-  // -----------------------------
-  // Scroll-mode load-more + scroll preservation
-  // -----------------------------
   const requestLoadMore = () => {
     if (!onLoadMore) return;
     if (!canLoadMore) return;
@@ -621,11 +445,6 @@ function TimeList({
     }
   }, [isHorizontal, horizontalScrollEnabled, solvesSafe.length]);
 
-  // -----------------------------
-  // AO5/AO12 for horizontal display
-  // - scroll enabled: computed across horizontalSolves indices
-  // - scroll disabled: computed for the global indices shown in the window
-  // -----------------------------
   const { ao5ByKey, ao12ByKey } = useMemo(() => {
     const ao5 = {};
     const ao12 = {};
@@ -646,7 +465,6 @@ function TimeList({
       return { ao5ByKey: ao5, ao12ByKey: ao12 };
     }
 
-    // paged (no scroll): key is global index
     const start = pagedWindow.start;
     const end = pagedWindow.end;
 
@@ -702,9 +520,6 @@ function TimeList({
     return { bestTime, worstTime, bestAo5, worstAo5, bestAo12, worstAo12 };
   }, [isHorizontal, horizontalSolves, ao5ByKey, ao12ByKey]);
 
-  // -----------------------------
-  // Early return now safe
-  // -----------------------------
   if (solvesSafe.length === 0) {
     return (
       <div className="time-list-container">
@@ -713,319 +528,6 @@ function TimeList({
     );
   }
 
-  // -----------------------------
-  // Bulk UI styles
-  // -----------------------------
-  const bulkBarStyle = {
-    position: "fixed",
-    top: "10px",
-    zIndex: 20,
-    display: selectionCount ? "flex" : "none",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "10px",
-    padding: "10px 10px",
-    background: "rgba(110, 115, 115, 0.75)",
-    border: "1px solid rgba(255,255,255,0.10)",
-    borderRadius: "12px",
-    boxSizing: "border-box",
-    marginBottom: "10px",
-    backdropFilter: "blur(6px)",
-  };
-
-  const bulkBtnStyle = {
-    height: "34px",
-    padding: "0 12px",
-    borderRadius: "10px",
-    border: "1px solid rgba(255,255,255,0.18)",
-    background: "transparent",
-    color: "white",
-    cursor: "pointer",
-    opacity: 0.95,
-    fontWeight: 700,
-    userSelect: "none",
-  };
-
-  const bulkPrimaryBtnStyle = {
-    ...bulkBtnStyle,
-    border: "none",
-    background: "#2EC4B6",
-    color: "#0E171D",
-    fontWeight: 900,
-  };
-
-  const modalBackdrop = {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,0.55)",
-    zIndex: 9999,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "20px",
-  };
-
-  const modalCard = {
-    width: "520px",
-    maxWidth: "94vw",
-    background: "#181F23",
-    border: "1px solid rgba(255,255,255,0.12)",
-    borderRadius: "14px",
-    padding: "16px",
-    boxSizing: "border-box",
-  };
-
-  const inputStyle = {
-    width: "100%",
-    height: "34px",
-    borderRadius: "10px",
-    border: "1px solid rgba(255,255,255,0.18)",
-    background: "rgba(0,0,0,0.20)",
-    color: "white",
-    padding: "0 10px",
-    outline: "none",
-    boxSizing: "border-box",
-  };
-
-  const textareaStyle = {
-    width: "100%",
-    minHeight: "130px",
-    borderRadius: "10px",
-    border: "1px solid rgba(255,255,255,0.18)",
-    background: "rgba(0,0,0,0.20)",
-    color: "white",
-    padding: "10px",
-    outline: "none",
-    boxSizing: "border-box",
-    fontFamily: "inherit",
-    fontSize: "13px",
-    lineHeight: 1.35,
-    resize: "vertical",
-  };
-
-  const selectStyle = {
-    ...inputStyle,
-    cursor: "pointer",
-  };
-
-  const getSessionsForEvent = (ev) => {
-    const E = normalizeEventCode(ev);
-    return (sessionsList || []).filter((s) => normalizeEventCode(s.Event) === E);
-  };
-
-  const sourceListKey = normalizeEventCode(eventKey || currentEvent || solvesSafe[0]?.event || "");
-
-  const applyBulkTags = async () => {
-    const patch = {};
-    if (String(bulkCubeModel || "").trim()) patch.CubeModel = String(bulkCubeModel).trim();
-    if (String(bulkCrossColor || "").trim()) patch.CrossColor = String(bulkCrossColor).trim();
-
-    const custom = parseCustomLines(bulkCustomLines);
-    if (Object.keys(custom).length) patch.Custom = custom;
-
-    if (practiceMode) {
-      const idxs = Array.from(selectedIndices);
-
-      setSessions?.((prev) => {
-        const next = { ...(prev || {}) };
-        const arr = Array.isArray(next[sourceListKey]) ? [...next[sourceListKey]] : [];
-        for (const idx of idxs) {
-          if (!arr[idx]) continue;
-          arr[idx] = {
-            ...arr[idx],
-            tags: safeMergeTags(arr[idx].tags, patch, bulkTagMode),
-          };
-        }
-        next[sourceListKey] = arr;
-        return next;
-      });
-
-      setShowBulkTags(false);
-      clearSelection();
-      return;
-    }
-
-    if (!user?.UserID) return;
-
-    const targets = selectedSolvesByIndex
-      .map(({ solve }) => solve)
-      .filter(Boolean)
-      .filter((s) => s?.datetime);
-
-    try {
-      for (const s of targets) {
-        const nextTags = safeMergeTags(s.tags, patch, bulkTagMode);
-
-        await updateSolve(user.UserID, s.datetime, { Tags: nextTags });
-
-        setSessions?.((prev) => {
-          const next = { ...(prev || {}) };
-          const arr = Array.isArray(next[sourceListKey]) ? [...next[sourceListKey]] : [];
-          const idx = arr.findIndex((x) => x?.datetime === s.datetime);
-          if (idx >= 0) arr[idx] = { ...arr[idx], tags: nextTags };
-          next[sourceListKey] = arr;
-          return next;
-        });
-      }
-    } catch (err) {
-      console.error("Bulk tag update failed:", err);
-    }
-
-    setShowBulkTags(false);
-    clearSelection();
-  };
-
-  const applyBulkMove = async () => {
-    const targetEvent = normalizeEventCode(bulkMoveEvent);
-    const targetSession = String(bulkMoveSession || "main").trim() || "main";
-
-    if (practiceMode) {
-      const idxs = Array.from(selectedIndices).sort((a, b) => b - a);
-
-      setSessions?.((prev) => {
-        const next = { ...(prev || {}) };
-        const sourceArr = Array.isArray(next[sourceListKey]) ? [...next[sourceListKey]] : [];
-
-        const moving = [];
-        for (const idx of idxs) {
-          if (sourceArr[idx]) moving.push(sourceArr[idx]);
-          sourceArr.splice(idx, 1);
-        }
-        next[sourceListKey] = sourceArr;
-
-        if (!next[targetEvent]) next[targetEvent] = [];
-        if (Array.isArray(next[targetEvent])) {
-          next[targetEvent] = [
-            ...(next[targetEvent] || []),
-            ...moving.map((s) => ({ ...s, event: targetEvent, sessionID: targetSession })),
-          ];
-        }
-
-        return next;
-      });
-
-      setShowBulkMove(false);
-      clearSelection();
-      return;
-    }
-
-    if (!user?.UserID) return;
-
-    const movingSolves = selectedSolvesByIndex
-      .map(({ solve }) => solve)
-      .filter(Boolean)
-      .filter((s) => s?.datetime);
-
-    if (movingSolves.length === 0) {
-      setShowBulkMove(false);
-      clearSelection();
-      return;
-    }
-
-    try {
-      for (const s of movingSolves) {
-        const nextGsi1pk = buildGsi1pk(user.UserID, targetEvent, targetSession);
-
-        await updateSolve(user.UserID, s.datetime, {
-          Event: targetEvent,
-          SessionID: targetSession,
-          GSI1PK: nextGsi1pk,
-        });
-      }
-
-      const datetimeSet = new Set(movingSolves.map((s) => s.datetime));
-
-      setSessions?.((prev) => {
-        const next = { ...(prev || {}) };
-        const arr = Array.isArray(next[sourceListKey]) ? [...next[sourceListKey]] : [];
-        next[sourceListKey] = arr.filter((s) => !datetimeSet.has(s?.datetime));
-        return next;
-      });
-    } catch (err) {
-      console.error("Bulk move failed:", err);
-    }
-
-    setShowBulkMove(false);
-    clearSelection();
-  };
-
-  const applyBulkDelete = async () => {
-    if (!selectionCount) return;
-
-    const ok = window.confirm(`Delete ${selectionCount} selected solve(s)?`);
-    if (!ok) return;
-
-    const targets = selectedSolvesByIndex
-      .map(({ solve }) => solve)
-      .filter(Boolean)
-      .filter((s) => s?.datetime);
-
-    if (!targets.length) {
-      clearSelection();
-      return;
-    }
-
-    if (practiceMode) {
-      const datetimeSet = new Set(targets.map((s) => s.datetime));
-      setSessions?.((prev) => {
-        const next = { ...(prev || {}) };
-        const arr = Array.isArray(next[sourceListKey]) ? [...next[sourceListKey]] : [];
-        next[sourceListKey] = arr.filter((s) => !datetimeSet.has(s?.datetime));
-        return next;
-      });
-
-      clearSelection();
-      return;
-    }
-
-    try {
-      for (const s of targets) {
-        await deleteTime(s?.datetime);
-      }
-    } catch (e) {
-      console.error("Bulk delete failed:", e);
-    }
-
-    clearSelection();
-  };
-
-  const openBulkShare = () => {
-    if (!selectionCount) return;
-    setBulkShareNote("");
-    setShowBulkShare(true);
-    setShowBulkTags(false);
-    setShowBulkMove(false);
-  };
-
-  const applyBulkShare = async () => {
-    const selectedSolves = selectedSolvesByIndex.map(({ solve }) => solve).filter(Boolean);
-
-    if (!selectedSolves.length) {
-      setShowBulkShare(false);
-      clearSelection();
-      return;
-    }
-
-    const ev = normalizeEventCode(currentEvent || eventKey || selectedSolves[0]?.event);
-
-    try {
-      await addPost?.({
-        note: bulkShareNote?.trim() || `Shared ${selectedSolves.length} solves`,
-        event: ev,
-        solveList: selectedSolves,
-        comments: [],
-      });
-    } catch (e) {
-      console.error("Bulk share failed:", e);
-    }
-
-    setShowBulkShare(false);
-    clearSelection();
-  };
-
-  // -----------------------------
-  // Table mode rows
-  // -----------------------------
   const rows = [];
   for (let i = 0; i < visibleSolves.length; i += colsPerRow) {
     const timesRow = visibleSolves.slice(i, i + colsPerRow);
@@ -1047,7 +549,7 @@ function TimeList({
               ? getPerfClassAndStyle(solve.time, overallMinValue, overallMaxValue, rank01)
               : { perfClass: "", perfStyle: null };
 
-          const selected = isIndexSelected(solveIndex);
+          const selected = selection.isIndexSelected(solveIndex);
 
           const selectStyleInline = selected
             ? {
@@ -1066,7 +568,7 @@ function TimeList({
               key={index}
               onClick={(e) => onSolveClick(e, solve, solveIndex)}
               onMouseDown={(e) => {
-                if (e.shiftKey || e.ctrlKey || e.metaKey || selectionCount > 0) {
+                if (e.shiftKey || e.ctrlKey || e.metaKey || selection.selectionCount > 0) {
                   e.preventDefault();
                 }
               }}
@@ -1105,9 +607,6 @@ function TimeList({
     }
   };
 
-  // -----------------------------
-  // Horizontal paging arrows (no-scroll mode)
-  // -----------------------------
   const canPageOlder = !horizontalScrollEnabled && pagedWindow.page < pagedWindow.maxPage;
   const canPageNewer = !horizontalScrollEnabled && pagedWindow.page > 0;
 
@@ -1121,14 +620,11 @@ function TimeList({
     setHorizontalPage((p) => Math.max(0, p - 1));
   };
 
-  // -----------------------------
-  // Horizontal render helpers
-  // -----------------------------
   const { bestTime, worstTime, bestAo5, worstAo5, bestAo12, worstAo12 } = horizontalBestWorst;
 
   const getKeyForIndex = (localIndex) => {
-    if (horizontalScrollEnabled) return localIndex; // 0..n-1
-    return pagedWindow.start + localIndex; // global index
+    if (horizontalScrollEnabled) return localIndex;
+    return pagedWindow.start + localIndex;
   };
 
   const getSolveNumberForIndex = (localIndex) => {
@@ -1138,59 +634,40 @@ function TimeList({
 
   return (
     <div className="time-list-container">
-      {/* ✅ BULK ACTION BAR */}
-      <div style={bulkBarStyle} data-bulk-ui>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <div style={{ fontWeight: 900, color: "white" }}>{selectionCount} selected</div>
-          <div style={{ fontSize: "12px", opacity: 0.85 }}>
-            Shift+click = range, Ctrl/Cmd+click = toggle, Esc = clear
-          </div>
-        </div>
+      <BulkSolveControls
+        selectionCount={selection.selectionCount}
+        clearSelection={selection.clearSelection}
+        showBulkTags={bulkActions.showBulkTags}
+        setShowBulkTags={bulkActions.setShowBulkTags}
+        showBulkMove={bulkActions.showBulkMove}
+        setShowBulkMove={bulkActions.setShowBulkMove}
+        showBulkShare={bulkActions.showBulkShare}
+        setShowBulkShare={bulkActions.setShowBulkShare}
+        openBulkTags={bulkActions.openBulkTags}
+        openBulkMove={bulkActions.openBulkMove}
+        openBulkShare={bulkActions.openBulkShare}
+        bulkTagMode={bulkActions.bulkTagMode}
+        setBulkTagMode={bulkActions.setBulkTagMode}
+        bulkCubeModel={bulkActions.bulkCubeModel}
+        setBulkCubeModel={bulkActions.setBulkCubeModel}
+        bulkCrossColor={bulkActions.bulkCrossColor}
+        setBulkCrossColor={bulkActions.setBulkCrossColor}
+        bulkCustomLines={bulkActions.bulkCustomLines}
+        setBulkCustomLines={bulkActions.setBulkCustomLines}
+        bulkMoveEvent={bulkActions.bulkMoveEvent}
+        setBulkMoveEvent={bulkActions.setBulkMoveEvent}
+        bulkMoveSession={bulkActions.bulkMoveSession}
+        setBulkMoveSession={bulkActions.setBulkMoveSession}
+        bulkShareNote={bulkActions.bulkShareNote}
+        setBulkShareNote={bulkActions.setBulkShareNote}
+        getSessionsForEvent={bulkActions.getSessionsForEvent}
+        applyBulkTags={bulkActions.applyBulkTags}
+        applyBulkMove={bulkActions.applyBulkMove}
+        applyBulkDelete={bulkActions.applyBulkDelete}
+        applyBulkShare={bulkActions.applyBulkShare}
+        enableShare={true}
+      />
 
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <button
-            type="button"
-            style={bulkBtnStyle}
-            onClick={() => {
-              setShowBulkTags(true);
-              setShowBulkMove(false);
-              setShowBulkShare(false);
-            }}
-          >
-            Tags
-          </button>
-
-          <button
-            type="button"
-            style={bulkBtnStyle}
-            onClick={() => {
-              setShowBulkMove(true);
-              setShowBulkTags(false);
-              setShowBulkShare(false);
-            }}
-          >
-            Move
-          </button>
-
-          <button type="button" style={bulkBtnStyle} onClick={openBulkShare}>
-            Share
-          </button>
-
-          <button
-            type="button"
-            style={{ ...bulkBtnStyle, border: "1px solid rgba(255,80,80,0.45)" }}
-            onClick={applyBulkDelete}
-          >
-            Delete
-          </button>
-
-          <button type="button" style={bulkBtnStyle} onClick={clearSelection}>
-            Clear
-          </button>
-        </div>
-      </div>
-
-      {/* OPTIONAL Load More UI (scroll mode only) */}
       {!!onLoadMore && horizontalScrollEnabled && (
         <div className="timelist-loadmore">
           <button
@@ -1206,7 +683,6 @@ function TimeList({
 
       {isHorizontal ? (
         <div className="horizontal-shell">
-          {/* ◀ older */}
           {!horizontalScrollEnabled && (
             <button
               type="button"
@@ -1234,7 +710,6 @@ function TimeList({
               margin: "0 auto",
             }}
           >
-            {/* AO12 */}
             <div className="horizontal-row ao12-row" style={{ "--cols": horizontalSolves.length }}>
               {horizontalSolves.map((_, index) => {
                 const key = getKeyForIndex(index);
@@ -1266,7 +741,6 @@ function TimeList({
               <div className="TimeItem row-label">AO12</div>
             </div>
 
-            {/* AO5 */}
             <div className="horizontal-row ao5-row" style={{ "--cols": horizontalSolves.length }}>
               {horizontalSolves.map((_, index) => {
                 const key = getKeyForIndex(index);
@@ -1298,10 +772,9 @@ function TimeList({
               <div className="TimeItem row-label">AO5</div>
             </div>
 
-            {/* Times */}
             <div className="horizontal-row times-row" style={{ "--cols": horizontalSolves.length }}>
               {horizontalSolves.map((solve, index) => {
-                const key = getKeyForIndex(index); // index or global index
+                const key = getKeyForIndex(index);
                 const globalIdx = key;
 
                 const tval = solve?.time;
@@ -1315,7 +788,7 @@ function TimeList({
                     ? getPerfClassAndStyle(tval, bestTime, worstTime, rank01)
                     : { perfClass: "", perfStyle: null };
 
-                const selected = isIndexSelected(globalIdx);
+                const selected = selection.isIndexSelected(globalIdx);
                 const selectStyleInline = selected
                   ? {
                       outline: "2px solid rgba(46,196,182,0.95)",
@@ -1333,7 +806,7 @@ function TimeList({
                     style={{ ...(perfStyle || {}), ...(selectStyleInline || {}) }}
                     onClick={(e) => onSolveClick(e, solve, globalIdx)}
                     onMouseDown={(e) => {
-                      if (e.shiftKey || e.ctrlKey || e.metaKey || selectionCount > 0) {
+                      if (e.shiftKey || e.ctrlKey || e.metaKey || selection.selectionCount > 0) {
                         e.preventDefault();
                       }
                     }}
@@ -1354,7 +827,6 @@ function TimeList({
               <div className="TimeItem row-label time-label">TIME</div>
             </div>
 
-            {/* Solve # */}
             <div className="horizontal-row count-row" style={{ "--cols": horizontalSolves.length }}>
               {horizontalSolves.map((_, index) => {
                 const realSolveNumber = getSolveNumberForIndex(index);
@@ -1399,7 +871,6 @@ function TimeList({
             )}
           </div>
 
-          {/* ▶ newer */}
           {!horizontalScrollEnabled && (
             <button
               type="button"
@@ -1455,176 +926,6 @@ function TimeList({
           >
             ▼
           </button>
-        </div>
-      )}
-
-      {/* BULK TAG MODAL */}
-      {showBulkTags && (
-        <div style={modalBackdrop} data-bulk-modal onMouseDown={() => setShowBulkTags(false)}>
-          <div style={modalCard} data-bulk-modal onMouseDown={(e) => e.stopPropagation()}>
-            <div style={{ fontSize: "16px", fontWeight: 900, marginBottom: "6px" }}>
-              Edit Tags ({selectionCount})
-            </div>
-
-            <div style={{ display: "flex", gap: "10px", marginBottom: "12px" }}>
-              <button
-                type="button"
-                style={bulkTagMode === "merge" ? bulkPrimaryBtnStyle : bulkBtnStyle}
-                onClick={() => setBulkTagMode("merge")}
-              >
-                Merge
-              </button>
-              <button
-                type="button"
-                style={bulkTagMode === "replace" ? bulkPrimaryBtnStyle : bulkBtnStyle}
-                onClick={() => setBulkTagMode("replace")}
-              >
-                Replace
-              </button>
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "10px",
-                marginBottom: "10px",
-              }}
-            >
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>CubeModel</div>
-                <input
-                  style={inputStyle}
-                  value={bulkCubeModel}
-                  onChange={(e) => setBulkCubeModel(e.target.value)}
-                  placeholder="Gan 13"
-                />
-              </div>
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>CrossColor</div>
-                <input
-                  style={inputStyle}
-                  value={bulkCrossColor}
-                  onChange={(e) => setBulkCrossColor(e.target.value)}
-                  placeholder="White"
-                />
-              </div>
-            </div>
-
-            <div style={{ marginBottom: "10px" }}>
-              <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
-                Custom (one per line: <span style={{ fontFamily: "monospace" }}>key=value</span>)
-              </div>
-              <textarea
-                style={textareaStyle}
-                value={bulkCustomLines}
-                onChange={(e) => setBulkCustomLines(e.target.value)}
-                placeholder={`cube=RS3M\nlube=cosmic\nmy tag with spaces=true`}
-              />
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-              <button type="button" style={bulkBtnStyle} onClick={() => setShowBulkTags(false)}>
-                Cancel
-              </button>
-              <button type="button" style={bulkPrimaryBtnStyle} onClick={applyBulkTags}>
-                Apply
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* BULK MOVE MODAL */}
-      {showBulkMove && (
-        <div style={modalBackdrop} data-bulk-modal onMouseDown={() => setShowBulkMove(false)}>
-          <div style={modalCard} data-bulk-modal onMouseDown={(e) => e.stopPropagation()}>
-            <div style={{ fontSize: "16px", fontWeight: 900, marginBottom: "6px" }}>
-              Move Solves ({selectionCount})
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "10px",
-                marginBottom: "12px",
-              }}
-            >
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>Event</div>
-                <input
-                  style={inputStyle}
-                  value={bulkMoveEvent}
-                  onChange={(e) => setBulkMoveEvent(e.target.value)}
-                  placeholder="333"
-                />
-              </div>
-
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>Session</div>
-                {getSessionsForEvent(bulkMoveEvent).length > 0 ? (
-                  <select
-                    style={selectStyle}
-                    value={bulkMoveSession}
-                    onChange={(e) => setBulkMoveSession(e.target.value)}
-                  >
-                    {getSessionsForEvent(bulkMoveEvent).map((s) => (
-                      <option key={`${s.SessionID}-${s.SessionName || ""}`} value={s.SessionID}>
-                        {s.SessionName || s.SessionID}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    style={inputStyle}
-                    value={bulkMoveSession}
-                    onChange={(e) => setBulkMoveSession(e.target.value)}
-                    placeholder="main"
-                  />
-                )}
-              </div>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-              <button type="button" style={bulkBtnStyle} onClick={() => setShowBulkMove(false)}>
-                Cancel
-              </button>
-              <button type="button" style={bulkPrimaryBtnStyle} onClick={applyBulkMove}>
-                Move
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* BULK SHARE MODAL */}
-      {showBulkShare && (
-        <div style={modalBackdrop} data-bulk-modal onMouseDown={() => setShowBulkShare(false)}>
-          <div style={modalCard} data-bulk-modal onMouseDown={(e) => e.stopPropagation()}>
-            <div style={{ fontSize: "16px", fontWeight: 900, marginBottom: "6px" }}>
-              Share Solves ({selectionCount})
-            </div>
-
-            <div style={{ marginBottom: "10px" }}>
-              <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>Post note</div>
-              <textarea
-                style={textareaStyle}
-                value={bulkShareNote}
-                onChange={(e) => setBulkShareNote(e.target.value)}
-                placeholder="Optional note..."
-              />
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-              <button type="button" style={bulkBtnStyle} onClick={() => setShowBulkShare(false)}>
-                Cancel
-              </button>
-              <button type="button" style={bulkPrimaryBtnStyle} onClick={applyBulkShare}>
-                Share
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>
