@@ -1222,11 +1222,18 @@ function Stats({
 
           <div className="stats-item stats-item--line stats-item--minh">
             <LineChart
-              solves={solvesToDisplay}
-              title={`Current Avg: ${statsEvent}`}
-              deleteTime={handleDeleteSolve}
-              addPost={addPost}
-            />
+  user={user}
+  solves={solvesToDisplay}
+  title={`Current Avg: ${statsEvent}`}
+  deleteTime={handleDeleteSolve}
+  addPost={addPost}
+  setSessions={setSessions}
+  sessionsList={sessionsList}
+  currentEvent={statsEvent}
+  currentSession={sessionId}
+  eventKey={statsEvent}
+  practiceMode={false}
+/>
           </div>
 
           <div className="stats-item stats-item--percent stats-item--minh">

@@ -12,6 +12,7 @@ const LineChartBuilder = ({
   verticalGuides: numberOfVerticalGuides,
   precision,
   onDotClick,
+  selectedIndices = new Set(),
 }) => {
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, time: "" });
 
@@ -29,10 +30,9 @@ const LineChartBuilder = ({
     const _maxY = ys.length ? Math.max(...ys) : 1;
 
     const maxYRounded = Math.ceil(_maxY / 10) * 10 || 1;
-    const digits = parseFloat(maxYRounded.toString()).toFixed(precision).length + 3; // include "s"
+    const digits = parseFloat(maxYRounded.toString()).toFixed(precision).length + 3;
     const yLabelRoom = digits * (FONT_SIZE * 0.62);
 
-    // More bottom space so X labels are visible
     const _padding = Math.ceil(Math.max(FONT_SIZE * 2.2, yLabelRoom)) + 10;
 
     return {
@@ -100,12 +100,9 @@ const LineChartBuilder = ({
     });
   };
 
-  // Thin X labels if there are many points (prevents overlap + clipping)
   const LabelsXAxis = () => {
     const y = height - padding + FONT_SIZE * 1.8;
     const n = safeData.length;
-
-    // show at most ~10 labels
     const step = n <= 12 ? 1 : Math.ceil(n / 10);
 
     return safeData.map((element, index) => {
@@ -149,6 +146,7 @@ const LineChartBuilder = ({
     const { clientX, clientY } = event;
     setTooltip({ visible: true, x: clientX, y: clientY, time });
   };
+
   const handleMouseOut = () => setTooltip({ visible: false, x: 0, y: 0, time: "" });
 
   const extraPolylines = (Array.isArray(extraSeries) ? extraSeries : []).map((s) => {
@@ -186,29 +184,35 @@ const LineChartBuilder = ({
         {numberOfVerticalGuides && <VerticalGuides />}
         <HorizontalGuides />
 
-        {/* main line */}
         <polyline fill="none" stroke="#00FFFF" strokeWidth={STROKE} points={mainPoints} />
 
-        {/* overlays (Ao5 / Ao12) */}
         {extraPolylines}
 
-        {/* dots */}
         {safeData.map((element, index) => {
           const x = ((element.x - minX) / xDenom) * chartWidth + padding;
           const y = chartHeight - (element.y / maximumYFromData) * chartHeight + padding;
+
+          const isSelected =
+            element.selectionIndex != null && selectedIndices?.has?.(element.selectionIndex);
 
           return (
             <circle
               key={index}
               cx={x}
               cy={y}
-              r={element.isDNF ? 6 : 5}
+              r={isSelected ? 8 : element.isDNF ? 6 : 5}
               fill={element.isDNF ? "none" : element.color}
-              stroke={element.isDNF ? "red" : "none"}
-              strokeWidth={element.isDNF ? 2 : 0}
+              stroke={
+                isSelected
+                  ? "#2EC4B6"
+                  : element.isDNF
+                    ? "red"
+                    : "none"
+              }
+              strokeWidth={isSelected ? 3 : element.isDNF ? 2 : 0}
               onMouseOver={(e) => handleMouseOver(e, element.time)}
               onMouseOut={handleMouseOut}
-              onClick={() => onDotClick(element.solve, element.fullIndex)}
+              onClick={() => onDotClick(element.solve, element.fullIndex, element)}
             />
           );
         })}
@@ -243,6 +247,7 @@ LineChartBuilder.defaultProps = {
   verticalGuides: null,
   precision: 2,
   extraSeries: [],
+  selectedIndices: new Set(),
 };
 
 LineChartBuilder.propTypes = {
@@ -256,6 +261,8 @@ LineChartBuilder.propTypes = {
       solve: PropTypes.object,
       fullIndex: PropTypes.number,
       isDNF: PropTypes.bool,
+      isBucket: PropTypes.bool,
+      selectionIndex: PropTypes.number,
     })
   ).isRequired,
 
@@ -267,7 +274,7 @@ LineChartBuilder.propTypes = {
       points: PropTypes.arrayOf(
         PropTypes.shape({
           x: PropTypes.number.isRequired,
-          y: PropTypes.number, // allow nulls; we filter them out
+          y: PropTypes.number,
         })
       ).isRequired,
     })
@@ -279,6 +286,7 @@ LineChartBuilder.propTypes = {
   verticalGuides: PropTypes.number,
   precision: PropTypes.number,
   onDotClick: PropTypes.func.isRequired,
+  selectedIndices: PropTypes.object,
 };
 
 export default LineChartBuilder;

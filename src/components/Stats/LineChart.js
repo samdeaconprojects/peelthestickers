@@ -5,6 +5,10 @@ import Detail from "../Detail/Detail";
 import "./Stats.css";
 import { formatTime, calculateAverageForGraph } from "../TimeList/TimeUtils";
 
+import useSolveSelection from "../../hooks/useSolveSelection";
+import useBulkSolveActions from "../../hooks/useBulkSolveActions";
+import BulkSolveControls from "../SolveBulk/BulkSolveControls";
+
 /* -----------------------------
    DATE GROUPING HELPERS
 ----------------------------- */
@@ -98,7 +102,7 @@ function groupByDate(solves, mode) {
         isBucket: true,
         bucketKey: key,
         bucketLabel: formatBucketLabel(mode, key),
-        time: avgMs, // ms
+        time: avgMs,
         solve: lastSolve,
         fullIndex: lastSolve?.fullIndex,
       };
@@ -128,17 +132,33 @@ function rollingAverageSeconds(data, windowSize) {
   return out;
 }
 
-function LineChart({ solves, title, deleteTime, addPost }) {
+function LineChart({
+  user,
+  solves,
+  title,
+  deleteTime,
+  addPost,
+  applyPenalty,
+  setSessions,
+  sessionsList = [],
+  currentEvent,
+  currentSession,
+  eventKey,
+  practiceMode = false,
+}) {
   const [selectedSolve, setSelectedSolve] = useState(null);
   const [selectedSolveIndex, setSelectedSolveIndex] = useState(null);
 
   const [showAo5, setShowAo5] = useState(false);
   const [showAo12, setShowAo12] = useState(false);
 
-  // Track if user manually picked a view (so we don't override)
   const userPickedView = useRef(false);
 
-  // ✅ baseValid == "current view" (what Stats passed in)
+  const selection = useSolveSelection();
+
+  /* -----------------------------
+     baseValid == "current Stats view"
+  ----------------------------- */
   const baseValid = useMemo(() => {
     const input = Array.isArray(solves) ? solves : [];
     return input.filter((solve) => {
@@ -149,7 +169,6 @@ function LineChart({ solves, title, deleteTime, addPost }) {
     });
   }, [solves]);
 
-  // ✅ DEFAULT: current view (unless 500+ => day buckets)
   const [viewMode, setViewMode] = useState(() => (baseValid.length >= 500 ? "day" : "current"));
 
   useEffect(() => {
@@ -157,13 +176,47 @@ function LineChart({ solves, title, deleteTime, addPost }) {
     setViewMode(baseValid.length >= 500 ? "day" : "current");
   }, [baseValid.length]);
 
+  const bulkSelectableSolves = useMemo(() => {
+    return viewMode === "current" || viewMode === "last100" ? baseValid : [];
+  }, [viewMode, baseValid]);
+
+  const bulkActions = useBulkSolveActions({
+    user,
+    solves: bulkSelectableSolves,
+    selectedIndices: selection.selectedIndices,
+    clearSelection: selection.clearSelection,
+    deleteTime,
+    addPost,
+    setSessions,
+    sessionsList,
+    currentEvent,
+    currentSession,
+    eventKey,
+    practiceMode,
+  });
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") {
+        if (selection.selectionCount > 0) {
+          e.preventDefault();
+          selection.clearSelection();
+        }
+        if (bulkActions.showBulkTags) bulkActions.setShowBulkTags(false);
+        if (bulkActions.showBulkMove) bulkActions.setShowBulkMove(false);
+        if (bulkActions.showBulkShare) bulkActions.setShowBulkShare(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selection, bulkActions]);
+
   const computed = useMemo(() => {
     let processed = [];
 
     if (viewMode === "current") {
-      processed = baseValid; // ✅ no slicing; show exactly what's in Stats view
+      processed = baseValid;
       if (processed.length > 5000) {
-        // eslint-disable-next-line no-alert
         alert("⚠ Rendering more than 5000 solves may be slow");
       }
     } else if (viewMode === "last100") {
@@ -202,6 +255,15 @@ function LineChart({ solves, title, deleteTime, addPost }) {
       const label = item.isBucket ? item.bucketLabel : `${index + 1}`;
       const solveForDetail = item.isBucket ? item.solve : item;
 
+      let selectionIndex = null;
+      if (!item.isBucket) {
+        if (viewMode === "current") {
+          selectionIndex = index;
+        } else if (viewMode === "last100") {
+          selectionIndex = Math.max(0, baseValid.length - processed.length) + index;
+        }
+      }
+
       return {
         label,
         x: index,
@@ -211,10 +273,11 @@ function LineChart({ solves, title, deleteTime, addPost }) {
         solve: solveForDetail,
         fullIndex: item.isBucket ? item.fullIndex : item.fullIndex,
         isDNF: item.isBucket ? false : item.penalty === "DNF",
+        isBucket: !!item.isBucket,
+        selectionIndex,
       };
     });
 
-    // ✅ Ao overlays only on solve-level views: current + last100
     const extraSeries = [];
     const solveLevel = viewMode === "current" || viewMode === "last100";
 
@@ -246,14 +309,106 @@ function LineChart({ solves, title, deleteTime, addPost }) {
   }, [baseValid, viewMode, showAo5, showAo12]);
 
   const solveLevel = viewMode === "current" || viewMode === "last100";
+  const bulkEnabled = solveLevel;
+
+  const handleDotClick = (solve, fullIndex, point) => {
+    if (!point || point.isBucket || point.selectionIndex == null || !bulkEnabled) {
+      setSelectedSolve(solve);
+      setSelectedSolveIndex(fullIndex ?? solve?.fullIndex ?? null);
+      return;
+    }
+
+    const syntheticEvent = {
+      shiftKey: window.__ptsShiftDown === true,
+      ctrlKey: window.__ptsCtrlDown === true,
+      metaKey: window.__ptsMetaDown === true,
+      preventDefault: () => {},
+    };
+
+    const handledAsSelection = selection.handleSelectionClick(syntheticEvent, point.selectionIndex);
+    if (handledAsSelection) return;
+
+    setSelectedSolve(solve);
+    setSelectedSolveIndex(fullIndex ?? solve?.fullIndex ?? null);
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === "Shift") window.__ptsShiftDown = true;
+      if (e.key === "Control") window.__ptsCtrlDown = true;
+      if (e.key === "Meta") window.__ptsMetaDown = true;
+    };
+
+    const onKeyUp = (e) => {
+      if (e.key === "Shift") window.__ptsShiftDown = false;
+      if (e.key === "Control") window.__ptsCtrlDown = false;
+      if (e.key === "Meta") window.__ptsMetaDown = false;
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.__ptsShiftDown = false;
+      window.__ptsCtrlDown = false;
+      window.__ptsMetaDown = false;
+    };
+  }, []);
 
   return (
     <div className="lineChart">
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+      {bulkEnabled && (
+        <BulkSolveControls
+          selectionCount={selection.selectionCount}
+          clearSelection={selection.clearSelection}
+          showBulkTags={bulkActions.showBulkTags}
+          setShowBulkTags={bulkActions.setShowBulkTags}
+          showBulkMove={bulkActions.showBulkMove}
+          setShowBulkMove={bulkActions.setShowBulkMove}
+          showBulkShare={bulkActions.showBulkShare}
+          setShowBulkShare={bulkActions.setShowBulkShare}
+          openBulkTags={bulkActions.openBulkTags}
+          openBulkMove={bulkActions.openBulkMove}
+          openBulkShare={bulkActions.openBulkShare}
+          bulkTagMode={bulkActions.bulkTagMode}
+          setBulkTagMode={bulkActions.setBulkTagMode}
+          bulkCubeModel={bulkActions.bulkCubeModel}
+          setBulkCubeModel={bulkActions.setBulkCubeModel}
+          bulkCrossColor={bulkActions.bulkCrossColor}
+          setBulkCrossColor={bulkActions.setBulkCrossColor}
+          bulkCustomLines={bulkActions.bulkCustomLines}
+          setBulkCustomLines={bulkActions.setBulkCustomLines}
+          bulkMoveEvent={bulkActions.bulkMoveEvent}
+          setBulkMoveEvent={bulkActions.setBulkMoveEvent}
+          bulkMoveSession={bulkActions.bulkMoveSession}
+          setBulkMoveSession={bulkActions.setBulkMoveSession}
+          bulkShareNote={bulkActions.bulkShareNote}
+          setBulkShareNote={bulkActions.setBulkShareNote}
+          getSessionsForEvent={bulkActions.getSessionsForEvent}
+          applyBulkTags={bulkActions.applyBulkTags}
+          applyBulkMove={bulkActions.applyBulkMove}
+          applyBulkDelete={bulkActions.applyBulkDelete}
+          applyBulkShare={bulkActions.applyBulkShare}
+          enableShare={true}
+        />
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
+          marginBottom: 8,
+          flexWrap: "wrap",
+        }}
+      >
         <select
           value={viewMode}
           onChange={(e) => {
             userPickedView.current = true;
+            selection.clearSelection();
             setViewMode(e.target.value);
           }}
         >
@@ -265,7 +420,14 @@ function LineChart({ solves, title, deleteTime, addPost }) {
           <option value="year">By Year</option>
         </select>
 
-        <label style={{ display: "flex", gap: 6, alignItems: "center", opacity: solveLevel ? 1 : 0.4 }}>
+        <label
+          style={{
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+            opacity: solveLevel ? 1 : 0.4,
+          }}
+        >
           <input
             type="checkbox"
             checked={showAo5}
@@ -275,7 +437,14 @@ function LineChart({ solves, title, deleteTime, addPost }) {
           Ao5 line
         </label>
 
-        <label style={{ display: "flex", gap: 6, alignItems: "center", opacity: solveLevel ? 1 : 0.4 }}>
+        <label
+          style={{
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+            opacity: solveLevel ? 1 : 0.4,
+          }}
+        >
           <input
             type="checkbox"
             checked={showAo12}
@@ -296,9 +465,9 @@ function LineChart({ solves, title, deleteTime, addPost }) {
         horizontalGuides={5}
         precision={2}
         verticalGuides={7}
-        onDotClick={(solve, fullIndex) => {
-          setSelectedSolve(solve);
-          setSelectedSolveIndex(fullIndex ?? solve?.fullIndex ?? null);
+        selectedIndices={selection.selectedIndices}
+        onDotClick={(solve, fullIndex, point) => {
+          handleDotClick(solve, fullIndex, point);
         }}
       />
 
@@ -307,11 +476,14 @@ function LineChart({ solves, title, deleteTime, addPost }) {
       {selectedSolve && (
         <Detail
           solve={selectedSolve}
+          userID={user?.UserID}
           onClose={() => setSelectedSolve(null)}
           deleteTime={() => {
             if (selectedSolveIndex != null) deleteTime(selectedSolveIndex);
           }}
           addPost={addPost}
+          applyPenalty={applyPenalty}
+          setSessions={setSessions}
         />
       )}
     </div>
