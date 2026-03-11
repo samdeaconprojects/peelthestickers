@@ -21,8 +21,20 @@ function BulkSolveControls({
   setBulkCubeModel,
   bulkCrossColor,
   setBulkCrossColor,
-  bulkCustomLines,
-  setBulkCustomLines,
+  bulkTimerInput,
+  setBulkTimerInput,
+  bulkSolveSource,
+  setBulkSolveSource,
+  bulkCustom1,
+  setBulkCustom1,
+  bulkCustom2,
+  setBulkCustom2,
+  bulkCustom3,
+  setBulkCustom3,
+  bulkCustom4,
+  setBulkCustom4,
+  bulkCustom5,
+  setBulkCustom5,
 
   bulkMoveEvent,
   setBulkMoveEvent,
@@ -42,29 +54,26 @@ function BulkSolveControls({
   enableShare = true,
 }) {
   const bulkBarStyle = {
-  position: "fixed",
-  top: "10px",
-  left: "50%",
-  transform: "translateX(-50%)",
-  zIndex: 2000,
-
-  display: selectionCount ? "flex" : "none",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "10px",
-  flexWrap: "wrap",
-
-  padding: "10px 14px",
-  background: "rgba(110, 115, 115, 0.82)",
-  border: "1px solid rgba(255,255,255,0.12)",
-  borderRadius: "12px",
-  boxSizing: "border-box",
-  marginBottom: "10px",
-  backdropFilter: "blur(6px)",
-
-  maxWidth: "min(1100px, calc(100vw - 32px))",
-  width: "max-content",
-};
+    position: "fixed",
+    top: "10px",
+    left: "50%",
+    transform: "translateX(-50%)",
+    zIndex: 2000,
+    display: selectionCount ? "flex" : "none",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    flexWrap: "wrap",
+    padding: "10px 14px",
+    background: "rgba(110, 115, 115, 0.82)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: "12px",
+    boxSizing: "border-box",
+    marginBottom: "10px",
+    backdropFilter: "blur(6px)",
+    maxWidth: "min(1100px, calc(100vw - 32px))",
+    width: "max-content",
+  };
 
   const bulkBtnStyle = {
     height: "34px",
@@ -88,18 +97,18 @@ function BulkSolveControls({
   };
 
   const modalBackdrop = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.55)",
-  zIndex: 3000,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: "20px",
-};
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.55)",
+    zIndex: 3000,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "20px",
+  };
 
   const modalCard = {
-    width: "520px",
+    width: "560px",
     maxWidth: "94vw",
     background: "#181F23",
     border: "1px solid rgba(255,255,255,0.12)",
@@ -214,18 +223,19 @@ function BulkSolveControls({
             >
               <div>
                 <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
-                  CubeModel
+                  Cube Model
                 </div>
                 <input
                   style={inputStyle}
                   value={bulkCubeModel}
                   onChange={(e) => setBulkCubeModel(e.target.value)}
-                  placeholder="Gan 13"
+                  placeholder="GAN 12"
                 />
               </div>
+
               <div>
                 <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
-                  CrossColor
+                  Cross Color
                 </div>
                 <input
                   style={inputStyle}
@@ -234,18 +244,99 @@ function BulkSolveControls({
                   placeholder="White"
                 />
               </div>
+
+              <div>
+                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
+                  Timer Input
+                </div>
+                <input
+                  style={inputStyle}
+                  value={bulkTimerInput}
+                  onChange={(e) => setBulkTimerInput(e.target.value)}
+                  placeholder="Keyboard"
+                />
+              </div>
+
+              <div>
+                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
+                  Solve Source
+                </div>
+                <input
+                  style={inputStyle}
+                  value={bulkSolveSource}
+                  onChange={(e) => setBulkSolveSource(e.target.value)}
+                  placeholder="Normal"
+                />
+              </div>
             </div>
 
-            <div style={{ marginBottom: "10px" }}>
-              <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
-                Custom (one per line: <span style={{ fontFamily: "monospace" }}>key=value</span>)
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "10px",
+                marginBottom: "10px",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
+                  Custom1
+                </div>
+                <input
+                  style={inputStyle}
+                  value={bulkCustom1}
+                  onChange={(e) => setBulkCustom1(e.target.value)}
+                  placeholder="Home"
+                />
               </div>
-              <textarea
-                style={textareaStyle}
-                value={bulkCustomLines}
-                onChange={(e) => setBulkCustomLines(e.target.value)}
-                placeholder={`cube=RS3M\nlube=cosmic\nmy tag with spaces=true`}
-              />
+
+              <div>
+                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
+                  Custom2
+                </div>
+                <input
+                  style={inputStyle}
+                  value={bulkCustom2}
+                  onChange={(e) => setBulkCustom2(e.target.value)}
+                  placeholder="Comp"
+                />
+              </div>
+
+              <div>
+                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
+                  Custom3
+                </div>
+                <input
+                  style={inputStyle}
+                  value={bulkCustom3}
+                  onChange={(e) => setBulkCustom3(e.target.value)}
+                  placeholder=""
+                />
+              </div>
+
+              <div>
+                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
+                  Custom4
+                </div>
+                <input
+                  style={inputStyle}
+                  value={bulkCustom4}
+                  onChange={(e) => setBulkCustom4(e.target.value)}
+                  placeholder=""
+                />
+              </div>
+
+              <div>
+                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
+                  Custom5
+                </div>
+                <input
+                  style={inputStyle}
+                  value={bulkCustom5}
+                  onChange={(e) => setBulkCustom5(e.target.value)}
+                  placeholder=""
+                />
+              </div>
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
@@ -276,7 +367,9 @@ function BulkSolveControls({
               }}
             >
               <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>Event</div>
+                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
+                  Event
+                </div>
                 <input
                   style={inputStyle}
                   value={bulkMoveEvent}
@@ -286,7 +379,9 @@ function BulkSolveControls({
               </div>
 
               <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>Session</div>
+                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
+                  Session
+                </div>
                 {getSessionsForEvent(bulkMoveEvent).length > 0 ? (
                   <select
                     style={selectStyle}
@@ -330,7 +425,9 @@ function BulkSolveControls({
             </div>
 
             <div style={{ marginBottom: "10px" }}>
-              <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>Post note</div>
+              <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
+                Post note
+              </div>
               <textarea
                 style={textareaStyle}
                 value={bulkShareNote}

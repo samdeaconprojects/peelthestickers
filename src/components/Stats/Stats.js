@@ -1,4 +1,3 @@
-// src/components/Stats/Stats.js
 import React, { useMemo, useCallback, useEffect, useState, useRef } from "react";
 import "./Stats.css";
 
@@ -8,18 +7,12 @@ import PercentBar from "./PercentBar";
 import StatsSummary from "./StatsSummary";
 import BarChart from "./BarChart";
 
-import {
-  getSolvesBySession,
-  getSolvesBySessionPage,
-} from "../../services/getSolvesBySession";
+import { getSolvesBySession, getSolvesBySessionPage } from "../../services/getSolvesBySession";
 import { getSessionStats } from "../../services/getSessionStats";
 import { recomputeSessionStats } from "../../services/recomputeSessionStats";
 
-// ✅ NEW: import modal + batch import service
 import ImportSolvesModal from "./ImportSolvesModal";
 import { importSolvesBatch } from "../../services/importSolvesBatch";
-
-// ✅ NEW: allow creating destination sessions for imports
 import { createSession } from "../../services/createSession";
 
 /* -------------------------------------------------------------------------- */
@@ -27,82 +20,132 @@ import { createSession } from "../../services/createSession";
 /* -------------------------------------------------------------------------- */
 
 const TAG_NONE = "__none__";
-const TAG_SHARED = "__shared__";
-const TAG_IMPORTS = "__imports__";
-const TAG_CUSTOM_PREFIX = "custom:"; // custom:<key>
 
-const GROUP_RAW = "__raw__";
-const GROUP_DAY = "day";
-const GROUP_WEEK = "week";
-const GROUP_MONTH = "month";
-const GROUP_YEAR = "year";
+const ALL_EVENTS = "__all_events__";
+const ALL_SESSIONS = "__all_sessions__";
 
 function isFiniteDate(d) {
   return d instanceof Date && Number.isFinite(d.getTime());
 }
 
-function startOfDay(d) {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+function num(v) {
+  return Number.isFinite(Number(v)) ? Number(v) : 0;
 }
 
-function startOfMonth(d) {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
+function minMaybe(a, b) {
+  const aa = Number.isFinite(Number(a)) ? Number(a) : null;
+  const bb = Number.isFinite(Number(b)) ? Number(b) : null;
+  if (aa == null) return bb;
+  if (bb == null) return aa;
+  return Math.min(aa, bb);
 }
 
-function startOfYear(d) {
-  return new Date(d.getFullYear(), 0, 1);
+function maxIso(a, b) {
+  if (!a) return b || null;
+  if (!b) return a || null;
+  return String(a) > String(b) ? a : b;
 }
 
-// ISO week start (Monday)
-function startOfISOWeek(d) {
-  const date = new Date(d);
-  const day = date.getDay(); // 0=Sun..6=Sat
-  const diff = (day === 0 ? -6 : 1) - day; // shift to Monday
-  date.setDate(date.getDate() + diff);
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
+function aggregateStatsList(statsList) {
+  const items = (statsList || []).filter(Boolean);
 
-function toISO(d) {
-  try {
-    return d.toISOString();
-  } catch {
-    return "";
+  let solveCountTotal = 0;
+  let solveCountIncluded = 0;
+  let dnfCount = 0;
+  let plus2Count = 0;
+  let sumFinalTimeMs = 0;
+
+  let bestSingleMs = null;
+  let bestMo3Ms = null;
+  let bestAo5Ms = null;
+  let bestAo12Ms = null;
+  let bestAo25Ms = null;
+  let bestAo50Ms = null;
+  let bestAo100Ms = null;
+  let bestAo1000Ms = null;
+
+  let bestSingleAt = null;
+  let lastSolveAt = null;
+
+  for (const s of items) {
+    solveCountTotal += num(s.SolveCountTotal);
+    solveCountIncluded += num(s.SolveCountIncluded);
+    dnfCount += num(s.DNFCount);
+    plus2Count += num(s.Plus2Count);
+    sumFinalTimeMs += num(s.SumFinalTimeMs);
+
+    bestSingleMs = minMaybe(bestSingleMs, s.BestSingleMs);
+    bestMo3Ms = minMaybe(bestMo3Ms, s.BestMo3Ms);
+    bestAo5Ms = minMaybe(bestAo5Ms, s.BestAo5Ms);
+    bestAo12Ms = minMaybe(bestAo12Ms, s.BestAo12Ms);
+    bestAo25Ms = minMaybe(bestAo25Ms, s.BestAo25Ms);
+    bestAo50Ms = minMaybe(bestAo50Ms, s.BestAo50Ms);
+    bestAo100Ms = minMaybe(bestAo100Ms, s.BestAo100Ms);
+    bestAo1000Ms = minMaybe(bestAo1000Ms, s.BestAo1000Ms);
+
+    bestSingleAt = maxIso(bestSingleAt, s.BestSingleAt);
+    lastSolveAt = maxIso(lastSolveAt, s.LastSolveAt);
   }
+
+  return {
+    SolveCountTotal: solveCountTotal,
+    SolveCountIncluded: solveCountIncluded,
+    DNFCount: dnfCount,
+    Plus2Count: plus2Count,
+    SumFinalTimeMs: sumFinalTimeMs,
+    MeanMs: solveCountIncluded > 0 ? Math.round(sumFinalTimeMs / solveCountIncluded) : null,
+    BestSingleMs: bestSingleMs,
+    BestMo3Ms: bestMo3Ms,
+    BestAo5Ms: bestAo5Ms,
+    BestAo12Ms: bestAo12Ms,
+    BestAo25Ms: bestAo25Ms,
+    BestAo50Ms: bestAo50Ms,
+    BestAo100Ms: bestAo100Ms,
+    BestAo1000Ms: bestAo1000Ms,
+    BestSingleAt: bestSingleAt,
+    LastSolveAt: lastSolveAt,
+  };
 }
 
-function safeUpper(s) {
-  return String(s || "").toUpperCase();
-}
-
-function solveHasSharedTag(tags) {
-  if (!tags) return false;
-  return !!(
-    tags.IsShared ||
-    tags.isShared ||
-    tags.SharedID ||
-    tags.sharedID ||
-    tags.SharedIndex != null ||
-    tags.sharedIndex != null
+function getSessionStatsFromSessionsList(sessionsList, event, sessionID) {
+  return (
+    (sessionsList || []).find(
+      (s) =>
+        String(s?.Event || "").toUpperCase() === String(event || "").toUpperCase() &&
+        String(s?.SessionID || "main") === String(sessionID || "main")
+    )?.Stats || null
   );
 }
 
-function solveHasImportTag(tags) {
-  if (!tags) return false;
-  const src = String(tags.Source || tags.source || "").toLowerCase();
-  return !!(
-    tags.Imports ||
-    tags.imports ||
-    tags.Imported ||
-    tags.imported ||
-    tags.IsImport ||
-    tags.isImport ||
-    tags.IsImported ||
-    tags.isImported ||
-    tags.Import === true ||
-    tags.import === true ||
-    src === "import"
-  );
+function getEventAggregateFromSessionsList(sessionsList, event) {
+  const statsList = (sessionsList || [])
+    .filter((s) => String(s?.Event || "").toUpperCase() === String(event || "").toUpperCase())
+    .map((s) => s?.Stats)
+    .filter(Boolean);
+
+  return aggregateStatsList(statsList);
+}
+
+function getAllEventsBreakdownFromSessionsList(sessionsList) {
+  const map = new Map();
+
+  for (const s of sessionsList || []) {
+    const ev = String(s?.Event || "").toUpperCase();
+    if (!ev) continue;
+    if (!map.has(ev)) map.set(ev, []);
+    if (s?.Stats) map.get(ev).push(s.Stats);
+  }
+
+  return Array.from(map.entries())
+    .map(([event, statsList]) => ({
+      event,
+      stats: aggregateStatsList(statsList),
+    }))
+    .sort((a, b) => {
+      const ac = num(a?.stats?.SolveCountTotal);
+      const bc = num(b?.stats?.SolveCountTotal);
+      return bc - ac || String(a.event).localeCompare(String(b.event));
+    });
 }
 
 function getTagValueForKey(solve, tagKey) {
@@ -111,95 +154,18 @@ function getTagValueForKey(solve, tagKey) {
 
   if (tagKey === "CubeModel") return String(tags.CubeModel || "");
   if (tagKey === "CrossColor") return String(tags.CrossColor || "");
+  if (tagKey === "TimerInput") return String(tags.TimerInput || tags.InputType || "");
 
-  if (tagKey.startsWith(TAG_CUSTOM_PREFIX)) {
-    const k = tagKey.slice(TAG_CUSTOM_PREFIX.length);
-    const c = tags.Custom || tags.custom || {};
-    const v = c?.[k];
-    if (v == null) return "";
-    return String(v);
-  }
-
-  // fallback: direct tag field
   const v = tags?.[tagKey];
   if (v == null) return "";
   return String(v);
-}
-
-function groupSolvesByPeriod(solves, grouping) {
-  if (!Array.isArray(solves) || solves.length === 0) return [];
-  if (!grouping || grouping === GROUP_RAW) return solves;
-
-  const bucketMap = new Map();
-
-  for (const s of solves) {
-    const iso = s?.datetime;
-    const d = new Date(iso);
-    if (!isFiniteDate(d)) continue;
-
-    let start;
-    if (grouping === GROUP_DAY) start = startOfDay(d);
-    else if (grouping === GROUP_WEEK) start = startOfISOWeek(d);
-    else if (grouping === GROUP_MONTH) start = startOfMonth(d);
-    else if (grouping === GROUP_YEAR) start = startOfYear(d);
-    else start = d;
-
-    const key = toISO(start);
-    if (!key) continue;
-
-    const entry = bucketMap.get(key) || {
-      key,
-      datetime: key,
-      count: 0,
-      sum: 0,
-      validCount: 0,
-      // keep representative fields so downstream components don't explode
-      event: s?.event,
-      scramble: "",
-      penalty: null,
-      note: "",
-      tags: { Bucket: grouping },
-      // keep earliest original time for compatibility
-      originalTime: undefined,
-    };
-
-    entry.count += 1;
-
-    const t = Number(s?.time);
-    const isDNF = String(s?.penalty || "").toUpperCase() === "DNF";
-    if (Number.isFinite(t) && t >= 0 && !isDNF) {
-      entry.sum += t;
-      entry.validCount += 1;
-    }
-
-    bucketMap.set(key, entry);
-  }
-
-  const out = Array.from(bucketMap.values())
-    .map((b) => {
-      const avg = b.validCount > 0 ? b.sum / b.validCount : null;
-      return {
-        time: avg == null ? 0 : avg, // keep numeric for charts
-        scramble: "",
-        event: b.event,
-        penalty: b.validCount > 0 ? null : "DNF", // if all were DNF/invalid, mark bucket DNF-ish
-        note: `(${b.count} solves)`,
-        datetime: b.datetime,
-        tags: b.tags,
-        originalTime: b.originalTime,
-        __bucketCount: b.count,
-        __bucketValid: b.validCount,
-      };
-    })
-    .sort((a, b) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
-
-  return out;
 }
 
 function Stats({
   sessions,
   sessionsList = [],
   sessionStats,
+  statsMutationTick = 0,
   setSessions,
   currentEvent,
   currentSession,
@@ -207,55 +173,46 @@ function Stats({
   deleteTime,
   addPost,
 }) {
-  const DEFAULT_IN_VIEW = 100;
-  const DEFAULT_PAGE_FETCH = 200;
+  const DEFAULT_IN_VIEW = 500;
+  const DEFAULT_PAGE_FETCH = 500;
 
-  // -----------------------------
-  // Local (Stats-only) event + session
-  // -----------------------------
-  const [statsEvent, setStatsEvent] = useState(currentEvent);
+  const [statsEvent, setStatsEvent] = useState(currentEvent || "333");
   const [statsSession, setStatsSession] = useState(currentSession || "main");
 
   const sessionId = useMemo(() => statsSession || "main", [statsSession]);
 
-  // -----------------------------
-  // ✅ NEW: Tag filter + time grouping
-  // -----------------------------
+  const isAllEventsMode = statsEvent === ALL_EVENTS;
+  const isAllSessionsMode = statsSession === ALL_SESSIONS;
+  const isSolveLevelMode = !isAllEventsMode && !isAllSessionsMode;
+
   const [tagFilterKey, setTagFilterKey] = useState(TAG_NONE);
   const [tagFilterValue, setTagFilterValue] = useState("");
-  const [timeGrouping, setTimeGrouping] = useState(GROUP_RAW);
 
-  // -----------------------------
-  // View controls
-  // -----------------------------
   const [solvesPerPage, setSolvesPerPage] = useState(DEFAULT_IN_VIEW);
   const [currentPage, setCurrentPage] = useState(0);
 
-  // -----------------------------
-  // Overall stats (SESSIONSTATS)
-  // -----------------------------
   const [overallStatsForEvent, setOverallStatsForEvent] = useState(null);
   const [loadingOverallStats, setLoadingOverallStats] = useState(false);
 
-  // -----------------------------
-  // Incremental paging state
-  // -----------------------------
   const [loadingInitial, setLoadingInitial] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingAllSolves, setLoadingAllSolves] = useState(false);
+  const [showAllActive, setShowAllActive] = useState(false);
 
   const [pageCursor, setPageCursor] = useState(null);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
   const [isAllLoaded, setIsAllLoaded] = useState(false);
 
-  // Prevent late async responses from overwriting newer state
   const requestTokenRef = useRef(0);
 
-  // -----------------------------
-  // Session dropdown UI
-  // -----------------------------
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const sessionMenuWrapRef = useRef(null);
+
+  const [showImport, setShowImport] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importProgress, setImportProgress] = useState(null);
+  const [statsViewMode, setStatsViewMode] = useState("standard");
+  const [selectedTimeDay, setSelectedTimeDay] = useState("");
 
   useEffect(() => {
     const onDown = (e) => {
@@ -269,39 +226,72 @@ function Stats({
     return () => document.removeEventListener("mousedown", onDown);
   }, [sessionMenuOpen]);
 
-  // -----------------------------
-  // ✅ NEW: Import modal state
-  // -----------------------------
-  const [showImport, setShowImport] = useState(false);
-  const [importBusy, setImportBusy] = useState(false);
-
-  // -----------------------------
-  // Normalize DynamoDB solve item into UI shape
-  // -----------------------------
   const normalizeSolve = useCallback((item) => {
-    if (item && item.datetime) return item; // already normalized
+    if (!item) return null;
+
+    const created =
+      item.CreatedAt ||
+      (typeof item.SK === "string" && item.SK.startsWith("SOLVE#")
+        ? item.SK.slice(6)
+        : null);
+
+    const rawCandidate = Number(
+      item?.RawTimeMs ??
+        item?.rawTimeMs ??
+        item?.Time ??
+        item?.time ??
+        item?.ms ??
+        item?.OriginalTime ??
+        item?.originalTime
+    );
+    const rawTimeMs = Number.isFinite(rawCandidate) ? rawCandidate : 0;
+    const finalCandidate = Number(item?.FinalTimeMs ?? item?.finalTimeMs);
+    const finalTimeMs = Number.isFinite(finalCandidate) ? finalCandidate : rawTimeMs;
 
     return {
-      time: item.Time,
-      scramble: item.Scramble,
+      solveRef: item.SK || item.SolveID || created,
+      fullIndex: undefined,
+      time: finalTimeMs,
+      rawTime: rawTimeMs,
+      originalTime: rawTimeMs,
+      scramble: item.Scramble || "",
       event: item.Event,
-      penalty: item.Penalty,
+      penalty: item.Penalty || null,
       note: item.Note || "",
-      datetime: item.DateTime,
+      datetime: created,
       tags: item.Tags || {},
-      originalTime: item.OriginalTime ?? item.originalTime,
+      sessionID: item.SessionID || item.SessionId || item.sessionID || sessionId,
     };
-  }, []);
+  }, [sessionId]);
 
-  // ✅ FIX: memoize solves so hooks deps don't thrash
+  const eventOptions = useMemo(() => {
+    const set = new Set();
+
+    for (const k of Object.keys(sessions || {})) {
+      if (k) set.add(String(k).toUpperCase());
+    }
+
+    for (const s of sessionsList || []) {
+      if (s?.Event) set.add(String(s.Event).toUpperCase());
+    }
+
+    const values = Array.from(set).sort((a, b) => a.localeCompare(b));
+    return [ALL_EVENTS, ...values];
+  }, [sessions, sessionsList]);
+
   const solves = useMemo(() => {
-    return sessions?.[statsEvent] || [];
-  }, [sessions, statsEvent]);
+    if (!isSolveLevelMode) return [];
+    const ev = String(statsEvent || "").toUpperCase();
+    const allForEvent = Array.isArray(sessions?.[ev]) ? sessions[ev] : [];
 
-  // -----------------------------
-  // Sessions available for dropdown (for this event)
-  // -----------------------------
+    return allForEvent.filter(
+      (s) => String(s?.sessionID || s?.SessionID || "main") === String(sessionId || "main")
+    );
+  }, [sessions, statsEvent, sessionId, isSolveLevelMode]);
+
   const sessionsForEvent = useMemo(() => {
+    if (isAllEventsMode) return [];
+
     const ev = String(statsEvent || "").toUpperCase();
 
     const list = (sessionsList || [])
@@ -309,10 +299,12 @@ function Stats({
       .map((s) => ({
         SessionID: s.SessionID || "main",
         SessionName: s.SessionName || s.Name || s.SessionID || "main",
+        Stats: s.Stats || null,
       }));
 
     const seen = new Set();
     const deduped = [];
+
     for (const s of list) {
       if (seen.has(s.SessionID)) continue;
       seen.add(s.SessionID);
@@ -325,22 +317,33 @@ function Stats({
       return String(a.SessionName).localeCompare(String(b.SessionName));
     });
 
-    return deduped;
-  }, [sessionsList, statsEvent]);
+    return [
+      {
+        SessionID: ALL_SESSIONS,
+        SessionName: "All Sessions",
+        Stats: getEventAggregateFromSessionsList(sessionsList, ev),
+      },
+      ...deduped,
+    ];
+  }, [sessionsList, statsEvent, isAllEventsMode]);
 
-  // Ensure statsSession valid for this event
   useEffect(() => {
-    const hasMain = sessionsForEvent.some((s) => s.SessionID === "main");
+    if (isAllEventsMode) {
+      setStatsSession(ALL_SESSIONS);
+      return;
+    }
+
     const valid = sessionsForEvent.some((s) => s.SessionID === statsSession);
     if (!valid) {
-      setStatsSession(hasMain ? "main" : (sessionsForEvent[0]?.SessionID || "main"));
+      const hasMain = sessionsForEvent.some((s) => s.SessionID === "main");
+      setStatsSession(
+        hasMain ? "main" : (sessionsForEvent[0]?.SessionID || "main")
+      );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statsEvent, sessionsForEvent]);
+  }, [isAllEventsMode, sessionsForEvent, statsSession]);
 
-  // Sync when navigating with external event/session
   useEffect(() => {
-    setStatsEvent(currentEvent);
+    setStatsEvent(currentEvent || "333");
     setStatsSession(currentSession || "main");
 
     setSolvesPerPage(DEFAULT_IN_VIEW);
@@ -348,22 +351,34 @@ function Stats({
     setPageCursor(null);
     setHasMoreOlder(false);
     setIsAllLoaded(false);
+    setShowAllActive(false);
 
-    // ✅ reset tag/time filters when external navigation happens
     setTagFilterKey(TAG_NONE);
     setTagFilterValue("");
-    setTimeGrouping(GROUP_RAW);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setSelectedTimeDay("");
   }, [currentEvent, currentSession]);
 
-  // -----------------------------
-  // Load overall stats (SESSIONSTATS)
-  // -----------------------------
   useEffect(() => {
     const userID = user?.UserID;
     if (!userID) {
       setOverallStatsForEvent(null);
       return;
+    }
+
+    if (isAllEventsMode) {
+      setOverallStatsForEvent(null);
+      return;
+    }
+
+    if (isAllSessionsMode) {
+      const aggregated = getEventAggregateFromSessionsList(sessionsList, statsEvent);
+      setOverallStatsForEvent(aggregated || null);
+      return;
+    }
+
+    const embedded = getSessionStatsFromSessionsList(sessionsList, statsEvent, sessionId);
+    if (embedded) {
+      setOverallStatsForEvent(embedded);
     }
 
     let cancelled = false;
@@ -384,11 +399,44 @@ function Stats({
     return () => {
       cancelled = true;
     };
-  }, [user?.UserID, statsEvent, sessionId]);
+  }, [user?.UserID, statsEvent, sessionId, sessionsList, isAllEventsMode, isAllSessionsMode]);
 
-  // -----------------------------
-  // Initial solves load for statsEvent/sessionId
-  // -----------------------------
+  const solveStatsRefreshKey = useMemo(() => {
+    if (!isSolveLevelMode || !Array.isArray(solves) || solves.length === 0) return "";
+    const first = solves[0];
+    const latest = solves[solves.length - 1];
+    const firstKey = String(first?.solveRef || first?.datetime || "");
+    const lastKey = String(latest?.solveRef || latest?.datetime || "");
+    return `${solves.length}|${firstKey}|${lastKey}`;
+  }, [solves, isSolveLevelMode]);
+
+  useEffect(() => {
+    const userID = user?.UserID;
+    if (!userID) return;
+    if (!isSolveLevelMode) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const item = await getSessionStats(
+          userID,
+          String(statsEvent || "").toUpperCase(),
+          String(sessionId || "main")
+        );
+        if (!cancelled) setOverallStatsForEvent(item || null);
+      } catch (e) {
+        if (!cancelled) {
+          console.error("Failed to refresh SESSIONSTATS after solve change:", e);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.UserID, statsEvent, sessionId, solveStatsRefreshKey, statsMutationTick, isSolveLevelMode]);
+
   const loadInitialSolves = useCallback(async () => {
     const userID = user?.UserID;
     if (!userID) return;
@@ -397,9 +445,19 @@ function Stats({
     setLoadingInitial(true);
 
     try {
+      if (!isSolveLevelMode) {
+        setPageCursor(null);
+        setHasMoreOlder(false);
+        setIsAllLoaded(true);
+        setShowAllActive(false);
+        setSolvesPerPage(DEFAULT_IN_VIEW);
+        setCurrentPage(0);
+        return;
+      }
+
       const { items, lastKey } = await getSolvesBySessionPage(
         userID,
-        statsEvent,
+        String(statsEvent || "").toUpperCase(),
         sessionId,
         DEFAULT_PAGE_FETCH,
         null
@@ -411,14 +469,27 @@ function Stats({
         .map(normalizeSolve)
         .reverse();
 
-      setSessions((prev) => ({
-        ...prev,
-        [statsEvent]: normalizedOldestToNewest,
-      }));
+      setSessions((prev) => {
+        const ev = String(statsEvent || "").toUpperCase();
+        const existingForEvent = Array.isArray(prev?.[ev]) ? prev[ev] : [];
+        const otherSessions = existingForEvent.filter(
+          (s) => String(s?.sessionID || s?.SessionID || "main") !== String(sessionId || "main")
+        );
+
+        return {
+          ...prev,
+          [ev]: [...otherSessions, ...normalizedOldestToNewest].sort((a, b) => {
+            const ta = new Date(a?.datetime || "").getTime();
+            const tb = new Date(b?.datetime || "").getTime();
+            return ta - tb;
+          }),
+        };
+      });
 
       setPageCursor(lastKey || null);
       setHasMoreOlder(!!lastKey);
-      setIsAllLoaded(false);
+      setIsAllLoaded(!lastKey);
+      setShowAllActive(false);
 
       setSolvesPerPage(DEFAULT_IN_VIEW);
       setCurrentPage(0);
@@ -435,6 +506,7 @@ function Stats({
     DEFAULT_IN_VIEW,
     normalizeSolve,
     setSessions,
+    isSolveLevelMode,
   ]);
 
   useEffect(() => {
@@ -442,9 +514,6 @@ function Stats({
     loadInitialSolves();
   }, [user?.UserID, statsEvent, sessionId, loadInitialSolves]);
 
-  // -----------------------------
-  // Paging math (RAW solves paging stays the same)
-  // -----------------------------
   const totalPages = useMemo(() => {
     const per = Math.max(1, solvesPerPage);
     return Math.max(1, Math.ceil((solves.length || 0) / per));
@@ -467,51 +536,28 @@ function Stats({
     );
   }, [solves.length, solvesPerPage, currentPage]);
 
-  const solvesToDisplayRaw = useMemo(() => {
-    const slice = solves.slice(startIndex, endIndex);
-    return slice.map((solve, i) => ({
+  const visiblePageRawSolves = useMemo(() => {
+    return solves.slice(startIndex, endIndex).map((solve, i) => ({
       ...solve,
       fullIndex: startIndex + i,
     }));
   }, [solves, startIndex, endIndex]);
 
-  /* -------------------------------------------------------------------------- */
-  /*                         ✅ NEW: TAG OPTIONS + FILTERING                    */
-  /* -------------------------------------------------------------------------- */
-
-  // Discover tag keys/values from ALL loaded solves for this event/session view.
-  // (So the dropdowns are stable even when paging)
   const discoveredTagInfo = useMemo(() => {
     const info = {
       cubeModels: new Set(),
       crossColors: new Set(),
-      customKeys: new Set(),
-      customValuesByKey: new Map(), // key -> Set(values)
-      hasAnyShared: false,
-      hasAnyImports: false,
+      timerInputs: new Set(),
     };
 
     for (const s of solves || []) {
       const tags = s?.tags || s?.Tags || {};
       if (!tags) continue;
 
-      const cm = tags.CubeModel;
-      if (cm) info.cubeModels.add(String(cm));
-
-      const cc = tags.CrossColor;
-      if (cc) info.crossColors.add(String(cc));
-
-      if (solveHasSharedTag(tags)) info.hasAnyShared = true;
-      if (solveHasImportTag(tags)) info.hasAnyImports = true;
-
-      const custom = tags.Custom || tags.custom || null;
-      if (custom && typeof custom === "object") {
-        for (const k of Object.keys(custom)) {
-          info.customKeys.add(String(k));
-          const v = custom[k];
-          if (!info.customValuesByKey.has(k)) info.customValuesByKey.set(k, new Set());
-          if (v != null) info.customValuesByKey.get(k).add(String(v));
-        }
+      if (tags.CubeModel) info.cubeModels.add(String(tags.CubeModel));
+      if (tags.CrossColor) info.crossColors.add(String(tags.CrossColor));
+      if (tags.TimerInput || tags.InputType) {
+        info.timerInputs.add(String(tags.TimerInput || tags.InputType));
       }
     }
 
@@ -519,103 +565,77 @@ function Stats({
   }, [solves]);
 
   const tagKeyOptions = useMemo(() => {
-    const opts = [{ value: TAG_NONE, label: "All tags" }];
-
-    // core tags
-    opts.push({ value: "CubeModel", label: "Cube Model" });
-    opts.push({ value: "CrossColor", label: "Cross Color" });
-
-    // boolean tags (only show if we’ve seen them, but keep safe if not)
-    opts.push({ value: TAG_SHARED, label: "Shared" });
-    opts.push({ value: TAG_IMPORTS, label: "Imports" });
-
-    // custom keys
-    const custom = Array.from(discoveredTagInfo.customKeys || []).sort((a, b) =>
-      String(a).localeCompare(String(b))
-    );
-    for (const k of custom) {
-      opts.push({ value: `${TAG_CUSTOM_PREFIX}${k}`, label: `Tag: ${k}` });
-    }
-
-    return opts;
-  }, [discoveredTagInfo.customKeys]);
+    return [
+      { value: TAG_NONE, label: "All tags" },
+      { value: "CubeModel", label: "Cube Model" },
+      { value: "CrossColor", label: "Cross Color" },
+      { value: "TimerInput", label: "Timer Input" },
+    ];
+  }, []);
 
   const tagValueOptions = useMemo(() => {
-    // For Shared/Imports we don’t need a value dropdown
-    if (tagFilterKey === TAG_NONE || tagFilterKey === TAG_SHARED || tagFilterKey === TAG_IMPORTS)
-      return [];
+    if (tagFilterKey === TAG_NONE) return [];
 
     let values = [];
     if (tagFilterKey === "CubeModel") {
       values = Array.from(discoveredTagInfo.cubeModels || []);
     } else if (tagFilterKey === "CrossColor") {
       values = Array.from(discoveredTagInfo.crossColors || []);
-    } else if (tagFilterKey.startsWith(TAG_CUSTOM_PREFIX)) {
-      const k = tagFilterKey.slice(TAG_CUSTOM_PREFIX.length);
-      const set = discoveredTagInfo.customValuesByKey.get(k);
-      values = set ? Array.from(set) : [];
+    } else if (tagFilterKey === "TimerInput") {
+      values = Array.from(discoveredTagInfo.timerInputs || []);
     }
 
     values.sort((a, b) => String(a).localeCompare(String(b)));
 
     return [{ value: "", label: "All" }, ...values.map((v) => ({ value: v, label: v }))];
-  }, [
-    tagFilterKey,
-    discoveredTagInfo.cubeModels,
-    discoveredTagInfo.crossColors,
-    discoveredTagInfo.customValuesByKey,
-  ]);
+  }, [tagFilterKey, discoveredTagInfo]);
 
-  // If the tagKey changes, reset value (so you don’t get stuck on a stale value)
   useEffect(() => {
     setTagFilterValue("");
   }, [tagFilterKey]);
 
-  const filteredSolvesRaw = useMemo(() => {
-    const arr = solvesToDisplayRaw || [];
-    if (tagFilterKey === TAG_NONE) return arr;
+  const filterRawSolveList = useCallback(
+    (arr) => {
+      const input = Array.isArray(arr) ? arr : [];
+      if (!isSolveLevelMode) return input;
+      if (tagFilterKey === TAG_NONE) return input;
 
-    if (tagFilterKey === TAG_SHARED) {
-      return arr.filter((s) => solveHasSharedTag(s?.tags || s?.Tags || {}));
-    }
+      if (!tagFilterValue) {
+        return input.filter((s) => {
+          const v = getTagValueForKey(s, tagFilterKey);
+          return !!String(v || "").trim();
+        });
+      }
 
-    if (tagFilterKey === TAG_IMPORTS) {
-      return arr.filter((s) => solveHasImportTag(s?.tags || s?.Tags || {}));
-    }
-
-    // value-based tags
-    const desired = String(tagFilterValue || "").trim();
-    if (!desired) {
-      // "All" values, but still require the tag to exist (so it actually filters)
-      return arr.filter((s) => {
+      return input.filter((s) => {
         const v = getTagValueForKey(s, tagFilterKey);
-        return !!String(v || "").trim();
+        return String(v || "") === String(tagFilterValue);
       });
-    }
+    },
+    [tagFilterKey, tagFilterValue, isSolveLevelMode]
+  );
 
-    return arr.filter((s) => {
-      const v = getTagValueForKey(s, tagFilterKey);
-      return String(v || "") === desired;
-    });
-  }, [solvesToDisplayRaw, tagFilterKey, tagFilterValue]);
+  const visiblePageFilteredRawSolves = useMemo(() => {
+    return filterRawSolveList(visiblePageRawSolves);
+  }, [visiblePageRawSolves, filterRawSolveList]);
 
-  /* -------------------------------------------------------------------------- */
-  /*                       ✅ NEW: TIME GROUPING (BUCKETS)                      */
-  /* -------------------------------------------------------------------------- */
+  const allLoadedFilteredRawSolves = useMemo(() => {
+    return filterRawSolveList(solves);
+  }, [solves, filterRawSolveList]);
 
-  const solvesToDisplay = useMemo(() => {
-    // Apply tag filter first, then bucket/group
-    const filtered = filteredSolvesRaw || [];
-    return groupSolvesByPeriod(filtered, timeGrouping);
-  }, [filteredSolvesRaw, timeGrouping]);
+  const barChartSolves = useMemo(() => {
+    return visiblePageFilteredRawSolves;
+  }, [visiblePageFilteredRawSolves]);
 
-  // -----------------------------
-  // Incremental “Older” fetch
-  // -----------------------------
+  const pieChartSolves = useMemo(() => {
+    return allLoadedFilteredRawSolves;
+  }, [allLoadedFilteredRawSolves]);
+
   const fetchNextOlderPage = useCallback(async () => {
     const userID = user?.UserID;
     if (!userID) return;
-    if (!hasMoreOlder || !pageCursor || loadingMore || loadingAllSolves) return;
+    if (!isSolveLevelMode) return;
+    if (!hasMoreOlder || !pageCursor || loadingMore) return;
 
     setLoadingMore(true);
     const myToken = ++requestTokenRef.current;
@@ -623,7 +643,7 @@ function Stats({
     try {
       const { items, lastKey } = await getSolvesBySessionPage(
         userID,
-        statsEvent,
+        String(statsEvent || "").toUpperCase(),
         sessionId,
         DEFAULT_PAGE_FETCH,
         pageCursor
@@ -634,15 +654,28 @@ function Stats({
       const pageOldestToNewest = (items || []).map(normalizeSolve).reverse();
 
       setSessions((prev) => {
-        const existing = prev?.[statsEvent] || [];
+        const ev = String(statsEvent || "").toUpperCase();
+        const existingForEvent = Array.isArray(prev?.[ev]) ? prev[ev] : [];
+        const thisSessionExisting = existingForEvent.filter(
+          (s) => String(s?.sessionID || s?.SessionID || "main") === String(sessionId || "main")
+        );
+        const otherSessions = existingForEvent.filter(
+          (s) => String(s?.sessionID || s?.SessionID || "main") !== String(sessionId || "main")
+        );
+
         return {
           ...prev,
-          [statsEvent]: [...pageOldestToNewest, ...existing],
+          [ev]: [...otherSessions, ...pageOldestToNewest, ...thisSessionExisting].sort((a, b) => {
+            const ta = new Date(a?.datetime || "").getTime();
+            const tb = new Date(b?.datetime || "").getTime();
+            return ta - tb;
+          }),
         };
       });
 
       setPageCursor(lastKey || null);
       setHasMoreOlder(!!lastKey);
+      setIsAllLoaded(!lastKey);
     } catch (err) {
       console.error("Failed to fetch older solves page:", err);
     } finally {
@@ -656,34 +689,34 @@ function Stats({
     pageCursor,
     hasMoreOlder,
     loadingMore,
-    loadingAllSolves,
     normalizeSolve,
     setSessions,
+    isSolveLevelMode,
   ]);
 
-  // -----------------------------
-  // Top bar meta
-  // -----------------------------
+  const allEventsBreakdown = useMemo(() => {
+    return getAllEventsBreakdownFromSessionsList(sessionsList);
+  }, [sessionsList]);
+
+  const allEventsOverall = useMemo(() => {
+    return aggregateStatsList(allEventsBreakdown.map((row) => row.stats));
+  }, [allEventsBreakdown]);
+
   const overallCount = useMemo(() => {
-    return (
-      overallStatsForEvent?.SolveCount ??
-      overallStatsForEvent?.Count ??
-      overallStatsForEvent?.TotalSolves ??
-      overallStatsForEvent?.Solves ??
-      overallStatsForEvent?.solveCount ??
-      null
-    );
-  }, [overallStatsForEvent]);
+    if (isAllEventsMode) return allEventsOverall?.SolveCountTotal ?? null;
+    return overallStatsForEvent?.SolveCountTotal ?? null;
+  }, [isAllEventsMode, allEventsOverall, overallStatsForEvent]);
 
   const showingCount = useMemo(() => {
-    // after filtering/grouping, this is the displayed list count
-    return solvesToDisplay?.length || 0;
-  }, [solvesToDisplay]);
+    if (isAllEventsMode) return allEventsOverall?.SolveCountTotal ?? 0;
+    if (isAllSessionsMode) return overallStatsForEvent?.SolveCountTotal ?? 0;
+    return visiblePageFilteredRawSolves?.length || 0;
+  }, [isAllEventsMode, isAllSessionsMode, allEventsOverall, overallStatsForEvent, visiblePageFilteredRawSolves]);
 
   const dateRangeText = useMemo(() => {
-    if (!solvesToDisplay || solvesToDisplay.length === 0) return "";
-    const first = solvesToDisplay[0]?.datetime;
-    const last = solvesToDisplay[solvesToDisplay.length - 1]?.datetime;
+    if (!visiblePageFilteredRawSolves || visiblePageFilteredRawSolves.length === 0) return "";
+    const first = visiblePageFilteredRawSolves[0]?.datetime;
+    const last = visiblePageFilteredRawSolves[visiblePageFilteredRawSolves.length - 1]?.datetime;
     if (!first || !last) return "";
 
     const fmt = (iso) => {
@@ -700,11 +733,33 @@ function Stats({
     const b = fmt(last);
     if (!a || !b) return "";
     return `${a} - ${b}`;
-  }, [solvesToDisplay]);
+  }, [visiblePageFilteredRawSolves]);
 
-  // -----------------------------
-  // Controls
-  // -----------------------------
+  const availableTimeDays = useMemo(() => {
+    const set = new Set();
+
+    for (const solve of visiblePageFilteredRawSolves || []) {
+      const date = new Date(solve?.datetime || "");
+      if (!isFiniteDate(date)) continue;
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+        date.getDate()
+      ).padStart(2, "0")}`;
+      set.add(key);
+    }
+
+    return Array.from(set).sort((a, b) => String(b).localeCompare(String(a)));
+  }, [visiblePageFilteredRawSolves]);
+
+  useEffect(() => {
+    if (!availableTimeDays.length) {
+      if (selectedTimeDay) setSelectedTimeDay("");
+      return;
+    }
+
+    if (selectedTimeDay && availableTimeDays.includes(selectedTimeDay)) return;
+    setSelectedTimeDay(availableTimeDays[0]);
+  }, [availableTimeDays, selectedTimeDay]);
+
   const handleEventChange = useCallback(
     (event) => {
       const next = event.target.value;
@@ -718,11 +773,16 @@ function Stats({
       setPageCursor(null);
       setHasMoreOlder(false);
       setIsAllLoaded(false);
+      setShowAllActive(false);
 
-      // ✅ reset tag/time when switching event
       setTagFilterKey(TAG_NONE);
       setTagFilterValue("");
-      setTimeGrouping(GROUP_RAW);
+
+      if (next === ALL_EVENTS) {
+        setStatsSession(ALL_SESSIONS);
+      } else {
+        setStatsSession("main");
+      }
     },
     [DEFAULT_IN_VIEW]
   );
@@ -738,105 +798,140 @@ function Stats({
       setPageCursor(null);
       setHasMoreOlder(false);
       setIsAllLoaded(false);
+      setShowAllActive(false);
 
-      // ✅ reset tag/time when switching session
       setTagFilterKey(TAG_NONE);
       setTagFilterValue("");
-      setTimeGrouping(GROUP_RAW);
     },
     [DEFAULT_IN_VIEW]
   );
 
   const handleDeleteSolve = useCallback(
-    (fullIndex) => {
-      // If you’re viewing grouped buckets, deleting doesn’t make sense.
-      // We’ll only allow delete when RAW grouping is active.
-      if (timeGrouping !== GROUP_RAW) return;
+    async (solveRefOrIndex) => {
+      if (!isSolveLevelMode) return;
+      const solveRef =
+        typeof solveRefOrIndex === "string"
+          ? solveRefOrIndex
+          : Number.isInteger(solveRefOrIndex)
+          ? visiblePageFilteredRawSolves?.[solveRefOrIndex]?.solveRef ||
+            solves?.[solveRefOrIndex]?.solveRef ||
+            null
+          : solveRefOrIndex?.solveRef || null;
+      if (!solveRef) return;
 
-      setSessions((prev) => ({
-        ...prev,
-        [statsEvent]: (prev?.[statsEvent] || []).filter((_, i) => i !== fullIndex),
-      }));
-      deleteTime(statsEvent, fullIndex);
+      setSessions((prev) => {
+        const ev = String(statsEvent || "").toUpperCase();
+        const existingForEvent = Array.isArray(prev?.[ev]) ? prev[ev] : [];
+        return {
+          ...prev,
+          [ev]: existingForEvent.filter((s) => String(s?.solveRef || "") !== String(solveRef)).sort((a, b) => {
+            const ta = new Date(a?.datetime || "").getTime();
+            const tb = new Date(b?.datetime || "").getTime();
+            return ta - tb;
+          }),
+        };
+      });
+
+      await deleteTime(statsEvent, solveRef);
+
+      try {
+        if (user?.UserID && !isAllEventsMode && !isAllSessionsMode) {
+          setLoadingOverallStats(true);
+          const item = await getSessionStats(
+            user.UserID,
+            String(statsEvent || "").toUpperCase(),
+            String(sessionId || "main")
+          );
+          setOverallStatsForEvent(item || null);
+        }
+      } catch (e) {
+        console.error("Failed to refresh overall stats after delete:", e);
+      } finally {
+        setLoadingOverallStats(false);
+      }
     },
-    [setSessions, deleteTime, statsEvent, timeGrouping]
+    [
+      setSessions,
+      deleteTime,
+      statsEvent,
+      sessionId,
+      solves,
+      visiblePageFilteredRawSolves,
+      isSolveLevelMode,
+      user?.UserID,
+      isAllEventsMode,
+      isAllSessionsMode,
+    ]
   );
 
   const handlePreviousPage = useCallback(async () => {
+    if (!isSolveLevelMode) return;
+
     if (currentPage < maxPage) {
       setCurrentPage((p) => Math.min(maxPage, p + 1));
       return;
     }
 
-    if (hasMoreOlder && !loadingMore && !loadingAllSolves && !isAllLoaded) {
-      const beforeLen = solves.length;
+    if (hasMoreOlder && !loadingMore && !isAllLoaded) {
       await fetchNextOlderPage();
-
       setCurrentPage((p) => p + 1);
-
-      setTimeout(() => {
-        const afterLen = (sessions?.[statsEvent] || []).length;
-        if (afterLen === beforeLen) {
-          setCurrentPage((p) => Math.max(0, p - 1));
-        }
-      }, 0);
     }
   }, [
     currentPage,
     maxPage,
     hasMoreOlder,
     loadingMore,
-    loadingAllSolves,
     isAllLoaded,
     fetchNextOlderPage,
-    solves.length,
-    sessions,
-    statsEvent,
+    isSolveLevelMode,
   ]);
 
   const handleNextPage = useCallback(() => {
+    if (!isSolveLevelMode) return;
     setCurrentPage((p) => Math.max(0, p - 1));
-  }, []);
+  }, [isSolveLevelMode]);
 
   const handleZoomIn = useCallback(() => {
+    if (!isSolveLevelMode) return;
     setSolvesPerPage((prev) => Math.max(50, prev - 50));
     setCurrentPage(0);
-  }, []);
+  }, [isSolveLevelMode]);
 
   const handleZoomOut = useCallback(async () => {
+    if (!isSolveLevelMode) return;
+
     if (solvesPerPage < solves.length) {
       setSolvesPerPage((prev) => Math.min(prev + 50, solves.length));
       setCurrentPage(0);
       return;
     }
 
-    if (hasMoreOlder && !loadingMore && !loadingAllSolves && !isAllLoaded) {
-      const beforeLen = solves.length;
+    if (hasMoreOlder && !loadingMore && !isAllLoaded) {
       await fetchNextOlderPage();
-
-      setTimeout(() => {
-        const afterLen = (sessions?.[statsEvent] || []).length;
-        if (afterLen > beforeLen) {
-          setSolvesPerPage((prev) => Math.min(prev + 50, afterLen));
-          setCurrentPage(0);
-        }
-      }, 0);
+      setSolvesPerPage((prev) => prev + 50);
+      setCurrentPage(0);
     }
   }, [
     solvesPerPage,
     solves.length,
     hasMoreOlder,
     loadingMore,
-    loadingAllSolves,
     isAllLoaded,
     fetchNextOlderPage,
-    sessions,
-    statsEvent,
+    isSolveLevelMode,
   ]);
 
   const handleShowAll = useCallback(async () => {
     const userID = user?.UserID;
     if (!userID) return;
+    if (!isSolveLevelMode) return;
+
+    if (!hasMoreOlder) {
+      setSolvesPerPage(Math.max(DEFAULT_IN_VIEW, solves.length));
+      setCurrentPage(0);
+      setShowAllActive(true);
+      return;
+    }
 
     setLoadingAllSolves(true);
     const myToken = ++requestTokenRef.current;
@@ -844,33 +939,56 @@ function Stats({
     try {
       const fullItems = await getSolvesBySession(
         userID,
-        statsEvent.toUpperCase(),
-        sessionId
+        String(statsEvent || "").toUpperCase(),
+        String(sessionId || "main")
       );
       if (requestTokenRef.current !== myToken) return;
 
       const normalized = (fullItems || []).map(normalizeSolve);
 
-      setSessions((prev) => ({
-        ...prev,
-        [statsEvent]: normalized,
-      }));
+      setSessions((prev) => {
+        const ev = String(statsEvent || "").toUpperCase();
+        const existingForEvent = Array.isArray(prev?.[ev]) ? prev[ev] : [];
+        const otherSessions = existingForEvent.filter(
+          (s) => String(s?.sessionID || s?.SessionID || "main") !== String(sessionId || "main")
+        );
+
+        return {
+          ...prev,
+          [ev]: [...otherSessions, ...normalized].sort((a, b) => {
+            const ta = new Date(a?.datetime || "").getTime();
+            const tb = new Date(b?.datetime || "").getTime();
+            return ta - tb;
+          }),
+        };
+      });
 
       setSolvesPerPage(Math.max(DEFAULT_IN_VIEW, normalized.length));
       setCurrentPage(0);
-
       setIsAllLoaded(true);
       setHasMoreOlder(false);
       setPageCursor(null);
+      setShowAllActive(true);
     } catch (err) {
       console.error("Failed to load all solves for Stats:", err);
     } finally {
       if (requestTokenRef.current === myToken) setLoadingAllSolves(false);
     }
-  }, [user?.UserID, statsEvent, sessionId, normalizeSolve, setSessions, DEFAULT_IN_VIEW]);
+  }, [
+    user?.UserID,
+    statsEvent,
+    sessionId,
+    isSolveLevelMode,
+    hasMoreOlder,
+    solves.length,
+    normalizeSolve,
+    setSessions,
+    DEFAULT_IN_VIEW,
+  ]);
 
   const handleRecomputeOverall = useCallback(async () => {
     if (!user?.UserID) return;
+    if (isAllEventsMode || isAllSessionsMode) return;
 
     try {
       setLoadingOverallStats(true);
@@ -893,11 +1011,7 @@ function Stats({
     } finally {
       setLoadingOverallStats(false);
     }
-  }, [user?.UserID, statsEvent, sessionId]);
-
-  /* -----------------------------
-     ✅ NEW: helpers for import destinations
-  ----------------------------- */
+  }, [user?.UserID, statsEvent, sessionId, isAllEventsMode, isAllSessionsMode]);
 
   const slugify = (s) =>
     String(s || "")
@@ -906,7 +1020,6 @@ function Stats({
       .replace(/\s+/g, "-")
       .replace(/[^a-z0-9-_]/g, "");
 
-  // creates a session for a given event, returns the sessionID
   const createImportSession = useCallback(
     async (evUpper, desiredName) => {
       const userID = user?.UserID;
@@ -916,11 +1029,9 @@ function Stats({
       const baseName = String(desiredName || "").trim() || `Import ${new Date().toLocaleString()}`;
       const sid = `import_${slugify(baseName)}_${Date.now()}`;
 
-      // createSession has multiple signatures across your app; try the richer one first, then fall back
       try {
         await createSession(userID, cleanEvent, sid, baseName);
       } catch (e) {
-        // fallback: old signature (userID, event, name)
         try {
           await createSession(userID, cleanEvent, baseName);
         } catch (e2) {
@@ -934,22 +1045,16 @@ function Stats({
     [user?.UserID]
   );
 
-  // -----------------------------
-  // ✅ NEW: Import handler (writes to DB + updates local sessions)
-  // -----------------------------
   const handleImportSolves = useCallback(
     async ({ parsedSolves, destination }) => {
       const userID = user?.UserID;
       if (!userID) return;
+      if (isAllEventsMode) return;
 
-      // destination can be:
-      //  - { kind: "existing", sessionID }
-      //  - { kind: "new", sessionName }
       const destKind = destination?.kind || "existing";
       const destExistingID = destination?.sessionID ? String(destination.sessionID) : null;
       const destNewName = destination?.sessionName ? String(destination.sessionName) : "";
 
-      // normalize input (keep per-solve event if present; csTimer can include it)
       const normalized = (parsedSolves || [])
         .map((s) => {
           const ev = String(s.event || statsEvent || "").toUpperCase();
@@ -971,7 +1076,6 @@ function Stats({
 
       if (normalized.length === 0) return;
 
-      // group by event (because Dynamo writes are event partitioned in your schema)
       const byEvent = new Map();
       for (const s of normalized) {
         const ev = s.event;
@@ -980,33 +1084,65 @@ function Stats({
       }
 
       setImportBusy(true);
+      setImportProgress({
+        phase: "starting",
+        completed: 0,
+        total: normalized.length,
+        label: `Preparing import (0/${normalized.length})`,
+      });
       try {
         const results = [];
+        let overallCompleted = 0;
+        const overallTotal = normalized.length;
 
-        // If creating a NEW import session, you must create it per-event
-        // because sessions are scoped to an event.
         for (const [ev, solvesForEv] of byEvent.entries()) {
           let destSessionForThisEvent = String(sessionId || "main");
 
           if (destKind === "existing") {
             destSessionForThisEvent = destExistingID || String(sessionId || "main");
           } else {
-            // destKind === "new"
             destSessionForThisEvent = await createImportSession(ev, destNewName || `Import ${ev}`);
           }
 
-          const res = await importSolvesBatch(userID, ev, destSessionForThisEvent, solvesForEv);
+          const completedBeforeEvent = overallCompleted;
+          const eventTotal = solvesForEv.length;
+
+          const res = await importSolvesBatch(
+            userID,
+            ev,
+            destSessionForThisEvent,
+            solvesForEv,
+            {
+              onProgress: (p) => {
+                const done = completedBeforeEvent + Math.min(eventTotal, Number(p?.completedSolves || 0));
+                const phase = String(p?.phase || "writing");
+                const label =
+                  phase === "recompute"
+                    ? `Recomputing stats… (${done}/${overallTotal})`
+                    : `Importing solves… (${done}/${overallTotal})`;
+
+                setImportProgress({
+                  phase,
+                  completed: done,
+                  total: overallTotal,
+                  label,
+                });
+              },
+            }
+          );
           results.push({ ev, destSessionForThisEvent, res });
+          overallCompleted += eventTotal;
         }
 
-        // Update local UI sessions state for each event that got imported
         setSessions((prev) => {
           const next = { ...(prev || {}) };
 
-          for (const { ev, res } of results) {
-            const added = res?.addedSolves || [];
-
-            const existing = next[ev] || [];
+          for (const { ev, destSessionForThisEvent, res } of results) {
+            const added = (res?.addedSolves || []).map((solve) => ({
+              ...solve,
+              sessionID: solve?.sessionID || solve?.SessionID || destSessionForThisEvent,
+            }));
+            const existing = Array.isArray(next[ev]) ? next[ev] : [];
             const merged = [...existing, ...added];
 
             merged.sort((a, b) => {
@@ -1021,16 +1157,14 @@ function Stats({
           return next;
         });
 
-        // Refresh overall stats for CURRENT view only (statsEvent + chosen dest if existing, else keep current)
         try {
-          const overallEv = String(statsEvent || "").toUpperCase();
-          const overallSid =
-            destKind === "existing"
-              ? (destExistingID || String(sessionId || "main"))
-              : String(sessionId || "main");
-
-          const item = await getSessionStats(userID, overallEv, overallSid);
-          setOverallStatsForEvent(item || null);
+          if (!isAllSessionsMode) {
+            const item = await getSessionStats(userID, String(statsEvent || "").toUpperCase(), String(sessionId || "main"));
+            setOverallStatsForEvent(item || null);
+          } else {
+            const aggregated = getEventAggregateFromSessionsList(sessionsList, statsEvent);
+            setOverallStatsForEvent(aggregated || null);
+          }
         } catch (_) {}
 
         setShowImport(false);
@@ -1039,139 +1173,167 @@ function Stats({
         alert("Import failed. Check console for details.");
       } finally {
         setImportBusy(false);
+        setImportProgress(null);
       }
     },
-    [user?.UserID, statsEvent, sessionId, setSessions, createImportSession]
+    [user?.UserID, statsEvent, sessionId, setSessions, createImportSession, isAllEventsMode, isAllSessionsMode, sessionsList]
   );
 
-  // Button states
   const canOlder =
-    currentPage < maxPage ||
-    (hasMoreOlder && !loadingMore && !loadingAllSolves && !isAllLoaded);
+    isSolveLevelMode &&
+    (currentPage < maxPage || (hasMoreOlder && !loadingMore && !isAllLoaded));
 
-  const canNewer = currentPage > 0;
-
-  const canZoomIn = solvesPerPage > 50;
+  const canNewer = isSolveLevelMode && currentPage > 0;
+  const canZoomIn = isSolveLevelMode && solvesPerPage > 50;
   const canZoomOut =
-    (solves.length > 0 && solvesPerPage < solves.length) ||
-    (hasMoreOlder && !loadingMore && !loadingAllSolves && !isAllLoaded);
+    isSolveLevelMode &&
+    ((solves.length > 0 && solvesPerPage < solves.length) ||
+      (hasMoreOlder && !loadingMore && !isAllLoaded));
+  const canShowAll = isSolveLevelMode && !!user?.UserID && !loadingAllSolves && !showAllActive;
 
-  const canShowAll = !!user?.UserID && !loadingAllSolves && !isAllLoaded;
+  const canRecomputeOverall =
+    !!user?.UserID && !loadingOverallStats && !isAllEventsMode && !isAllSessionsMode;
 
   const headerStatusText = useMemo(() => {
     if (loadingInitial) return "Loading solves…";
     if (loadingAllSolves) return "Loading ALL solves…";
     if (loadingMore) return "Loading older solves…";
-    if (isAllLoaded) return "All solves loaded";
+    if (isAllEventsMode) return "Cached overall stats for all events";
+    if (isAllSessionsMode) return `Cached overall stats for ${statsEvent}`;
+    if (showAllActive) return "All solves loaded";
+    if (isAllLoaded) return "Loaded solves currently in memory for this session";
     if (hasMoreOlder) return "Showing recent solves (paged)";
     return "Showing recent solves";
-  }, [loadingInitial, loadingAllSolves, loadingMore, isAllLoaded, hasMoreOlder]);
+  }, [loadingInitial, loadingAllSolves, loadingMore, isAllEventsMode, isAllSessionsMode, statsEvent, showAllActive, isAllLoaded, hasMoreOlder]);
+
+  const eventSelectLabel = useMemo(() => {
+    if (statsEvent === ALL_EVENTS) return "All Events";
+    if (statsEvent === "333") return "3x3";
+    return statsEvent;
+  }, [statsEvent]);
+
+  const selectedSessionDisplay = useMemo(() => {
+    if (statsSession === ALL_SESSIONS) return "All Sessions";
+    const found = sessionsForEvent.find((s) => s.SessionID === statsSession);
+    return found?.SessionName || statsSession || "main";
+  }, [statsSession, sessionsForEvent]);
 
   return (
     <div className="Page statsPageRoot">
       <div className="statsTopBar">
         <div className="statsTopLeft">
           <select className="statsSelect" onChange={handleEventChange} value={statsEvent}>
-            {Object.keys(sessions || {}).map((eventKey) => (
+            {eventOptions.map((eventKey) => (
               <option key={eventKey} value={eventKey}>
-                {eventKey === "333" ? "3x3" : eventKey}
+                {eventKey === ALL_EVENTS ? "All Events" : eventKey === "333" ? "3x3" : eventKey}
               </option>
             ))}
           </select>
 
-          <div className="statsSessionWrap" ref={sessionMenuWrapRef}>
-            <button
-              type="button"
-              className="statsSessionBtn"
-              onClick={() => setSessionMenuOpen((v) => !v)}
-            >
-              {statsSession || "main"} <span className="statsCaret">▼</span>
-            </button>
+          {!isAllEventsMode && (
+            <div className="statsSessionWrap" ref={sessionMenuWrapRef}>
+              <button
+                type="button"
+                className="statsSessionBtn"
+                onClick={() => setSessionMenuOpen((v) => !v)}
+              >
+                {selectedSessionDisplay} <span className="statsCaret">▼</span>
+              </button>
 
-            {sessionMenuOpen && (
-              <div className="statsSessionMenu">
-                {sessionsForEvent.length === 0 && (
-                  <div className="statsSessionEmpty">No sessions</div>
-                )}
+              {sessionMenuOpen && (
+                <div className="statsSessionMenu">
+                  {sessionsForEvent.length === 0 && (
+                    <div className="statsSessionEmpty">No sessions</div>
+                  )}
 
-                {sessionsForEvent.map((s) => {
-                  const sid = s.SessionID || "main";
-                  const name = s.SessionName || sid;
-                  const active = sid === statsSession;
+                  {sessionsForEvent.map((s) => {
+                    const sid = s.SessionID || "main";
+                    const name = s.SessionName || sid;
+                    const active = sid === statsSession;
 
-                  return (
-                    <button
-                      key={`sess-${sid}`}
-                      type="button"
-                      className={`statsSessionItem ${active ? "active" : ""}`}
-                      onClick={() => handlePickSession(sid)}
-                    >
-                      <span className="check">{active ? "✓" : ""}</span>
-                      <span className="label">{name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* ✅ NEW: Tag filter */}
-          <select
-            className="statsSelect"
-            value={tagFilterKey}
-            onChange={(e) => setTagFilterKey(e.target.value)}
-            title="Filter stats by tag"
-          >
-            {tagKeyOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-
-          {/* ✅ NEW: Tag value (only when needed) */}
-          {tagValueOptions.length > 0 && (
-            <select
-              className="statsSelect"
-              value={tagFilterValue}
-              onChange={(e) => setTagFilterValue(e.target.value)}
-              title="Tag value"
-            >
-              {tagValueOptions.map((o) => (
-                <option key={`${o.value}`} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+                    return (
+                      <button
+                        key={`sess-${sid}`}
+                        type="button"
+                        className={`statsSessionItem ${active ? "active" : ""}`}
+                        onClick={() => handlePickSession(sid)}
+                      >
+                        <span className="check">{active ? "✓" : ""}</span>
+                        <span className="label">{name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           )}
 
-          {/* ✅ NEW: Time grouping */}
-          <select
-            className="statsSelect"
-            value={timeGrouping}
-            onChange={(e) => setTimeGrouping(e.target.value)}
-            title="Group stats by time"
-          >
-            <option value={GROUP_RAW}>Raw</option>
-            <option value={GROUP_DAY}>Day</option>
-            <option value={GROUP_WEEK}>Week</option>
-            <option value={GROUP_MONTH}>Month</option>
-            <option value={GROUP_YEAR}>Year</option>
-          </select>
+          {isSolveLevelMode && (
+            <>
+              <select
+                className="statsSelect"
+                value={tagFilterKey}
+                onChange={(e) => setTagFilterKey(e.target.value)}
+                title="Filter stats by tag"
+              >
+                {tagKeyOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+
+              {tagValueOptions.length > 0 && (
+                <select
+                  className="statsSelect"
+                  value={tagFilterValue}
+                  onChange={(e) => setTagFilterValue(e.target.value)}
+                  title="Tag value"
+                >
+                  {tagValueOptions.map((o) => (
+                    <option key={`${o.value}`} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              <div className="statsViewToggle" role="group" aria-label="Stats view">
+                <button
+                  type="button"
+                  className={`statsToggleBtn ${statsViewMode === "standard" ? "is-active" : ""}`}
+                  onClick={() => setStatsViewMode("standard")}
+                >
+                  Standard
+                </button>
+                <button
+                  type="button"
+                  className={`statsToggleBtn ${statsViewMode === "time" ? "is-active" : ""}`}
+                  onClick={() => setStatsViewMode("time")}
+                >
+                  Time View
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="statsTopMiddle">
           <div className="statsTopMeta">
             <span className="statsTopCount">
               {showingCount}
-              {overallCount != null ? `/${overallCount}` : ""}
+              {overallCount != null && isSolveLevelMode ? `/${overallCount}` : ""}
             </span>
             <span className="statsTopCountLabel">
-              {timeGrouping === GROUP_RAW ? "solves" : "buckets"}
+              {isAllEventsMode
+                ? "cached solves"
+                : isAllSessionsMode
+                  ? "event total"
+                  : "visible/raw"}
             </span>
           </div>
 
-          {dateRangeText && <div className="statsTopRange">{dateRangeText}</div>}
+          {dateRangeText && isSolveLevelMode && <div className="statsTopRange">{dateRangeText}</div>}
         </div>
 
         <div className="statsTopRight">
@@ -1192,18 +1354,23 @@ function Stats({
           </button>
 
           <button onClick={handleShowAll} disabled={!canShowAll}>
-            {loadingAllSolves ? "Loading…" : isAllLoaded ? "All Loaded" : "Show All"}
+            {loadingAllSolves ? "Loading…" : showAllActive ? "All Loaded" : "Show All"}
           </button>
 
-          <button onClick={handleRecomputeOverall} disabled={loadingOverallStats}>
+          <button onClick={handleRecomputeOverall} disabled={!canRecomputeOverall}>
             {loadingOverallStats ? "Recomputing…" : "Recompute Overall"}
           </button>
 
-          {/* ✅ NEW: Import button */}
           <button
             onClick={() => setShowImport(true)}
-            disabled={!user?.UserID || importBusy}
-            title={!user?.UserID ? "Sign in to import" : "Import solves into this session"}
+            disabled={!user?.UserID || importBusy || isAllEventsMode}
+            title={
+              !user?.UserID
+                ? "Sign in to import"
+                : isAllEventsMode
+                  ? "Choose a specific event to import"
+                  : "Import solves into this event"
+            }
           >
             {importBusy ? "Importing…" : "Import"}
           </button>
@@ -1217,51 +1384,77 @@ function Stats({
           {loadingInitial && <div className="statsLoadingOverlay">Loading…</div>}
 
           <div className="stats-item stats-item--header stats-item--minh">
-            <StatsSummary solves={solvesToDisplay} overallStats={overallStatsForEvent} />
+            <StatsSummary
+              solves={visiblePageFilteredRawSolves}
+              overallSolves={allLoadedFilteredRawSolves}
+              overallStats={overallStatsForEvent}
+              allEventsBreakdown={isAllEventsMode ? allEventsBreakdown : null}
+              mode={isAllEventsMode ? "all-events" : isAllSessionsMode ? "event-overall" : "session"}
+              selectedEvent={eventSelectLabel}
+              selectedSession={selectedSessionDisplay}
+              loadedSolveCount={solves?.length || 0}
+              showCurrentMetrics={currentPage === 0}
+              viewMode={statsViewMode}
+              selectedDay={selectedTimeDay}
+            />
           </div>
 
-          <div className="stats-item stats-item--line stats-item--minh">
-            <LineChart
-  user={user}
-  solves={solvesToDisplay}
-  title={`Current Avg: ${statsEvent}`}
-  deleteTime={handleDeleteSolve}
-  addPost={addPost}
-  setSessions={setSessions}
-  sessionsList={sessionsList}
-  currentEvent={statsEvent}
-  currentSession={sessionId}
-  eventKey={statsEvent}
-  practiceMode={false}
-/>
-          </div>
+          {isSolveLevelMode && (
+            <>
+              <div className="stats-item stats-item--line stats-item--minh">
+                <LineChart
+                  user={user}
+                  solves={visiblePageFilteredRawSolves}
+                  title={`Line: ${statsEvent}`}
+                  deleteTime={handleDeleteSolve}
+                  addPost={addPost}
+                  setSessions={setSessions}
+                  sessionsList={sessionsList}
+                  currentEvent={statsEvent}
+                  currentSession={sessionId}
+                  eventKey={statsEvent}
+                  practiceMode={false}
+                  viewMode={statsViewMode}
+                  selectedDay={selectedTimeDay}
+                  onSelectedDayChange={setSelectedTimeDay}
+                />
+              </div>
 
-          <div className="stats-item stats-item--percent stats-item--minh">
-            <PercentBar solves={solvesToDisplay} title="Solves Distribution by Time" />
-          </div>
+              <div className="stats-item stats-item--percent stats-item--minh">
+                <PercentBar solves={pieChartSolves} title="Solves Distribution by Time" />
+              </div>
 
-          <div className="stats-item stats-item--bar stats-item--minh">
-            <BarChart solves={solvesToDisplay} />
-          </div>
+              <div className="stats-item stats-item--bar stats-item--minh">
+                <BarChart solves={barChartSolves} />
+              </div>
 
-          <div className="stats-item stats-item--table">
-            <TimeTable
-  user={user}
-  solves={solvesToDisplay}
-  deleteTime={handleDeleteSolve}
-  addPost={addPost}
-  setSessions={setSessions}
-  sessionsList={sessionsList}
-  currentEvent={statsEvent}
-  currentSession={sessionId}
-  eventKey={statsEvent}
-  practiceMode={false}
-/>
-          </div>
+              <div className="stats-item stats-item--table">
+                <TimeTable
+                  user={user}
+                  solves={allLoadedFilteredRawSolves}
+                  deleteTime={handleDeleteSolve}
+                  addPost={addPost}
+                  setSessions={setSessions}
+                  sessionsList={sessionsList}
+                  currentEvent={statsEvent}
+                  currentSession={sessionId}
+                  eventKey={statsEvent}
+                  practiceMode={false}
+                />
+              </div>
+            </>
+          )}
+
+          {!isSolveLevelMode && (
+            <div className="stats-item stats-item--table">
+              <div className="statsSummaryEmpty">
+                Cached overall mode is active. Pick a single session to see solve-level charts.
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* ✅ NEW: Import modal */}
       {showImport && (
         <ImportSolvesModal
           event={String(statsEvent || "").toUpperCase()}
@@ -1269,7 +1462,8 @@ function Stats({
           onClose={() => setShowImport(false)}
           onImport={handleImportSolves}
           busy={importBusy}
-          sessionsForEvent={sessionsForEvent}
+          importProgress={importProgress}
+          sessionsForEvent={sessionsForEvent.filter((s) => s.SessionID !== ALL_SESSIONS)}
           defaultDestination={{ kind: "new", sessionName: "" }}
         />
       )}

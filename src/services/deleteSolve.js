@@ -1,11 +1,12 @@
 // src/services/deleteSolve.js
 import { apiDelete } from "./api.js";
 
-export const deleteSolve = async (userID, timestamp) => {
+export const deleteSolve = async (userID, solveRef) => {
   const id = String(userID || "").trim();
-  const ts = String(timestamp || "").trim();
-  if (!id) throw new Error("deleteSolve: userID required");
-  if (!ts) throw new Error("deleteSolve: timestamp required");
+  const ref = String(solveRef || "").trim();
 
-  return apiDelete(`/api/solve/${encodeURIComponent(id)}/${encodeURIComponent(ts)}`);
+  if (!id) throw new Error("deleteSolve: userID required");
+  if (!ref) throw new Error("deleteSolve: solveRef required");
+
+  return apiDelete(`/api/solve/${encodeURIComponent(id)}/${encodeURIComponent(ref)}`);
 };

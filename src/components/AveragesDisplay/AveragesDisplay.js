@@ -7,11 +7,20 @@ function safeAverage(solves, count) {
   return calculateAverage(solves.slice(-count).map(s => s.time), true).average;
 }
 
-function AveragesDisplay({ currentSolves, setSelectedAverageSolves }) {
+function AveragesDisplay({
+  currentSolves,
+  overallSessionStats = null,
+  setSelectedAverageSolves,
+  onRequestBestAverageWindow = null,
+}) {
   const avgOfFive = safeAverage(currentSolves, 5);
   const avgOfTwelve = safeAverage(currentSolves, 12);
 
-  const bestAvgOfFive = calculateBestAverageOfFive(currentSolves.map((s) => s.time));
+  const fallbackBestAvgOfFive = calculateBestAverageOfFive(currentSolves.map((s) => s.time));
+  const bestAvgOfFiveOverall = Number(overallSessionStats?.BestAo5Ms);
+  const bestAvgOfFive = Number.isFinite(bestAvgOfFiveOverall)
+    ? bestAvgOfFiveOverall
+    : fallbackBestAvgOfFive;
 
   // Best AO12
   let bestAvgOfTwelve = "N/A";
@@ -25,6 +34,27 @@ function AveragesDisplay({ currentSolves, setSelectedAverageSolves }) {
     }
     if (best !== Infinity) bestAvgOfTwelve = best;
   }
+  const bestAvgOfTwelveOverall = Number(overallSessionStats?.BestAo12Ms);
+  if (Number.isFinite(bestAvgOfTwelveOverall)) bestAvgOfTwelve = bestAvgOfTwelveOverall;
+
+  const selectBestWindow = async (count, targetAvg, startSolveRef = null) => {
+    if (typeof onRequestBestAverageWindow === "function") {
+      const handled = await onRequestBestAverageWindow(count, startSolveRef, targetAvg);
+      if (handled) return;
+    }
+
+    if (!Number.isFinite(Number(targetAvg))) return;
+    let selected = [];
+    for (let i = 0; i <= currentSolves.length - count; i++) {
+      const slice = currentSolves.slice(i, i + count);
+      const avg = calculateAverage(slice.map((s) => s.time), true).average;
+      if (typeof avg === "number" && Math.round(avg) === Math.round(Number(targetAvg))) {
+        selected = slice;
+        break;
+      }
+    }
+    if (selected.length > 0) setSelectedAverageSolves(selected);
+  };
 
   // BPA/WPA
   const lastFour = currentSolves.slice(-4).map(s => s.time).filter(t => typeof t === "number");
@@ -83,21 +113,9 @@ function AveragesDisplay({ currentSolves, setSelectedAverageSolves }) {
       </div>
       <div
         className="cell best ao5"
-        onClick={() => {
-          if (currentSolves.length >= 5) {
-            let bestSlice = [];
-            let best = Infinity;
-            for (let i = 0; i <= currentSolves.length - 5; i++) {
-              const slice = currentSolves.slice(i, i + 5);
-              const avg = calculateAverage(slice.map(s => s.time), true).average;
-              if (typeof avg === "number" && avg < best) {
-                best = avg;
-                bestSlice = slice;
-              }
-            }
-            if (bestSlice.length > 0) setSelectedAverageSolves(bestSlice);
-          }
-        }}
+        onClick={() =>
+          selectBestWindow(5, bestAvgOfFive, overallSessionStats?.BestAo5StartSolveSK || null)
+        }
       >
         {bestAvgOfFive === "N/A" ? "N/A" : bestAvgOfFive === "DNF" ? "DNF" : formatTime(bestAvgOfFive)}
       </div>
@@ -113,21 +131,9 @@ function AveragesDisplay({ currentSolves, setSelectedAverageSolves }) {
       </div>
       <div
         className="cell best ao12"
-        onClick={() => {
-          if (currentSolves.length >= 12) {
-            let bestSlice = [];
-            let best = Infinity;
-            for (let i = 0; i <= currentSolves.length - 12; i++) {
-              const slice = currentSolves.slice(i, i + 12);
-              const avg = calculateAverage(slice.map(s => s.time), true).average;
-              if (typeof avg === "number" && avg < best) {
-                best = avg;
-                bestSlice = slice;
-              }
-            }
-            if (bestSlice.length > 0) setSelectedAverageSolves(bestSlice);
-          }
-        }}
+        onClick={() =>
+          selectBestWindow(12, bestAvgOfTwelve, overallSessionStats?.BestAo12StartSolveSK || null)
+        }
       >
         {bestAvgOfTwelve === "N/A" ? "N/A" : bestAvgOfTwelve === "DNF" ? "DNF" : formatTime(bestAvgOfTwelve)}
       </div>

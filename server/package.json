@@ -9,7 +9,11 @@
     "deleteStats": "node scripts/deleteSessionStats.js",
     "printStats": "node scripts/printSessionStats.js",
     "recomputeStats": "node scripts/recomputeSessionStats.js",
-    "backfillStats": "node scripts/backfillSessionStats.js"
+    "backfillStats": "node scripts/backfillSessionStats.js",
+    "backfillSingles": "node scripts/backfillSingleRanks.js",
+    "backfillBestCandidates": "node scripts/backfillBestCandidates.js",
+    "repairOutliers": "node scripts/repairSessionOutliers.js",
+    "migrateUser": "node scripts/migrateUserToProd.js"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.600.0",

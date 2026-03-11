@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import PropTypes from "prop-types";
 
 const STROKE = 1;
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const LineChartBuilder = ({
   data,
@@ -13,24 +14,47 @@ const LineChartBuilder = ({
   precision,
   onDotClick,
   selectedIndices = new Set(),
+  dotRadius = 5,
+  selectedDotRadius = 8,
+  yMin = null,
+  yMax = null,
 }) => {
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, time: "" });
 
   const FONT_SIZE = Math.max(10, Math.floor(width / 52));
 
-  const safeData = Array.isArray(data) ? data : [];
+  const safeData = useMemo(() => (Array.isArray(data) ? data : []), [data]);
 
-  const { padding, chartWidth, chartHeight, minX, maxX, maximumYFromData, xDenom } = useMemo(() => {
+  const {
+    padding,
+    chartWidth,
+    chartHeight,
+    minX,
+    minimumYFromData,
+    yDenom,
+    xDenom,
+  } = useMemo(() => {
     const xs = safeData.map((e) => e.x);
     const ys = safeData.map((e) => e.y).filter((v) => typeof v === "number" && isFinite(v));
 
     const _maxX = xs.length ? Math.max(...xs) : 1;
     const _minX = xs.length ? Math.min(...xs) : 0;
 
-    const _maxY = ys.length ? Math.max(...ys) : 1;
+    const dataMinY = ys.length ? Math.min(...ys) : 0;
+    const dataMaxY = ys.length ? Math.max(...ys) : 1;
+    const parsedYMin = Number(yMin);
+    const parsedYMax = Number(yMax);
+    const hasCustomRange =
+      Number.isFinite(parsedYMin) &&
+      Number.isFinite(parsedYMax) &&
+      parsedYMax > parsedYMin;
 
-    const maxYRounded = Math.ceil(_maxY / 10) * 10 || 1;
-    const digits = parseFloat(maxYRounded.toString()).toFixed(precision).length + 3;
+    const resolvedMinY = hasCustomRange ? parsedYMin : 0;
+    const resolvedMaxY = hasCustomRange
+      ? parsedYMax
+      : Math.max(1, Math.ceil(Math.max(dataMaxY, dataMinY, 1)));
+
+    const digits = parseFloat(resolvedMaxY.toString()).toFixed(precision).length + 3;
     const yLabelRoom = digits * (FONT_SIZE * 0.62);
 
     const _padding = Math.ceil(Math.max(FONT_SIZE * 2.2, yLabelRoom)) + 10;
@@ -41,21 +65,34 @@ const LineChartBuilder = ({
       chartHeight: height - _padding * 2,
       minX: _minX,
       maxX: _maxX,
-      maximumYFromData: maxYRounded,
+      minimumYFromData: resolvedMinY,
+      maximumYFromData: resolvedMaxY,
+      yDenom: resolvedMaxY - resolvedMinY || 1,
       xDenom: (_maxX - _minX) || 1,
     };
-  }, [safeData, width, height, FONT_SIZE, precision]);
+  }, [safeData, width, height, FONT_SIZE, precision, yMin, yMax]);
 
   const mainPoints = useMemo(() => {
     if (!safeData.length) return "";
     return safeData
       .map((element) => {
         const x = ((element.x - minX) / xDenom) * chartWidth + padding;
-        const y = chartHeight - (element.y / maximumYFromData) * chartHeight + padding;
+        const rawY =
+          chartHeight - ((element.y - minimumYFromData) / yDenom) * chartHeight + padding;
+        const y = clamp(rawY, padding, chartHeight + padding);
         return `${x},${y}`;
       })
       .join(" ");
-  }, [safeData, minX, xDenom, chartWidth, chartHeight, padding, maximumYFromData]);
+  }, [
+    safeData,
+    minX,
+    xDenom,
+    chartWidth,
+    chartHeight,
+    padding,
+    minimumYFromData,
+    yDenom,
+  ]);
 
   const Axis = ({ points }) => <polyline fill="none" stroke="#ccc" strokeWidth=".7" points={points} />;
   const XAxis = () => <Axis points={`${padding},${height - padding} ${width - padding},${height - padding}`} />;
@@ -136,7 +173,7 @@ const LineChartBuilder = ({
           textAnchor="end"
           style={{ fill: "#808080", fontSize: FONT_SIZE, fontFamily: "Helvetica" }}
         >
-          {(maximumYFromData * (index / PARTS)).toFixed(1) + "s"}
+          {(minimumYFromData + yDenom * (index / PARTS)).toFixed(1) + "s"}
         </text>
       );
     });
@@ -154,7 +191,9 @@ const LineChartBuilder = ({
       .filter((p) => p && typeof p.y === "number" && isFinite(p.y))
       .map((p) => {
         const x = ((p.x - minX) / xDenom) * chartWidth + padding;
-        const y = chartHeight - (p.y / maximumYFromData) * chartHeight + padding;
+        const rawY =
+          chartHeight - ((p.y - minimumYFromData) / yDenom) * chartHeight + padding;
+        const y = clamp(rawY, padding, chartHeight + padding);
         return `${x},${y}`;
       })
       .join(" ");
@@ -186,11 +225,11 @@ const LineChartBuilder = ({
 
         <polyline fill="none" stroke="#00FFFF" strokeWidth={STROKE} points={mainPoints} />
 
-        {extraPolylines}
-
         {safeData.map((element, index) => {
           const x = ((element.x - minX) / xDenom) * chartWidth + padding;
-          const y = chartHeight - (element.y / maximumYFromData) * chartHeight + padding;
+          const rawY =
+            chartHeight - ((element.y - minimumYFromData) / yDenom) * chartHeight + padding;
+          const y = clamp(rawY, padding, chartHeight + padding);
 
           const isSelected =
             element.selectionIndex != null && selectedIndices?.has?.(element.selectionIndex);
@@ -200,7 +239,7 @@ const LineChartBuilder = ({
               key={index}
               cx={x}
               cy={y}
-              r={isSelected ? 8 : element.isDNF ? 6 : 5}
+              r={isSelected ? selectedDotRadius : Math.max(2, dotRadius)}
               fill={element.isDNF ? "none" : element.color}
               stroke={
                 isSelected
@@ -216,6 +255,8 @@ const LineChartBuilder = ({
             />
           );
         })}
+
+        {extraPolylines}
       </svg>
 
       {tooltip.visible && (
@@ -248,6 +289,10 @@ LineChartBuilder.defaultProps = {
   precision: 2,
   extraSeries: [],
   selectedIndices: new Set(),
+  dotRadius: 5,
+  selectedDotRadius: 8,
+  yMin: null,
+  yMax: null,
 };
 
 LineChartBuilder.propTypes = {
@@ -287,6 +332,10 @@ LineChartBuilder.propTypes = {
   precision: PropTypes.number,
   onDotClick: PropTypes.func.isRequired,
   selectedIndices: PropTypes.object,
+  dotRadius: PropTypes.number,
+  selectedDotRadius: PropTypes.number,
+  yMin: PropTypes.number,
+  yMax: PropTypes.number,
 };
 
 export default LineChartBuilder;

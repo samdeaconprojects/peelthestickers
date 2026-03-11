@@ -1,11 +1,48 @@
 import { useCallback, useMemo, useState } from "react";
 import { updateSolve } from "../services/updateSolve";
-import {
-  buildGsi1pk,
-  normalizeEventCode,
-  parseCustomLines,
-  safeMergeTags,
-} from "../components/SolveBulk/solveBulkUtils";
+import { moveSolvesToSession } from "../services/moveSolvesToSession";
+import { normalizeEventCode } from "../components/SolveBulk/solveBulkUtils";
+
+function safeMergeCanonicalTags(existingTags, patch, mode = "merge") {
+  const base =
+    mode === "replace"
+      ? {}
+      : existingTags && typeof existingTags === "object"
+      ? { ...existingTags }
+      : {};
+
+  const next = { ...base };
+
+  const allowed = [
+    "CubeModel",
+    "CrossColor",
+    "Custom1",
+    "Custom2",
+    "Custom3",
+    "Custom4",
+    "Custom5",
+  ];
+
+  for (const key of allowed) {
+    if (!(key in patch)) continue;
+    const value = String(patch[key] ?? "").trim();
+    if (!value) delete next[key];
+    else next[key] = value;
+  }
+
+  delete next.Custom;
+  delete next.SolveSource;
+
+  return next;
+}
+
+function sortSolvesByCreatedAt(items = []) {
+  return [...items].sort((a, b) => {
+    const ta = new Date(a?.createdAt || a?.datetime || 0).getTime();
+    const tb = new Date(b?.createdAt || b?.datetime || 0).getTime();
+    return ta - tb;
+  });
+}
 
 export default function useBulkSolveActions({
   user,
@@ -30,10 +67,18 @@ export default function useBulkSolveActions({
   const [bulkTagMode, setBulkTagMode] = useState("merge");
   const [bulkCubeModel, setBulkCubeModel] = useState("");
   const [bulkCrossColor, setBulkCrossColor] = useState("");
-  const [bulkCustomLines, setBulkCustomLines] = useState("");
+  const [bulkCustom1, setBulkCustom1] = useState("");
+  const [bulkCustom2, setBulkCustom2] = useState("");
+  const [bulkCustom3, setBulkCustom3] = useState("");
+  const [bulkCustom4, setBulkCustom4] = useState("");
+  const [bulkCustom5, setBulkCustom5] = useState("");
 
-  const [bulkMoveEvent, setBulkMoveEvent] = useState(() => normalizeEventCode(currentEvent));
-  const [bulkMoveSession, setBulkMoveSession] = useState(() => String(currentSession || "main"));
+  const [bulkMoveEvent, setBulkMoveEvent] = useState(() =>
+    normalizeEventCode(currentEvent)
+  );
+  const [bulkMoveSession, setBulkMoveSession] = useState(() =>
+    String(currentSession || "main")
+  );
 
   const selectionCount = selectedIndices.size;
 
@@ -88,16 +133,19 @@ export default function useBulkSolveActions({
 
   const applyBulkTags = useCallback(async () => {
     const patch = {};
+
     if (String(bulkCubeModel || "").trim()) patch.CubeModel = String(bulkCubeModel).trim();
     if (String(bulkCrossColor || "").trim()) patch.CrossColor = String(bulkCrossColor).trim();
-
-    const custom = parseCustomLines(bulkCustomLines);
-    if (Object.keys(custom).length) patch.Custom = custom;
+    if (String(bulkCustom1 || "").trim()) patch.Custom1 = String(bulkCustom1).trim();
+    if (String(bulkCustom2 || "").trim()) patch.Custom2 = String(bulkCustom2).trim();
+    if (String(bulkCustom3 || "").trim()) patch.Custom3 = String(bulkCustom3).trim();
+    if (String(bulkCustom4 || "").trim()) patch.Custom4 = String(bulkCustom4).trim();
+    if (String(bulkCustom5 || "").trim()) patch.Custom5 = String(bulkCustom5).trim();
 
     const targets = selectedSolvesByIndex
       .map(({ solve }) => solve)
       .filter(Boolean)
-      .filter((s) => s?.datetime);
+      .filter((s) => s?.solveRef);
 
     if (!targets.length) {
       setShowBulkTags(false);
@@ -106,15 +154,18 @@ export default function useBulkSolveActions({
     }
 
     if (practiceMode) {
-      const datetimeSet = new Set(targets.map((s) => s.datetime));
+      const solveRefSet = new Set(targets.map((s) => s.solveRef));
 
       setSessions?.((prev) => {
         const next = { ...(prev || {}) };
         const arr = Array.isArray(next[sourceListKey]) ? [...next[sourceListKey]] : [];
 
         next[sourceListKey] = arr.map((s) =>
-          datetimeSet.has(s?.datetime)
-            ? { ...s, tags: safeMergeTags(s.tags, patch, bulkTagMode) }
+          solveRefSet.has(s?.solveRef)
+            ? {
+                ...s,
+                tags: safeMergeCanonicalTags(s.tags, patch, bulkTagMode),
+              }
             : s
         );
 
@@ -130,14 +181,44 @@ export default function useBulkSolveActions({
 
     try {
       for (const s of targets) {
-        const nextTags = safeMergeTags(s.tags, patch, bulkTagMode);
-        await updateSolve(user.UserID, s.datetime, { Tags: nextTags });
+        const nextTags = safeMergeCanonicalTags(s.tags, patch, bulkTagMode);
+        const saved = await updateSolve(user.UserID, s.solveRef, { Tags: nextTags });
 
         setSessions?.((prev) => {
           const next = { ...(prev || {}) };
           const arr = Array.isArray(next[sourceListKey]) ? [...next[sourceListKey]] : [];
-          const idx = arr.findIndex((x) => x?.datetime === s.datetime);
-          if (idx >= 0) arr[idx] = { ...arr[idx], tags: nextTags };
+          const idx = arr.findIndex((x) => x?.solveRef === s.solveRef);
+
+          if (idx >= 0) {
+            arr[idx] = saved
+              ? {
+                  ...arr[idx],
+                  solveRef: saved?.SK || arr[idx].solveRef,
+                  createdAt: saved?.CreatedAt || arr[idx].createdAt,
+                  rawTimeMs:
+                    Number.isFinite(saved?.RawTimeMs) ? saved.RawTimeMs : arr[idx].rawTimeMs,
+                  finalTimeMs:
+                    Number.isFinite(saved?.FinalTimeMs) || saved?.FinalTimeMs === null
+                      ? saved.FinalTimeMs
+                      : arr[idx].finalTimeMs,
+                  time:
+                    saved?.Penalty === "DNF"
+                      ? Number.MAX_SAFE_INTEGER
+                      : Number.isFinite(saved?.FinalTimeMs)
+                      ? saved.FinalTimeMs
+                      : arr[idx].time,
+                  isDNF: saved?.Penalty === "DNF" || saved?.IsDNF === true,
+                  penalty:
+                    typeof saved?.Penalty !== "undefined" ? saved.Penalty : arr[idx].penalty,
+                  tags: saved?.Tags || nextTags,
+                  event: saved?.Event || arr[idx].event,
+                  sessionID: saved?.SessionID || arr[idx].sessionID,
+                  scramble: saved?.Scramble ?? arr[idx].scramble,
+                  note: saved?.Note ?? arr[idx].note,
+                }
+              : { ...arr[idx], tags: nextTags };
+          }
+
           next[sourceListKey] = arr;
           return next;
         });
@@ -151,7 +232,11 @@ export default function useBulkSolveActions({
   }, [
     bulkCubeModel,
     bulkCrossColor,
-    bulkCustomLines,
+    bulkCustom1,
+    bulkCustom2,
+    bulkCustom3,
+    bulkCustom4,
+    bulkCustom5,
     bulkTagMode,
     selectedSolvesByIndex,
     practiceMode,
@@ -168,7 +253,7 @@ export default function useBulkSolveActions({
     const movingSolves = selectedSolvesByIndex
       .map(({ solve }) => solve)
       .filter(Boolean)
-      .filter((s) => s?.datetime);
+      .filter((s) => s?.solveRef);
 
     if (!movingSolves.length) {
       setShowBulkMove(false);
@@ -177,7 +262,7 @@ export default function useBulkSolveActions({
     }
 
     if (practiceMode) {
-      const datetimeSet = new Set(movingSolves.map((s) => s.datetime));
+      const solveRefSet = new Set(movingSolves.map((s) => s.solveRef));
 
       setSessions?.((prev) => {
         const next = { ...(prev || {}) };
@@ -187,19 +272,21 @@ export default function useBulkSolveActions({
         const moving = [];
 
         for (const s of sourceArr) {
-          if (datetimeSet.has(s?.datetime)) moving.push(s);
+          if (solveRefSet.has(s?.solveRef)) moving.push(s);
           else staying.push(s);
         }
 
         next[sourceListKey] = staying;
 
         if (!next[targetEvent]) next[targetEvent] = [];
-        if (Array.isArray(next[targetEvent])) {
-          next[targetEvent] = [
-            ...(next[targetEvent] || []),
-            ...moving.map((s) => ({ ...s, event: targetEvent, sessionID: targetSession })),
-          ];
-        }
+        next[targetEvent] = [
+          ...(next[targetEvent] || []),
+          ...moving.map((s) => ({
+            ...s,
+            event: targetEvent,
+            sessionID: targetSession,
+          })),
+        ];
 
         return next;
       });
@@ -211,31 +298,76 @@ export default function useBulkSolveActions({
 
     if (!user?.UserID) return;
 
+    let rollbackSnapshot = null;
+    const solveRefSet = new Set(movingSolves.map((s) => s.solveRef));
+
     try {
-      for (const s of movingSolves) {
-        const nextGsi1pk = buildGsi1pk(user.UserID, targetEvent, targetSession);
-
-        await updateSolve(user.UserID, s.datetime, {
-          Event: targetEvent,
-          SessionID: targetSession,
-          GSI1PK: nextGsi1pk,
-        });
-      }
-
-      const datetimeSet = new Set(movingSolves.map((s) => s.datetime));
-
       setSessions?.((prev) => {
         const next = { ...(prev || {}) };
-        const arr = Array.isArray(next[sourceListKey]) ? [...next[sourceListKey]] : [];
-        next[sourceListKey] = arr.filter((s) => !datetimeSet.has(s?.datetime));
+        const sourceArr = Array.isArray(prev?.[sourceListKey]) ? [...prev[sourceListKey]] : [];
+        const targetArr =
+          sourceListKey === targetEvent
+            ? sourceArr
+            : Array.isArray(prev?.[targetEvent])
+            ? [...prev[targetEvent]]
+            : [];
+
+        rollbackSnapshot = {
+          sourceKey: sourceListKey,
+          sourceArr,
+          targetKey: targetEvent,
+          targetArr,
+        };
+
+        if (sourceListKey === targetEvent) {
+          next[sourceListKey] = sortSolvesByCreatedAt(
+            sourceArr.map((s) =>
+              solveRefSet.has(s?.solveRef)
+                ? {
+                    ...s,
+                    event: targetEvent,
+                    sessionID: targetSession,
+                  }
+                : s
+            )
+          );
+        } else {
+          const fromSource = sourceArr.filter((s) => solveRefSet.has(s?.solveRef));
+          const staying = sourceArr.filter((s) => !solveRefSet.has(s?.solveRef));
+          const movedItems = fromSource.map((s) => ({
+            ...s,
+            event: targetEvent,
+            sessionID: targetSession,
+          }));
+
+          next[sourceListKey] = staying;
+          next[targetEvent] = sortSolvesByCreatedAt([...targetArr, ...movedItems]);
+        }
+
         return next;
+      });
+
+      setShowBulkMove(false);
+      clearSelection();
+
+      await moveSolvesToSession(user.UserID, movingSolves, {
+        event: sourceListKey,
+        fromSessionID: currentSession,
+        toEvent: targetEvent,
+        toSessionID: targetSession,
       });
     } catch (err) {
       console.error("Bulk move failed:", err);
+      if (rollbackSnapshot) {
+        setSessions?.((prev) => {
+          const next = { ...(prev || {}) };
+          next[rollbackSnapshot.sourceKey] = rollbackSnapshot.sourceArr;
+          next[rollbackSnapshot.targetKey] = rollbackSnapshot.targetArr;
+          return next;
+        });
+      }
+      alert("Bulk move failed. Your solves were restored.");
     }
-
-    setShowBulkMove(false);
-    clearSelection();
   }, [
     bulkMoveEvent,
     bulkMoveSession,
@@ -244,6 +376,8 @@ export default function useBulkSolveActions({
     setSessions,
     sourceListKey,
     user,
+    currentSession,
+    setShowBulkMove,
     clearSelection,
   ]);
 
@@ -256,7 +390,7 @@ export default function useBulkSolveActions({
     const targets = selectedSolvesByIndex
       .map(({ solve }) => solve)
       .filter(Boolean)
-      .filter((s) => s?.datetime);
+      .filter((s) => s?.solveRef);
 
     if (!targets.length) {
       clearSelection();
@@ -264,11 +398,12 @@ export default function useBulkSolveActions({
     }
 
     if (practiceMode) {
-      const datetimeSet = new Set(targets.map((s) => s.datetime));
+      const solveRefSet = new Set(targets.map((s) => s.solveRef));
+
       setSessions?.((prev) => {
         const next = { ...(prev || {}) };
         const arr = Array.isArray(next[sourceListKey]) ? [...next[sourceListKey]] : [];
-        next[sourceListKey] = arr.filter((s) => !datetimeSet.has(s?.datetime));
+        next[sourceListKey] = arr.filter((s) => !solveRefSet.has(s?.solveRef));
         return next;
       });
 
@@ -278,7 +413,7 @@ export default function useBulkSolveActions({
 
     try {
       for (const s of targets) {
-        await deleteTime(s?.datetime);
+        await deleteTime(s.solveRef);
       }
     } catch (e) {
       console.error("Bulk delete failed:", e);
@@ -338,8 +473,16 @@ export default function useBulkSolveActions({
     setBulkCubeModel,
     bulkCrossColor,
     setBulkCrossColor,
-    bulkCustomLines,
-    setBulkCustomLines,
+    bulkCustom1,
+    setBulkCustom1,
+    bulkCustom2,
+    setBulkCustom2,
+    bulkCustom3,
+    setBulkCustom3,
+    bulkCustom4,
+    setBulkCustom4,
+    bulkCustom5,
+    setBulkCustom5,
 
     bulkMoveEvent,
     setBulkMoveEvent,

@@ -2,39 +2,46 @@ import React, { useMemo } from "react";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
 import "./StatsSummary.css";
 
+const WINDOW_SPECS = [
+  { key: "ao5", label: "AO5", size: 5, kind: "ao" },
+  { key: "ao12", label: "AO12", size: 12, kind: "ao" },
+  { key: "mo3", label: "MO3", size: 3, kind: "mo3" },
+  { key: "ao25", label: "AO25", size: 25, kind: "ao" },
+  { key: "ao50", label: "AO50", size: 50, kind: "ao" },
+  { key: "ao100", label: "AO100", size: 100, kind: "ao" },
+  { key: "ao1000", label: "AO1000", size: 1000, kind: "ao" },
+];
+
 function solveMsAdjusted(s) {
   if (!s) return null;
 
   const base =
     typeof s.originalTime === "number" && isFinite(s.originalTime)
       ? s.originalTime
+      : typeof s.rawTime === "number" && isFinite(s.rawTime)
+      ? s.rawTime
+      : typeof s.rawTimeMs === "number" && isFinite(s.rawTimeMs)
+      ? s.rawTimeMs
       : typeof s.time === "number" && isFinite(s.time)
       ? s.time
+      : typeof s.finalTimeMs === "number" && isFinite(s.finalTimeMs)
+      ? s.finalTimeMs
       : null;
 
   if (base == null) return null;
 
-  if (s.penalty === "+2") return base + 2000;
-  if (s.penalty === "DNF") return null;
-
-  return base;
+  const penalty = String(s.penalty ?? s.Penalty ?? "").toUpperCase();
+  if (penalty === "DNF") return null;
+  if (penalty === "+2") return base + 2000;
+  return typeof s.time === "number" && isFinite(s.time) ? s.time : base;
 }
 
 function toTimesForWCA(solves) {
   return (Array.isArray(solves) ? solves : []).map((s) => {
     if (!s) return "DNF";
-
-    const base =
-      typeof s.originalTime === "number" && isFinite(s.originalTime)
-        ? s.originalTime
-        : typeof s.time === "number" && isFinite(s.time)
-        ? s.time
-        : null;
-
-    if (s.penalty === "DNF") return "DNF";
-    if (base == null) return "DNF";
-    if (s.penalty === "+2") return base + 2000;
-    return base;
+    if (String(s.penalty ?? s.Penalty ?? "").toUpperCase() === "DNF") return "DNF";
+    const adjusted = solveMsAdjusted(s);
+    return adjusted == null ? "DNF" : adjusted;
   });
 }
 
@@ -57,253 +64,660 @@ function stdDevMs(nums) {
   return Math.sqrt(variance);
 }
 
-function mo3FromTimes(times3) {
-  if (times3.length < 3) return null;
-  if (times3.some((t) => t === "DNF")) return "DNF";
-  const nums = times3.filter((t) => typeof t === "number" && isFinite(t));
+function formatStatTime(msOrDnf, { average = true } = {}) {
+  if (msOrDnf === "DNF") return "DNF";
+  if (msOrDnf == null || !isFinite(msOrDnf)) return "—";
+  return formatTime(msOrDnf, average);
+}
+
+function formatCount(value) {
+  return Number.isFinite(Number(value)) ? Number(value).toLocaleString() : "—";
+}
+
+function formatDurationMs(ms) {
+  if (!Number.isFinite(Number(ms))) return "—";
+  const total = Math.max(0, Math.round(Number(ms)));
+  const hours = Math.floor(total / 3600000);
+  const minutes = Math.floor((total % 3600000) / 60000);
+  const seconds = Math.floor((total % 60000) / 1000);
+  const centis = Math.floor((total % 1000) / 10)
+    .toString()
+    .padStart(2, "0");
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${centis}`;
+  }
+
+  return `${minutes}:${String(seconds).padStart(2, "0")}.${centis}`;
+}
+
+function formatDateRange(solves) {
+  const input = Array.isArray(solves) ? solves : [];
+  if (!input.length) return "—";
+  const first = input[0]?.datetime || input[0]?.createdAt;
+  const last = input[input.length - 1]?.datetime || input[input.length - 1]?.createdAt;
+  if (!first || !last) return "—";
+
+  const fmt = (iso) => {
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return "";
+    return d.toLocaleDateString(undefined, {
+      month: "numeric",
+      day: "numeric",
+      year: "2-digit",
+    });
+  };
+
+  const start = fmt(first);
+  const end = fmt(last);
+  return start && end ? `${start} - ${end}` : "—";
+}
+
+function getSolveDate(solve) {
+  const raw = solve?.datetime || solve?.createdAt || solve?.DateTime || solve?.dateTime;
+  if (!raw) return null;
+  const date = new Date(raw);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function getLocalDayKey(date) {
+  if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDayLabel(dayKey) {
+  if (!dayKey) return "—";
+  const date = new Date(`${dayKey}T12:00:00`);
+  if (!Number.isFinite(date.getTime())) return dayKey;
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatClockTime(date) {
+  if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return "—";
+  return date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatIndexRange(solves, totalSolveCount = null, loadedSolveCount = null) {
+  const input = Array.isArray(solves) ? solves : [];
+  if (!input.length) return "—";
+  const first = input[0]?.fullIndex;
+  const last = input[input.length - 1]?.fullIndex;
+  if (!Number.isFinite(first) || !Number.isFinite(last)) return "—";
+
+  const total = Number(totalSolveCount);
+  const loaded = Number(loadedSolveCount);
+
+  if (Number.isFinite(total) && total > 0 && Number.isFinite(loaded) && loaded > 0) {
+    const offset = Math.max(0, total - loaded);
+    return `${offset + first + 1}-${offset + last + 1}`;
+  }
+
+  return `${first + 1}-${last + 1}`;
+}
+
+function getLastSolveDisplay(solves) {
+  const input = Array.isArray(solves) ? solves : [];
+  const last = input[input.length - 1];
+  if (!last) return null;
+  if (String(last.penalty ?? last.Penalty ?? "").toUpperCase() === "DNF") return "DNF";
+  return solveMsAdjusted(last);
+}
+
+function computeMo3Value(times) {
+  if (times.length < 3) return null;
+  if (times.some((t) => t === "DNF")) return "DNF";
+  const nums = times.filter((t) => typeof t === "number" && isFinite(t));
   if (nums.length !== 3) return null;
   return meanMs(nums);
 }
 
-function bestMo3(times) {
-  if (times.length < 3) return null;
-  let best = Infinity;
-  let found = false;
-  for (let i = 0; i <= times.length - 3; i++) {
-    const v = mo3FromTimes(times.slice(i, i + 3));
-    if (typeof v === "number" && isFinite(v)) {
-      found = true;
-      best = Math.min(best, v);
-    }
-  }
-  return found ? best : null;
-}
-
-function bestAoUsingCalculateAverage(times, n) {
-  if (times.length < n) return null;
-  let best = Infinity;
-  let found = false;
-
-  for (let i = 0; i <= times.length - n; i++) {
-    const window = times.slice(i, i + n);
-    const out = calculateAverage(window, true)?.average;
-    if (out === "DNF" || out == null) continue;
-    if (typeof out === "number" && isFinite(out)) {
-      found = true;
-      best = Math.min(best, out);
-    }
-  }
-
-  return found ? best : null;
-}
-
-function currentAoUsingCalculateAverage(times, n) {
-  if (times.length < n) return null;
-  const window = times.slice(-n);
-  const out = calculateAverage(window, true)?.average;
-  if (out === "DNF") return "DNF";
+function computeAoValue(times) {
+  const out = calculateAverage(times, true)?.average;
   return out ?? null;
 }
 
-function bestRollingMean(nums, n) {
-  if (nums.length < n) return null;
-  let best = Infinity;
-  let found = false;
+function computeMeanWindow(nums) {
+  if (!nums.every((n) => typeof n === "number" && isFinite(n))) return null;
+  return meanMs(nums);
+}
 
-  let sum = 0;
-  for (let i = 0; i < nums.length; i++) {
-    sum += nums[i];
-    if (i >= n) sum -= nums[i - n];
-    if (i >= n - 1) {
-      const avg = sum / n;
-      if (isFinite(avg)) {
-        found = true;
-        best = Math.min(best, avg);
-      }
+function computeWindowStat(solves, spec) {
+  const input = Array.isArray(solves) ? solves : [];
+  if (input.length < spec.size) return { current: null, best: null, worst: null };
+
+  const windows = [];
+  const timesForWCA = toTimesForWCA(input);
+  const numeric = input.map(solveMsAdjusted);
+
+  for (let i = 0; i <= input.length - spec.size; i += 1) {
+    let value = null;
+
+    if (spec.kind === "mo3") {
+      value = computeMo3Value(timesForWCA.slice(i, i + spec.size));
+    } else if (spec.kind === "ao") {
+      value = computeAoValue(timesForWCA.slice(i, i + spec.size));
+    } else {
+      value = computeMeanWindow(numeric.slice(i, i + spec.size));
+    }
+
+    windows.push(value);
+  }
+
+  const current = windows[windows.length - 1] ?? null;
+  const numericValues = windows.filter((v) => typeof v === "number" && isFinite(v));
+
+  return {
+    current,
+    best: numericValues.length ? Math.min(...numericValues) : null,
+    worst: numericValues.length ? Math.max(...numericValues) : null,
+  };
+}
+
+function buildViewSummary(solves, totalSolveCount = null, loadedSolveCount = null) {
+  const input = Array.isArray(solves) ? solves : [];
+  if (!input.length) return null;
+
+  const numeric = input.map(solveMsAdjusted).filter((x) => typeof x === "number" && isFinite(x));
+  const plus2Values = input
+    .filter((s) => String(s.penalty ?? s.Penalty ?? "").toUpperCase() === "+2")
+    .map(solveMsAdjusted)
+    .filter((x) => typeof x === "number" && isFinite(x));
+
+  const metrics = {};
+  for (const spec of WINDOW_SPECS) {
+    metrics[spec.key] = computeWindowStat(input, spec);
+  }
+
+  return {
+    solveCount: input.length,
+    dateRange: formatDateRange(input),
+    indexRange: formatIndexRange(input, totalSolveCount, loadedSolveCount),
+    single: {
+      current: getLastSolveDisplay(input),
+      best: numeric.length ? Math.min(...numeric) : null,
+      worst: numeric.length ? Math.max(...numeric) : null,
+    },
+    metrics,
+    mean: meanMs(numeric),
+    median: medianMs(numeric),
+    stdDev: stdDevMs(numeric),
+    plus2Count: plus2Values.length,
+    plus2Best: plus2Values.length ? Math.min(...plus2Values) : null,
+    sum: numeric.reduce((sum, value) => sum + value, 0),
+    dnfCount: input.filter((s) => String(s.penalty ?? s.Penalty ?? "").toUpperCase() === "DNF").length,
+  };
+}
+
+function buildOverallDerived(solves) {
+  const input = Array.isArray(solves) ? solves : [];
+  if (!input.length) return null;
+
+  const numeric = input.map(solveMsAdjusted).filter((x) => typeof x === "number" && isFinite(x));
+  const plus2Values = input
+    .filter((s) => String(s.penalty ?? s.Penalty ?? "").toUpperCase() === "+2")
+    .map(solveMsAdjusted)
+    .filter((x) => typeof x === "number" && isFinite(x));
+
+  return {
+    singleWorst: numeric.length ? Math.max(...numeric) : null,
+    mo3Worst: computeWindowStat(input, { size: 3, kind: "mo3" }).worst,
+    ao5Worst: computeWindowStat(input, { size: 5, kind: "ao" }).worst,
+    ao12Worst: computeWindowStat(input, { size: 12, kind: "ao" }).worst,
+    mean: meanMs(numeric),
+    stdDev: stdDevMs(numeric),
+    sum: numeric.reduce((sum, value) => sum + value, 0),
+    plus2Best: plus2Values.length ? Math.min(...plus2Values) : null,
+  };
+}
+
+function buildTimeViewSummary(solves, selectedDay) {
+  const input = Array.isArray(solves) ? solves : [];
+  const daySolves = input.filter((solve) => {
+    const date = getSolveDate(solve);
+    return date && getLocalDayKey(date) === selectedDay;
+  });
+
+  if (!daySolves.length) return null;
+
+  const dated = daySolves
+    .map((solve) => ({ solve, date: getSolveDate(solve) }))
+    .filter((item) => item.date)
+    .sort((a, b) => a.date - b.date);
+
+  const numeric = daySolves.map(solveMsAdjusted).filter((x) => typeof x === "number" && isFinite(x));
+  const dnfCount = daySolves.filter((s) => String(s.penalty ?? s.Penalty ?? "").toUpperCase() === "DNF").length;
+
+  const hourMap = Array.from({ length: 24 }, (_, hour) => ({
+    hour,
+    count: 0,
+    numeric: [],
+  }));
+
+  for (const item of dated) {
+    const hour = item.date.getHours();
+    hourMap[hour].count += 1;
+    const adjusted = solveMsAdjusted(item.solve);
+    if (typeof adjusted === "number" && isFinite(adjusted)) {
+      hourMap[hour].numeric.push(adjusted);
     }
   }
 
-  return found ? best : null;
+  const activeHours = hourMap.filter((hour) => hour.count > 0);
+  const busiestHour = [...activeHours].sort((a, b) => b.count - a.count || a.hour - b.hour)[0] || null;
+  const fastestHour =
+    [...activeHours]
+      .filter((hour) => hour.numeric.length)
+      .sort(
+        (a, b) =>
+          meanMs(a.numeric) - meanMs(b.numeric) ||
+          b.count - a.count ||
+          a.hour - b.hour
+      )[0] || null;
+
+  const firstDate = dated[0]?.date || null;
+  const lastDate = dated[dated.length - 1]?.date || null;
+  const spanMs = firstDate && lastDate ? lastDate.getTime() - firstDate.getTime() : null;
+
+  return {
+    solveCount: daySolves.length,
+    dateLabel: formatDayLabel(selectedDay),
+    firstSolve: formatClockTime(firstDate),
+    lastSolve: formatClockTime(lastDate),
+    activeHours: activeHours.length,
+    busiestHour: busiestHour
+      ? `${formatClockTime(new Date(2000, 0, 1, busiestHour.hour, 0))} (${busiestHour.count})`
+      : "—",
+    fastestHour: fastestHour
+      ? `${formatClockTime(new Date(2000, 0, 1, fastestHour.hour, 0))} (${formatStatTime(meanMs(fastestHour.numeric))})`
+      : "—",
+    bestSingle: numeric.length ? Math.min(...numeric) : null,
+    worstSingle: numeric.length ? Math.max(...numeric) : null,
+    mean: meanMs(numeric),
+    median: medianMs(numeric),
+    stdDev: stdDevMs(numeric),
+    sum: numeric.reduce((sum, value) => sum + value, 0),
+    dnfCount,
+    spanMs,
+    topHours: [...activeHours]
+      .sort((a, b) => b.count - a.count || a.hour - b.hour)
+      .slice(0, 3)
+      .map((hour) => ({
+        label: formatClockTime(new Date(2000, 0, 1, hour.hour, 0)),
+        count: hour.count,
+        mean: hour.numeric.length ? meanMs(hour.numeric) : null,
+      })),
+  };
 }
 
-function displayMaybe(msOrDnf) {
-  if (msOrDnf === "DNF") return "DNF";
-  if (msOrDnf == null) return "—";
-  return formatTime(msOrDnf);
+function MetricRow({ label, current, best, worst, showWorst = true, showCurrent = true }) {
+  return (
+    <div className="ssMetricRow">
+      <div className="ssMetricLabel">{label}</div>
+      <div className="ssMetricValues">
+        <span className="ssMetricValue ssMetricValue--best">{formatStatTime(best)}</span>
+        {showWorst && (
+          <>
+            <span className="ssMetricDot">·</span>
+            <span className="ssMetricValue ssMetricValue--worst">{formatStatTime(worst)}</span>
+          </>
+        )}
+        {showCurrent && (
+          <>
+            <span className="ssMetricDot">·</span>
+            <span className="ssMetricValue ssMetricValue--current">{formatStatTime(current)}</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
-function StatsSummary({ solves, overallStats }) {
-  const computed = useMemo(() => {
-    const input = Array.isArray(solves) ? solves : [];
-    if (input.length === 0) return null;
+function OverallMetricRow({ label, best, worst = null, average = true }) {
+  return (
+    <div className="ssOverallMetricRow">
+      <div className="ssOverallMetricLabel">{label}</div>
+      <div className="ssOverallMetricValues">
+        <span className="ssMetricValue ssMetricValue--best">
+          {formatStatTime(best, { average })}
+        </span>
+        {worst !== null && (
+          <>
+            <span className="ssMetricSpacer" />
+            <span className="ssMetricValue ssMetricValue--worst">
+              {formatStatTime(worst, { average })}
+            </span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
-    const numeric = input
-      .map(solveMsAdjusted)
-      .filter((x) => typeof x === "number" && isFinite(x));
+function MetaStat({ label, value, tone = "default", stacked = false }) {
+  return (
+    <div className={`ssMetaStat ssMetaStat--${tone} ${stacked ? "ssMetaStat--stacked" : ""}`}>
+      <div className="ssMetaLabel">{label}</div>
+      <div className="ssMetaValue">{value}</div>
+    </div>
+  );
+}
 
-    const timesForWCA = toTimesForWCA(input);
+function StatsSummary({
+  solves,
+  overallSolves = [],
+  overallStats,
+  allEventsBreakdown,
+  mode = "session",
+  selectedEvent,
+  selectedSession,
+  loadedSolveCount = null,
+  showCurrentMetrics = true,
+  viewMode = "standard",
+  selectedDay = "",
+}) {
+  const view = useMemo(
+    () => buildViewSummary(solves, overallStats?.SolveCountTotal ?? null, loadedSolveCount),
+    [solves, overallStats?.SolveCountTotal, loadedSolveCount]
+  );
+  const timeView = useMemo(() => buildTimeViewSummary(solves, selectedDay), [solves, selectedDay]);
+  const overallDerived = useMemo(() => buildOverallDerived(overallSolves), [overallSolves]);
 
-    const bestSingleInView = numeric.length ? Math.min(...numeric) : null;
+  const overall = useMemo(
+    () => ({
+      solveCountTotal: overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
+      single: overallStats?.BestSingleMs ?? null,
+      mo3: overallStats?.BestMo3Ms ?? null,
+      ao5: overallStats?.BestAo5Ms ?? null,
+      ao12: overallStats?.BestAo12Ms ?? null,
+      ao25: overallStats?.BestAo25Ms ?? null,
+      ao50: overallStats?.BestAo50Ms ?? null,
+      ao100: overallStats?.BestAo100Ms ?? null,
+      ao1000: overallStats?.BestAo1000Ms ?? null,
+      mean: overallStats?.MeanMs ?? overallDerived?.mean ?? null,
+      stdDev: overallDerived?.stdDev ?? null,
+      sum: overallStats?.SumFinalTimeMs ?? overallDerived?.sum ?? null,
+      plus2Count: overallStats?.Plus2Count ?? null,
+      plus2Best: overallDerived?.plus2Best ?? null,
+      dnfCount: overallStats?.DNFCount ?? null,
+      singleWorst: overallDerived?.singleWorst ?? null,
+      mo3Worst: overallDerived?.mo3Worst ?? null,
+      ao5Worst: overallDerived?.ao5Worst ?? null,
+      ao12Worst: overallDerived?.ao12Worst ?? null,
+    }),
+    [overallStats, overallDerived, overallSolves]
+  );
 
-    const meanInView = meanMs(numeric);
-    const medianInView = medianMs(numeric);
-    const stdDevInView = stdDevMs(numeric);
+  const compactSession = String(selectedSession || "").replace(/\s+session$/i, "").trim();
+  const overallTitle = `Overall ${selectedEvent || "Event"}${compactSession ? ` · ${compactSession}` : ""}`;
 
-    const current = {
-      mo3: mo3FromTimes(timesForWCA.slice(-3)),
-      ao5: currentAoUsingCalculateAverage(timesForWCA, 5),
-      ao12: currentAoUsingCalculateAverage(timesForWCA, 12),
-      ao50: numeric.length >= 50 ? meanMs(numeric.slice(-50)) : null,
-      ao100: numeric.length >= 100 ? meanMs(numeric.slice(-100)) : null,
-    };
+  if (mode === "all-events") {
+    const rows = Array.isArray(allEventsBreakdown) ? allEventsBreakdown : [];
+    return (
+      <div className="statsSummaryEmpty">
+        {rows.length ? `All events overview: ${rows.length} events cached.` : "No solves available"}
+      </div>
+    );
+  }
 
-    const bestInView = {
-      mo3: bestMo3(timesForWCA),
-      ao5: bestAoUsingCalculateAverage(timesForWCA, 5),
-      ao12: bestAoUsingCalculateAverage(timesForWCA, 12),
-      ao50: numeric.length >= 50 ? bestRollingMean(numeric, 50) : null,
-      ao100: numeric.length >= 100 ? bestRollingMean(numeric, 100) : null,
-    };
-
-    return {
-      bestSingleInView,
-      meanInView,
-      medianInView,
-      stdDevInView,
-      current,
-      bestInView,
-    };
-  }, [solves]);
-
-  if (!computed) {
+  if (!view && !overallStats) {
     return <div className="statsSummaryEmpty">No solves available</div>;
   }
 
-  // ✅ in-view count (last 100 by default)
-  const inViewCount = Array.isArray(solves) ? solves.length : 0;
-
-  // ✅ overall only from cached stats
-  const overall = {
-    solveCount: overallStats?.solveCount ?? null,
-    single: overallStats?.bestSingleMs ?? null,
-    mean: overallStats?.overallAvgMs ?? overallStats?.meanMs ?? null,
-    ao5: overallStats?.bestAo5Ms ?? overallStats?.bestAo5 ?? null,
-    ao12: overallStats?.bestAo12Ms ?? overallStats?.bestAo12 ?? null,
-    ao50: overallStats?.bestAo50Ms ?? overallStats?.bestAo50 ?? null,
-    ao100: overallStats?.bestAo100Ms ?? overallStats?.bestAo100 ?? null,
-  };
-
-  const meanToShow = overall.mean ?? computed.meanInView;
-  const bestSingleToShow = overall.single ?? computed.bestSingleInView;
-
   return (
-    <div className="statsSummaryBar">
-      <div className="ssCount">
-        <div>
-          <div className="ssCountValue">{inViewCount}</div>
-          <div className="ssCountLabel">solves</div>
+    <div className="statsSummaryShell">
+      <section className={`ssCard ${viewMode === "time" ? "ssCard--time" : "ssCard--view"}`}>
+        {viewMode === "time" ? (
+          timeView ? (
+            <>
+              <div className="ssTimeLead">
+                <div className="ssViewCountValue">{formatCount(timeView.solveCount)}</div>
+                <div className="ssViewCountLabel">solves that day</div>
+                <div className="ssViewMeta">{timeView.dateLabel}</div>
+                <div className="ssViewMeta">
+                  {timeView.firstSolve} - {timeView.lastSolve}
+                </div>
+              </div>
+
+              <div className="ssTimeBody">
+                <div className="ssTimeBodyHeader">Top hours</div>
+                <div className="ssTimeHours">
+                  {timeView.topHours.map((hour) => (
+                    <div key={hour.label} className="ssTimeHourRow">
+                      <span className="ssTimeHourLabel">{hour.label}</span>
+                      <span className="ssTimeHourCount">{hour.count} solves</span>
+                      <span className="ssTimeHourMean">{formatStatTime(hour.mean)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="ssTimeSide">
+                <div className="ssSingleRow">
+                  <div className="ssSingleLabel">Single</div>
+                  <div className="ssSingleValues">
+                    <span className="ssMetricValue ssMetricValue--best">
+                      {formatStatTime(timeView.bestSingle, { average: false })}
+                    </span>
+                    <span className="ssMetricValue ssMetricValue--worst">
+                      {formatStatTime(timeView.worstSingle, { average: false })}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="ssTopMetaRow">
+                  <MetaStat label="Mean" value={formatStatTime(timeView.mean)} tone="accent" stacked />
+                  <MetaStat label="Median" value={formatStatTime(timeView.median)} tone="accent" stacked />
+                  <MetaStat label="SD" value={formatStatTime(timeView.stdDev)} tone="accent" stacked />
+                </div>
+
+                <div className="ssMetaGrid">
+                  <div className="ssMetaColumn">
+                    <MetaStat label="Active Hours" value={formatCount(timeView.activeHours)} tone="lime" />
+                    <MetaStat label="Busiest Hour" value={timeView.busiestHour} tone="teal" />
+                  </div>
+                  <div className="ssMetaColumn">
+                    <MetaStat label="Fastest Hour" value={timeView.fastestHour} tone="blue" />
+                    <MetaStat label="DNF Count" value={formatCount(timeView.dnfCount)} tone="danger" />
+                  </div>
+                </div>
+
+                <div className="ssMetaGrid">
+                  <div className="ssMetaColumn">
+                    <MetaStat label="Day Span" value={formatDurationMs(timeView.spanMs)} tone="blue" />
+                  </div>
+                  <div className="ssMetaColumn">
+                    <MetaStat label="Sum" value={formatDurationMs(timeView.sum)} tone="blue" />
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="statsSummaryEmpty">No solves available for the selected day</div>
+          )
+        ) : (
+          <>
+        <div className="ssViewCount">
+          <div className="ssViewCountValue">{formatCount(view?.solveCount)}</div>
+          <div className="ssViewCountLabel">solves</div>
+          <div className="ssViewMeta">{view?.dateRange || "—"}</div>
+          <div className="ssViewMeta">{view?.indexRange || "—"}</div>
         </div>
 
-        <div className="ssBestSingle">
-          <div className="ssBestSingleValue">{displayMaybe(bestSingleToShow)}</div>
-          <div className="ssBestSingleLabel">BEST SINGLE</div>
-        </div>
-      </div>
+        <div className="ssViewBody">
+          <div className="ssMetricGrid">
+            <div className="ssMetricColumn">
+              <div className="ssViewLegend">
+                <span className="ssMetricValue--best">Best</span>
+                <span className="ssMetricDot">·</span>
+                <span className="ssMetricValue--worst">Worst</span>
+                {showCurrentMetrics && (
+                  <>
+                    <span className="ssMetricDot">·</span>
+                    <span className="ssMetricValue--current">Current</span>
+                  </>
+                )}
+              </div>
+              <MetricRow
+                label="AO5"
+                current={view?.metrics?.ao5?.current}
+                best={view?.metrics?.ao5?.best}
+                worst={view?.metrics?.ao5?.worst}
+                showCurrent={showCurrentMetrics}
+              />
+              <MetricRow
+                label="AO12"
+                current={view?.metrics?.ao12?.current}
+                best={view?.metrics?.ao12?.best}
+                worst={view?.metrics?.ao12?.worst}
+                showCurrent={showCurrentMetrics}
+              />
+              <MetricRow
+                label="MO3"
+                current={view?.metrics?.mo3?.current}
+                best={view?.metrics?.mo3?.best}
+                worst={view?.metrics?.mo3?.worst}
+                showCurrent={showCurrentMetrics}
+              />
+            </div>
 
-      <div className="ssMainStats">
-        <div>
-          <div className="ssStatLabel">MEAN</div>
-          <div className="ssStatValue">{displayMaybe(meanToShow)}</div>
-        </div>
-        <div>
-          <div className="ssStatLabel">MEDIAN</div>
-          <div className="ssStatValue">{displayMaybe(computed.medianInView)}</div>
-        </div>
-        <div>
-          <div className="ssStatLabel">ST. DEV</div>
-          <div className="ssStatValue">{displayMaybe(computed.stdDevInView)}</div>
-        </div>
-      </div>
-
-      <div className="ssPanels">
-        <div className="ssPanel ssPanel--current">
-          <div className="ssPanelTitle">Current</div>
-          <div className="ssPanelGrid">
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(computed.current.mo3)}</div>
-              <div className="ssLbl">mo3</div>
-            </div>
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(computed.current.ao5)}</div>
-              <div className="ssLbl">ao5</div>
-            </div>
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(computed.current.ao12)}</div>
-              <div className="ssLbl">ao12</div>
-            </div>
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(computed.current.ao50)}</div>
-              <div className="ssLbl">ao50</div>
-            </div>
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(computed.current.ao100)}</div>
-              <div className="ssLbl">ao100</div>
+            <div className="ssMetricColumn">
+              <MetricRow
+                label="AO25"
+                current={view?.metrics?.ao25?.current}
+                best={view?.metrics?.ao25?.best}
+                worst={view?.metrics?.ao25?.worst}
+                showWorst={false}
+                showCurrent={showCurrentMetrics}
+              />
+              <MetricRow
+                label="AO50"
+                current={view?.metrics?.ao50?.current}
+                best={view?.metrics?.ao50?.best}
+                worst={view?.metrics?.ao50?.worst}
+                showWorst={false}
+                showCurrent={showCurrentMetrics}
+              />
+              <MetricRow
+                label="AO100"
+                current={view?.metrics?.ao100?.current}
+                best={view?.metrics?.ao100?.best}
+                worst={view?.metrics?.ao100?.worst}
+                showWorst={false}
+                showCurrent={showCurrentMetrics}
+              />
+              <MetricRow
+                label="AO1000"
+                current={view?.metrics?.ao1000?.current}
+                best={view?.metrics?.ao1000?.best}
+                worst={view?.metrics?.ao1000?.worst}
+                showWorst={false}
+                showCurrent={showCurrentMetrics}
+              />
             </div>
           </div>
         </div>
 
-        <div className="ssPanel ssPanel--best">
-          <div className="ssPanelTitle">Best in view</div>
-          <div className="ssPanelGrid">
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(computed.bestInView.mo3)}</div>
-              <div className="ssLbl">mo3</div>
-            </div>
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(computed.bestInView.ao5)}</div>
-              <div className="ssLbl">ao5</div>
-            </div>
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(computed.bestInView.ao12)}</div>
-              <div className="ssLbl">ao12</div>
-            </div>
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(computed.bestInView.ao50)}</div>
-              <div className="ssLbl">ao50</div>
-            </div>
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(computed.bestInView.ao100)}</div>
-              <div className="ssLbl">ao100</div>
+        <div className="ssViewSide">
+          <div className="ssSingleRow">
+            <div className="ssSingleLabel">Single</div>
+            <div className="ssSingleValues">
+              <span className="ssMetricValue ssMetricValue--best">
+                {formatStatTime(view?.single?.best, { average: false })}
+              </span>
+              <span className="ssMetricValue ssMetricValue--worst">
+                {formatStatTime(view?.single?.worst, { average: false })}
+              </span>
+              {showCurrentMetrics && (
+                <span className="ssMetricValue ssMetricValue--current">
+                  {formatStatTime(view?.single?.current, { average: false })}
+                </span>
+              )}
             </div>
           </div>
+
+          <div className="ssTopMetaRow">
+            <MetaStat label="Mean" value={formatStatTime(view?.mean)} tone="accent" stacked />
+            <MetaStat label="Median" value={formatStatTime(view?.median)} tone="accent" stacked />
+            <MetaStat label="SD" value={formatStatTime(view?.stdDev)} tone="accent" stacked />
+          </div>
+
+          <div className="ssMetaGrid">
+            <div className="ssMetaColumn">
+              <MetaStat label="+2 Count" value={formatCount(view?.plus2Count)} tone="lime" />
+              <MetaStat
+                label="+2 Best"
+                value={formatStatTime(view?.plus2Best, { average: false })}
+                tone="teal"
+              />
+            </div>
+            <div className="ssMetaColumn">
+              <MetaStat label="Sum" value={formatDurationMs(view?.sum)} tone="blue" />
+              <MetaStat label="DNF Count" value={formatCount(view?.dnfCount)} tone="danger" />
+            </div>
+          </div>
+        </div>
+          </>
+        )}
+      </section>
+
+      <section className="ssCard ssCard--overall">
+        <div className="ssOverallHeader">
+          <div className="ssOverallTitle">{overallTitle}</div>
+          <div className="ssOverallCount">{formatCount(overall.solveCountTotal)} solves</div>
         </div>
 
-        <div className="ssPanel ssPanel--overall">
-          <div className="ssPanelTitle">Overall</div>
-          <div className="ssPanelGrid">
-            <div className="ssRow">
-              <div className="ssKey">{overall.solveCount ?? "—"}</div>
-              <div className="ssLbl">solves</div>
+        <div className="ssOverallBody">
+          <div className="ssOverallMetricGrid">
+            <OverallMetricRow
+              label="Single"
+              best={overall.single}
+              worst={overall.singleWorst}
+              average={false}
+            />
+            <OverallMetricRow label="AO25" best={overall.ao25} />
+            <OverallMetricRow label="AO5" best={overall.ao5} worst={overall.ao5Worst} />
+            <OverallMetricRow label="AO50" best={overall.ao50} />
+            <OverallMetricRow label="AO12" best={overall.ao12} worst={overall.ao12Worst} />
+            <OverallMetricRow label="AO100" best={overall.ao100} />
+            <OverallMetricRow label="MO3" best={overall.mo3} worst={overall.mo3Worst} />
+            <OverallMetricRow label="AO1000" best={overall.ao1000} />
+          </div>
+
+          <div className="ssOverallMeta">
+            <div className="ssOverallMetaRow ssOverallMetaRow--pair">
+              <MetaStat label="Mean" value={formatStatTime(overall.mean)} tone="accent" />
+              <MetaStat label="SD" value={formatStatTime(overall.stdDev)} tone="accent" />
             </div>
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(overall.single)}</div>
-              <div className="ssLbl">single</div>
+            <div className="ssOverallMetaRow">
+              <MetaStat label="Sum" value={formatDurationMs(overall.sum)} tone="blue" />
             </div>
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(overall.mean)}</div>
-              <div className="ssLbl">mean</div>
+            <div className="ssOverallMetaRow">
+              <MetaStat label="+2 Count" value={formatCount(overall.plus2Count)} tone="lime" />
             </div>
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(overall.ao5)}</div>
-              <div className="ssLbl">ao5</div>
+            <div className="ssOverallMetaRow">
+              <MetaStat
+                label="+2 Best"
+                value={formatStatTime(overall.plus2Best, { average: false })}
+                tone="teal"
+              />
             </div>
-            <div className="ssRow">
-              <div className="ssKey">{displayMaybe(overall.ao12)}</div>
-              <div className="ssLbl">ao12</div>
+            <div className="ssOverallMetaRow">
+              <MetaStat label="DNF Count" value={formatCount(overall.dnfCount)} tone="danger" />
             </div>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

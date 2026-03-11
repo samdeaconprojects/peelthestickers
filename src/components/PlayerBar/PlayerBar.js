@@ -25,6 +25,7 @@ function PlayerBar({
   applyPenalty,
   customEvents,
   sessionsList,
+  onHide,
 }) {
   const location = useLocation();
   const { pathname } = location;
@@ -38,23 +39,11 @@ function PlayerBar({
   };
   const currentBorderColor = borderColor[pathname] || "white";
 
-  const getScrambleFontSize = (event) => {
-    switch (event) {
-      case "222": return "18px";
-      case "333": return "16px";
-      case "444": return "14px";
-      case "555": return "12px";
-      case "666":
-      case "777": return "11px";
-      case "CLOCK": return "14px";
-      case "SKEWB":
-      case "PYRAMINX": return "14px";
-      case "MEGAMINX": return "10px";
-      default: return "14px";
-    }
-  };
-
-  const currentSolves = sessions[currentEvent] || [];
+  const eventKey = String(currentEvent || "").toUpperCase();
+  const allEventSolves = Array.isArray(sessions?.[eventKey]) ? sessions[eventKey] : [];
+  const currentSolves = allEventSolves.filter(
+    (s) => String(s?.sessionID || s?.SessionID || "main") === String(currentSession || "main")
+  );
 
   return (
     <div
@@ -66,7 +55,6 @@ function PlayerBar({
         <div className="playerbar-timer">
           <Timer addTime={addTime} inPlayerBar={true} />
         </div>
-        
       </div>
 
       {/* MIDDLE: Scramble + TimeList */}
@@ -86,17 +74,31 @@ function PlayerBar({
             user={user}
             applyPenalty={applyPenalty}
             solves={currentSolves}
-            deleteTime={(index) => deleteTime(currentEvent, index)}
+            deleteTime={(solveRefOrIndex) => deleteTime(eventKey, solveRefOrIndex)}
             inPlayerBar={true}
             addPost={addPost}
             rowsToShow={1}
+            sessionsList={sessionsList}
+            currentEvent={currentEvent}
+            currentSession={currentSession}
+            eventKey={currentEvent}
+            practiceMode={false}
           />
         </div>
       </div>
 
       {/* RIGHT: Puzzle SVG */}
       <div className="playerbar-right">
-        <div className="playerbar-selector">
+        <button
+          type="button"
+          className="playerbar-toggle-inbar"
+          onClick={onHide}
+          aria-label="Hide player bar"
+          title="Hide player bar"
+        >
+          ▼
+        </button>
+        <div className="playerbar-selector-wrap">
           <EventSelector
             currentEvent={currentEvent}
             handleEventChange={handleEventChange}

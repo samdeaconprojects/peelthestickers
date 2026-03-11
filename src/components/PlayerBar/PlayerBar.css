@@ -2,7 +2,7 @@
 
 .player-bar {
   display: grid;
-  grid-template-columns: minmax(100px, 200px) 1fr 120px; /* left | middle | cube */
+  grid-template-columns: minmax(140px, 240px) minmax(420px, 1fr) minmax(170px, 230px);
   align-items: center;
   gap: 12px;
 
@@ -22,11 +22,10 @@
 
 .player-bar.hidden { transform: translateY(100%); }
 
-/* LEFT: timer + selector */
+/* LEFT: timer */
 .playerbar-left {
   display: flex;
   align-items: center;
-  gap: 12px;                 /* selector sits close to timer */
   height: 100%;
 }
 
@@ -36,14 +35,6 @@
   font-size: 72px;           /* a little bigger */
   margin: 0;
   line-height: 1;
-}
-
-/* keep selector vertically aligned with timer */
-.playerbar-selector {
-  display: flex;
-  align-items: center;
-  margin-right: 100px;
-
 }
 
 /* MIDDLE: scramble + timelist centered and stable */
@@ -96,16 +87,91 @@
   margin: 0 auto;
 }
 
-/* RIGHT: cube pulled in a bit */
+/* RIGHT: selector + cube stack */
+.playerbar-right {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  position: relative;
+  padding-right: 2px;
+}
+
+.playerbar-toggle-inbar {
+  position: absolute;
+  top: -4px;
+  right: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  background: rgba(14, 23, 29, 0.92);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  opacity: 1;
+}
+
+.playerbar-selector-wrap {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin-top: 14px;
+}
+
+.playerbar-selector-wrap .event-selector-box {
+  min-width: 96px;
+  padding: 6px 10px;
+}
+
 .playerbar-cube {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
 }
 
 .playerbar-cube svg {
   width: 90px;
   height: 90px;
+}
+
+/* In player bar, force cube wrapper to ignore global music-player offsets */
+.playerbar-cube .cube {
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  margin-top: 0 !important;
+}
+
+/* Lock fixed chip sizes in player bar TimeList */
+.playerbar-timelist .TimeList {
+  table-layout: auto;
+}
+
+.playerbar-timelist .TimeList tr {
+  grid-template-columns: repeat(12, 54px) 66px;
+  justify-content: center;
+  gap: 6px;
+}
+
+.playerbar-timelist .TimeList td {
+  width: 54px;
+  min-width: 54px;
+  max-width: 54px;
+  height: 34px;
+  padding: 0 2px;
+}
+
+.playerbar-timelist .TimeList td:nth-child(13) {
+  width: 66px;
+  min-width: 66px;
+  max-width: 66px;
 }
 
 /* make sure any global .Timer margin doesn't leak here */

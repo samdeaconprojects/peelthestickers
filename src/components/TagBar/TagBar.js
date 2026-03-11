@@ -1,36 +1,83 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./TagBar.css";
 
-/**
- * TagBar
- * - Lives under the EventSelector (Timer page)
- * - Edits "current tags" that will be attached to NEW solves
- * - Keeps it lightweight: tags are just stored on solves (no extra queries)
- *
- * tags shape:
- * {
- *   CubeModel: "Gan V100",
- *   Lighting: "White Light",
- *   CrossColor: "Yellow Cross",
- *   Custom: { key1: "value1", ... }
- * }
- */
-export default function TagBar({ tags, onChange }) {
-  const safeTags = tags || {};
-  const custom = safeTags.Custom || {};
+const DEFAULT_TAG_CONFIG = {
+  Fixed: {
+    CubeModel: { label: "Cube Model", options: [] },
+    CrossColor: {
+      label: "Cross Color",
+      options: ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
+    },
+    TimerInput: {
+      label: "Timer Input",
+      options: ["Keyboard", "Type", "Stackmat", "GAN Bluetooth", "GAN Cube"],
+    },
+    SolveSource: {
+      label: "Solve Source",
+      options: ["Normal", "Practice", "Shared", "Relay", "Import", "SmartCube"],
+    },
+  },
+  CustomSlots: [
+    { slot: "Custom1", label: "", options: [] },
+    { slot: "Custom2", label: "", options: [] },
+    { slot: "Custom3", label: "", options: [] },
+    { slot: "Custom4", label: "", options: [] },
+    { slot: "Custom5", label: "", options: [] },
+  ],
+};
 
-  const [adding, setAdding] = useState(false);
-  const [newKey, setNewKey] = useState("");
-  const [newVal, setNewVal] = useState("");
-  const [editingField, setEditingField] = useState(null); // "CubeModel" | "Lighting" | "CrossColor" | null
+function normalizeTagConfig(input) {
+  const cfg = input && typeof input === "object" ? input : {};
+  const fixed = cfg.Fixed || {};
+  const customSlots = Array.isArray(cfg.CustomSlots) ? cfg.CustomSlots : [];
 
+  return {
+    Fixed: {
+      CubeModel: {
+        label: fixed?.CubeModel?.label || "Cube Model",
+        options: Array.isArray(fixed?.CubeModel?.options) ? fixed.CubeModel.options : [],
+      },
+      CrossColor: {
+        label: fixed?.CrossColor?.label || "Cross Color",
+        options: Array.isArray(fixed?.CrossColor?.options)
+          ? fixed.CrossColor.options
+          : ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
+      },
+      TimerInput: {
+        label: fixed?.TimerInput?.label || "Timer Input",
+        options: Array.isArray(fixed?.TimerInput?.options)
+          ? fixed.TimerInput.options
+          : ["Keyboard", "Type", "Stackmat", "GAN Bluetooth", "GAN Cube"],
+      },
+      SolveSource: {
+        label: fixed?.SolveSource?.label || "Solve Source",
+        options: Array.isArray(fixed?.SolveSource?.options)
+          ? fixed.SolveSource.options
+          : ["Normal", "Practice", "Shared", "Relay", "Import", "SmartCube"],
+      },
+    },
+    CustomSlots: Array.from({ length: 5 }, (_, i) => {
+      const existing = customSlots[i] || {};
+      return {
+        slot: `Custom${i + 1}`,
+        label: existing?.label || "",
+        options: Array.isArray(existing?.options) ? existing.options : [],
+      };
+    }),
+  };
+}
+
+export default function TagBar({ tags, onChange, tagConfig }) {
   const wrapRef = useRef(null);
+  const safeTags = tags || {};
+  const cfg = useMemo(() => normalizeTagConfig(tagConfig || DEFAULT_TAG_CONFIG), [tagConfig]);
+
+  const [editingField, setEditingField] = useState(null);
 
   useEffect(() => {
     const onDown = (e) => {
       if (!wrapRef.current) return;
       if (!wrapRef.current.contains(e.target)) {
-        setAdding(false);
         setEditingField(null);
       }
     };
@@ -39,56 +86,50 @@ export default function TagBar({ tags, onChange }) {
   }, []);
 
   const setField = (field, value) => {
+    const v = String(value || "").trim();
     const next = { ...(safeTags || {}) };
-    if (!value) delete next[field];
-    else next[field] = value;
+    if (!v) delete next[field];
+    else next[field] = v;
     onChange?.(next);
   };
 
-  const removeCustom = (k) => {
-    const next = { ...(safeTags || {}) };
-    const c = { ...(next.Custom || {}) };
-    delete c[k];
-    if (Object.keys(c).length === 0) delete next.Custom;
-    else next.Custom = c;
-    onChange?.(next);
-  };
-
-  const addCustom = () => {
-    const k = String(newKey || "").trim();
-    const v = String(newVal || "").trim();
-    if (!k) return;
-
-    const next = { ...(safeTags || {}) };
-    const c = { ...(next.Custom || {}) };
-    c[k] = v || "true";
-    next.Custom = c;
-
-    onChange?.(next);
-    setNewKey("");
-    setNewVal("");
-    setAdding(false);
-  };
-
-  const pill = (label, field) => {
+  const pill = (label, field, options = []) => {
     const value = safeTags?.[field] || "";
-    const text = value ? value : label;
+    const text = value || label;
+    const hasOptions = Array.isArray(options) && options.length > 0;
 
     return (
       <div className="tagPillWrap" key={field}>
         {editingField === field ? (
-          <input
-            className="tagPillInput"
-            autoFocus
-            value={value}
-            onChange={(e) => setField(field, e.target.value)}
-            onBlur={() => setEditingField(null)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") setEditingField(null);
-              if (e.key === "Escape") setEditingField(null);
-            }}
-            placeholder={label}
-          />
+          hasOptions ? (
+            <select
+              className="tagPillInput"
+              autoFocus
+              value={value}
+              onChange={(e) => setField(field, e.target.value)}
+              onBlur={() => setEditingField(null)}
+            >
+              <option value="">{label}</option>
+              {options.map((opt) => (
+                <option key={`${field}-${opt}`} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className="tagPillInput"
+              autoFocus
+              value={value}
+              onChange={(e) => setField(field, e.target.value)}
+              onBlur={() => setEditingField(null)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") setEditingField(null);
+                if (e.key === "Escape") setEditingField(null);
+              }}
+              placeholder={label}
+            />
+          )
         ) : (
           <button
             type="button"
@@ -103,63 +144,15 @@ export default function TagBar({ tags, onChange }) {
     );
   };
 
-  const customPills = useMemo(() => {
-    return Object.entries(custom).map(([k, v]) => (
-      <div className="tagPillWrap" key={`custom-${k}`}>
-        <div className="tagPill tagPill--custom" title={`${k}=${v}`}>
-          <span className="tagPillText">
-            {k}{v && v !== "true" ? `: ${v}` : ""}
-          </span>
-          <button
-            type="button"
-            className="tagPillX"
-            onClick={() => removeCustom(k)}
-            title="Remove"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-    ));
-  }, [custom, tags]); // eslint-disable-line react-hooks/exhaustive-deps
-
   return (
     <div className="tagBarWrap" ref={wrapRef}>
-      {pill("Cube", "CubeModel")}
-      {pill("Light", "Lighting")}
-      {pill("Cross", "CrossColor")}
+      {pill(cfg.Fixed.CubeModel.label, "CubeModel", cfg.Fixed.CubeModel.options)}
+      {pill(cfg.Fixed.CrossColor.label, "CrossColor", cfg.Fixed.CrossColor.options)}
+      {pill(cfg.Fixed.TimerInput.label, "TimerInput", cfg.Fixed.TimerInput.options)}
+      {pill(cfg.Fixed.SolveSource.label, "SolveSource", cfg.Fixed.SolveSource.options)}
 
-      {customPills}
-
-      {adding ? (
-        <div className="tagAddRow">
-          <input
-            className="tagAddInput"
-            value={newKey}
-            onChange={(e) => setNewKey(e.target.value)}
-            placeholder="tag"
-          />
-          <input
-            className="tagAddInput"
-            value={newVal}
-            onChange={(e) => setNewVal(e.target.value)}
-            placeholder="value"
-          />
-          <button type="button" className="tagAddBtn" onClick={addCustom}>
-            Add
-          </button>
-          <button
-            type="button"
-            className="tagAddBtn tagAddBtn--ghost"
-            onClick={() => setAdding(false)}
-          >
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <button type="button" className="tagPill tagPill--add" onClick={() => setAdding(true)}>
-          + Tag
-        </button>
+      {cfg.CustomSlots.map((slot) =>
+        pill(slot.label || slot.slot, slot.slot, Array.isArray(slot.options) ? slot.options : [])
       )}
     </div>
   );

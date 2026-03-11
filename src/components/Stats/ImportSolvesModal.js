@@ -31,6 +31,7 @@ export default function ImportSolvesModal({
   onClose,
   onImport,
   busy,
+  importProgress,
 }) {
   const [mode, setMode] = useState("auto"); // "auto" | "lines" | "json" | "cstimer" | "csv"
   const [raw, setRaw] = useState("");
@@ -142,6 +143,44 @@ export default function ImportSolvesModal({
     const dt = new Date(s);
     if (Number.isFinite(dt.getTime())) return dt.getTime();
     return null;
+  };
+
+  const parseCsTimerComment = (commentRaw) => {
+    const raw = String(commentRaw ?? "").trim();
+    if (!raw) return { note: "", tags: {} };
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        const fromTags = parsed.tags && typeof parsed.tags === "object" ? parsed.tags : null;
+
+        if (fromTags) {
+          return {
+            note: typeof parsed.note === "string" ? parsed.note : "",
+            tags: { ...fromTags },
+          };
+        }
+
+        const directTags = {};
+        if (parsed.CubeModel != null) directTags.CubeModel = String(parsed.CubeModel);
+        if (parsed.CrossColor != null) directTags.CrossColor = String(parsed.CrossColor);
+        if (parsed.TimerInput != null) directTags.TimerInput = String(parsed.TimerInput);
+        if (parsed.InputType != null && !directTags.TimerInput) {
+          directTags.TimerInput = String(parsed.InputType);
+        }
+
+        if (Object.keys(directTags).length > 0) {
+          return {
+            note: typeof parsed.note === "string" ? parsed.note : "",
+            tags: directTags,
+          };
+        }
+      }
+    } catch {
+      // Non-JSON comments are treated as plain notes.
+    }
+
+    return { note: raw, tags: {} };
   };
 
   /* ------------------------------ DEDUPE + TS ------------------------------ */
@@ -321,7 +360,8 @@ export default function ImportSolvesModal({
         // row[0] typically [flag,timeMs]
         const timePart = row[0];
         const scramble = typeof row[1] === "string" ? row[1] : "";
-        const note = typeof row[2] === "string" ? row[2] : "";
+        const commentRaw = typeof row[2] === "string" ? row[2] : "";
+        const { note, tags } = parseCsTimerComment(commentRaw);
 
         let ms = null;
         let penalty = null;
@@ -361,7 +401,7 @@ export default function ImportSolvesModal({
           penalty,
           note,
           datetime,
-          tags: {},
+          tags,
           originalTime: ms, // keep for your penalty system later if needed
           event: ev,
           // optional metadata in case you want it later:
@@ -584,6 +624,31 @@ Example:
             {busy ? "Importing…" : "Import"}
           </button>
         </div>
+
+        {busy && importProgress && (
+          <div className="importProgressWrap">
+            <div className="importProgressLabel">
+              {importProgress.label ||
+                `Importing ${importProgress.completed || 0}/${importProgress.total || 0}`}
+            </div>
+            <div className="importProgressTrack">
+              <div
+                className="importProgressFill"
+                style={{
+                  width: `${Math.max(
+                    0,
+                    Math.min(
+                      100,
+                      ((Number(importProgress.completed) || 0) /
+                        Math.max(1, Number(importProgress.total) || 1)) *
+                        100
+                    )
+                  )}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         <div className="importPreviewWrap">
           <div className="importPreviewTitle">Preview (first {preview.length} / {meta?.total ?? preview.length})</div>

@@ -1,9 +1,10 @@
-import React, { useMemo, useRef, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import LineChartBuilder from "./LineChartBuilder";
+import TimePeriodChart from "./TimePeriodChart";
 import Label from "./AxisLabel";
 import Detail from "../Detail/Detail";
 import "./Stats.css";
-import { formatTime, calculateAverageForGraph } from "../TimeList/TimeUtils";
+import { formatTime } from "../TimeList/TimeUtils";
 
 import useSolveSelection from "../../hooks/useSolveSelection";
 import useBulkSolveActions from "../../hooks/useBulkSolveActions";
@@ -30,7 +31,7 @@ function safeDateFromSolve(s) {
 function formatBucketLabel(mode, key) {
   if (!key) return "";
   if (mode === "day") {
-    const [y, m, d] = key.split("-");
+    const [, m, d] = key.split("-");
     return `${m}/${d}`;
   }
   if (mode === "month") {
@@ -43,6 +44,30 @@ function formatBucketLabel(mode, key) {
   }
   if (mode === "year") return key;
   return key;
+}
+
+function getSolveBaseMs(solve) {
+  if (!solve) return null;
+
+  if (solve.penalty === "DNF") {
+    if (typeof solve.originalTime === "number" && isFinite(solve.originalTime)) {
+      return solve.originalTime;
+    }
+    if (typeof solve.rawTime === "number" && isFinite(solve.rawTime)) {
+      return solve.rawTime;
+    }
+    return null;
+  }
+
+  if (typeof solve.time === "number" && isFinite(solve.time)) {
+    return solve.time;
+  }
+
+  if (typeof solve.rawTime === "number" && isFinite(solve.rawTime)) {
+    return solve.rawTime;
+  }
+
+  return null;
 }
 
 function groupByDate(solves, mode) {
@@ -82,17 +107,15 @@ function groupByDate(solves, mode) {
       const arr = map.get(key) || [];
 
       const valid = arr.filter((solve) => {
-        if (solve.penalty === "DNF") {
-          return typeof solve.originalTime === "number" && isFinite(solve.originalTime);
-        }
-        return typeof solve.time === "number" && isFinite(solve.time);
+        const ms = getSolveBaseMs(solve);
+        return typeof ms === "number" && isFinite(ms);
       });
 
       if (valid.length === 0) return null;
 
       const avgMs =
         valid.reduce((sum, solve) => {
-          const base = solve.penalty === "DNF" ? solve.originalTime : solve.time;
+          const base = getSolveBaseMs(solve);
           return sum + base;
         }, 0) / valid.length;
 
@@ -104,7 +127,7 @@ function groupByDate(solves, mode) {
         bucketLabel: formatBucketLabel(mode, key),
         time: avgMs,
         solve: lastSolve,
-        fullIndex: lastSolve?.fullIndex,
+        fullIndex: lastSolve?.fullIndex ?? null,
       };
     })
     .filter(Boolean);
@@ -116,19 +139,28 @@ function groupByDate(solves, mode) {
 function rollingAverageSeconds(data, windowSize) {
   const out = new Array(data.length).fill(null);
   let sum = 0;
+  let validCount = 0;
 
   for (let i = 0; i < data.length; i++) {
     const v = data[i]?.y;
-    if (typeof v !== "number" || !isFinite(v)) {
-      sum = 0;
-      continue;
+    if (typeof v === "number" && isFinite(v)) {
+      sum += v;
+      validCount += 1;
     }
 
-    sum += v;
-    if (i >= windowSize) sum -= data[i - windowSize]?.y;
+    if (i >= windowSize) {
+      const prev = data[i - windowSize]?.y;
+      if (typeof prev === "number" && isFinite(prev)) {
+        sum -= prev;
+        validCount -= 1;
+      }
+    }
 
-    if (i >= windowSize - 1) out[i] = sum / windowSize;
+    if (i >= windowSize - 1 && validCount === windowSize) {
+      out[i] = sum / windowSize;
+    }
   }
+
   return out;
 }
 
@@ -145,40 +177,37 @@ function LineChart({
   currentSession,
   eventKey,
   practiceMode = false,
+  allowViewPicker = true,
+  viewMode = "standard",
+  selectedDay = "",
+  onSelectedDayChange = null,
 }) {
+  const DEFAULT_DOT_SIZE = 5;
+  const MIN_DOT_SIZE = 2;
+  const MAX_DOT_SIZE = 10;
+
   const [selectedSolve, setSelectedSolve] = useState(null);
-  const [selectedSolveIndex, setSelectedSolveIndex] = useState(null);
 
   const [showAo5, setShowAo5] = useState(false);
   const [showAo12, setShowAo12] = useState(false);
-
-  const userPickedView = useRef(false);
+  const [groupMode, setGroupMode] = useState("solve");
+  const [dotSize, setDotSize] = useState(DEFAULT_DOT_SIZE);
+  const [yMinInput, setYMinInput] = useState("");
+  const [yMaxInput, setYMaxInput] = useState("");
 
   const selection = useSolveSelection();
 
-  /* -----------------------------
-     baseValid == "current Stats view"
-  ----------------------------- */
   const baseValid = useMemo(() => {
     const input = Array.isArray(solves) ? solves : [];
     return input.filter((solve) => {
-      if (solve.penalty === "DNF") {
-        return typeof solve.originalTime === "number" && isFinite(solve.originalTime);
-      }
-      return typeof solve.time === "number" && isFinite(solve.time);
+      const ms = getSolveBaseMs(solve);
+      return typeof ms === "number" && isFinite(ms);
     });
   }, [solves]);
 
-  const [viewMode, setViewMode] = useState(() => (baseValid.length >= 500 ? "day" : "current"));
-
-  useEffect(() => {
-    if (userPickedView.current) return;
-    setViewMode(baseValid.length >= 500 ? "day" : "current");
-  }, [baseValid.length]);
-
   const bulkSelectableSolves = useMemo(() => {
-    return viewMode === "current" || viewMode === "last100" ? baseValid : [];
-  }, [viewMode, baseValid]);
+    return groupMode === "solve" ? baseValid : [];
+  }, [groupMode, baseValid]);
 
   const bulkActions = useBulkSolveActions({
     user,
@@ -214,29 +243,24 @@ function LineChart({
   const computed = useMemo(() => {
     let processed = [];
 
-    if (viewMode === "current") {
+    if (groupMode === "solve") {
       processed = baseValid;
-      if (processed.length > 5000) {
-        alert("⚠ Rendering more than 5000 solves may be slow");
-      }
-    } else if (viewMode === "last100") {
-      processed = baseValid.slice(-100);
     } else {
-      processed = groupByDate(baseValid, viewMode);
+      processed = groupByDate(baseValid, groupMode);
     }
 
     if (processed.length === 0) {
       return { data: [], solveCountText: "Solve Count: 0", extraSeries: [] };
     }
 
-    const timesMs = processed.map((item) => {
-      if (item.isBucket) return item.time;
-      return item.penalty === "DNF" ? item.originalTime : item.time;
-    });
+    const timesMs = processed
+      .map((item) => (item.isBucket ? item.time : getSolveBaseMs(item)))
+      .filter((v) => typeof v === "number" && isFinite(v));
 
     const minTime = Math.min(...timesMs);
     const maxTime = Math.max(...timesMs);
-    const averageTime = calculateAverageForGraph(timesMs);
+    const averageTime =
+      timesMs.reduce((sum, v) => sum + v, 0) / Math.max(1, timesMs.length);
     const denom = maxTime - minTime || 1;
 
     const getColor = (timeMs) => {
@@ -246,22 +270,13 @@ function LineChart({
     };
 
     const data = processed.map((item, index) => {
-      const baseTimeMs = item.isBucket
-        ? item.time
-        : item.penalty === "DNF"
-          ? item.originalTime
-          : item.time;
-
+      const baseTimeMs = item.isBucket ? item.time : getSolveBaseMs(item);
       const label = item.isBucket ? item.bucketLabel : `${index + 1}`;
       const solveForDetail = item.isBucket ? item.solve : item;
 
       let selectionIndex = null;
       if (!item.isBucket) {
-        if (viewMode === "current") {
-          selectionIndex = index;
-        } else if (viewMode === "last100") {
-          selectionIndex = Math.max(0, baseValid.length - processed.length) + index;
-        }
+        selectionIndex = index;
       }
 
       return {
@@ -279,7 +294,7 @@ function LineChart({
     });
 
     const extraSeries = [];
-    const solveLevel = viewMode === "current" || viewMode === "last100";
+    const solveLevel = groupMode === "solve";
 
     if (solveLevel && showAo5) {
       const ao5 = rollingAverageSeconds(data, 5);
@@ -303,18 +318,42 @@ function LineChart({
 
     return {
       data,
-      solveCountText: `Solve Count: ${data.length}`,
+      solveCountText: `${solveLevel ? "Solve" : "Bucket"} Count: ${data.length}`,
       extraSeries,
     };
-  }, [baseValid, viewMode, showAo5, showAo12]);
+  }, [baseValid, groupMode, showAo5, showAo12]);
 
-  const solveLevel = viewMode === "current" || viewMode === "last100";
+  const solveLevel = groupMode === "solve";
   const bulkEnabled = solveLevel;
+  const isTimeView = viewMode === "time";
+
+  const autoScale = useMemo(() => {
+    const values = computed.data
+      .map((point) => point?.y)
+      .filter((value) => typeof value === "number" && isFinite(value));
+
+    if (values.length === 0) {
+      return { min: 0, max: 1 };
+    }
+
+    const maxValue = Math.max(...values);
+    return {
+      min: 0,
+      max: Math.max(1, Math.ceil(maxValue)),
+    };
+  }, [computed.data]);
+
+  const parsedYMin = Number(yMinInput);
+  const parsedYMax = Number(yMaxInput);
+  const resolvedYMin =
+    yMinInput !== "" && Number.isFinite(parsedYMin) ? parsedYMin : autoScale.min;
+  const resolvedYMax =
+    yMaxInput !== "" && Number.isFinite(parsedYMax) ? parsedYMax : autoScale.max;
+  const hasCustomYRange = resolvedYMax > resolvedYMin;
 
   const handleDotClick = (solve, fullIndex, point) => {
     if (!point || point.isBucket || point.selectionIndex == null || !bulkEnabled) {
       setSelectedSolve(solve);
-      setSelectedSolveIndex(fullIndex ?? solve?.fullIndex ?? null);
       return;
     }
 
@@ -329,7 +368,6 @@ function LineChart({
     if (handledAsSelection) return;
 
     setSelectedSolve(solve);
-    setSelectedSolveIndex(fullIndex ?? solve?.fullIndex ?? null);
   };
 
   useEffect(() => {
@@ -359,6 +397,19 @@ function LineChart({
 
   return (
     <div className="lineChart">
+      {isTimeView ? (
+        <TimePeriodChart
+          user={user}
+          solves={solves}
+          deleteTime={deleteTime}
+          addPost={addPost}
+          applyPenalty={applyPenalty}
+          setSessions={setSessions}
+          selectedDay={selectedDay}
+          onSelectedDayChange={onSelectedDayChange}
+        />
+      ) : (
+        <>
       {bulkEnabled && (
         <BulkSolveControls
           selectionCount={selection.selectionCount}
@@ -395,81 +446,118 @@ function LineChart({
         />
       )}
 
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          alignItems: "center",
-          marginBottom: 8,
-          flexWrap: "wrap",
-        }}
-      >
-        <select
-          value={viewMode}
-          onChange={(e) => {
-            userPickedView.current = true;
-            selection.clearSelection();
-            setViewMode(e.target.value);
-          }}
-        >
-          <option value="current">Current View</option>
-          <option value="last100">Last 100</option>
-          <option value="day">By Day</option>
-          <option value="week">By Week</option>
-          <option value="month">By Month</option>
-          <option value="year">By Year</option>
-        </select>
+      {allowViewPicker && (
+        <div className="lineChartControls">
+          <select
+            className="statsSelect statsSelect--chart"
+            value={groupMode}
+            onChange={(e) => {
+              selection.clearSelection();
+              setGroupMode(e.target.value);
+            }}
+          >
+            <option value="solve">By Solve</option>
+            <option value="day">By Day</option>
+            <option value="week">By Week</option>
+            <option value="month">By Month</option>
+            <option value="year">By Year</option>
+          </select>
 
-        <label
-          style={{
-            display: "flex",
-            gap: 6,
-            alignItems: "center",
-            opacity: solveLevel ? 1 : 0.4,
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={showAo5}
+          <button
+            type="button"
+            className={`statsToggleBtn ${showAo5 ? "is-active" : ""}`}
             disabled={!solveLevel}
-            onChange={(e) => setShowAo5(e.target.checked)}
-          />
-          Ao5 line
-        </label>
+            onClick={() => setShowAo5((value) => !value)}
+          >
+            Ao5
+          </button>
 
-        <label
-          style={{
-            display: "flex",
-            gap: 6,
-            alignItems: "center",
-            opacity: solveLevel ? 1 : 0.4,
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={showAo12}
+          <button
+            type="button"
+            className={`statsToggleBtn ${showAo12 ? "is-active" : ""}`}
             disabled={!solveLevel}
-            onChange={(e) => setShowAo12(e.target.checked)}
-          />
-          Ao12 line
-        </label>
-      </div>
+            onClick={() => setShowAo12((value) => !value)}
+          >
+            Ao12
+          </button>
+
+          <div className="chartControlGroup">
+            <span className="chartControlLabel">Dots</span>
+            <button
+              type="button"
+              className="statsMiniBtn"
+              onClick={() => setDotSize((value) => Math.max(MIN_DOT_SIZE, value - 1))}
+            >
+              -
+            </button>
+            <span className="chartControlValue">{dotSize}</span>
+            <button
+              type="button"
+              className="statsMiniBtn"
+              onClick={() => setDotSize((value) => Math.min(MAX_DOT_SIZE, value + 1))}
+            >
+              +
+            </button>
+          </div>
+
+          <div className="chartControlGroup">
+            <span className="chartControlLabel">Scale</span>
+            <input
+              className="chartScaleInput"
+              type="number"
+              step="0.1"
+              inputMode="decimal"
+              placeholder={String(autoScale.min)}
+              value={yMinInput}
+              onChange={(e) => setYMinInput(e.target.value)}
+              aria-label="Minimum seconds"
+            />
+            <span className="chartControlDivider">to</span>
+            <input
+              className="chartScaleInput"
+              type="number"
+              step="0.1"
+              inputMode="decimal"
+              placeholder={String(autoScale.max)}
+              value={yMaxInput}
+              onChange={(e) => setYMaxInput(e.target.value)}
+              aria-label="Maximum seconds"
+            />
+            <button
+              type="button"
+              className="statsMiniBtn"
+              onClick={() => {
+                setYMinInput("");
+                setYMaxInput("");
+              }}
+            >
+              Auto
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="chartTitle">{/* {title} */}</div>
 
-      <LineChartBuilder
-        width={560}
-        height={340}
-        data={computed.data}
-        extraSeries={computed.extraSeries}
-        horizontalGuides={5}
-        precision={2}
-        verticalGuides={7}
-        selectedIndices={selection.selectedIndices}
-        onDotClick={(solve, fullIndex, point) => {
-          handleDotClick(solve, fullIndex, point);
-        }}
-      />
+      <div className="lineChartCanvas">
+        <LineChartBuilder
+          width={560}
+          height={320}
+          data={computed.data}
+          extraSeries={computed.extraSeries}
+          horizontalGuides={5}
+          precision={2}
+          verticalGuides={7}
+          selectedIndices={selection.selectedIndices}
+          dotRadius={dotSize}
+          selectedDotRadius={dotSize + 3}
+          yMin={hasCustomYRange ? resolvedYMin : null}
+          yMax={hasCustomYRange ? resolvedYMax : null}
+          onDotClick={(solve, fullIndex, point) => {
+            handleDotClick(solve, fullIndex, point);
+          }}
+        />
+      </div>
 
       <Label text={computed.solveCountText} />
 
@@ -479,12 +567,15 @@ function LineChart({
           userID={user?.UserID}
           onClose={() => setSelectedSolve(null)}
           deleteTime={() => {
-            if (selectedSolveIndex != null) deleteTime(selectedSolveIndex);
+            const solveRef = selectedSolve?.solveRef || null;
+            if (solveRef && deleteTime) deleteTime(solveRef);
           }}
           addPost={addPost}
           applyPenalty={applyPenalty}
           setSessions={setSessions}
         />
+      )}
+        </>
       )}
     </div>
   );

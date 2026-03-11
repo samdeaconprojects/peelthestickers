@@ -36,10 +36,9 @@
 
 .toggle-bar {
   position: fixed;
-  bottom: 0;
-  right: 0;
-  padding: 10px;
-  z-index: 500;
+  right: 12px;
+  padding: 0;
+  z-index: 1200;
 }
 
 button {
@@ -59,12 +58,19 @@ button:hover {
 }
 
 .toggle-button {
-  background: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  background: rgba(14, 23, 29, 0.92);
   color: white;
-  border: none;
-  font-size: 24px;
+  font-size: 18px;
+  line-height: 1;
   cursor: pointer;
   outline: none;
+  opacity: 1;
+  display: grid;
+  place-items: center;
 }
 
 .player-bar {

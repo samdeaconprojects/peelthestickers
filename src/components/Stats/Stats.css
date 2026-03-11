@@ -66,6 +66,7 @@ td:nth-child(13) {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .statsSelect{
@@ -198,6 +199,191 @@ td:nth-child(13) {
   border-radius: 8px;
 }
 
+.lineChart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding-top: 4px;
+}
+
+.lineChartControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.lineChartCanvas {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+}
+
+.lineChartCanvas > * {
+  width: 100%;
+  height: 100%;
+}
+
+.statsSelect--chart {
+  min-width: 120px;
+}
+
+.statsToggleBtn,
+.statsMiniBtn {
+  height: 34px;
+  border-radius: 8px;
+  border: 2px solid rgba(255,255,255,0.18);
+  background: rgba(0,0,0,0.22);
+  color: white;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.statsToggleBtn {
+  padding: 0 12px;
+}
+
+.statsToggleBtn.is-active {
+  background: rgba(46,196,182,0.18);
+  border-color: rgba(46,196,182,0.55);
+  color: #bff7f0;
+}
+
+.statsToggleBtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.statsViewToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.statsMiniBtn {
+  min-width: 34px;
+  padding: 0 10px;
+}
+
+.chartControlGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.chartControlLabel,
+.chartControlValue,
+.chartControlDivider {
+  color: rgba(255,255,255,0.82);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.chartScaleInput {
+  width: 64px;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 2px solid rgba(255,255,255,0.18);
+  background: rgba(0,0,0,0.22);
+  color: white;
+  font-weight: 800;
+  outline: none;
+}
+
+.timePeriodChart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+}
+
+.timeLineChartCanvas {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.timeLineChartSvg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.timeLineGuide {
+  stroke: rgba(194, 194, 194, 0.24);
+  stroke-width: 1;
+}
+
+.timeLineAxis {
+  stroke: rgba(204, 204, 204, 0.9);
+  stroke-width: 1.2;
+}
+
+.timeLineAxisLabel {
+  fill: #808080;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.timeLineSegment {
+  cursor: pointer;
+  stroke: rgba(0, 0, 0, 0.12);
+  stroke-width: 1;
+}
+
+.timeLineSegment:hover {
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 1.5;
+}
+
+.timeLineEmptyText {
+  fill: rgba(255, 255, 255, 0.6);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.timeLineLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.timeLineLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.timeLineLegendSwatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.timeLineLegendLabel {
+  color: rgba(255,255,255,0.82);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 /* -------------------------------------------------
    GRID (slightly narrower + less tall)
 -------------------------------------------------- */
@@ -241,8 +427,11 @@ td:nth-child(13) {
 
 /* Header */
 .stats-item--header {
-  padding: 10px 12px;
-  overflow: hidden;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  overflow: visible;
 }
 
 /* ✅ Line chart fill fix */
@@ -349,6 +538,16 @@ input {
     justify-content: flex-start;
   }
   .statsTopRight{
+    flex-wrap: wrap;
+  }
+
+  .lineChartControls {
+    align-items: stretch;
+  }
+
+  .chartControlGroup {
+    width: 100%;
+    justify-content: flex-start;
     flex-wrap: wrap;
   }
 

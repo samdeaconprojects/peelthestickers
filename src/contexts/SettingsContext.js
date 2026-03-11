@@ -1,7 +1,14 @@
-// src/contexts/SettingsContext.js
-import React, { createContext, useContext, useState } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+} from "react";
 
-const SettingsContext = createContext();
+const SettingsContext = createContext(null);
+
 export const useSettings = () => useContext(SettingsContext);
 
 const defaultEventBindings = {
@@ -11,61 +18,98 @@ const defaultEventBindings = {
   "555": "Alt+5",
   "666": "Alt+6",
   "777": "Alt+7",
-  "SQ1": "Alt+Q",
-  "SKEWB": "Alt+S",
-  "CLOCK": "Alt+C",
+  SQ1: "Alt+Q",
+  SKEWB: "Alt+S",
+  CLOCK: "Alt+C",
   "333OH": "Alt+O",
-  "MEGAMINX": "Alt+M",
-  "PYRAMINX": "Alt+P",
-  "333BLD": "Alt+B"
+  MEGAMINX: "Alt+M",
+  PYRAMINX: "Alt+P",
+  "333BLD": "Alt+B",
 };
 
-export const SettingsProvider = ({ children }) => {
-  const [settings, setSettings] = useState({
-    primaryColor: '#0E171D',
-    secondaryColor: '#ffffff',
-    timerInput: 'Keyboard', // Keyboard | Type | Stackmat | GAN Bluetooth | GAN Cube
+export const defaultSettings = {
+  primaryColor: "#0E171D",
+  secondaryColor: "#ffffff",
+  timerInput: "Keyboard",
 
-    horizontalTimeList: true, // default to horizontal
+  horizontalTimeList: true,
+  horizontalTimeListScroll: false,
+  horizontalTimeListCols: "auto",
 
-    // Horizontal list scroll behavior
-    // false = old behavior (only show 12/5 with arrow paging)
-    // true  = allow scrolling across loaded solves (your current scroll build)
-    horizontalTimeListScroll: false,
+  disableKeypad: false,
+  timeColorMode: "index",
 
-    horizontalTimeListCols: "auto", // "auto" | "12" | "5"
+  eventKeyBindings: defaultEventBindings,
 
-    // if true, do NOT show the on-screen keypad grid in manual entry modes
-    disableKeypad: false,
+  inspectionEnabled: false,
+  inspectionCountDirection: "up",
+  inspectionBeeps: true,
+  inspectionFullscreen: true,
 
-    // Time color modes:
-    // "binary" | "continuous" | "bucket" | "index"
-    timeColorMode: "index",
+  relayMode: "total",
 
-    eventKeyBindings: defaultEventBindings,
+  cubeAutoStart: true,
+  cubeAutoStop: true,
+  cubeStopIdleMs: 5000,
 
-    // Inspection settings
-    inspectionEnabled: false,
-    inspectionCountDirection: "up",
-    inspectionBeeps: true,
-    inspectionFullscreen: true,
+  showPlayerBar: true,
+  lastEvent: "333",
+  lastSessionByEvent: {},
+};
 
-    // Relay settings
-    relayMode: "total", // "total" | "legs"
+function mergeSettings(input) {
+  const safe = input && typeof input === "object" ? input : {};
 
-    // GAN Cube settings
-    cubeAutoStart: true,   // start timing on first MOVE
-    cubeAutoStop: true,    // stop & save after inactivity
-    cubeStopIdleMs: 5000,  // idle window to consider "stopped"
-  });
-
-  const updateSettings = (newSettings) => {
-    setSettings(prev => ({ ...prev, ...newSettings }));
+  return {
+    ...defaultSettings,
+    ...safe,
+    eventKeyBindings: {
+      ...defaultEventBindings,
+      ...(safe.eventKeyBindings || {}),
+    },
+    lastSessionByEvent:
+      safe.lastSessionByEvent && typeof safe.lastSessionByEvent === "object"
+        ? safe.lastSessionByEvent
+        : {},
   };
+}
 
-  return (
-    <SettingsContext.Provider value={{ settings, updateSettings }}>
-      {children}
-    </SettingsContext.Provider>
+export const SettingsProvider = ({ children }) => {
+  const [settings, setSettings] = useState(defaultSettings);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      "--primary-color",
+      settings.primaryColor || defaultSettings.primaryColor
+    );
+    document.documentElement.style.setProperty(
+      "--secondary-color",
+      settings.secondaryColor || defaultSettings.secondaryColor
+    );
+  }, [settings.primaryColor, settings.secondaryColor]);
+
+  const updateSettings = useCallback((newSettings) => {
+    setSettings((prev) => mergeSettings({ ...prev, ...(newSettings || {}) }));
+  }, []);
+
+  const setAllSettings = useCallback((nextSettings) => {
+    setSettings(mergeSettings(nextSettings));
+  }, []);
+
+  const resetSettings = useCallback(() => {
+    setSettings(defaultSettings);
+  }, []);
+
+  const value = useMemo(
+    () => ({
+      settings,
+      updateSettings,
+      setAllSettings,
+      resetSettings,
+      defaultSettings,
+    }),
+    [settings, updateSettings, setAllSettings, resetSettings]
   );
+
+  return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 };

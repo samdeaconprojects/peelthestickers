@@ -19,14 +19,11 @@ function hslColor(h, s = 100, l = 50) {
   return `hsl(${h}, ${s}%, ${l}%)`;
 }
 
-// Green (fast) -> Red (slow)
 function hueGreenToRed(t01) {
   const t = clamp01(t01);
   return 120 * (1 - t);
 }
 
-// Build a rank-based 0..1 mapping by time (fastest -> 0, slowest -> 1)
-// Ties get the average rank of their tie group.
 function buildRank01Map(items) {
   const valid = items
     .filter((it) => typeof it.time === "number" && isFinite(it.time))
@@ -35,7 +32,9 @@ function buildRank01Map(items) {
   const n = valid.length;
   const out = {};
   if (n <= 1) {
-    valid.forEach((v) => (out[v.key] = 0));
+    valid.forEach((v) => {
+      out[v.key] = 0;
+    });
     return out;
   }
 
@@ -56,6 +55,11 @@ function buildRank01Map(items) {
   return out;
 }
 
+function hasRealSolveRef(solve) {
+  const ref = solve?.solveRef;
+  return typeof ref === "string" && ref.startsWith("SOLVE#");
+}
+
 function TimeList({
   user,
   applyPenalty,
@@ -65,13 +69,11 @@ function TimeList({
   inPlayerBar,
   addPost,
   setSessions,
-
   sessionsList = [],
   currentEvent,
   currentSession,
   eventKey,
   practiceMode,
-
   onLoadMore,
   canLoadMore = true,
   isLoadingMore = false,
@@ -136,7 +138,7 @@ function TimeList({
   const horizontalMaxWidthPx = useMemo(() => {
     const cols = horizontalCount + 1;
     return cols * COL_STEP + 10;
-  }, [horizontalCount, COL_STEP]);
+  }, [horizontalCount]);
 
   useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
@@ -202,7 +204,7 @@ function TimeList({
     try {
       getOveralls(times);
     } catch (e) {
-      /* ignore */
+      // ignore
     }
 
     return { minIdx, maxIdx, minVal, maxVal };
@@ -255,6 +257,8 @@ function TimeList({
 
     const stats = match?.Stats || match?.stats || null;
     const c =
+      stats?.SolveCountTotal ??
+      stats?.solveCountTotal ??
       stats?.SolveCount ??
       stats?.solveCount ??
       stats?.Count ??
@@ -297,13 +301,13 @@ function TimeList({
     if (horizontalScrollEnabled) {
       const items = horizontalSolves.map((s, i) => ({ key: i, time: s?.time }));
       return buildRank01Map(items);
-    } else {
-      const items = horizontalSolves.map((s, i) => ({
-        key: pagedWindow.start + i,
-        time: s?.time,
-      }));
-      return buildRank01Map(items);
     }
+
+    const items = horizontalSolves.map((s, i) => ({
+      key: pagedWindow.start + i,
+      time: s?.time,
+    }));
+    return buildRank01Map(items);
   }, [isHorizontal, horizontalScrollEnabled, horizontalSolves, pagedWindow.start]);
 
   const getPerfClassAndStyle = (value, min, max, rank01) => {
@@ -342,13 +346,17 @@ function TimeList({
       const timesArr = solve.tags.RelayLegTimes || [];
 
       const expanded = legs.map((ev, i) => ({
+        solveRef: `RELAYLEG#${solve.solveRef || "local"}#${i}`,
+        createdAt: solve.createdAt,
         event: ev,
         scramble: scrs[i] || "",
         time: timesArr[i] ?? 0,
+        rawTimeMs: timesArr[i] ?? 0,
+        finalTimeMs: timesArr[i] ?? 0,
         penalty: null,
         note: "",
-        datetime: `${solve.datetime}#${i}`,
         userID: user?.UserID,
+        __readOnly: true,
       }));
 
       setSelectedSolveList(expanded);
@@ -414,7 +422,7 @@ function TimeList({
     }
 
     prevLenRef.current = newLen;
-  }, [horizontalScrollEnabled, solvesSafe.length, COL_STEP]);
+  }, [horizontalScrollEnabled, solvesSafe.length]);
 
   useEffect(() => {
     if (!isHorizontal) return;
@@ -475,8 +483,9 @@ function TimeList({
       }
       if (gi >= 11) {
         const slice = solvesSafe.slice(gi - 11, gi + 1);
-        if (slice.length === 12)
+        if (slice.length === 12) {
           ao12[gi] = calculateAverage(slice.map((s) => s?.time), true).average;
+        }
       }
     }
 
@@ -491,7 +500,7 @@ function TimeList({
   ]);
 
   const horizontalBestWorst = useMemo(() => {
-    if (!isHorizontal)
+    if (!isHorizontal) {
       return {
         bestTime: null,
         worstTime: null,
@@ -500,6 +509,7 @@ function TimeList({
         bestAo12: null,
         worstAo12: null,
       };
+    }
 
     const timeVals = horizontalSolves
       .map((s) => s?.time)
@@ -578,7 +588,9 @@ function TimeList({
                 className="delete-icon"
                 onClick={(e) => {
                   e.stopPropagation();
-                  deleteTime(solve?.datetime);
+                  if (hasRealSolveRef(solve)) {
+                    deleteTime(solve.solveRef);
+                  }
                 }}
               >
                 x
@@ -631,6 +643,9 @@ function TimeList({
     const globalIdx = horizontalScrollEnabled ? localIndex : pagedWindow.start + localIndex;
     return globalBaseIndex + globalIdx + 1;
   };
+
+  const selectedSolveListIsMutable =
+    Array.isArray(selectedSolveList) && selectedSolveList.every((s) => hasRealSolveRef(s));
 
   return (
     <div className="time-list-container">
@@ -731,7 +746,12 @@ function TimeList({
                     key={index}
                     className={`ao12 TimeItem ${textClass}`}
                     onClick={() =>
-                      setSelectedSolveList(slice.map((s) => ({ ...s, userID: user?.UserID })))
+                      setSelectedSolveList(
+                        slice.map((s) => ({
+                          ...s,
+                          userID: user?.UserID,
+                        }))
+                      )
                     }
                   >
                     {formatTime(avg)}
@@ -762,7 +782,12 @@ function TimeList({
                     key={index}
                     className={`ao5 TimeItem ${textClass}`}
                     onClick={() =>
-                      setSelectedSolveList(slice.map((s) => ({ ...s, userID: user?.UserID })))
+                      setSelectedSolveList(
+                        slice.map((s) => ({
+                          ...s,
+                          userID: user?.UserID,
+                        }))
+                      )
                     }
                   >
                     {formatTime(avg)}
@@ -816,7 +841,9 @@ function TimeList({
                       className="delete-icon"
                       onClick={(e) => {
                         e.stopPropagation();
-                        deleteTime(solve?.datetime);
+                        if (hasRealSolveRef(solve)) {
+                          deleteTime(solve.solveRef);
+                        }
                       }}
                     >
                       x
@@ -844,9 +871,11 @@ function TimeList({
                 solve={selectedSolve}
                 userID={user?.UserID}
                 onClose={() => setSelectedSolve(null)}
-                deleteTime={() => deleteTime(selectedSolve?.datetime)}
+                deleteTime={() => {
+                  if (hasRealSolveRef(selectedSolve)) deleteTime(selectedSolve.solveRef);
+                }}
                 addPost={addPost}
-                applyPenalty={applyPenalty}
+                applyPenalty={hasRealSolveRef(selectedSolve) ? applyPenalty : null}
                 setSessions={setSessions}
               />
             )}
@@ -857,7 +886,7 @@ function TimeList({
                 userID={user?.UserID}
                 onClose={() => setSelectedSolveList(null)}
                 deleteTime={() => {}}
-                applyPenalty={applyPenalty}
+                applyPenalty={selectedSolveListIsMutable ? applyPenalty : null}
                 addPost={() =>
                   addPost({
                     note: "Average solve group",
@@ -894,9 +923,11 @@ function TimeList({
               solve={selectedSolve}
               userID={user?.UserID}
               onClose={() => setSelectedSolve(null)}
-              deleteTime={() => deleteTime(selectedSolve?.datetime)}
+              deleteTime={() => {
+                if (hasRealSolveRef(selectedSolve)) deleteTime(selectedSolve.solveRef);
+              }}
               addPost={addPost}
-              applyPenalty={applyPenalty}
+              applyPenalty={hasRealSolveRef(selectedSolve) ? applyPenalty : null}
               setSessions={setSessions}
             />
           )}
@@ -906,9 +937,16 @@ function TimeList({
               solve={selectedSolveList}
               userID={user?.UserID}
               onClose={() => setSelectedSolveList(null)}
-              deleteTime={() => deleteTime(selectedSolveIndex)}
-              addPost={addPost}
-              applyPenalty={applyPenalty}
+              deleteTime={() => {}}
+              addPost={() =>
+                addPost({
+                  note: "Average solve group",
+                  event: selectedSolveList[0]?.event,
+                  solveList: selectedSolveList,
+                  comments: [],
+                })
+              }
+              applyPenalty={selectedSolveListIsMutable ? applyPenalty : null}
               setSessions={setSessions}
             />
           )}

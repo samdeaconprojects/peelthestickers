@@ -1,4 +1,3 @@
-// src/App.js
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import "./App.css";
 import Timer from "./components/Timer/Timer";
@@ -20,6 +19,7 @@ import { useSettings } from "./contexts/SettingsContext";
 import { generateScramble } from "./components/scrambleUtils";
 import { Routes, Route, useLocation } from "react-router-dom";
 import { getUser } from "./services/getUser";
+import { updateUser } from "./services/updateUser";
 import { getSessions } from "./services/getSessions";
 import { getLastNSolvesBySession } from "./services/getSolvesBySession";
 import { getCustomEvents } from "./services/getCustomEvents";
@@ -31,8 +31,8 @@ import { deletePost as deletePostFromDB } from "./services/deletePost";
 import { updatePostComments } from "./services/updatePostComments";
 import { createSession } from "./services/createSession";
 import { createUser } from "./services/createUser";
-import { updateSolve } from "./services/updateSolve";
-import { updateUser } from "./services/updateUser";
+import { updateSolvePenalty } from "./services/updateSolvePenalty";
+import { getSolveWindowFromStart } from "./services/getSolveWindow";
 import { sendMessage } from "./services/sendMessage";
 import { setGanCurrentScramble } from "./smart/ganScrambleProgress";
 
@@ -45,14 +45,69 @@ import {
 } from "./components/TimeList/TimeUtils";
 
 /* -------------------------------------------------------------------------- */
+/*                               TAG CONFIG HELPERS                           */
+/* -------------------------------------------------------------------------- */
+const DEFAULT_TAG_CONFIG = {
+  Fixed: {
+    CubeModel: { label: "Cube Model", options: [] },
+    CrossColor: {
+      label: "Cross Color",
+      options: ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
+    },
+  },
+  CustomSlots: [
+    { slot: "Custom1", label: "", options: [] },
+    { slot: "Custom2", label: "", options: [] },
+    { slot: "Custom3", label: "", options: [] },
+    { slot: "Custom4", label: "", options: [] },
+    { slot: "Custom5", label: "", options: [] },
+  ],
+};
+
+function normalizeTagConfig(input) {
+  const cfg = input && typeof input === "object" ? input : {};
+  const fixed = cfg.Fixed || {};
+  const customSlots = Array.isArray(cfg.CustomSlots) ? cfg.CustomSlots : [];
+
+  return {
+    Fixed: {
+      CubeModel: {
+        label: fixed?.CubeModel?.label || "Cube Model",
+        options: Array.isArray(fixed?.CubeModel?.options) ? fixed.CubeModel.options : [],
+      },
+      CrossColor: {
+        label: fixed?.CrossColor?.label || "Cross Color",
+        options: Array.isArray(fixed?.CrossColor?.options)
+          ? fixed.CrossColor.options
+          : ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
+      },
+    },
+    CustomSlots: Array.from({ length: 5 }, (_, i) => {
+      const existing = customSlots[i] || {};
+      return {
+        slot: `Custom${i + 1}`,
+        label: existing?.label || "",
+        options: Array.isArray(existing?.options) ? existing.options : [],
+      };
+    }),
+  };
+}
+
+function makeEmptyTagSelection() {
+  return {
+    CubeModel: "",
+    CrossColor: "",
+    Custom1: "",
+    Custom2: "",
+    Custom3: "",
+    Custom4: "",
+    Custom5: "",
+  };
+}
+
+/* -------------------------------------------------------------------------- */
 /*                         SMART-CUBE SCRAMBLE HELPERS                         */
 /* -------------------------------------------------------------------------- */
-/**
- * Turn a scramble string into a list of expected "steps".
- * Key behavior:
- * - "L2" becomes ["L","L"] (2 physical turns)
- * - We ALSO allow "L'","L'" as an alternative when matching, handled elsewhere.
- */
 function expandScrambleToSteps(scramble) {
   const tokens = String(scramble || "")
     .trim()
@@ -65,15 +120,12 @@ function expandScrambleToSteps(scramble) {
     const t = String(tok).trim();
     if (!t) continue;
 
-    // Examples: "L", "L'", "L2"
-    // We treat any "X2" as two same-direction quarter-turn steps: "X","X"
     if (t.endsWith("2")) {
-      const base = t.slice(0, -1); // "L" or "Rw" etc.
+      const base = t.slice(0, -1);
       if (base) {
         steps.push(base);
         steps.push(base);
       } else {
-        // fallback (shouldn't happen)
         steps.push(t);
       }
     } else {
@@ -84,15 +136,6 @@ function expandScrambleToSteps(scramble) {
   return steps;
 }
 
-/**
- * Convert "token progress" (how many *scramble tokens* completed)
- * into "step progress" (how many *physical quarter-turn steps* completed),
- * where each X2 token counts as 2 steps.
- *
- * If your cube integration emits token-based progress, this makes the UI right.
- * If your cube integration already emits step-based progress, you can set
- * scrambleProgressMode below to "steps" and bypass this conversion.
- */
 function tokenProgressToStepProgress(scramble, tokenProgress) {
   const tokens = String(scramble || "")
     .trim()
@@ -112,26 +155,26 @@ function tokenProgressToStepProgress(scramble, tokenProgress) {
 /* -------------------------------------------------------------------------- */
 /*                            INLINE TAG BAR (HOME)                           */
 /* -------------------------------------------------------------------------- */
-function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
+function TagBarInline({ tags, onChange, tagConfig, cubeModelOptions = [] }) {
   const wrapRef = useRef(null);
-  const safeTags = tags || {};
-  const custom = safeTags.Custom || {};
-
-  const cubeOptions = Array.isArray(tagOptions?.CubeModels)
-    ? tagOptions.CubeModels
-    : [];
-  const crossOptions = Array.isArray(tagOptions?.CrossColors)
-    ? tagOptions.CrossColors
-    : [];
+  const safeTags = tags || makeEmptyTagSelection();
+  const cfg = useMemo(() => normalizeTagConfig(tagConfig || DEFAULT_TAG_CONFIG), [tagConfig]);
 
   const [addingCube, setAddingCube] = useState(false);
   const [addingCross, setAddingCross] = useState(false);
   const [newCube, setNewCube] = useState("");
   const [newCross, setNewCross] = useState("");
-
-  const [addingCustom, setAddingCustom] = useState(false);
-  const [newKey, setNewKey] = useState("");
-  const [newVal, setNewVal] = useState("");
+  const [localCubeOptions, setLocalCubeOptions] = useState([]);
+  const highestFilledCustomIndex = useMemo(() => {
+    for (let i = 4; i >= 0; i--) {
+      const slot = `Custom${i + 1}`;
+      if (String(safeTags?.[slot] || "").trim()) return i;
+    }
+    return -1;
+  }, [safeTags]);
+  const [visibleCustomCount, setVisibleCustomCount] = useState(() =>
+    Math.max(1, Math.min(5, highestFilledCustomIndex + 2))
+  );
 
   const ADD_CUBE = "__ADD_CUBE__";
   const ADD_CROSS = "__ADD_CROSS__";
@@ -146,66 +189,48 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
       if (!wrapRef.current.contains(e.target)) {
         setAddingCube(false);
         setAddingCross(false);
-        setAddingCustom(false);
       }
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, []);
 
+  useEffect(() => {
+    const required = Math.max(1, Math.min(5, highestFilledCustomIndex + 2));
+    setVisibleCustomCount((prev) => (prev < required ? required : prev));
+  }, [highestFilledCustomIndex]);
+
   const setField = (field, value) => {
     const v = String(value ?? "").trim();
+    if (field === "CubeModel" && v) {
+      setLocalCubeOptions((prev) => (prev.includes(v) ? prev : [...prev, v]));
+    }
     const next = { ...(safeTags || {}) };
-    if (!v) delete next[field];
-    else next[field] = v;
+    next[field] = v;
     onChange?.(next);
   };
 
-  const removeCustom = (k) => {
-    const next = { ...(safeTags || {}) };
-    const c = { ...(next.Custom || {}) };
-    delete c[k];
-    if (Object.keys(c).length === 0) delete next.Custom;
-    else next.Custom = c;
-    onChange?.(next);
-  };
+  const cubeOptionsBase = Array.isArray(cfg?.Fixed?.CubeModel?.options)
+    ? cfg.Fixed.CubeModel.options
+    : [];
+  const crossOptionsBase = Array.isArray(cfg?.Fixed?.CrossColor?.options)
+    ? cfg.Fixed.CrossColor.options
+    : [];
 
-  const addCustom = () => {
-    const k = String(newKey ?? "").trim();
-    const v = String(newVal ?? "").trim();
-    if (!k) return;
+  const cubeOptions = Array.from(
+    new Set(
+      [
+        ...cubeOptionsBase,
+        ...(Array.isArray(cubeModelOptions) ? cubeModelOptions : []),
+        ...localCubeOptions,
+        safeTags?.CubeModel || "",
+      ].filter(Boolean)
+    )
+  );
 
-    const next = { ...(safeTags || {}) };
-    const c = { ...(next.Custom || {}) };
-    c[k] = v || "true";
-    next.Custom = c;
-
-    onChange?.(next);
-    setNewKey("");
-    setNewVal("");
-    setAddingCustom(false);
-  };
-
-  const pillStyle = (isSet) => ({
-    width: "120px",
-    height: "30px",
-    borderRadius: "8px",
-    border: `2px solid ${
-      isSet ? "rgba(172, 172, 172, 0.95)" : "rgba(172, 172, 172, 0.75)"
-    }`,
-    background: "transparent",
-    color: "white",
-    fontSize: "14px",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "0 10px",
-    boxSizing: "border-box",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-  });
+  const crossOptions = safeTags?.CrossColor
+    ? Array.from(new Set([safeTags.CrossColor, ...crossOptionsBase]))
+    : crossOptionsBase;
 
   const selectStyle = {
     width: "120px",
@@ -247,14 +272,11 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
   const addCubeOption = () => {
     const v = String(newCube ?? "").trim();
     if (!v) return;
-
-    const next = {
-      ...(tagOptions || {}),
-      CubeModels: Array.from(new Set([v, ...(cubeOptions || [])])),
-    };
-    onTagOptionsChange?.(next);
-    setField("CubeModel", v);
-
+    setLocalCubeOptions((prev) => (prev.includes(v) ? prev : [...prev, v]));
+    onChange?.({
+      ...(safeTags || {}),
+      CubeModel: v,
+    });
     setNewCube("");
     setAddingCube(false);
   };
@@ -262,14 +284,10 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
   const addCrossOption = () => {
     const v = String(newCross ?? "").trim();
     if (!v) return;
-
-    const next = {
-      ...(tagOptions || {}),
-      CrossColors: Array.from(new Set([v, ...(crossOptions || [])])),
-    };
-    onTagOptionsChange?.(next);
-    setField("CrossColor", v);
-
+    onChange?.({
+      ...(safeTags || {}),
+      CrossColor: v,
+    });
     setNewCross("");
     setAddingCross(false);
   };
@@ -288,7 +306,6 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
       onKeyDownCapture={stopKeys}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Cube Model dropdown */}
       <div
         style={{
           width: "170px",
@@ -312,8 +329,8 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
           onKeyDownCapture={stopKeys}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <option value="">Cube Model</option>
-          {(cubeOptions || []).map((opt) => (
+          <option value="">{cfg.Fixed.CubeModel.label || "Cube Model"}</option>
+          {cubeOptions.map((opt) => (
             <option key={opt} value={opt}>
               {opt}
             </option>
@@ -342,18 +359,13 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
             <button type="button" style={addBtnStyle} onClick={addCubeOption}>
               Add
             </button>
-            <button
-              type="button"
-              style={addBtnStyle}
-              onClick={() => setAddingCube(false)}
-            >
+            <button type="button" style={addBtnStyle} onClick={() => setAddingCube(false)}>
               Cancel
             </button>
           </>
         )}
       </div>
 
-      {/* Cross Color dropdown */}
       <div
         style={{
           width: "170px",
@@ -377,8 +389,8 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
           onKeyDownCapture={stopKeys}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <option value="">Cross Color</option>
-          {(crossOptions || []).map((opt) => (
+          <option value="">{cfg.Fixed.CrossColor.label || "Cross Color"}</option>
+          {crossOptions.map((opt) => (
             <option key={opt} value={opt}>
               {opt}
             </option>
@@ -407,114 +419,32 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
             <button type="button" style={addBtnStyle} onClick={addCrossOption}>
               Add
             </button>
-            <button
-              type="button"
-              style={addBtnStyle}
-              onClick={() => setAddingCross(false)}
-            >
+            <button type="button" style={addBtnStyle} onClick={() => setAddingCross(false)}>
               Cancel
             </button>
           </>
         )}
       </div>
 
-      {/* custom tags list */}
-      {Object.entries(custom).map(([k, v]) => (
-        <div
-          key={`custom-${k}`}
-          style={{
-            width: "170px",
-            display: "flex",
-            justifyContent: "flex-end",
-          }}
-        >
-          <div
-            style={{
-              ...pillStyle(true),
-              justifyContent: "space-between",
-              gap: "8px",
-            }}
-            title={`${k}=${v}`}
-          >
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-              {k}
-              {v && v !== "true" ? `: ${v}` : ""}
-            </span>
-            <button
-              type="button"
-              onClick={() => removeCustom(k)}
-              title="Remove"
-              style={{
-                border: "none",
-                background: "transparent",
-                color: "white",
-                cursor: "pointer",
-                fontSize: "18px",
-                lineHeight: 1,
-                opacity: 0.9,
-                height: "auto",
-              }}
-            >
-              ×
-            </button>
-          </div>
-        </div>
+      {(cfg.CustomSlots || []).slice(0, visibleCustomCount).map((slot) => (
+        <input
+          key={slot.slot}
+          style={inputStyle}
+          value={safeTags?.[slot.slot] || ""}
+          onChange={(e) => setField(slot.slot, e.target.value)}
+          placeholder={slot.label || ""}
+          onKeyDownCapture={stopKeys}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
       ))}
 
-      {/* add custom */}
-      {addingCustom ? (
-        <div
-          style={{
-            width: "220px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "6px",
-            alignItems: "stretch",
-          }}
-        >
-          <input
-            style={inputStyle}
-            value={newKey}
-            onChange={(e) => setNewKey(e.target.value)}
-            placeholder="tag name (spaces ok)"
-            autoFocus
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === "Enter") addCustom();
-              if (e.key === "Escape") setAddingCustom(false);
-            }}
-            onKeyDownCapture={stopKeys}
-          />
-          <input
-            style={inputStyle}
-            value={newVal}
-            onChange={(e) => setNewVal(e.target.value)}
-            placeholder="value"
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === "Enter") addCustom();
-              if (e.key === "Escape") setAddingCustom(false);
-            }}
-            onKeyDownCapture={stopKeys}
-          />
-          <button type="button" onClick={addCustom} style={addBtnStyle}>
-            Add
-          </button>
-          <button
-            type="button"
-            onClick={() => setAddingCustom(false)}
-            style={addBtnStyle}
-          >
-            Cancel
-          </button>
-        </div>
-      ) : (
+      {visibleCustomCount < 5 && (
         <button
           type="button"
-          onClick={() => setAddingCustom(true)}
           style={addBtnStyle}
+          onClick={() => setVisibleCustomCount((prev) => Math.min(5, prev + 1))}
         >
-          + Tag
+          + Add Custom
         </button>
       )}
     </div>
@@ -522,11 +452,16 @@ function TagBarInline({ tags, onChange, tagOptions, onTagOptionsChange }) {
 }
 
 function App() {
+  const location = useLocation();
+  const isHomePage = location.pathname === "/";
+  const { settings, updateSettings, setAllSettings } = useSettings();
+
   const [sessionsList, setSessionsList] = useState([]);
   const [customEvents, setCustomEvents] = useState([]);
   const [currentSession, setCurrentSession] = useState("main");
   const [currentEvent, setCurrentEvent] = useState("333");
   const [sessionStats, setSessionStats] = useState({});
+  const [statsMutationTick, setStatsMutationTick] = useState(0);
 
   const [scrambles, setScrambles] = useState({});
   const [sessions, setSessions] = useState({
@@ -560,20 +495,12 @@ function App() {
   const [relayLegs, setRelayLegs] = useState([]);
 
   const [tagsByEvent, setTagsByEvent] = useState({});
-
-  const [tagOptions, setTagOptions] = useState({
-    CubeModels: [],
-    CrossColors: ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
-  });
+  const [tagConfig, setTagConfig] = useState(DEFAULT_TAG_CONFIG);
 
   const [practiceMode, setPracticeMode] = useState(false);
   const [practiceSolves, setPracticeSolves] = useState([]);
   const [showPracticeExit, setShowPracticeExit] = useState(false);
   const [practiceSaveTargetSession, setPracticeSaveTargetSession] = useState("main");
-
-  const location = useLocation();
-  const isHomePage = location.pathname === "/";
-  const { settings } = useSettings();
 
   const [scrambleProgress, setScrambleProgress] = useState(0);
   const [scrambleProgressTotal, setScrambleProgressTotal] = useState(0);
@@ -587,6 +514,10 @@ function App() {
   const dbSuccessTimeoutRef = useRef(null);
   const dbErrorTimeoutRef = useRef(null);
 
+  const settingsAutosaveTimeoutRef = useRef(null);
+  const lastSavedSettingsJsonRef = useRef("");
+  const skipNextSettingsAutosaveRef = useRef(false);
+
   const setDbPhase = (phase, op = "") => {
     setDbStatus((prev) => ({
       phase,
@@ -595,28 +526,36 @@ function App() {
     }));
   };
 
-  const runDb = async (opLabel, fn) => {
-    try {
-      if (dbSuccessTimeoutRef.current) clearTimeout(dbSuccessTimeoutRef.current);
-      if (dbErrorTimeoutRef.current) clearTimeout(dbErrorTimeoutRef.current);
+  const runDb = async (opLabel, fn, options = {}) => {
+    const showStatus = options?.showStatus !== false;
 
-      setDbPhase("loading", opLabel);
+    try {
+      if (showStatus) {
+        if (dbSuccessTimeoutRef.current) clearTimeout(dbSuccessTimeoutRef.current);
+        if (dbErrorTimeoutRef.current) clearTimeout(dbErrorTimeoutRef.current);
+
+        setDbPhase("loading", opLabel);
+      }
 
       const res = await fn();
 
-      setDbPhase("success", opLabel);
-      dbSuccessTimeoutRef.current = setTimeout(() => {
-        setDbPhase("idle", "");
-      }, 900);
+      if (showStatus) {
+        setDbPhase("success", opLabel);
+        dbSuccessTimeoutRef.current = setTimeout(() => {
+          setDbPhase("idle", "");
+        }, 900);
+      }
 
       return res;
     } catch (err) {
       console.error(`DB op failed (${opLabel}):`, err);
 
-      setDbPhase("error", opLabel);
-      dbErrorTimeoutRef.current = setTimeout(() => {
-        setDbPhase("idle", "");
-      }, 1400);
+      if (showStatus) {
+        setDbPhase("error", opLabel);
+        dbErrorTimeoutRef.current = setTimeout(() => {
+          setDbPhase("idle", "");
+        }, 1400);
+      }
 
       throw err;
     }
@@ -626,8 +565,83 @@ function App() {
     return () => {
       if (dbSuccessTimeoutRef.current) clearTimeout(dbSuccessTimeoutRef.current);
       if (dbErrorTimeoutRef.current) clearTimeout(dbErrorTimeoutRef.current);
+      if (settingsAutosaveTimeoutRef.current) clearTimeout(settingsAutosaveTimeoutRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isSignedIn || !user?.UserID) return;
+
+    if (settings.lastEvent !== currentEvent) {
+      updateSettings({ lastEvent: currentEvent });
+    }
+  }, [currentEvent, settings.lastEvent, updateSettings, isSignedIn, user?.UserID]);
+
+  useEffect(() => {
+    if (!isSignedIn || !user?.UserID) return;
+
+    if (settings.showPlayerBar !== showPlayerBar) {
+      updateSettings({ showPlayerBar });
+    }
+  }, [showPlayerBar, settings.showPlayerBar, updateSettings, isSignedIn, user?.UserID]);
+
+  useEffect(() => {
+    if (!isSignedIn || !user?.UserID) return;
+
+    const existing = settings.lastSessionByEvent || {};
+    const currentSaved = existing[currentEvent];
+
+    if ((currentSaved || "main") !== (currentSession || "main")) {
+      updateSettings({
+        lastSessionByEvent: {
+          ...existing,
+          [currentEvent]: currentSession || "main",
+        },
+      });
+    }
+  }, [
+    currentEvent,
+    currentSession,
+    settings.lastSessionByEvent,
+    updateSettings,
+    isSignedIn,
+    user?.UserID,
+  ]);
+
+  useEffect(() => {
+    if (!isSignedIn || !user?.UserID) return;
+
+    const settingsJson = JSON.stringify(settings || {});
+
+    if (skipNextSettingsAutosaveRef.current) {
+      lastSavedSettingsJsonRef.current = settingsJson;
+      skipNextSettingsAutosaveRef.current = false;
+      return;
+    }
+
+    if (settingsJson === lastSavedSettingsJsonRef.current) return;
+
+    if (settingsAutosaveTimeoutRef.current) {
+      clearTimeout(settingsAutosaveTimeoutRef.current);
+    }
+
+    settingsAutosaveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await updateUser(user.UserID, {
+          Settings: settings,
+        });
+        lastSavedSettingsJsonRef.current = JSON.stringify(settings || {});
+      } catch (err) {
+        console.error("Failed to autosave settings:", err);
+      }
+    }, 500);
+
+    return () => {
+      if (settingsAutosaveTimeoutRef.current) {
+        clearTimeout(settingsAutosaveTimeoutRef.current);
+      }
+    };
+  }, [settings, isSignedIn, user?.UserID]);
 
   const eventKey =
     String(currentEvent || "").toUpperCase() === "RELAY" ? "RELAY" : currentEvent;
@@ -661,8 +675,6 @@ function App() {
     return isRelayActive ? relayCurrentEvent : currentEvent;
   }, [isRelayActive, relayCurrentEvent, currentEvent]);
 
-  // ✅ if your cube integration emits TOKEN progress (per scramble token), keep "tokens".
-  // ✅ if it emits STEP progress (each quarter turn), change to "steps".
   const scrambleProgressMode = "steps";
 
   useEffect(() => {
@@ -676,8 +688,6 @@ function App() {
       const s = norm(d.scramble);
       const shown = norm(displayedScramble);
 
-      // If emitter includes scramble string, require match.
-      // If not, accept it as "current".
       if (s && shown && s !== shown) return;
 
       const rawProgress = Number(d.progress || 0);
@@ -695,7 +705,7 @@ function App() {
 
     window.addEventListener("pts:cubeScrambleProgress", onProg);
     return () => window.removeEventListener("pts:cubeScrambleProgress", onProg);
-  }, [displayedScramble]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [displayedScramble]);
 
   useEffect(() => {
     setScrambleProgress(0);
@@ -707,31 +717,30 @@ function App() {
   }, [displayedScramble]);
 
   useEffect(() => {
-  const onCubeSolve = (e) => {
-    console.log("SMART SOLVE", e.detail);
-  };
-
-  window.addEventListener("pts:cubeSolve", onCubeSolve);
-  return () => window.removeEventListener("pts:cubeSolve", onCubeSolve);
-}, []);
-
-  const currentTags =
-    tagsByEvent[eventKey] || {
-      CubeModel: "",
-      CrossColor: "",
-      Custom: {},
+    const onCubeSolve = (e) => {
+      console.log("SMART SOLVE", e.detail);
     };
 
+    window.addEventListener("pts:cubeSolve", onCubeSolve);
+    return () => window.removeEventListener("pts:cubeSolve", onCubeSolve);
+  }, []);
+
+  const currentTags = tagsByEvent[eventKey] || makeEmptyTagSelection();
+
   const buildTagPayload = (baseTags = {}) => {
-    const t = currentTags || {};
+    const t = currentTags || makeEmptyTagSelection();
     const payload = { ...(baseTags || {}) };
 
     if (t.CubeModel) payload.CubeModel = t.CubeModel;
     if (t.CrossColor) payload.CrossColor = t.CrossColor;
 
-    if (t.Custom && Object.keys(t.Custom).length) {
-      payload.Custom = { ...(t.Custom || {}) };
-    }
+    payload.TimerInput = settings.timerInput || "Keyboard";
+
+    if (t.Custom1) payload.Custom1 = t.Custom1;
+    if (t.Custom2) payload.Custom2 = t.Custom2;
+    if (t.Custom3) payload.Custom3 = t.Custom3;
+    if (t.Custom4) payload.Custom4 = t.Custom4;
+    if (t.Custom5) payload.Custom5 = t.Custom5;
 
     return payload;
   };
@@ -740,19 +749,23 @@ function App() {
     if (!scrambles[currentEvent]) {
       preloadScrambles(currentEvent);
     }
-  }, [currentEvent]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentEvent]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (!e.altKey) return;
 
       const key = e.key.toUpperCase();
-      const bindings = settings.eventKeyBindings;
+      const bindings = settings.eventKeyBindings || {};
 
       for (const [eventCode, combo] of Object.entries(bindings)) {
-        const [modifier, boundKey] = combo.split("+");
+        const parts = String(combo || "").split("+");
+        const modifier = parts[0];
+        const boundKey = parts[1] || "";
         if (modifier === "Alt" && boundKey.toUpperCase() === key) {
+          const savedSession = settings.lastSessionByEvent?.[eventCode] || "main";
           setCurrentEvent(eventCode);
+          setCurrentSession(savedSession);
           break;
         }
       }
@@ -760,7 +773,7 @@ function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [settings.eventKeyBindings]);
+  }, [settings.eventKeyBindings, settings.lastSessionByEvent]);
 
   useEffect(() => {
     if (!isSignedIn || !user?.UserID) return;
@@ -828,16 +841,12 @@ function App() {
   };
 
   const getNextScramble = () => {
-    const ev = currentEvent; // capture
-    const nextScramble = (scrambles[ev]?.[0]) || generateScramble(ev);
+    const ev = currentEvent;
+    const nextScramble = scrambles[ev]?.[0] || generateScramble(ev);
 
     setScrambles((prev) => {
       const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
-
-      // consume the first scramble
       const rest = arr.length ? arr.slice(1) : [];
-
-      // keep a buffer
       const need = rest.length < 5 ? 10 : 0;
       const refill = need ? Array.from({ length: need }, () => generateScramble(ev)) : [];
 
@@ -911,13 +920,19 @@ function App() {
     }
   };
 
-  const normalizeSolve = (item) => {
-    const baseTags = item.Tags || {};
+  const toFiniteNumber = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
 
-    const relayLegsLocal = item.RelayLegs || baseTags.RelayLegs || null;
+  const normalizeSolve = (item) => {
+    const baseTags = item?.Tags || {};
+
+    const relayLegsLocal = item?.RelayLegs || baseTags?.RelayLegs || null;
     const relayScramblesLocal =
-      item.RelayScrambles || baseTags.RelayScrambles || null;
-    const relayLegTimesLocal = item.RelayLegTimes || baseTags.RelayLegTimes || null;
+      item?.RelayScrambles || baseTags?.RelayScrambles || null;
+    const relayLegTimesLocal =
+      item?.RelayLegTimes || baseTags?.RelayLegTimes || null;
 
     const mergedTags =
       relayLegsLocal || relayScramblesLocal || relayLegTimesLocal
@@ -930,13 +945,39 @@ function App() {
           }
         : baseTags;
 
+    delete mergedTags.SolveSource;
+
+    const isDNF =
+      item?.IsDNF === true || item?.isDNF === true || item?.Penalty === "DNF" || item?.penalty === "DNF";
+    const rawTimeMs = toFiniteNumber(
+      item?.RawTimeMs ??
+        item?.rawTimeMs ??
+        item?.Time ??
+        item?.time ??
+        item?.ms ??
+        item?.OriginalTime ??
+        item?.originalTime
+    );
+    const explicitFinal = toFiniteNumber(item?.FinalTimeMs ?? item?.finalTimeMs);
+    const finalTimeMs = isDNF
+      ? null
+      : explicitFinal !== null
+      ? explicitFinal
+      : rawTimeMs;
+
     return {
-      time: item.Time,
-      scramble: item.Scramble,
-      event: item.Event,
-      penalty: item.Penalty,
-      note: item.Note || "",
-      datetime: item.DateTime,
+      solveRef: item?.SK || null,
+      createdAt: item?.CreatedAt || null,
+
+      time: isDNF ? Number.MAX_SAFE_INTEGER : finalTimeMs,
+      rawTimeMs,
+      finalTimeMs,
+      isDNF,
+
+      scramble: item?.Scramble || "",
+      event: item?.Event || "",
+      penalty: item?.Penalty ?? null,
+      note: item?.Note || "",
       tags: mergedTags,
 
       relayLegs: relayLegsLocal,
@@ -999,24 +1040,30 @@ function App() {
     const solvesToSave = [...(practiceSolves || [])];
 
     try {
-      await runDb("Saving practice solves", async () => {
+      const savedSolves = await runDb("Saving practice solves", async () => {
+        const out = [];
+
         for (const s of solvesToSave) {
-          await addSolveToDB(
-            user.UserID,
-            targetSessionID,
-            ev,
-            s.time,
-            s.scramble,
-            s.penalty ?? null,
-            s.note ?? "",
-            s.tags ?? {}
-          );
+          const res = await addSolveToDB(user.UserID, {
+            event: ev,
+            sessionID: targetSessionID,
+            rawTimeMs: s.rawTimeMs ?? s.time,
+            penalty: s.penalty ?? null,
+            scramble: s.scramble ?? "",
+            note: s.note ?? "",
+            createdAt: s.createdAt ?? new Date().toISOString(),
+            tags: s.tags ?? {},
+          });
+
+          if (res?.item) out.push(normalizeSolve(res.item));
         }
+
+        return out;
       });
 
       setSessions((prev) => ({
         ...prev,
-        [ev]: [...(prev[ev] || []), ...solvesToSave],
+        [ev]: [...(prev[ev] || []), ...(savedSolves || [])],
       }));
 
       setShowPracticeExit(false);
@@ -1041,11 +1088,8 @@ function App() {
           headerStats: [],
           wcaid: null,
           cubeCollection: [],
-          settings: {
-            primaryColor: "#0E171D",
-            secondaryColor: "#ffffff",
-            timerInput: "Keyboard",
-          },
+          settings: {},
+          tagConfig: DEFAULT_TAG_CONFIG,
           Friends: [],
         });
 
@@ -1058,9 +1102,33 @@ function App() {
       alert("User created successfully!");
 
       const profile = await getUser(username);
-      setUser(profile);
+      const userID = profile?.PK?.split("#")[1] || username;
+
+      skipNextSettingsAutosaveRef.current = true;
+      setAllSettings(profile?.Settings && typeof profile.Settings === "object" ? profile.Settings : {});
+      lastSavedSettingsJsonRef.current = JSON.stringify(
+        profile?.Settings && typeof profile.Settings === "object" ? profile.Settings : {}
+      );
+
+      setTagConfig(normalizeTagConfig(profile?.TagConfig));
+
+      setUser({
+        ...profile,
+        UserID: userID,
+      });
       setIsSignedIn(true);
       setShowSignInPopup(false);
+
+      setCurrentEvent(profile?.Settings?.lastEvent || "333");
+      setCurrentSession(
+        profile?.Settings?.lastSessionByEvent?.[profile?.Settings?.lastEvent || "333"] ||
+          "main"
+      );
+      setShowPlayerBar(
+        typeof profile?.Settings?.showPlayerBar === "boolean"
+          ? profile.Settings.showPlayerBar
+          : true
+      );
     } catch (error) {
       console.error("Error signing up:", error);
       alert("An error occurred during sign-up.");
@@ -1082,25 +1150,13 @@ function App() {
         Friends: profile.Friends || [],
       };
 
-      const dbTagOptions =
-        profile.TagOptions ||
-        profile.tagOptions ||
-        profile.Settings?.TagOptions ||
-        profile.Settings?.tagoptions ||
-        null;
+      skipNextSettingsAutosaveRef.current = true;
+      setAllSettings(profile?.Settings && typeof profile.Settings === "object" ? profile.Settings : {});
+      lastSavedSettingsJsonRef.current = JSON.stringify(
+        profile?.Settings && typeof profile.Settings === "object" ? profile.Settings : {}
+      );
 
-      if (dbTagOptions) {
-        setTagOptions((prev) => ({
-          ...(prev || {}),
-          ...(dbTagOptions || {}),
-          CubeModels: Array.isArray(dbTagOptions?.CubeModels)
-            ? dbTagOptions.CubeModels
-            : prev.CubeModels,
-          CrossColors: Array.isArray(dbTagOptions?.CrossColors)
-            ? dbTagOptions.CrossColors
-            : prev.CrossColors,
-        }));
-      }
+      setTagConfig(normalizeTagConfig(profile?.TagConfig));
 
       setUser(userWithData);
       setIsSignedIn(true);
@@ -1111,6 +1167,23 @@ function App() {
 
       setSessionsList(sessionItems);
       setCustomEvents(eventItems);
+
+      const restoredEvent =
+        profile?.Settings?.lastEvent && String(profile.Settings.lastEvent).trim()
+          ? profile.Settings.lastEvent
+          : "333";
+
+      const restoredSession =
+        profile?.Settings?.lastSessionByEvent?.[restoredEvent] || "main";
+
+      setCurrentEvent(restoredEvent);
+      setCurrentSession(restoredSession);
+
+      if (typeof profile?.Settings?.showPlayerBar === "boolean") {
+        setShowPlayerBar(profile.Settings.showPlayerBar);
+      } else {
+        setShowPlayerBar(true);
+      }
 
       const missingEvents = DEFAULT_EVENTS.filter(
         (event) =>
@@ -1148,30 +1221,66 @@ function App() {
     }
   };
 
-  const persistTagOptions = async (nextOptions) => {
-    if (!isSignedIn || !user?.UserID) return;
-    try {
-      await runDb("Saving tag options", () =>
-        updateUser(user.UserID, { TagOptions: nextOptions })
-      );
-      setUser((prev) => (prev ? { ...prev, TagOptions: nextOptions } : prev));
-    } catch (err) {
-      console.error("Failed to persist TagOptions:", err);
-    }
-  };
-
   const addSolve = async (newTime, smartMeta = null) => {
+    const createPendingSolve = ({
+      createdAt,
+      time,
+      scramble,
+      event,
+      tags,
+      note = "",
+      penalty = null,
+    }) => ({
+      solveRef: `PENDING#${createdAt}#${Math.random().toString(36).slice(2, 8)}`,
+      createdAt,
+      time,
+      rawTimeMs: time,
+      finalTimeMs: time,
+      isDNF: penalty === "DNF",
+      scramble,
+      event,
+      penalty,
+      note,
+      tags,
+    });
+
+    const appendPendingSolve = (ev, pendingSolve) => {
+      setSessions((prev) => ({
+        ...prev,
+        [ev]: [...(prev[ev] || []), pendingSolve],
+      }));
+    };
+
+    const replacePendingSolve = (ev, pendingRef, savedSolve) => {
+      setSessions((prev) => ({
+        ...prev,
+        [ev]: (prev[ev] || []).map((s) => (s.solveRef === pendingRef ? savedSolve : s)),
+      }));
+    };
+
+    const removePendingSolve = (ev, pendingRef) => {
+      setSessions((prev) => ({
+        ...prev,
+        [ev]: (prev[ev] || []).filter((s) => s.solveRef !== pendingRef),
+      }));
+    };
+
     if (practiceMode) {
       const scramble = getNextScramble();
       const timestamp = new Date().toISOString();
 
       const newSolve = {
+        solveRef: `LOCAL#${timestamp}`,
+        createdAt: timestamp,
         time: newTime,
+        rawTimeMs: newTime,
+        finalTimeMs: newTime,
+        isDNF: false,
+
         scramble,
         event: currentEvent,
         penalty: null,
         note: "",
-        datetime: timestamp,
         tags: buildTagPayload({ Practice: true }),
       };
 
@@ -1214,38 +1323,56 @@ function App() {
           RelayLegTimes: nextLegTimes,
         });
 
-        const newSolve = {
-          time: totalMs,
-          scramble: "Relay",
-          event: "RELAY",
-          penalty: null,
-          note: "",
-          datetime: timestamp,
-          tags: fullRelayTags,
-        };
-
-        setSessions((prev) => ({
-          ...prev,
-          RELAY: [...(prev.RELAY || []), newSolve],
-        }));
-
         if (isSignedIn && user) {
+          const pendingSolve = createPendingSolve({
+            createdAt: timestamp,
+            time: totalMs,
+            scramble: "Relay",
+            event: "RELAY",
+            tags: fullRelayTags,
+          });
+          appendPendingSolve("RELAY", pendingSolve);
+
           try {
-            await runDb("Saving solve", () =>
-              addSolveToDB(
-                user.UserID,
-                currentSession,
-                "RELAY",
-                totalMs,
-                "Relay",
-                null,
-                "",
-                fullRelayTags
-              )
+            const res = await runDb("Saving solve", () =>
+              addSolveToDB(user.UserID, {
+                event: "RELAY",
+                sessionID: currentSession,
+                rawTimeMs: totalMs,
+                penalty: null,
+                scramble: "Relay",
+                note: "",
+                createdAt: timestamp,
+                tags: fullRelayTags,
+              })
             );
+
+            const savedSolve = normalizeSolve(res?.item);
+            replacePendingSolve("RELAY", pendingSolve.solveRef, savedSolve);
           } catch (err) {
+            removePendingSolve("RELAY", pendingSolve.solveRef);
             console.error("Error adding relay solve:", err);
           }
+        } else {
+          const localSolve = {
+            solveRef: `LOCAL#${timestamp}`,
+            createdAt: timestamp,
+            time: totalMs,
+            rawTimeMs: totalMs,
+            finalTimeMs: totalMs,
+            isDNF: false,
+
+            scramble: "Relay",
+            event: "RELAY",
+            penalty: null,
+            note: "",
+            tags: fullRelayTags,
+          };
+
+          setSessions((prev) => ({
+            ...prev,
+            RELAY: [...(prev.RELAY || []), localSolve],
+          }));
         }
 
         resetRelaySet();
@@ -1254,38 +1381,56 @@ function App() {
 
       const totalMs = newTime;
 
-      const newSolve = {
-        time: totalMs,
-        scramble: "Relay",
-        event: "RELAY",
-        penalty: null,
-        note: "",
-        datetime: timestamp,
-        tags: relayTags,
-      };
-
-      setSessions((prev) => ({
-        ...prev,
-        RELAY: [...(prev.RELAY || []), newSolve],
-      }));
-
       if (isSignedIn && user) {
+        const pendingSolve = createPendingSolve({
+          createdAt: timestamp,
+          time: totalMs,
+          scramble: "Relay",
+          event: "RELAY",
+          tags: relayTags,
+        });
+        appendPendingSolve("RELAY", pendingSolve);
+
         try {
-          await runDb("Saving solve", () =>
-            addSolveToDB(
-              user.UserID,
-              currentSession,
-              "RELAY",
-              totalMs,
-              "Relay",
-              null,
-              "",
-              relayTags
-            )
+          const res = await runDb("Saving solve", () =>
+            addSolveToDB(user.UserID, {
+              event: "RELAY",
+              sessionID: currentSession,
+              rawTimeMs: totalMs,
+              penalty: null,
+              scramble: "Relay",
+              note: "",
+              createdAt: timestamp,
+              tags: relayTags,
+            })
           );
+
+          const savedSolve = normalizeSolve(res?.item);
+          replacePendingSolve("RELAY", pendingSolve.solveRef, savedSolve);
         } catch (err) {
+          removePendingSolve("RELAY", pendingSolve.solveRef);
           console.error("Error adding relay solve:", err);
         }
+      } else {
+        const localSolve = {
+          solveRef: `LOCAL#${timestamp}`,
+          createdAt: timestamp,
+          time: totalMs,
+          rawTimeMs: totalMs,
+          finalTimeMs: totalMs,
+          isDNF: false,
+
+          scramble: "Relay",
+          event: "RELAY",
+          penalty: null,
+          note: "",
+          tags: relayTags,
+        };
+
+        setSessions((prev) => ({
+          ...prev,
+          RELAY: [...(prev.RELAY || []), localSolve],
+        }));
       }
 
       resetRelaySet();
@@ -1293,7 +1438,6 @@ function App() {
     }
 
     let scramble;
-
     let activeSharedID = null;
     let solveIndexForBroadcast = null;
 
@@ -1328,7 +1472,6 @@ function App() {
     const smartTagPayload = smartMeta
       ? {
           SmartCube: {
-            Source: smartMeta.source || "GAN_CUBE",
             Reason: smartMeta.reason || "",
             StartedAtHostTs: smartMeta.startedAtHostTs ?? null,
             EndedAtHostTs: smartMeta.endedAtHostTs ?? null,
@@ -1339,46 +1482,47 @@ function App() {
         }
       : {};
 
-    const newSolve = {
-      time: newTime,
-      scramble,
-      event: currentEvent,
-      penalty: null,
-      note: "",
-      datetime: timestamp,
-      tags: sharedSession
-        ? buildTagPayload({
-            Shared: true,
-            IsShared: true,
-            SharedID: sharedSession.sharedID,
-            SharedIndex: sharedIndex,
-            ...smartTagPayload,
-          })
-        : buildTagPayload({
-            ...smartTagPayload,
-          }),
-    };
-
-    setSessions((prev) => ({
-      ...prev,
-      [currentEvent]: [...(prev[currentEvent] || []), newSolve],
-    }));
+    const newTags = sharedSession
+      ? buildTagPayload({
+          Shared: true,
+          IsShared: true,
+          SharedID: sharedSession.sharedID,
+          SharedIndex: sharedIndex,
+          ...smartTagPayload,
+        })
+      : buildTagPayload({
+          ...smartTagPayload,
+        });
 
     if (isSignedIn && user) {
+      const pendingSolve = createPendingSolve({
+        createdAt: timestamp,
+        time: newTime,
+        scramble,
+        event: currentEvent,
+        tags: newTags,
+      });
+      appendPendingSolve(currentEvent, pendingSolve);
+
       try {
-        await runDb("Saving solve", () =>
-          addSolveToDB(
-            user.UserID,
-            currentSession,
-            currentEvent,
-            newTime,
+        const res = await runDb("Saving solve", () =>
+          addSolveToDB(user.UserID, {
+            event: currentEvent,
+            sessionID: currentSession,
+            rawTimeMs: newTime,
+            penalty: null,
             scramble,
-            null,
-            "",
-            newSolve.tags
-          )
+            note: "",
+            createdAt: timestamp,
+            tags: newTags,
+          })
         );
+
+        const savedSolve = normalizeSolve(res?.item);
+        replacePendingSolve(currentEvent, pendingSolve.solveRef, savedSolve);
+        setStatsMutationTick((t) => t + 1);
       } catch (err) {
+        removePendingSolve(currentEvent, pendingSolve.solveRef);
         console.error("Error adding solve (DB write failed):", err);
         return;
       }
@@ -1400,19 +1544,42 @@ function App() {
           console.warn("Shared broadcast failed (solve still saved):", err);
         }
       }
+    } else {
+      const localSolve = {
+        solveRef: `LOCAL#${timestamp}`,
+        createdAt: timestamp,
+        time: newTime,
+        rawTimeMs: newTime,
+        finalTimeMs: newTime,
+        isDNF: false,
+
+        scramble,
+        event: currentEvent,
+        penalty: null,
+        note: "",
+        tags: newTags,
+      };
+
+      setSessions((prev) => ({
+        ...prev,
+        [currentEvent]: [...(prev[currentEvent] || []), localSolve],
+      }));
     }
   };
 
-  const applyPenalty = async (timestamp, penalty, updatedTime) => {
+  const applyPenalty = async (solveRef, penalty, updatedTime) => {
     if (practiceMode) {
       setPracticeSolves((prev) =>
         (prev || []).map((solve) => {
-          if (solve.datetime === timestamp) {
+          if (solve.solveRef === solveRef) {
+            const raw = solve.rawTimeMs ?? solve.time;
             return {
               ...solve,
               penalty,
-              time: updatedTime,
-              originalTime: solve.originalTime ?? solve.time,
+              time: penalty === "DNF" ? Number.MAX_SAFE_INTEGER : updatedTime,
+              rawTimeMs: raw,
+              finalTimeMs: penalty === "DNF" ? null : updatedTime,
+              isDNF: penalty === "DNF",
             };
           }
           return solve;
@@ -1424,13 +1591,27 @@ function App() {
     const updatedSessions = { ...sessions };
     const eventSolves = updatedSessions[eventKey] || [];
 
+    const targetSolve = eventSolves.find((solve) => solve.solveRef === solveRef);
+    if (!targetSolve) return;
+
+    const rawTimeMs =
+      Number.isFinite(Number(targetSolve?.rawTimeMs))
+        ? Number(targetSolve.rawTimeMs)
+        : Number.isFinite(Number(targetSolve?.finalTimeMs))
+        ? Number(targetSolve.finalTimeMs)
+        : Number.isFinite(Number(targetSolve?.time))
+        ? Number(targetSolve.time)
+        : null;
+
     const updatedSolves = eventSolves.map((solve) => {
-      if (solve.datetime === timestamp) {
+      if (solve.solveRef === solveRef) {
         return {
           ...solve,
           penalty,
-          time: updatedTime,
-          originalTime: solve.originalTime ?? solve.time,
+          time: penalty === "DNF" ? Number.MAX_SAFE_INTEGER : updatedTime,
+          rawTimeMs,
+          finalTimeMs: penalty === "DNF" ? null : updatedTime,
+          isDNF: penalty === "DNF",
         };
       }
       return solve;
@@ -1441,14 +1622,21 @@ function App() {
 
     if (isSignedIn && user?.UserID) {
       try {
-        await runDb("Updating solve", () =>
-          updateSolve(user.UserID, timestamp, {
-            Penalty: penalty,
-            Time: updatedTime,
-            OriginalTime: updatedSolves.find((s) => s.datetime === timestamp)
-              ?.originalTime,
-          })
+        const res = await runDb(
+          "Updating solve",
+          () => updateSolvePenalty(user.UserID, solveRef, rawTimeMs, penalty),
+          { showStatus: false }
         );
+
+        const savedSolve = normalizeSolve(res?.item);
+
+        setSessions((prev) => ({
+          ...prev,
+          [eventKey]: (prev[eventKey] || []).map((solve) =>
+            solve.solveRef === solveRef ? savedSolve : solve
+          ),
+        }));
+        setStatsMutationTick((t) => t + 1);
       } catch (err) {
         console.error("Failed to update DynamoDB penalty:", err);
       }
@@ -1456,32 +1644,36 @@ function App() {
   };
 
   const deleteTime = async (eventKeyParam, solveOrIndex) => {
-    const ev = eventKeyParam;
+    const ev = String(eventKeyParam || "").toUpperCase();
+    if (!ev) return;
 
-    let datetimeToDelete = null;
+    let solveRefToDelete = null;
 
     if (typeof solveOrIndex === "string") {
-      datetimeToDelete = solveOrIndex;
+      solveRefToDelete = solveOrIndex;
     } else if (typeof solveOrIndex === "number") {
       const s = sessions?.[ev]?.[solveOrIndex];
-      datetimeToDelete = s?.datetime;
+      solveRefToDelete = s?.solveRef || null;
     } else if (solveOrIndex && typeof solveOrIndex === "object") {
-      datetimeToDelete = solveOrIndex.datetime;
+      solveRefToDelete = solveOrIndex.solveRef || null;
     }
 
-    if (!datetimeToDelete) return;
+    if (!solveRefToDelete) return;
 
     setSessions((prev) => {
       const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
       return {
         ...(prev || {}),
-        [ev]: arr.filter((s) => s?.datetime !== datetimeToDelete),
+        [ev]: arr.filter((s) => s?.solveRef !== solveRefToDelete),
       };
     });
 
     if (isSignedIn && user) {
       try {
-        await runDb("Deleting solve", () => deleteSolve(user.UserID, datetimeToDelete));
+        await runDb("Deleting solve", () => deleteSolve(user.UserID, solveRefToDelete), {
+          showStatus: false,
+        });
+        setStatsMutationTick((t) => t + 1);
       } catch (err) {
         alert("Failed to delete solve");
         console.error(err);
@@ -1530,8 +1722,14 @@ function App() {
   };
 
   const handleEventChange = (event) => {
-    setCurrentEvent(event.target.value);
-    setCurrentSession("main");
+    const nextEvent = event.target.value;
+    const savedSession =
+      isSignedIn && user?.UserID
+        ? settings.lastSessionByEvent?.[nextEvent] || "main"
+        : "main";
+
+    setCurrentEvent(nextEvent);
+    setCurrentSession(savedSession);
     setSharedSession(null);
     setSharedIndex(0);
 
@@ -1575,8 +1773,82 @@ function App() {
   const solvesSourceForDetail = practiceMode
     ? practiceSolves || []
     : sessions[eventKey] || [];
+  const currentSessionStatsForEvent =
+    sessionStats?.[String(eventKey || "").toUpperCase()]?.[String(currentSession || "main")] ||
+    null;
+  const currentSessionTotalSolveCount = Number(
+    currentSessionStatsForEvent?.SolveCountTotal ??
+      currentSessionStatsForEvent?.solveCountTotal ??
+      currentSessionStatsForEvent?.SolveCount ??
+      currentSessionStatsForEvent?.solveCount ??
+      0
+  );
 
-  // (you compute averages but don’t use them directly here — leaving as-is)
+  const requestBestAverageWindow = async (count, startSolveRef, targetAvg) => {
+    if (
+      !practiceMode &&
+      isSignedIn &&
+      user?.UserID &&
+      startSolveRef &&
+      Number.isFinite(Number(count)) &&
+      count > 0
+    ) {
+      try {
+        const items = await runDb(
+          "Loading best average",
+          () =>
+            getSolveWindowFromStart(
+              user.UserID,
+              currentEvent,
+              currentSession,
+              startSolveRef,
+              count
+            ),
+          { showStatus: false }
+        );
+
+        const normalized = (items || []).map((it) => normalizeSolve(it)).filter(Boolean);
+        if (normalized.length === count) {
+          setSelectedAverageSolves(normalized);
+          setSelectedAverageIndex(0);
+          return true;
+        }
+      } catch (err) {
+        console.warn("Failed to load best average window from API:", err);
+      }
+    }
+
+    if (!Number.isFinite(Number(targetAvg))) return false;
+
+    let selected = [];
+    for (let i = 0; i <= currentSolves.length - count; i++) {
+      const slice = currentSolves.slice(i, i + count);
+      const avg = calculateAverage(
+        slice.map((s) => s.time),
+        true
+      ).average;
+      if (typeof avg === "number" && Math.round(avg) === Math.round(Number(targetAvg))) {
+        selected = slice;
+        break;
+      }
+    }
+
+    if (selected.length > 0) {
+      setSelectedAverageSolves(selected);
+      setSelectedAverageIndex(0);
+      return true;
+    }
+
+    return false;
+  };
+  const cubeModelHistoryOptions = Array.from(
+    new Set(
+      currentSolves
+        .map((s) => String(s?.tags?.CubeModel || "").trim())
+        .filter(Boolean)
+    )
+  );
+
   const avgOfFive = calculateAverage(
     currentSolves.slice(-5).map((s) => s.time),
     true
@@ -1800,6 +2072,7 @@ function App() {
                             }}
                           >
                             <TagBarInline
+                              key={`tagbar-${eventKey}`}
                               tags={currentTags}
                               onChange={(next) =>
                                 setTagsByEvent((prev) => ({
@@ -1807,11 +2080,8 @@ function App() {
                                   [eventKey]: next,
                                 }))
                               }
-                              tagOptions={tagOptions}
-                              onTagOptionsChange={(nextOptions) => {
-                                setTagOptions(nextOptions);
-                                persistTagOptions(nextOptions);
-                              }}
+                              tagConfig={tagConfig}
+                              cubeModelOptions={cubeModelHistoryOptions}
                             />
                             <img src={tagIcon} alt="tagIcon" className="tagIcon" />
                           </div>
@@ -1824,7 +2094,9 @@ function App() {
 
                   <AveragesDisplay
                     currentSolves={currentSolves}
+                    overallSessionStats={currentSessionStatsForEvent}
                     setSelectedAverageSolves={setSelectedAverageSolves}
+                    onRequestBestAverageWindow={requestBestAverageWindow}
                   />
 
                   <TimeList
@@ -1848,8 +2120,12 @@ function App() {
                     currentSession={currentSession}
                     eventKey={eventKey}
                     practiceMode={practiceMode}
-
-                    
+                    totalSolveCount={
+                      Number.isFinite(currentSessionTotalSolveCount) &&
+                      currentSessionTotalSolveCount >= 0
+                        ? currentSessionTotalSolveCount
+                        : undefined
+                    }
                   />
 
                   {selectedAverageSolves.length > 0 && (
@@ -1860,15 +2136,17 @@ function App() {
                         setSelectedAverageIndex(0);
                       }}
                       deleteTime={() => {
-                        const idx = solvesSourceForDetail.indexOf(
-                          selectedAverageSolves[selectedAverageIndex]
-                        );
-                        if (idx < 0) return;
+                        const selected = selectedAverageSolves[selectedAverageIndex];
+                        if (!selected) return;
 
                         if (practiceMode) {
+                          const idx = solvesSourceForDetail.findIndex(
+                            (s) => s.solveRef === selected.solveRef
+                          );
+                          if (idx < 0) return;
                           deletePracticeTime(idx);
                         } else {
-                          deleteTime(eventKey, idx);
+                          deleteTime(eventKey, selected.solveRef);
                         }
                       }}
                       addPost={addPost}
@@ -1921,6 +2199,7 @@ function App() {
                   sessions={sessions}
                   sessionStats={sessionStats}
                   sessionsList={sessionsList}
+                  statsMutationTick={statsMutationTick}
                   setSessions={setSessions}
                   currentEvent={currentEvent}
                   currentSession={currentSession}
@@ -1971,20 +2250,23 @@ function App() {
           addPost={addPost}
           user={user}
           applyPenalty={applyPenalty}
+          onHide={() => setShowPlayerBar(false)}
         />
       )}
 
-      {!isHomePage && (
-        <div className="toggle-bar">
-          {showPlayerBar ? (
-            <button className="toggle-button" onClick={() => setShowPlayerBar(false)}>
-              &#x25BC;
-            </button>
-          ) : (
-            <button className="toggle-button" onClick={() => setShowPlayerBar(true)}>
-              &#x25B2;
-            </button>
-          )}
+      {!isHomePage && !showPlayerBar && (
+        <div
+          className="toggle-bar"
+          style={{ bottom: "12px" }}
+        >
+          <button
+            className="toggle-button"
+            onClick={() => setShowPlayerBar(true)}
+            aria-label="Show player bar"
+            title="Show player bar"
+          >
+            &#x25B2;
+          </button>
         </div>
       )}
 
@@ -2000,7 +2282,15 @@ function App() {
         <Settings
           userID={user?.UserID}
           onClose={() => setShowSettingsPopup(false)}
-          onProfileUpdate={(fresh) => setUser((prev) => ({ ...prev, ...fresh }))}
+          onProfileUpdate={(fresh) => {
+            setUser((prev) => ({ ...prev, ...fresh }));
+            if (fresh?.Settings && typeof fresh.Settings === "object") {
+              skipNextSettingsAutosaveRef.current = true;
+              setAllSettings(fresh.Settings);
+              lastSavedSettingsJsonRef.current = JSON.stringify(fresh.Settings);
+            }
+            setTagConfig(normalizeTagConfig(fresh?.TagConfig));
+          }}
         />
       )}
 

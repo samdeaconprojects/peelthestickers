@@ -1,23 +1,51 @@
-// src/components/Profile/Profile.js
-import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
-import './Profile.css';
-import Post from './Post';
-import PostDetail from './PostDetail';
-import ProfileHeader from './ProfileHeader';
-import LineChart from '../Stats/LineChart';
-import EventCountPieChart from '../Stats/EventCountPieChart';
-import BarChart from '../Stats/BarChart';
-import TimeTable from '../Stats/TimeTable';
-import { getPosts } from '../../services/getPosts';
-import { getUser } from '../../services/getUser';
-import { updateUser } from '../../services/updateUser';
-import { updatePostComments } from '../../services/updatePostComments';
-import { getSessions } from '../../services/getSessions';
-import {
-  getSolvesBySession,
-  getLastNSolvesBySession, // 🔹 NEW
-} from '../../services/getSolvesBySession';
+import React, { useState, useEffect, useMemo } from "react";
+import { useParams } from "react-router-dom";
+import "./Profile.css";
+import Post from "./Post";
+import PostDetail from "./PostDetail";
+import ProfileHeader from "./ProfileHeader";
+import LineChart from "../Stats/LineChart";
+import EventCountPieChart from "../Stats/EventCountPieChart";
+import BarChart from "../Stats/BarChart";
+import TimeTable from "../Stats/TimeTable";
+import { getPosts } from "../../services/getPosts";
+import { getUser } from "../../services/getUser";
+import { updateUser } from "../../services/updateUser";
+import { updatePostComments } from "../../services/updatePostComments";
+import { getSessions } from "../../services/getSessions";
+import { getLastNSolvesBySession } from "../../services/getSolvesBySession";
+
+function normalizeSolve(item) {
+  if (!item) return null;
+
+  const created =
+    item.CreatedAt ||
+    (typeof item.SK === "string" && item.SK.startsWith("SOLVE#")
+      ? item.SK.slice(6)
+      : null);
+
+  const isDNF = item?.IsDNF === true || item?.Penalty === "DNF";
+  const rawTimeMs = Number.isFinite(item?.RawTimeMs) ? item.RawTimeMs : null;
+  const finalTimeMs = isDNF
+    ? null
+    : Number.isFinite(item?.FinalTimeMs)
+      ? item.FinalTimeMs
+      : rawTimeMs;
+
+  return {
+    solveRef: item?.SK || null,
+    fullIndex: null,
+    time: isDNF ? Number.MAX_SAFE_INTEGER : finalTimeMs,
+    rawTime: rawTimeMs,
+    originalTime: rawTimeMs,
+    scramble: item?.Scramble || "",
+    event: item?.Event || "",
+    penalty: item?.Penalty ?? null,
+    note: item?.Note || "",
+    datetime: created,
+    tags: item?.Tags || {},
+  };
+}
 
 function Profile({ user, setUser, deletePost: deletePostProp }) {
   const { userID: paramID } = useParams();
@@ -28,20 +56,19 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
 
   const [viewedProfile, setViewedProfile] = useState(null);
   const [viewedSessions, setViewedSessions] = useState({});
-  const [viewedSessionStats, setViewedSessionStats] = useState({}); // 🔹 NEW
+  const [viewedSessionStats, setViewedSessionStats] = useState({});
   const [posts, setPosts] = useState([]);
   const [selectedPost, setSelectedPost] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
 
-  // Default visible stats
   const defaultVisibleStats = [
-    { chart: 'lineChart', event: '333', session: 'all' },
-    { chart: 'pieChart' },
+    { chart: "lineChart", event: "333", session: "all" },
+    { chart: "pieChart" },
   ];
+
   const [visibleStats, setVisibleStats] = useState(defaultVisibleStats);
   const [editingStats, setEditingStats] = useState(false);
 
-  // Load profile data
   useEffect(() => {
     const loadProfile = async () => {
       if (isOwn) {
@@ -61,78 +88,64 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
               : defaultVisibleStats
           );
         } catch (err) {
-          console.error('Error loading profile:', err);
+          console.error("Error loading profile:", err);
         }
       }
     };
     loadProfile();
   }, [viewID, user, isOwn]);
 
-  // Load sessions and group by event + session
   useEffect(() => {
     const loadSessions = async () => {
       if (!viewID) return;
+
       try {
         const sessionItems = await getSessions(viewID);
 
         const grouped = {};
-        const statsByEvent = {}; // 🔹 NEW
+        const statsByEvent = {};
 
         for (const session of sessionItems) {
-          const ev = (session.Event || 'UNKNOWN').toUpperCase();
-          const sid = session.SessionID || 'main';
+          const ev = (session.Event || "UNKNOWN").toUpperCase();
+          const sid = session.SessionID || "main";
 
           if (!grouped[ev]) grouped[ev] = {};
-          if (!statsByEvent[ev]) statsByEvent[ev] = {}; // 🔹 NEW
+          if (!statsByEvent[ev]) statsByEvent[ev] = {};
 
-          // 🔹 Store per-session Stats blob from Dynamo (overall stats)
           statsByEvent[ev][sid] = session.Stats || null;
 
           if (!grouped[ev][sid]) grouped[ev][sid] = [];
 
           try {
-            // 🔹 Only fetch the last N solves for charts, not all
             const solves = await getLastNSolvesBySession(viewID, ev, sid, 200);
-            grouped[ev][sid] = solves.map(normalizeSolve);
+            grouped[ev][sid] = (solves || []).map(normalizeSolve).filter(Boolean);
           } catch (err) {
-            console.error('Error fetching solves for', ev, sid, err);
+            console.error("Error fetching solves for", ev, sid, err);
           }
         }
 
-        console.log('Grouped sessions for profile:', grouped);
         setViewedSessions(grouped);
-        setViewedSessionStats(statsByEvent); // 🔹 NEW
+        setViewedSessionStats(statsByEvent);
       } catch (err) {
-        console.error('Failed to fetch sessions:', err);
+        console.error("Failed to fetch sessions:", err);
       }
     };
+
     loadSessions();
   }, [viewID]);
 
-  const normalizeSolve = (item) => ({
-    time: item.Time,
-    scramble: item.Scramble,
-    event: item.Event,
-    penalty: item.Penalty,
-    note: item.Note || '',
-    datetime: item.DateTime,
-    tags: item.Tags || {},
-  });
-
-  // Load posts
   useEffect(() => {
     const loadPosts = async () => {
       try {
         const fresh = await getPosts(viewID);
         setPosts(fresh);
       } catch (err) {
-        console.error('Failed to fetch posts:', err);
+        console.error("Failed to fetch posts:", err);
       }
     };
     if (viewID) loadPosts();
   }, [viewID]);
 
-  // Delete post
   const handleDeletePost = async (ts) => {
     try {
       await deletePostProp(ts);
@@ -140,11 +153,10 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
       setPosts(fresh);
       setSelectedPost(null);
     } catch (err) {
-      console.error('Failed to delete post:', err);
+      console.error("Failed to delete post:", err);
     }
   };
 
-  // Add comment
   const handleAddComment = async (comment) => {
     if (!selectedPost) return;
     const ts = selectedPost.DateTime || selectedPost.date;
@@ -158,11 +170,10 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
     try {
       await updatePostComments(ownerID, ts, updatedComments);
     } catch (err) {
-      console.error('Failed to save comment:', err);
+      console.error("Failed to save comment:", err);
     }
   };
 
-  // Add friend
   const handleAddFriend = async () => {
     if (!user || isOwn) return;
     const current = user.Friends || [];
@@ -172,21 +183,33 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
         await updateUser(user.UserID, { Friends: updatedList });
         setUser((prev) => ({ ...prev, Friends: updatedList }));
       } catch (err) {
-        console.error('Failed to add friend:', err);
+        console.error("Failed to add friend:", err);
       }
     }
   };
 
-  // Save stat preferences
   const handleSaveStats = async () => {
     try {
       await updateUser(user.UserID, { VisibleStats: visibleStats });
       setUser((prev) => ({ ...prev, VisibleStats: visibleStats }));
       setEditingStats(false);
     } catch (err) {
-      console.error('Failed to update visible stats:', err);
+      console.error("Failed to update visible stats:", err);
     }
   };
+
+  const solvesForConfig = useMemo(() => {
+    return (item) => {
+      if (!item?.event) return [];
+      const ev = String(item.event).toUpperCase();
+
+      if (item.session === "all") {
+        return Object.values(viewedSessions[ev] || {}).flat();
+      }
+
+      return viewedSessions[ev]?.[item.session] || [];
+    };
+  }, [viewedSessions]);
 
   if (!viewedProfile) return null;
   if (!viewedProfile.UserID) return <div>Loading profile…</div>;
@@ -198,7 +221,7 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
       <ProfileHeader
         user={viewedProfile}
         sessions={viewedSessions}
-        sessionStats={viewedSessionStats} // 🔹 NEW (overall stats per session)
+        sessionStats={viewedSessionStats}
       />
 
       {!isOwn && (
@@ -207,7 +230,7 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
           onClick={handleAddFriend}
           disabled={isFriend}
         >
-          {isFriend ? 'Friend' : 'Add Friend'}
+          {isFriend ? "Friend" : "Add Friend"}
         </button>
       )}
 
@@ -223,6 +246,7 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
       {editingStats && (
         <div className="statsEditor">
           <h3>Select visible stats</h3>
+
           {visibleStats.map((item, idx) => (
             <div key={idx} className="statSelector">
               <select
@@ -238,10 +262,11 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
                 <option value="barChart">Bar Chart</option>
                 <option value="timeTable">Time Table</option>
               </select>
-              {item.chart !== 'pieChart' && (
+
+              {item.chart !== "pieChart" && (
                 <>
                   <select
-                    value={item.event || '333'}
+                    value={item.event || "333"}
                     onChange={(e) => {
                       const newStats = [...visibleStats];
                       newStats[idx] = { ...item, event: e.target.value };
@@ -256,7 +281,7 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
                   </select>
 
                   <select
-                    value={item.session || 'all'}
+                    value={item.session || "all"}
                     onChange={(e) => {
                       const newStats = [...visibleStats];
                       newStats[idx] = { ...item, session: e.target.value };
@@ -274,16 +299,18 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
               )}
             </div>
           ))}
+
           <button
             onClick={() =>
               setVisibleStats([
                 ...visibleStats,
-                { chart: 'lineChart', event: '333', session: 'all' },
+                { chart: "lineChart", event: "333", session: "all" },
               ])
             }
           >
             + Add Chart
           </button>
+
           <div>
             <button onClick={handleSaveStats}>Save</button>
             <button onClick={() => setEditingStats(false)}>Cancel</button>
@@ -293,13 +320,13 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
 
       <div className="tabContainer">
         <button
-          className={`tabButton ${activeTab === 0 ? 'active' : ''}`}
+          className={`tabButton ${activeTab === 0 ? "active" : ""}`}
           onClick={() => setActiveTab(0)}
         >
           Stats
         </button>
         <button
-          className={`tabButton ${activeTab === 1 ? 'active' : ''}`}
+          className={`tabButton ${activeTab === 1 ? "active" : ""}`}
           onClick={() => setActiveTab(1)}
         >
           Posts
@@ -312,59 +339,49 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
             <div className="stats-page">
               <div className="stats-grid">
                 {visibleStats.map((item, idx) => {
-                  if (item.chart === 'lineChart') {
-                    let solves = [];
-                    if (item.session === 'all') {
-                      solves = Object.values(viewedSessions[item.event] || {}).flat();
-                    } else {
-                      solves = viewedSessions[item.event]?.[item.session] || [];
-                    }
+                  if (item.chart === "lineChart") {
+                    const solves = solvesForConfig(item);
                     return (
                       <div key={idx} className="stats-item">
                         <LineChart
-                          solves={solves.slice(-100)}
-                          title={`${item.event} (${item.session || 'all'})`}
-                        />
-                      </div>
-                    );
-                  }
-                  if (item.chart === 'pieChart') {
-                    return (
-                      <div key={idx} className="stats-item">
-                       <EventCountPieChart
-                          sessions={viewedSessions}
-                          sessionStats={viewedSessionStats}   
+                          solves={solves}
+                          title={`${item.event} (${item.session || "all"})`}
+                          defaultViewMode="last100"
+                          allowViewPicker={true}
                         />
                       </div>
                     );
                   }
 
-                  if (item.chart === 'barChart') {
-                    let solves = [];
-                    if (item.session === 'all') {
-                      solves = Object.values(viewedSessions[item.event] || {}).flat();
-                    } else {
-                      solves = viewedSessions[item.event]?.[item.session] || [];
-                    }
+                  if (item.chart === "pieChart") {
                     return (
                       <div key={idx} className="stats-item">
-                        <BarChart solves={solves} />
+                        <EventCountPieChart
+                          sessions={viewedSessions}
+                          sessionStats={viewedSessionStats}
+                        />
                       </div>
                     );
                   }
-                  if (item.chart === 'timeTable') {
-                    let solves = [];
-                    if (item.session === 'all') {
-                      solves = Object.values(viewedSessions[item.event] || {}).flat();
-                    } else {
-                      solves = viewedSessions[item.event]?.[item.session] || [];
-                    }
+
+                  if (item.chart === "barChart") {
+                    const solves = solvesForConfig(item);
                     return (
                       <div key={idx} className="stats-item">
-                        <TimeTable solves={solves} />
+                        <BarChart solves={solves.slice(-200)} />
                       </div>
                     );
                   }
+
+                  if (item.chart === "timeTable") {
+                    const solves = solvesForConfig(item);
+                    return (
+                      <div key={idx} className="stats-item">
+                        <TimeTable solves={solves.slice(-200)} />
+                      </div>
+                    );
+                  }
+
                   return null;
                 })}
               </div>

@@ -1,9 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import "./Detail.css";
 import RubiksCubeSVG from "../PuzzleSVGs/RubiksCubeSVG";
 import { getScrambledFaces } from "../scrambleUtils";
 import { formatTime } from "../TimeList/TimeUtils";
-import { updateSolvePenalty } from "../../services/updateSolvePenalty";
 import { updateSolve } from "../../services/updateSolve";
 
 function Detail({
@@ -20,9 +19,44 @@ function Detail({
 }) {
   const isArray = Array.isArray(solve);
 
-  const getSolveTS = (s) => s?.datetime || s?.DateTime || s?.CreatedAt || null;
+  const getSolveRef = (s) => s?.solveRef || s?.SK || null;
+  const getSolveCreatedAt = (s) => s?.createdAt || s?.CreatedAt || s?.DateTime || null;
   const getSolveTags = (s) => s?.tags || s?.Tags || {};
   const getSolveNote = (s) => s?.note ?? s?.Note ?? "";
+  const getSolveEvent = (s) => s?.event || s?.Event || "";
+  const hasRealSolveRef = (s) => {
+    const ref = getSolveRef(s);
+    return typeof ref === "string" && ref.startsWith("SOLVE#");
+  };
+  const isReadOnlySolve = (s) => !!s?.__readOnly || !hasRealSolveRef(s);
+
+  const toFiniteNumber = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const getSolveRawTimeMs = (s) =>
+    toFiniteNumber(s?.rawTimeMs) ??
+    toFiniteNumber(s?.RawTimeMs) ??
+    toFiniteNumber(s?.originalTime) ??
+    toFiniteNumber(s?.OriginalTime) ??
+    toFiniteNumber(s?.finalTimeMs) ??
+    toFiniteNumber(s?.FinalTimeMs) ??
+    toFiniteNumber(s?.time);
+
+  const getSolveFinalTimeMs = (s) => {
+    if (s?.penalty === "DNF" || s?.Penalty === "DNF" || s?.isDNF === true || s?.IsDNF === true) {
+      return Number.MAX_SAFE_INTEGER;
+    }
+
+    const finalMs =
+      toFiniteNumber(s?.finalTimeMs) ??
+      toFiniteNumber(s?.FinalTimeMs) ??
+      toFiniteNumber(s?.time);
+
+    if (finalMs !== null) return finalMs;
+    return null;
+  };
 
   const resolveUserID = (s) =>
     userID || s?.PK?.split("USER#")[1] || s?.userID || s?.UserID || null;
@@ -58,17 +92,11 @@ function Detail({
     }
   };
 
-  // -------------------------
-  // Notes state
-  // -------------------------
   const [notes, setNotes] = useState(
     isArray ? solve.map((s) => getSolveNote(s)) : getSolveNote(solve)
   );
   const [noteSaving, setNoteSaving] = useState(false);
 
-  // -------------------------
-  // Tags editor state
-  // -------------------------
   const initTagState = (s) => {
     const t = getSolveTags(s);
     const customObj =
@@ -94,16 +122,12 @@ function Detail({
     isArray ? solve.map((s) => initTagState(s)) : initTagState(solve)
   );
 
-  // keep state in sync when solve changes
   useEffect(() => {
     setNotes(isArray ? solve.map((s) => getSolveNote(s)) : getSolveNote(solve));
     setTagsState(isArray ? solve.map((s) => initTagState(s)) : initTagState(solve));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [solve, isArray]);
 
-  // -------------------------
-  // Click outside to close
-  // -------------------------
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (event.target.className === "detailPopup") {
@@ -115,65 +139,74 @@ function Detail({
     return () => document.removeEventListener("click", handleClickOutside);
   }, [onClose]);
 
-  // -------------------------
-  // Patch local solve + sessions
-  // -------------------------
-  const patchLocalSolve = (s, ts, patch) => {
-    // patch sessions if provided
-    if (typeof setSessions === "function") {
+  const arrayIsMutable = useMemo(() => {
+    if (!isArray) return false;
+    return solve.every((s) => hasRealSolveRef(s) && !s?.__readOnly);
+  }, [isArray, solve]);
+
+  const patchLocalSolve = (s, solveRef, patch) => {
+    if (typeof setSessions === "function" && hasRealSolveRef(s)) {
       setSessions((prev) => {
-        const updated = { ...prev };
-        const session = updated[s.event] || [];
-        const i = session.findIndex((sol) => sol.datetime === s.datetime);
+        const updated = { ...(prev || {}) };
+        const eventKey = getSolveEvent(s);
+        const session = Array.isArray(updated?.[eventKey]) ? [...updated[eventKey]] : [];
+        const i = session.findIndex((sol) => (sol?.solveRef || sol?.SK || null) === solveRef);
+
         if (i !== -1) {
           session[i] = { ...session[i], ...patch };
-          updated[s.event] = [...session];
+          updated[eventKey] = session;
         }
+
         return updated;
       });
     }
-    // patch in-place for the open popup
+
     Object.assign(s, patch);
 
-    // also support legacy fields so future normalizers don't "lose" it
     if (patch.tags) Object.assign(s, { Tags: patch.tags });
     if (patch.note !== undefined) Object.assign(s, { Note: patch.note });
-    if (patch.datetime) Object.assign(s, { DateTime: patch.datetime });
+    if (patch.createdAt) Object.assign(s, { CreatedAt: patch.createdAt });
+    if (patch.solveRef) Object.assign(s, { SK: patch.solveRef });
   };
 
-  // -------------------------
-  // Save Note
-  // -------------------------
   const saveNote = async (index = null) => {
     const s = isArray ? solve[index] : solve;
+    if (isReadOnlySolve(s)) return;
+
     const resolved = resolveUserID(s);
-    const ts = getSolveTS(s);
+    const solveRef = getSolveRef(s);
     const noteValue = isArray ? notes[index] : notes;
 
-    if (!resolved || !ts) {
-      console.error("❌ Missing userID or timestamp:", { resolved, ts, s });
+    if (!resolved || !solveRef) {
+      console.error("Missing userID or solveRef:", { resolved, solveRef, s });
       return;
     }
 
     try {
       setNoteSaving(true);
-      await updateSolve(resolved, ts, { Note: noteValue });
-      patchLocalSolve(s, ts, { note: noteValue });
+      const res = await updateSolve(resolved, solveRef, { Note: noteValue });
+
+      const savedItem = res?.item;
+      const nextPatch = {
+        note: savedItem?.Note ?? noteValue,
+        solveRef: savedItem?.SK ?? solveRef,
+        createdAt: savedItem?.CreatedAt ?? getSolveCreatedAt(s),
+      };
+
+      patchLocalSolve(s, solveRef, nextPatch);
     } catch (err) {
-      console.error("❌ Note update failed:", err);
+      console.error("Note update failed:", err);
     } finally {
       setNoteSaving(false);
     }
   };
 
-  // -------------------------
-  // Tags helpers
-  // -------------------------
   const buildTagsPayload = (tState) => {
     const payload = {};
 
     const cube = String(tState?.CubeModel || "").trim();
     const cross = String(tState?.CrossColor || "").trim();
+
     if (cube) payload.CubeModel = cube;
     if (cross) payload.CrossColor = cross;
 
@@ -184,6 +217,7 @@ function Detail({
       const v = String(row.value ?? "").trim();
       custom[k] = v || "true";
     }
+
     if (Object.keys(custom).length) payload.Custom = custom;
 
     return payload;
@@ -191,11 +225,13 @@ function Detail({
 
   const saveTags = async (index = null) => {
     const s = isArray ? solve[index] : solve;
-    const resolved = resolveUserID(s);
-    const ts = getSolveTS(s);
+    if (isReadOnlySolve(s)) return;
 
-    if (!resolved || !ts) {
-      console.error("❌ Missing userID or timestamp:", { resolved, ts, s });
+    const resolved = resolveUserID(s);
+    const solveRef = getSolveRef(s);
+
+    if (!resolved || !solveRef) {
+      console.error("Missing userID or solveRef:", { resolved, solveRef, s });
       return;
     }
 
@@ -216,18 +252,22 @@ function Detail({
 
     try {
       setSaving(true, "");
-      await updateSolve(resolved, ts, { Tags: payload });
-      patchLocalSolve(s, ts, { tags: payload });
+      const res = await updateSolve(resolved, solveRef, { Tags: payload });
+
+      const savedItem = res?.item;
+      patchLocalSolve(s, solveRef, {
+        tags: savedItem?.Tags ?? payload,
+        solveRef: savedItem?.SK ?? solveRef,
+        createdAt: savedItem?.CreatedAt ?? getSolveCreatedAt(s),
+      });
+
       setSaving(false, "");
     } catch (err) {
-      console.error("❌ Tags update failed:", err);
+      console.error("Tags update failed:", err);
       setSaving(false, "Failed to save tags.");
     }
   };
 
-  // -------------------------
-  // Tag UI mutators
-  // -------------------------
   const updateTagField = (field, value, index = null) => {
     if (isArray) {
       setTagsState((prev) => {
@@ -307,98 +347,92 @@ function Detail({
     }
   };
 
-  // -------------------------
-  // Penalties (your existing logic)
-  // -------------------------
   const handlePenaltyChange = async (penalty, index = null) => {
     const s = isArray ? solve[index] : solve;
-    const originalTime = s.originalTime || s.time;
-    const ts = getSolveTS(s);
-    const resolved = resolveUserID(s);
+    if (isReadOnlySolve(s) || typeof applyPenalty !== "function") return;
 
-    if (!resolved || !ts) {
-      console.error("❌ Missing userID or timestamp:", { resolved, ts, s });
+    const solveRef = getSolveRef(s);
+    const rawTimeMs = getSolveRawTimeMs(s);
+
+    if (!solveRef) {
+      console.error("Missing solveRef:", { solveRef, s });
+      return;
+    }
+
+    if (!Number.isFinite(rawTimeMs)) {
+      console.error("Missing rawTimeMs for penalty update:", { rawTimeMs, s });
       return;
     }
 
     const newTime =
       penalty === "+2"
-        ? originalTime + 2000
+        ? rawTimeMs + 2000
         : penalty === "DNF"
         ? Number.MAX_SAFE_INTEGER
-        : originalTime;
+        : rawTimeMs;
 
-    try {
-      await updateSolvePenalty(resolved, ts, originalTime, penalty);
+    const updatedSolve = {
+      ...s,
+      penalty,
+      time: newTime,
+      rawTimeMs,
+      finalTimeMs: penalty === "DNF" ? null : newTime,
+      isDNF: penalty === "DNF",
+      solveRef,
+      createdAt: getSolveCreatedAt(s),
+    };
 
-      const updatedSolve = {
-        ...s,
-        penalty,
-        time: newTime,
-        originalTime,
-      };
-
-      if (typeof setSessions === "function") {
-        setSessions((prev) => {
-          const updated = { ...prev };
-          const session = updated[s.event] || [];
-          const i = session.findIndex((sol) => sol.datetime === s.datetime);
-          if (i !== -1) session[i] = updatedSolve;
-          return updated;
-        });
-      }
-
-      if (!isArray) Object.assign(s, updatedSolve);
-
-      if (typeof applyPenalty === "function") {
-        applyPenalty(ts, penalty, newTime);
-      }
-    } catch (err) {
-      console.error("❌ Penalty update failed:", err);
-    }
+    patchLocalSolve(s, solveRef, updatedSolve);
+    applyPenalty(solveRef, penalty, newTime);
   };
 
   const handleDelete = (index) => {
     if (!isArray) {
-      deleteTime();
+      if (!isReadOnlySolve(solve) && typeof deleteTime === "function") {
+        deleteTime();
+      }
       onClose();
-    } else if (typeof deleteTime === "function") {
+      return;
+    }
+
+    if (typeof deleteTime === "function" && arrayIsMutable) {
       deleteTime(index);
     }
   };
 
   const handleShare = (index) => {
     const item = isArray ? solve[index] : solve;
+    if (typeof addPost !== "function") return;
+
     addPost({
       note: isArray ? notes[index] : notes,
-      event: item.event,
+      event: getSolveEvent(item),
       solveList: [item],
       comments: [],
     });
     onClose();
   };
 
-  // -------------------------
-  // Tags UI renderer (NOT a component)
-  // ✅ prevents focus loss while typing
-  // -------------------------
   const renderTagsEditor = (item, index) => {
     const t = isArray ? tagsState[index] : tagsState;
+    const readOnly = isReadOnlySolve(item);
 
     return (
       <div className="detailTagsBlock">
         <div className="detailTagsHeaderRow">
           <div className="detailTagsLabel">Tags</div>
 
-          <button
-            type="button"
-            className="detailSaveTagsBtn"
-            onClick={() => saveTags(index)}
-            disabled={!!t?.saving}
-            title="Save tags to DynamoDB"
-          >
-            {t?.saving ? "Saving..." : "Save Tags"}
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              className="detailSaveTagsBtn"
+              onClick={() => saveTags(index)}
+              disabled={!!t?.saving}
+              title="Save tags to DynamoDB"
+            >
+              {t?.saving ? "Saving..." : "Save Tags"}
+            </button>
+          )}
         </div>
 
         <div className="detailTagRow">
@@ -408,6 +442,7 @@ function Detail({
             value={t?.CubeModel || ""}
             onChange={(e) => updateTagField("CubeModel", e.target.value, index)}
             placeholder="Gan 16"
+            disabled={readOnly}
           />
         </div>
 
@@ -418,6 +453,7 @@ function Detail({
             value={t?.CrossColor || ""}
             onChange={(e) => updateTagField("CrossColor", e.target.value, index)}
             placeholder="White"
+            disabled={readOnly}
           />
         </div>
 
@@ -428,128 +464,145 @@ function Detail({
                 <input
                   className="detailCustomKey"
                   value={row.key}
-                  onChange={(e) =>
-                    updateCustomRow(rIdx, { key: e.target.value }, index)
-                  }
+                  onChange={(e) => updateCustomRow(rIdx, { key: e.target.value }, index)}
                   placeholder="tag name"
+                  disabled={readOnly}
                 />
                 <input
                   className="detailCustomVal"
                   value={row.value}
-                  onChange={(e) =>
-                    updateCustomRow(rIdx, { value: e.target.value }, index)
-                  }
+                  onChange={(e) => updateCustomRow(rIdx, { value: e.target.value }, index)}
                   placeholder="value"
+                  disabled={readOnly}
                 />
-                <button
-                  type="button"
-                  className="detailCustomRemove"
-                  onClick={() => removeCustomRow(rIdx, index)}
-                  title="Remove"
-                >
-                  ×
-                </button>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    className="detailCustomRemove"
+                    onClick={() => removeCustomRow(rIdx, index)}
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             ))}
           </div>
         )}
 
-        <div className="detailCustomAddRow">
-          <input
-            className="detailCustomKey"
-            value={t?.customKey || ""}
-            onChange={(e) => updateTagField("customKey", e.target.value, index)}
-            placeholder="new tag"
-          />
-          <input
-            className="detailCustomVal"
-            value={t?.customValue || ""}
-            onChange={(e) => updateTagField("customValue", e.target.value, index)}
-            placeholder="value"
-          />
-          <button
-            type="button"
-            className="detailCustomAddBtn"
-            onClick={() => addCustomRow(index)}
-            title="Add"
-          >
-            + Add
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="detailCustomAddRow">
+            <input
+              className="detailCustomKey"
+              value={t?.customKey || ""}
+              onChange={(e) => updateTagField("customKey", e.target.value, index)}
+              placeholder="new tag"
+            />
+            <input
+              className="detailCustomVal"
+              value={t?.customValue || ""}
+              onChange={(e) => updateTagField("customValue", e.target.value, index)}
+              placeholder="value"
+            />
+            <button
+              type="button"
+              className="detailCustomAddBtn"
+              onClick={() => addCustomRow(index)}
+              title="Add"
+            >
+              + Add
+            </button>
+          </div>
+        )}
 
         {t?.error ? <div className="detailTagsError">{t.error}</div> : null}
       </div>
     );
   };
 
-  const renderSolveCard = (item, index) => (
-    <div key={index} className="detailSolveCard">
-      <div className="detailTopRow">
-        <div className="detailTime">
-          {formatTime(item.time, false, item.penalty)}
-        </div>
-        <div
-          className="detailScramble"
-          style={{ fontSize: getScrambleFontSize(item.event) }}
-        >
-          {item.scramble}
-        </div>
-      </div>
+  const renderSolveCard = (item, index) => {
+    const readOnly = isReadOnlySolve(item);
 
-      <div className="detailDateRow">{formatDateTime(getSolveTS(item))}</div>
-
-      <div className="detailBottomRow">
-        <div className="detailCube">
-          <RubiksCubeSVG
-            n={item.event}
-            faces={getScrambledFaces(item.scramble, item.event)}
-            isMusicPlayer={false}
-            isTimerCube={false}
-          />
+    return (
+      <div key={index} className="detailSolveCard">
+        <div className="detailTopRow">
+          <div className="detailTime">
+            {formatTime(getSolveFinalTimeMs(item), false, item.penalty)}
+          </div>
+          <div
+            className="detailScramble"
+            style={{ fontSize: getScrambleFontSize(getSolveEvent(item)) }}
+          >
+            {item.scramble}
+          </div>
         </div>
 
-        <div className="detailInfoSection">
-          <textarea
-            className="detailNotes"
-            value={notes[index]}
-            placeholder="Add a note"
-            onChange={(e) => {
-              const updatedNotes = [...notes];
-              updatedNotes[index] = e.target.value;
-              setNotes(updatedNotes);
-            }}
-          />
+        <div className="detailDateRow">{formatDateTime(getSolveCreatedAt(item))}</div>
 
-          <div className="detailNoteButtonsRow">
-            <button
-              type="button"
-              className="detailSaveNoteBtn"
-              onClick={() => saveNote(index)}
-              disabled={noteSaving}
-            >
-              {noteSaving ? "Saving..." : "Save Note"}
+        <div className="detailBottomRow">
+          <div className="detailCube">
+            <RubiksCubeSVG
+              n={getSolveEvent(item)}
+              faces={getScrambledFaces(item.scramble, getSolveEvent(item))}
+              isMusicPlayer={false}
+              isTimerCube={false}
+            />
+          </div>
+
+          <div className="detailInfoSection">
+            <textarea
+              className="detailNotes"
+              value={notes[index]}
+              placeholder="Add a note"
+              onChange={(e) => {
+                const updatedNotes = [...notes];
+                updatedNotes[index] = e.target.value;
+                setNotes(updatedNotes);
+              }}
+              disabled={readOnly}
+            />
+
+            {!readOnly && (
+              <div className="detailNoteButtonsRow">
+                <button
+                  type="button"
+                  className="detailSaveNoteBtn"
+                  onClick={() => saveNote(index)}
+                  disabled={noteSaving}
+                >
+                  {noteSaving ? "Saving..." : "Save Note"}
+                </button>
+              </div>
+            )}
+
+            {renderTagsEditor(item, index)}
+          </div>
+
+          <div className="detailActions">
+            {!readOnly && typeof applyPenalty === "function" && (
+              <div className="penalty-buttons">
+                <button onClick={() => handlePenaltyChange("+2", index)}>+2</button>
+                <button onClick={() => handlePenaltyChange("DNF", index)}>DNF</button>
+                <button onClick={() => handlePenaltyChange(null, index)}>Clear</button>
+              </div>
+            )}
+
+            <button className="share-button" onClick={() => handleShare(index)}>
+              Share
             </button>
-          </div>
 
-          {renderTagsEditor(item, index)}
-        </div>
-
-        <div className="detailActions">
-          <div className="penalty-buttons">
-            <button onClick={() => handlePenaltyChange("+2", index)}>+2</button>
-            <button onClick={() => handlePenaltyChange("DNF", index)}>DNF</button>
-            <button onClick={() => handlePenaltyChange(null, index)}>Clear</button>
+            {!readOnly && typeof deleteTime === "function" && (
+              <button className="delete-button" onClick={() => handleDelete(index)}>
+                Delete
+              </button>
+            )}
           </div>
-          <button className="share-button" onClick={() => handleShare(index)}>
-            Share
-          </button>
-          <button className="delete-button" onClick={() => handleDelete(index)}>
-            Delete
-          </button>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
+
+  const singleReadOnly = !isArray && isReadOnlySolve(solve);
 
   return (
     <div className="detailPopup">
@@ -562,23 +615,23 @@ function Detail({
           <div className="detailFlexCol">
             <div className="detailTopRow">
               <div className="detailTime">
-                {formatTime(solve.time, false, solve.penalty)}
+                {formatTime(getSolveFinalTimeMs(solve), false, solve.penalty)}
               </div>
               <div
                 className="detailScramble"
-                style={{ fontSize: getScrambleFontSize(solve.event) }}
+                style={{ fontSize: getScrambleFontSize(getSolveEvent(solve)) }}
               >
                 {solve.scramble}
               </div>
             </div>
 
-            <div className="detailDateRow">{formatDateTime(getSolveTS(solve))}</div>
+            <div className="detailDateRow">{formatDateTime(getSolveCreatedAt(solve))}</div>
 
             <div className="detailBottomRow">
               <div className="detailCube">
                 <RubiksCubeSVG
-                  n={solve.event}
-                  faces={getScrambledFaces(solve.scramble, solve.event)}
+                  n={getSolveEvent(solve)}
+                  faces={getScrambledFaces(solve.scramble, getSolveEvent(solve))}
                   isMusicPlayer={false}
                   isTimerCube={false}
                 />
@@ -590,34 +643,43 @@ function Detail({
                   value={notes}
                   placeholder="Add a note"
                   onChange={(e) => setNotes(e.target.value)}
+                  disabled={singleReadOnly}
                 />
 
-                <div className="detailNoteButtonsRow">
-                  <button
-                    type="button"
-                    className="detailSaveNoteBtn"
-                    onClick={() => saveNote()}
-                    disabled={noteSaving}
-                  >
-                    {noteSaving ? "Saving..." : "Save Note"}
-                  </button>
-                </div>
+                {!singleReadOnly && (
+                  <div className="detailNoteButtonsRow">
+                    <button
+                      type="button"
+                      className="detailSaveNoteBtn"
+                      onClick={() => saveNote()}
+                      disabled={noteSaving}
+                    >
+                      {noteSaving ? "Saving..." : "Save Note"}
+                    </button>
+                  </div>
+                )}
 
                 {renderTagsEditor(solve, null)}
               </div>
 
               <div className="detailActions">
-                <div className="penalty-buttons">
-                  <button onClick={() => handlePenaltyChange("+2")}>+2</button>
-                  <button onClick={() => handlePenaltyChange("DNF")}>DNF</button>
-                  <button onClick={() => handlePenaltyChange(null)}>Clear</button>
-                </div>
+                {!singleReadOnly && typeof applyPenalty === "function" && (
+                  <div className="penalty-buttons">
+                    <button onClick={() => handlePenaltyChange("+2")}>+2</button>
+                    <button onClick={() => handlePenaltyChange("DNF")}>DNF</button>
+                    <button onClick={() => handlePenaltyChange(null)}>Clear</button>
+                  </div>
+                )}
+
                 <button className="share-button" onClick={() => handleShare()}>
                   Share
                 </button>
-                <button className="delete-button" onClick={() => handleDelete()}>
-                  Delete
-                </button>
+
+                {!singleReadOnly && typeof deleteTime === "function" && (
+                  <button className="delete-button" onClick={() => handleDelete()}>
+                    Delete
+                  </button>
+                )}
               </div>
             </div>
 

@@ -101,11 +101,10 @@ export const getOveralls = (timesArray) => {
 };
 
 export const calculateAverageOfFive = (times) => {
-    const lastFiveSolves = times.slice(-5);
-    //console.log("calculate average of five, last five solves: " + lastFiveSolves);
-    if (lastFiveSolves.length === 0) return 'N/A';
-    return calculateAverage(lastFiveSolves, true).answer;
-  };
+  const lastFiveSolves = times.slice(-5);
+  if (lastFiveSolves.length === 0) return "N/A";
+  return calculateAverage(lastFiveSolves, true).average;
+};
 
 export const calculateBestAverageOfFive = (times) => {
   let bestAvg = Infinity;

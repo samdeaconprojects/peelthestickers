@@ -11,6 +11,7 @@ export const getSolvesBySessionPage = async (
   const id = String(userID || "").trim();
   const ev = String(event || "").toUpperCase();
   const sid = String(sessionID || "main");
+
   if (!id) throw new Error("getSolvesBySessionPage: userID required");
   if (!ev) throw new Error("getSolvesBySessionPage: event required");
 
@@ -20,7 +21,7 @@ export const getSolvesBySessionPage = async (
     limit: String(limit),
   });
 
-  if (cursor) qs.set("cursor", encodeURIComponent(JSON.stringify(cursor)));
+  if (cursor) qs.set("cursor", JSON.stringify(cursor));
 
   const data = await apiGet(`/api/solves/${encodeURIComponent(id)}?${qs.toString()}`);
 
@@ -31,16 +32,15 @@ export const getSolvesBySessionPage = async (
 };
 
 export const getSolvesBySession = async (userID, event, sessionID) => {
-  // server can page; client loops until done
   let cursor = null;
   const all = [];
+
   do {
     const { items, lastKey } = await getSolvesBySessionPage(userID, event, sessionID, 1000, cursor);
     if (items?.length) all.push(...items);
     cursor = lastKey || null;
   } while (cursor);
 
-  // server returns newest->oldest; normalize to oldest->newest like your old code
   return all.reverse();
 };
 
@@ -56,6 +56,5 @@ export const getLastNSolvesBySession = async (userID, event, sessionID, n = 100)
   });
 
   const data = await apiGet(`/api/solvesLastN/${encodeURIComponent(id)}?${qs.toString()}`);
-  // return oldest->newest (same as your previous helper)
   return (data?.items || []).reverse();
 };

@@ -9,6 +9,8 @@ import useBulkSolveActions from "../../hooks/useBulkSolveActions";
 import BulkSolveControls from "../SolveBulk/BulkSolveControls";
 import { normalizeEventCode } from "../SolveBulk/solveBulkUtils";
 
+const TABLE_LIMITS = ["100", "250", "500", "1000", "all"];
+
 function buildRank01Map(items) {
   const valid = items
     .filter((it) => typeof it.time === "number" && isFinite(it.time))
@@ -125,33 +127,40 @@ const TimeTable = ({
   practiceMode = false,
 }) => {
   const [selectedSolve, setSelectedSolve] = useState(null);
-  const [selectedSolveIndex, setSelectedSolveIndex] = useState(null);
 
   const [displayMode, setDisplayMode] = useState("items");
   const [sortBy, setSortBy] = useState("date");
   const [sortDirection, setSortDirection] = useState("desc");
   const [itemRowSize, setItemRowSize] = useState(12);
+  const [tableLimit, setTableLimit] = useState("1000");
 
   const selection = useSolveSelection();
 
+  const limitedSolves = useMemo(() => {
+    const arr = Array.isArray(solves) ? solves : [];
+    if (tableLimit === "all") return arr;
+    const n = Math.max(1, Number(tableLimit || 0));
+    return arr.slice(-n);
+  }, [solves, tableLimit]);
+
   const showAverages = sortBy !== "time";
-  const totalDisplayed = Array.isArray(solves) ? solves.length : 0;
+  const totalDisplayed = Array.isArray(limitedSolves) ? limitedSolves.length : 0;
 
   const timeRange = useMemo(() => {
-    const numeric = (solves || []).map(getSolveMs).filter((v) => Number.isFinite(v));
+    const numeric = (limitedSolves || []).map(getSolveMs).filter((v) => Number.isFinite(v));
     if (numeric.length === 0) return { min: null, max: null };
 
     return {
       min: Math.min(...numeric),
       max: Math.max(...numeric),
     };
-  }, [solves]);
+  }, [limitedSolves]);
 
   const averagesByKey = useMemo(() => {
     const ao5 = new Map();
     const ao12 = new Map();
 
-    const chronological = Array.isArray(solves) ? solves : [];
+    const chronological = Array.isArray(limitedSolves) ? limitedSolves : [];
 
     for (let i = 0; i < chronological.length; i++) {
       const solve = chronological[i];
@@ -183,10 +192,10 @@ const TimeTable = ({
     }
 
     return { ao5, ao12 };
-  }, [solves]);
+  }, [limitedSolves]);
 
   const sortedSolves = useMemo(() => {
-    const arr = Array.isArray(solves) ? [...solves] : [];
+    const arr = Array.isArray(limitedSolves) ? [...limitedSolves] : [];
     const dir = sortDirection === "asc" ? 1 : -1;
 
     arr.sort((a, b) => {
@@ -212,7 +221,7 @@ const TimeTable = ({
     });
 
     return arr;
-  }, [solves, sortBy, sortDirection]);
+  }, [limitedSolves, sortBy, sortDirection]);
 
   const bulkActions = useBulkSolveActions({
     user,
@@ -353,25 +362,18 @@ const TimeTable = ({
     overallVisibleRankMap,
   ]);
 
-  const handleSolvePrimaryAction = (solve, solveIndex) => {
+  const handleSolvePrimaryAction = (solve) => {
     setSelectedSolve({ ...solve, userID: user?.UserID });
-    setSelectedSolveIndex(solveIndex);
   };
 
   const onSolveClick = (e, solve, solveIndex) => {
     const handledAsSelection = selection.handleSelectionClick(e, solveIndex);
     if (handledAsSelection) return;
-    handleSolvePrimaryAction(solve, solveIndex);
-  };
-
-  const openDetail = (solve) => {
-    setSelectedSolve({ ...solve, userID: user?.UserID });
-    setSelectedSolveIndex(solve?.fullIndex ?? solve?.datetime ?? null);
+    handleSolvePrimaryAction(solve);
   };
 
   const closeDetail = () => {
     setSelectedSolve(null);
-    setSelectedSolveIndex(null);
   };
 
   return (
@@ -463,6 +465,20 @@ const TimeTable = ({
           >
             ↓
           </button>
+        </div>
+
+        <div className="time-table-toolbar-group">
+          <select
+            className="time-table-select"
+            value={tableLimit}
+            onChange={(e) => setTableLimit(e.target.value)}
+          >
+            {TABLE_LIMITS.map((v) => (
+              <option key={v} value={v}>
+                {v === "all" ? "All loaded" : `Last ${v}`}
+              </option>
+            ))}
+          </select>
         </div>
 
         {displayMode === "items" && (
@@ -627,9 +643,10 @@ const TimeTable = ({
           solve={selectedSolve}
           userID={user?.UserID}
           onClose={closeDetail}
-          deleteTime={() =>
-            deleteTime(selectedSolve?.datetime ?? selectedSolveIndex ?? selectedSolve?.fullIndex)
-          }
+          deleteTime={() => {
+            const solveRef = selectedSolve?.solveRef || null;
+            if (solveRef) deleteTime(solveRef);
+          }}
           addPost={addPost}
           applyPenalty={applyPenalty}
           setSessions={setSessions}

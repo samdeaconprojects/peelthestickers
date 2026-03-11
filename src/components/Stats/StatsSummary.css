@@ -1,177 +1,433 @@
 .statsSummaryEmpty {
-  color: rgba(255,255,255,0.7);
-  padding: 18px;
+  padding: 20px;
+  color: rgba(255, 255, 255, 0.72);
 }
 
-/* Whole header bar */
-.statsSummaryBar {
-  width: 100%;
+.statsSummaryShell {
+  --ss-bg-left: linear-gradient(135deg, rgba(35, 42, 48, 0.96), rgba(26, 32, 38, 0.96));
+  --ss-bg-right: linear-gradient(135deg, rgba(32, 67, 95, 0.92), rgba(21, 57, 90, 0.92));
+  --ss-line: rgba(255, 255, 255, 0.18);
+  --ss-current: #5ab2ff;
+  --ss-best: #38d6c9;
+  --ss-worst: #ff6078;
+  --ss-accent: #f2ef62;
+  --ss-blue: #64b5ff;
+  --ss-lime: #dff46d;
+  --ss-text: #f3f4f6;
+  --ss-muted: rgba(243, 244, 246, 0.66);
+
   display: grid;
-  grid-template-columns: 160px 1fr auto;
-  gap: 18px;
-  align-items: center;
-
-  color: #fff;
+  grid-template-columns: minmax(0, 2fr) minmax(360px, 1fr);
+  gap: 12px;
+  width: 100%;
+  align-items: start;
 }
 
-/* Left: solve count + best single */
-.ssCount {
+.ssCard {
+  border-radius: 22px;
+  border: 2px solid var(--ss-line);
+  color: var(--ss-text);
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  height: auto;
+}
+
+.ssCard--view {
+  background: var(--ss-bg-left);
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr) 228px;
+  gap: 8px;
+  padding: 12px 14px 10px 14px;
+}
+
+.ssCard--time {
+  background: var(--ss-bg-left);
+  display: grid;
+  grid-template-columns: 156px minmax(0, 1fr) 250px;
+  gap: 10px;
+  padding: 12px 14px 10px 14px;
+}
+
+.ssCard--overall {
+  background: var(--ss-bg-right);
+  padding: 14px 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-left: 6px;
+  border: 2px solid #50B6FF;
 }
 
-.ssCountValue {
-  font-size: 56px;
-  line-height: 1;
-  font-weight: 800;
-}
-
-.ssCountLabel {
-  margin-top: -6px;
-  color: rgba(255,255,255,0.55);
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-.ssBestSingle {
-  margin-top: 4px;
-}
-
-.ssBestSingleValue {
-  color: #0add5e;
-  font-weight: 900;
-  font-size: 22px;
-  line-height: 1.1;
-}
-
-.ssBestSingleLabel {
-  margin-top: 2px;
-  color: rgba(255,255,255,0.55);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-/* Middle: mean/median/stddev */
-.ssMainStats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(110px, 1fr));
-  gap: 12px;
-  align-items: center;
-  justify-items: center;
-  text-align: center;
-}
-
-.ssStatLabel {
-  font-size: 12px;
-  font-weight: 900;
-  color: rgba(255,255,255,0.55);
-  letter-spacing: 0.05em;
-}
-
-.ssStatValue {
-  margin-top: 4px;
-  font-size: 26px;
-  font-weight: 900;
-  color: #ffd400; /* your yellow */
-}
-
-/* Right: 3 mini panels */
-.ssPanels {
+.ssViewCount {
   display: flex;
-  gap: 12px;
-  align-items: stretch;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding-right: 4px;
 }
 
-.ssPanel {
-  width: 170px;
-  padding: 10px 10px 8px 10px;
-  border-radius: 10px;
-
-  border: 2px solid rgba(46, 196, 182, 0.35);
-  background: rgba(46, 196, 182, 0.07);
+.ssViewCountValue {
+  font-size: clamp(2.9rem, 4vw, 3.9rem);
+  line-height: 0.92;
+  font-weight: 700;
+  letter-spacing: -0.04em;
 }
 
-.ssPanelTitle {
-  font-size: 12px;
-  font-weight: 900;
-  color: rgba(255,255,255,0.8);
-  margin-bottom: 6px;
+.ssViewCountLabel {
+  font-size: 0.86rem;
+  color: var(--ss-muted);
 }
 
-/* Tight list */
-.ssPanelGrid {
+.ssViewMeta {
+  font-size: 0.72rem;
+  color: rgba(243, 244, 246, 0.82);
+}
+
+.ssViewBody {
+  min-width: 0;
+}
+
+.ssTimeLead,
+.ssTimeBody,
+.ssTimeSide {
+  min-width: 0;
+}
+
+.ssTimeBody {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.ssTimeBodyHeader {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: rgba(243, 244, 246, 0.78);
+}
+
+.ssTimeHours {
+  display: grid;
+  gap: 8px;
+}
+
+.ssTimeHourRow {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ssTimeHourLabel,
+.ssTimeHourCount,
+.ssTimeHourMean {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.ssTimeHourCount {
+  color: rgba(243, 244, 246, 0.82);
+}
+
+.ssTimeHourMean {
+  color: var(--ss-best);
+}
+
+.ssTimeSide {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.ssViewLegend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  margin-bottom: 0;
+  min-height: 18px;
+}
+
+.ssMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 8px 12px;
+  align-content: start;
+}
+
+.ssMetricColumn {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.ssMetricRow,
+.ssOverallMetricRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+}
+
+.ssMetricLabel,
+.ssOverallMetricLabel {
+  font-size: clamp(0.88rem, 1.15vw, 1.02rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.ssMetricValues,
+.ssOverallMetricValues {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.ssMetricRow .ssMetricValues {
+  justify-content: flex-start;
+}
+
+.ssMetricValue {
+  font-size: clamp(0.92rem, 1.1vw, 1.04rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.ssMetricValue--current {
+  color: var(--ss-current);
+}
+
+.ssMetricValue--best {
+  color: var(--ss-best);
+}
+
+.ssMetricValue--worst {
+  color: var(--ss-worst);
+}
+
+.ssMetricDot,
+.ssMetricSpacer {
+  color: rgba(243, 244, 246, 0.42);
+}
+
+.ssViewSide {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  gap: 2px;
+  align-content: start;
+  min-width: 0;
+}
+
+.ssSingleRow {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.ssSingleLabel {
+  font-size: clamp(1rem, 1.4vw, 1.18rem);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ssSingleValues {
+  display: flex;
+  justify-content: flex-start;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.ssSingleValues .ssMetricValue {
+  font-size: clamp(1.08rem, 1.55vw, 1.34rem);
+}
+
+.ssTopMetaRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  align-items: start;
+}
+
+.ssMetaGrid,
+.ssOverallMeta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
+  align-content: start;
+}
+
+.ssMetaColumn {
   display: grid;
   gap: 4px;
 }
 
-.ssRow {
+.ssMetaStat {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto auto;
+  justify-content: space-between;
+  gap: 6px;
   align-items: baseline;
+}
+
+.ssMetaStat--stacked {
+  grid-template-columns: 1fr;
+  justify-content: start;
+  gap: 0;
+  align-content: start;
+}
+
+.ssMetaStat--stacked .ssMetaLabel {
+  font-size: 0.6rem;
+  line-height: 1;
+}
+
+.ssMetaStat--stacked .ssMetaValue {
+  font-size: clamp(0.88rem, 0.96vw, 0.98rem);
+  line-height: 1.02;
+}
+
+.ssMetaLabel {
+  font-size: 0.72rem;
+  color: var(--ss-muted);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ssMetaValue {
+  font-size: clamp(0.9rem, 1.05vw, 1rem);
+  font-weight: 700;
+  color: var(--ss-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ssMetaStat--accent .ssMetaValue {
+  color: var(--ss-accent);
+}
+
+.ssMetaStat--blue .ssMetaValue {
+  color: var(--ss-blue);
+}
+
+.ssMetaStat--lime .ssMetaValue {
+  color: var(--ss-lime);
+}
+
+.ssMetaStat--teal .ssMetaValue {
+  color: var(--ss-best);
+}
+
+.ssMetaStat--danger .ssMetaValue {
+  color: var(--ss-worst);
+}
+
+.ssOverallHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.ssOverallTitle {
+  font-size: clamp(1.05rem, 1.55vw, 1.5rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.ssOverallCount {
+  font-size: 0.78rem;
+  color: rgba(243, 244, 246, 0.86);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ssOverallBody {
+  display: grid;
+  grid-template-columns: minmax(0, 2.15fr) minmax(136px, 0.85fr);
+  gap: 12px;
+  align-content: start;
+}
+
+.ssOverallMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(132px, 1fr));
+  gap: 8px 20px;
+}
+
+.ssOverallMeta {
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.ssOverallMetaRow {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.ssOverallMetaRow--pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-.ssKey {
-  font-weight: 900;
-  font-size: 13px;
-  color: rgba(255,255,255,0.92);
+@media (max-width: 1300px) {
+  .statsSummaryShell {
+    grid-template-columns: 1fr;
+  }
 }
 
-.ssLbl {
-  font-weight: 900;
-  font-size: 11px;
-  color: rgba(255,255,255,0.55);
-  text-transform: lowercase;
-}
-
-/* Slightly different accents per panel (subtle) */
-.ssPanel--current {
-  border-color: rgba(255, 210, 0, 0.35);
-  background: rgba(255, 210, 0, 0.06);
-}
-.ssPanel--best {
-  border-color: rgba(46, 196, 182, 0.35);
-  background: rgba(46, 196, 182, 0.07);
-}
-.ssPanel--overall {
-  border-color: rgba(200, 200, 200, 0.28);
-  background: rgba(200, 200, 200, 0.06);
-}
-
-/* Responsive: stack panels below on narrow widths */
-@media (max-width: 1100px) {
-  .statsSummaryBar {
-    grid-template-columns: 140px 1fr;
-    grid-template-rows: auto auto;
+@media (max-width: 1120px) {
+  .ssCard--view {
+    grid-template-columns: 1fr;
   }
 
-  .ssPanels {
-    grid-column: 1 / -1;
+  .ssViewSide {
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    padding-top: 16px;
+  }
+
+  .ssSingleValues {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 820px) {
+  .ssTopMetaRow,
+  .ssMetricGrid,
+  .ssOverallMetricGrid,
+  .ssMetaGrid,
+  .ssOverallMeta,
+  .ssOverallBody {
+    grid-template-columns: 1fr;
+  }
+
+  .ssOverallHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .ssMetricRow,
+  .ssOverallMetricRow,
+  .ssSingleRow,
+  .ssMetaStat {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .ssMetricValues,
+  .ssOverallMetricValues,
+  .ssSingleValues {
     justify-content: flex-start;
     flex-wrap: wrap;
-  }
-
-  .ssPanel {
-    width: 190px;
-  }
-}
-
-@media (max-width: 800px) {
-  .ssMainStats {
-    grid-template-columns: 1fr;
-    justify-items: start;
-    text-align: left;
-  }
-
-  .ssStatValue {
-    font-size: 22px;
-  }
-
-  .ssCountValue {
-    font-size: 44px;
+    white-space: normal;
   }
 }
