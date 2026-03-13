@@ -179,6 +179,7 @@ body {
 /* left slot already 13% */
 .left-slot-auth {
   width: 13%;
+  transform: translate(8px, -8px);
 }
 
 /* center scramble stays centered */

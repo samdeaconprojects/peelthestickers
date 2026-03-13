@@ -155,7 +155,8 @@
 
 .profileCube {
     margin: 8px;
-    margin-left: -12px;
+    margin-left: -18px;
+    margin-top: 2px;
     
 }
 
@@ -545,6 +546,28 @@
 .profileNameAndUsername {
     display: flex;
     flex-direction: column;
+}
+
+.profileHeaderActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.profileHeaderButton {
+    border: 1px solid #2EC4B6;
+    background: transparent;
+    color: white;
+    border-radius: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    opacity: 1;
+    font-size: 0.9rem;
+}
+
+.profileHeaderButton:hover {
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .profileContent {

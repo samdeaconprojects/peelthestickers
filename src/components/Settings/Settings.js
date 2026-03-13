@@ -61,6 +61,7 @@ function Settings({
   userID,
   onClose,
   onProfileUpdate,
+  onSignOut,
   statsContext = null,
   onStatsRecompute,
   onStatsImport,
@@ -233,6 +234,12 @@ function Settings({
       onClick={(e) => e.target.className === "settingsPopup" && onClose()}
     >
       <div className="settingsPopupContent">
+        {userID && (
+          <button className="signOutButton" onClick={onSignOut}>
+            Sign Out
+          </button>
+        )}
+
         <button className="closeButton" onClick={onClose}>
           ×
         </button>

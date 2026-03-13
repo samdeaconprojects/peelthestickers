@@ -366,6 +366,8 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
       <ProfileHeader
         user={viewedProfile}
         sessionStats={viewedSessionStats}
+        isOwn={isOwn}
+        onEditStats={() => setEditingStats(true)}
       />
 
       {!isOwn && (
@@ -375,15 +377,6 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
           disabled={isFriend}
         >
           {isFriend ? "Friend" : "Add Friend"}
-        </button>
-      )}
-
-      {isOwn && (
-        <button
-          className="editStatsButton"
-          onClick={() => setEditingStats(true)}
-        >
-          Edit Visible Stats
         </button>
       )}
 

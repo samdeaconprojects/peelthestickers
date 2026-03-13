@@ -1,12 +1,13 @@
 // Navigation.js
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import './Navigation.css';
 import ptsLogo from '../../assets/LogoStrokeWide.svg';
 import statsIcon from '../../assets/Stats.svg';
 import socialIcon from '../../assets/Social.svg';
 import profileIcon from '../../assets/Profile.svg';
 import settingsIcon from '../../assets/SettingsOrange.svg';
+import PuzzleSVG from '../PuzzleSVGs/PuzzleSVG';
 
 function DbIndicator({ dbStatus }) {
   const phase = dbStatus?.phase || "idle";
@@ -96,7 +97,72 @@ function DbIndicator({ dbStatus }) {
   );
 }
 
-function Navigation({ onNavClick, onMainLogoClick, handleSignIn, isSignedIn, handleSettingsClick, name, dbStatus }) {
+function CompactProfileChip({ user }) {
+  const profileColor = user?.Color || user?.color || '#FFFFFF';
+  const profileEvent = user?.ProfileEvent || user?.profileEvent || '333';
+  const profileScramble = user?.ProfileScramble || user?.profileScramble || '';
+
+  return (
+    <span
+      className={`nav-profile-chip nav-profile-chip--${String(profileEvent).toLowerCase()}`}
+      style={{ borderColor: profileColor }}
+      aria-hidden="true"
+    >
+      <span className="nav-profile-chip__cube">
+        <PuzzleSVG
+          event={profileEvent}
+          scramble={profileScramble}
+          isMusicPlayer={false}
+          isTimerCube={false}
+          isNameTagCube={true}
+        />
+      </span>
+    </span>
+  );
+}
+
+function NavItem({ to, isActive, onClick, children, activeClassName = '', activeDotColor }) {
+  if (isActive) {
+    return (
+      <span
+        className={`nav-item-current ${activeClassName}`.trim()}
+        aria-current="page"
+        style={
+          activeDotColor
+            ? {
+                '--nav-active-dot-color': activeDotColor,
+                '--nav-active-shadow-color': activeDotColor,
+              }
+            : undefined
+        }
+      >
+        <i className="nav-icon nav-icon--active">{children}</i>
+      </span>
+    );
+  }
+
+  return (
+    <Link to={to} onClick={onClick}>
+      <i className="nav-icon">{children}</i>
+    </Link>
+  );
+}
+
+function Navigation({
+  onNavClick,
+  onMainLogoClick,
+  isSignedIn,
+  handleSettingsClick,
+  user,
+  dbStatus,
+}) {
+  const location = useLocation();
+  const isHomePage = location.pathname === '/';
+  const isProfilePage = location.pathname === '/profile' || location.pathname.startsWith('/profile/');
+  const isStatsPage = location.pathname === '/stats';
+  const isSocialPage = location.pathname === '/social';
+  const showCompactProfileChip = isSignedIn && !isHomePage;
+
   return (
     <nav className="Navigation">
       <Link
@@ -110,25 +176,43 @@ function Navigation({ onNavClick, onMainLogoClick, handleSignIn, isSignedIn, han
 
       <ul>
         <li>
-          <Link to="/profile" onClick={onNavClick}>
-            <i className="nav-icon">
+          <NavItem
+            to="/profile"
+            onClick={onNavClick}
+            isActive={isProfilePage}
+            activeClassName="nav-item-current--profile"
+            activeDotColor={user?.Color || user?.color || '#FFFFFF'}
+          >
+            {showCompactProfileChip && !isProfilePage ? (
+              <CompactProfileChip user={user} />
+            ) : (
               <img src={profileIcon} alt="Profile" className="profile" />
-            </i>
-          </Link>
+            )}
+          </NavItem>
         </li>
+
         <li>
-          <Link to="/stats" onClick={onNavClick}>
-            <i className="nav-icon">
-              <img src={statsIcon} alt="Stats" className="stats" />
-            </i>
-          </Link>
+          <NavItem
+            to="/stats"
+            onClick={onNavClick}
+            isActive={isStatsPage}
+            activeClassName="nav-item-current--stats"
+            activeDotColor="#F4C542"
+          >
+            <img src={statsIcon} alt="Stats" className="stats" />
+          </NavItem>
         </li>
+
         <li>
-          <Link to="/social" onClick={onNavClick}>
-            <i className="nav-icon">
-              <img src={socialIcon} alt="Social" className="social" />
-            </i>
-          </Link>
+          <NavItem
+            to="/social"
+            onClick={onNavClick}
+            isActive={isSocialPage}
+            activeClassName="nav-item-current--social"
+            activeDotColor="#5DA9FF"
+          >
+            <img src={socialIcon} alt="Social" className="social" />
+          </NavItem>
         </li>
       </ul>
 
@@ -137,10 +221,6 @@ function Navigation({ onNavClick, onMainLogoClick, handleSignIn, isSignedIn, han
           <i className="nav-icon">
             <img src={settingsIcon} alt="Settings" className="settings" />
           </i>
-        </button>
-
-        <button onClick={handleSignIn} className="sign-in-button">
-          {isSignedIn ? "@" + name : 'Sign In'}
         </button>
       </div>
     </nav>

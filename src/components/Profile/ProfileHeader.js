@@ -78,7 +78,7 @@ function formatDateText(value) {
   return d.toLocaleDateString();
 }
 
-export default function ProfileHeader({ user, sessionStats }) {
+export default function ProfileHeader({ user, sessionStats, isOwn = false, onEditStats }) {
   const {
     Name,
     UserID,
@@ -267,22 +267,27 @@ export default function ProfileHeader({ user, sessionStats }) {
           <div className="profileName">{Name || "Guest"}</div>
           <div className="profileUsername">@{UserID || "guest"}</div>
 
-          <button
-            type="button"
-            className="profileEventButton"
-            onClick={() => setShowEventSelector(true)}
-            style={{
-              marginTop: "8px",
-              border: `1px solid ${Color || "#2EC4B6"}`,
-              background: "transparent",
-              color: "white",
-              borderRadius: "8px",
-              padding: "6px 10px",
-              cursor: "pointer",
-            }}
-          >
-            Select Events
-          </button>
+          <div className="profileHeaderActions">
+            <button
+              type="button"
+              className="profileHeaderButton"
+              onClick={() => setShowEventSelector(true)}
+              style={{ borderColor: Color || "#2EC4B6" }}
+            >
+              Select Events
+            </button>
+
+            {isOwn && typeof onEditStats === "function" && (
+              <button
+                type="button"
+                className="profileHeaderButton"
+                onClick={onEditStats}
+                style={{ borderColor: Color || "#2EC4B6" }}
+              >
+                Edit Visible Stats
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

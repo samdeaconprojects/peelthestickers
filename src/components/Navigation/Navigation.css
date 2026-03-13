@@ -21,7 +21,9 @@
 }
 
 .Navigation li {
-  padding: 20px;
+  padding: 20px 0;
+  display: flex;
+  justify-content: center;
 }
 
 .Navigation a {
@@ -29,10 +31,25 @@
   text-decoration: none;
 }
 
+.nav-item-current {
+  --nav-active-dot-color: rgba(255, 255, 255, 0.95);
+  --nav-active-shadow-color: rgba(255, 255, 255, 0.35);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
 .logo {
   max-width: 55px;
   margin-top: 10px;
   margin-left: 25px;
+  filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.28));
+  transition: filter 180ms ease;
+}
+
+.Navigation a:hover .logo {
+  filter: drop-shadow(0 0 18px rgba(255, 255, 255, 0.36));
 }
 
 .profile, .stats, .social, .settings {
@@ -42,18 +59,41 @@
   cursor: pointer;
 }
 
-button.sign-in-button {
-  background-color: transparent;
-  color: #cecece;
-  opacity: 50%;
-  width: 60px;
-  margin-top: 15px;
-  font-size: 8pt;
+.nav-profile-chip {
+  width: 48px;
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #ffffff;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  box-sizing: border-box;
+  overflow: hidden;
+  transform: translateY(0);
+  animation: navProfileChipEnter 220ms ease-out;
 }
 
-button.sign-in-button:hover {
-  opacity: 70%;
-  cursor: pointer;
+.nav-profile-chip__cube {
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-7px, 3px);
+}
+
+.nav-profile-chip__cube .puzzle-svg-wrap {
+  transform: scale(1);
+  transform-origin: center;
+}
+
+.nav-profile-chip--pyraminx .nav-profile-chip__cube .puzzle-svg-wrap,
+.nav-profile-chip--megaminx .nav-profile-chip__cube .puzzle-svg-wrap,
+.nav-profile-chip--skewb .nav-profile-chip__cube .puzzle-svg-wrap,
+.nav-profile-chip--clock .nav-profile-chip__cube .puzzle-svg-wrap,
+.nav-profile-chip--sq1 .nav-profile-chip__cube .puzzle-svg-wrap {
+  transform: scale(0.82);
 }
 
 .bottom-icons {
@@ -75,8 +115,60 @@ button.sign-in-button:hover {
 }
 
 .nav-icon {
-  display: inline-block; /* Ensure it behaves as a block */
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   /*transition: transform 0.1s ease-out, box-shadow 0.1s ease-out; /* Smooth transition */
+}
+
+.nav-icon--active {
+  opacity: 1;
+}
+
+.nav-icon--active img {
+  filter: brightness(0) invert(1) drop-shadow(0 0 10px var(--nav-active-shadow-color));
+}
+
+.nav-icon--active .nav-profile-chip {
+  border-color: #ffffff !important;
+  box-shadow:
+    0 0 14px var(--nav-active-shadow-color),
+    0 0 24px color-mix(in srgb, var(--nav-active-shadow-color) 55%, transparent);
+}
+
+.nav-icon--active .nav-profile-chip .nav-profile-chip__cube {
+  filter: grayscale(1) brightness(2.6) contrast(1.05);
+}
+
+.nav-icon--active::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: var(--nav-active-dot-color);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--nav-active-dot-color) 50%, transparent);
+}
+
+.nav-item-current--stats {
+  --nav-active-shadow-color: rgba(244, 197, 66, 0.7);
+}
+
+.nav-item-current--profile {
+  --nav-active-shadow-color: rgba(255, 255, 255, 0.8);
+}
+
+.nav-item-current--profile .nav-icon--active img.profile {
+  filter: brightness(0) invert(1) drop-shadow(0 0 12px var(--nav-active-shadow-color));
+}
+
+.nav-item-current--social {
+  --nav-active-shadow-color: rgba(93, 169, 255, 1);
+}
+
+.nav-item-current--social .nav-icon--active img {
+  filter: brightness(0) invert(1) drop-shadow(0 0 14px var(--nav-active-shadow-color));
 }
 
 .nav-icon:hover {
@@ -84,3 +176,14 @@ button.sign-in-button:hover {
   /* box-shadow: 0px 5px 10px rgba(0, 0, 0, 0.2); /* Optional: Adds a shadow for a lifting effect */
 }
 
+@keyframes navProfileChipEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.9);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

@@ -45,6 +45,23 @@
   cursor: pointer;
 }
 
+.signOutButton {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.06);
+  color: white;
+  font-size: 0.9rem;
+  opacity: 1;
+}
+
+.signOutButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
 /* Headings inside modal */
 .settingsPopupContent h2 {
   color: white;

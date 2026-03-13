@@ -19,7 +19,7 @@ import Detail from "./components/Detail/Detail";
 import SharePostModal from "./components/Social/SharePostModal";
 import { useSettings } from "./contexts/SettingsContext";
 import { generateScramble } from "./components/scrambleUtils";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { getUser } from "./services/getUser";
 import { updateUser } from "./services/updateUser";
 import { getSessions } from "./services/getSessions";
@@ -64,6 +64,18 @@ const DEFAULT_TAG_CONFIG = {
     { slot: "Custom4", label: "", options: [] },
     { slot: "Custom5", label: "", options: [] },
   ],
+};
+
+const INITIAL_SESSIONS = {
+  "222": [],
+  "333": [],
+  "444": [],
+  "555": [],
+  "666": [],
+  "777": [],
+  "333OH": [],
+  "333BLD": [],
+  RELAY: [],
 };
 
 function normalizeTagConfig(input) {
@@ -455,6 +467,7 @@ function TagBarInline({ tags, onChange, tagConfig, cubeModelOptions = [] }) {
 
 function App() {
   const location = useLocation();
+  const navigate = useNavigate();
   const isHomePage = location.pathname === "/";
   const { settings, updateSettings, setAllSettings } = useSettings();
 
@@ -466,17 +479,7 @@ function App() {
   const [statsMutationTick, setStatsMutationTick] = useState(0);
 
   const [scrambles, setScrambles] = useState({});
-  const [sessions, setSessions] = useState({
-    "222": [],
-    "333": [],
-    "444": [],
-    "555": [],
-    "666": [],
-    "777": [],
-    "333OH": [],
-    "333BLD": [],
-    RELAY: [],
-  });
+  const [sessions, setSessions] = useState(INITIAL_SESSIONS);
   const [showPlayerBar, setShowPlayerBar] = useState(true);
   const [showDetail, setShowDetail] = useState(false);
   const [user, setUser] = useState(null);
@@ -1845,6 +1848,37 @@ function App() {
 
   const handleShowSignInPopup = () => setShowSignInPopup(true);
   const handleCloseSignInPopup = () => setShowSignInPopup(false);
+  const handleSignOut = () => {
+    setShowSettingsPopup(false);
+    setShowSignInPopup(false);
+    navigate("/");
+    setIsSignedIn(false);
+    setUser(null);
+    setSessionsList([]);
+    setCustomEvents([]);
+    setSessions(INITIAL_SESSIONS);
+    setScrambles({});
+    setSessionStats({});
+    setStatsMutationTick(0);
+    setCurrentEvent("333");
+    setCurrentSession("main");
+    setTagConfig(DEFAULT_TAG_CONFIG);
+    setStatsSettingsContext({
+      eventLabel: "333",
+      sessionLabel: "main",
+      isAllEventsMode: false,
+      canRecomputeOverall: false,
+      canImport: false,
+      loadingOverallStats: false,
+      importBusy: false,
+      isStatsRouteActive: false,
+    });
+    setSelectedAverageSolves([]);
+    setSelectedAverageSolve(null);
+    setSharedSession(null);
+    setSharedIndex(0);
+    setShowPlayerBar(true);
+  };
 
   const openEventSelector = () => {
     const el = document.querySelector(".event-selector-trigger");
@@ -1967,10 +2001,9 @@ function App() {
         }`}
       >
         <Navigation
-          handleSignIn={handleShowSignInPopup}
           isSignedIn={isSignedIn}
           handleSettingsClick={() => setShowSettingsPopup(true)}
-          name={user?.Name || ""}
+          user={user}
           dbStatus={dbStatus}
         />
 
@@ -2375,6 +2408,7 @@ function App() {
         <Settings
           userID={user?.UserID}
           onClose={() => setShowSettingsPopup(false)}
+          onSignOut={handleSignOut}
           statsContext={statsSettingsContext}
           onStatsRecompute={() => {
             setShowSettingsPopup(false);
