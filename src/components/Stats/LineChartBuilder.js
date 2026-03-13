@@ -7,6 +7,8 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const LineChartBuilder = ({
   data,
   extraSeries,
+  comparisonSeries,
+  primaryStroke,
   height,
   width,
   horizontalGuides: numberOfHorizontalGuides,
@@ -24,6 +26,10 @@ const LineChartBuilder = ({
   const FONT_SIZE = Math.max(10, Math.floor(width / 52));
 
   const safeData = useMemo(() => (Array.isArray(data) ? data : []), [data]);
+  const safeComparisonSeries = useMemo(
+    () => (Array.isArray(comparisonSeries) ? comparisonSeries : []),
+    [comparisonSeries]
+  );
 
   const {
     padding,
@@ -34,8 +40,14 @@ const LineChartBuilder = ({
     yDenom,
     xDenom,
   } = useMemo(() => {
-    const xs = safeData.map((e) => e.x);
-    const ys = safeData.map((e) => e.y).filter((v) => typeof v === "number" && isFinite(v));
+    const xs = [
+      ...safeData.map((e) => e.x),
+      ...safeComparisonSeries.flatMap((series) => (series.points || []).map((point) => point?.x)),
+    ].filter((value) => typeof value === "number" && isFinite(value));
+    const ys = [
+      ...safeData.map((e) => e.y),
+      ...safeComparisonSeries.flatMap((series) => (series.points || []).map((point) => point?.y)),
+    ].filter((v) => typeof v === "number" && isFinite(v));
 
     const _maxX = xs.length ? Math.max(...xs) : 1;
     const _minX = xs.length ? Math.min(...xs) : 0;
@@ -70,7 +82,7 @@ const LineChartBuilder = ({
       yDenom: resolvedMaxY - resolvedMinY || 1,
       xDenom: (_maxX - _minX) || 1,
     };
-  }, [safeData, width, height, FONT_SIZE, precision, yMin, yMax]);
+  }, [safeComparisonSeries, safeData, width, height, FONT_SIZE, precision, yMin, yMax]);
 
   const mainPoints = useMemo(() => {
     if (!safeData.length) return "";
@@ -212,6 +224,32 @@ const LineChartBuilder = ({
     );
   });
 
+  const comparisonPolylines = safeComparisonSeries.map((series) => {
+    const pts = (series.points || [])
+      .filter((point) => point && typeof point.y === "number" && isFinite(point.y))
+      .map((point) => {
+        const x = ((point.x - minX) / xDenom) * chartWidth + padding;
+        const rawY =
+          chartHeight - ((point.y - minimumYFromData) / yDenom) * chartHeight + padding;
+        const y = clamp(rawY, padding, chartHeight + padding);
+        return `${x},${y}`;
+      })
+      .join(" ");
+
+    if (!pts) return null;
+
+    return (
+      <polyline
+        key={series.id}
+        fill="none"
+        stroke={series.stroke || "#7c8cff"}
+        strokeWidth={2.6}
+        opacity={0.92}
+        points={pts}
+      />
+    );
+  });
+
   return (
     <div style={{ position: "relative", width: "100%", overflow: "visible" }}>
       <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: "100%", overflow: "visible" }}>
@@ -223,7 +261,14 @@ const LineChartBuilder = ({
         {numberOfVerticalGuides && <VerticalGuides />}
         <HorizontalGuides />
 
-        <polyline fill="none" stroke="#00FFFF" strokeWidth={STROKE} points={mainPoints} />
+        <polyline
+          fill="none"
+          stroke={primaryStroke || safeData[0]?.color || "#00FFFF"}
+          strokeWidth={STROKE}
+          points={mainPoints}
+        />
+
+        {comparisonPolylines}
 
         {safeData.map((element, index) => {
           const x = ((element.x - minX) / xDenom) * chartWidth + padding;
@@ -237,6 +282,8 @@ const LineChartBuilder = ({
           return (
             <circle
               key={index}
+              className="lineChartDot"
+              data-interactive="solve-point"
               cx={x}
               cy={y}
               r={isSelected ? selectedDotRadius : Math.max(2, dotRadius)}
@@ -251,12 +298,40 @@ const LineChartBuilder = ({
               strokeWidth={isSelected ? 3 : element.isDNF ? 2 : 0}
               onMouseOver={(e) => handleMouseOver(e, element.time)}
               onMouseOut={handleMouseOut}
-              onClick={() => onDotClick(element.solve, element.fullIndex, element)}
+              onClick={(event) => onDotClick(event, element.solve, element.fullIndex, element)}
             />
           );
         })}
 
         {extraPolylines}
+
+        {safeComparisonSeries.map((series) =>
+          (series.points || []).map((element, index) => {
+            if (!element || typeof element.y !== "number" || !isFinite(element.y)) return null;
+
+            const x = ((element.x - minX) / xDenom) * chartWidth + padding;
+            const rawY =
+              chartHeight - ((element.y - minimumYFromData) / yDenom) * chartHeight + padding;
+            const y = clamp(rawY, padding, chartHeight + padding);
+
+            return (
+              <circle
+                key={`${series.id}-${index}`}
+                className="lineChartDot"
+                data-interactive="solve-point"
+                cx={x}
+                cy={y}
+                r={Math.max(2, dotRadius - 1)}
+                fill={element.color || series.stroke || "#7c8cff"}
+                stroke="rgba(5,10,14,0.6)"
+                strokeWidth={1}
+                onMouseOver={(e) => handleMouseOver(e, `${series.label || "Compare"} · ${element.time}`)}
+                onMouseOut={handleMouseOut}
+                onClick={(event) => onDotClick(event, element.solve, element.fullIndex, element)}
+              />
+            );
+          })
+        )}
       </svg>
 
       {tooltip.visible && (
@@ -288,6 +363,8 @@ LineChartBuilder.defaultProps = {
   verticalGuides: null,
   precision: 2,
   extraSeries: [],
+  comparisonSeries: [],
+  primaryStroke: "#00FFFF",
   selectedIndices: new Set(),
   dotRadius: 5,
   selectedDotRadius: 8,
@@ -324,6 +401,15 @@ LineChartBuilder.propTypes = {
       ).isRequired,
     })
   ),
+  comparisonSeries: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.string.isRequired,
+      label: PropTypes.string,
+      stroke: PropTypes.string,
+      points: PropTypes.arrayOf(PropTypes.object).isRequired,
+    })
+  ),
+  primaryStroke: PropTypes.string,
 
   height: PropTypes.number,
   width: PropTypes.number,

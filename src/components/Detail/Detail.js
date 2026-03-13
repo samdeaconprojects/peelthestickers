@@ -20,7 +20,8 @@ function Detail({
   const isArray = Array.isArray(solve);
 
   const getSolveRef = (s) => s?.solveRef || s?.SK || null;
-  const getSolveCreatedAt = (s) => s?.createdAt || s?.CreatedAt || s?.DateTime || null;
+  const getSolveCreatedAt = (s) =>
+    s?.createdAt || s?.CreatedAt || s?.DateTime || s?.datetime || s?.date || null;
   const getSolveTags = (s) => s?.tags || s?.Tags || {};
   const getSolveNote = (s) => s?.note ?? s?.Note ?? "";
   const getSolveEvent = (s) => s?.event || s?.Event || "";

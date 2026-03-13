@@ -25,6 +25,8 @@ function TimeItem({
 
   // allow caller to add extra classes if needed
   className = "",
+  style = undefined,
+  disablePerformanceClass = false,
 }) {
   const { settings } = useSettings();
   const mode = settings?.timeColorMode || "binary";
@@ -59,7 +61,10 @@ function TimeItem({
   }, [ms, rangeMin, rangeMax, mode]);
 
   return (
-    <li className={`time-item ${speedClass} ${className}`.trim()}>
+    <li
+      className={`time-item ${disablePerformanceClass ? "" : speedClass} ${className}`.trim()}
+      style={style}
+    >
       {display}
     </li>
   );

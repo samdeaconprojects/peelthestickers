@@ -1,7 +1,14 @@
 // src/services/createPost.js
 import { apiPost } from "./api.js";
 
-export const createPost = async (userID, note, event, solveList, comments) => {
+export const createPost = async (
+  userID,
+  note,
+  event,
+  solveList,
+  comments,
+  extra = {}
+) => {
   const id = String(userID || "").trim();
   if (!id) throw new Error("createPost: userID required");
 
@@ -11,6 +18,7 @@ export const createPost = async (userID, note, event, solveList, comments) => {
     event,
     solveList,
     comments,
+    ...extra,
   });
 
   return data?.item;

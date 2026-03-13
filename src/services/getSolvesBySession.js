@@ -58,3 +58,16 @@ export const getLastNSolvesBySession = async (userID, event, sessionID, n = 100)
   const data = await apiGet(`/api/solvesLastN/${encodeURIComponent(id)}?${qs.toString()}`);
   return (data?.items || []).reverse();
 };
+
+export const getLastNSolvesByEvent = async (userID, event, n = 100) => {
+  const id = String(userID || "").trim();
+  const ev = String(event || "").toUpperCase();
+
+  const qs = new URLSearchParams({
+    event: ev,
+    n: String(n),
+  });
+
+  const data = await apiGet(`/api/solvesLastN/${encodeURIComponent(id)}?${qs.toString()}`);
+  return (data?.items || []).reverse();
+};

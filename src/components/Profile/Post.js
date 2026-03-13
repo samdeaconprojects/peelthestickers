@@ -7,6 +7,7 @@ import NameTag from './NameTag';
 import { getScrambledFaces } from '../cubeStructure';
 import { currentEventToString } from "../../components/scrambleUtils";
 import { formatTime } from '../TimeList/TimeUtils';
+import StatSharePost from './StatSharePost';
 
 /* --- helper: add alpha to hex color --- */
 const withAlpha = (hex, alpha = 0.12) => {
@@ -66,7 +67,19 @@ const formatPostDateTime = (value) => {
   return `${dateStr} ${timeStr}`;
 };
 
-function Post({ name, picture, user, date, solveList = [], postColor, onClick }) {
+function Post({
+  name,
+  picture,
+  user,
+  date,
+  solveList = [],
+  postColor,
+  onClick,
+  note = "",
+  postType = "solve",
+  statShare = null,
+}) {
+  const resolvedPostType = statShare ? "stat-share" : postType;
   const primary = solveList[0] || {};
   const { event, scramble, time } = primary;
   const singleOrAvg = solveList.length > 1 ? 'Average' : 'Single';
@@ -77,6 +90,7 @@ function Post({ name, picture, user, date, solveList = [], postColor, onClick })
 
   const nxn = isNxNEvent(event);
   const prettyDate = formatPostDateTime(date);
+  const trimmedNote = String(note || "").trim();
 
   return (
     <div
@@ -84,50 +98,70 @@ function Post({ name, picture, user, date, solveList = [], postColor, onClick })
       style={{ border: `2px solid ${withAlpha(postColor, 0.5)}` }}
       onClick={onClick}
     >
-      <div className="titleAndContent">
-        <div className="postTitle">
-          <div
-            className={`postTitleCube ${
-              nxn
-                ? "postTitleCube--nxn"
-                : `postTitleCube--other postTitleCube--${String(event || "333").toLowerCase()}`
-            }`}
-          >
-            {nxn ? (
-              <RubiksCubeSVG
-                className="postCube"
-                n={event || "333"}
-                faces={getScrambledFaces(scramble || "", event || "333")}
-                isMusicPlayer={false}
-                isTimerCube={false}
-              />
-            ) : (
-              <PuzzleSVG
-                event={event || "333"}
-                scramble={scramble || ""}
-                isMusicPlayer={false}
-                isTimerCube={false}
-              />
-            )}
+      {resolvedPostType === "stat-share" ? (
+        <>
+          <div className="titleAndContent">
+            <StatSharePost note={trimmedNote} statShare={statShare} />
           </div>
 
-          <div className="titleText">
-            {eventStr} {singleOrAvg} – {time != null ? formatTime(time) : '--'}
+          <div className="dateAndName">
+            <div className="postDate">{prettyDate}</div>
+            <div className="postNameAndPicture">
+              <div style={{ color: "white", fontWeight: 700 }}>
+                @{safeUser?.Name || name || safeUser?.UserID || "user"}
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </>
+      ) : (
+        <>
+          <div className="titleAndContent">
+            {trimmedNote ? <div className="postCaption">{trimmedNote}</div> : null}
+            <div className="postTitle">
+              <div
+                className={`postTitleCube ${
+                  nxn
+                    ? "postTitleCube--nxn"
+                    : `postTitleCube--other postTitleCube--${String(event || "333").toLowerCase()}`
+                }`}
+              >
+                {nxn ? (
+                  <RubiksCubeSVG
+                    className="postCube"
+                    n={event || "333"}
+                    faces={getScrambledFaces(scramble || "", event || "333")}
+                    isMusicPlayer={false}
+                    isTimerCube={false}
+                  />
+                ) : (
+                  <PuzzleSVG
+                    event={event || "333"}
+                    scramble={scramble || ""}
+                    isMusicPlayer={false}
+                    isTimerCube={false}
+                  />
+                )}
+              </div>
 
-      <div className="dateAndName">
-        <div className="postDate">{prettyDate}</div>
-        <div className="postNameAndPicture">
-          <NameTag
-            name={name}
-            picture={picture}
-            user={safeUser}
-            size="sm"
-          />
-        </div>
-      </div>
+              <div className="titleText">
+                {eventStr} {singleOrAvg} – {time != null ? formatTime(time) : '--'}
+              </div>
+            </div>
+          </div>
+
+          <div className="dateAndName">
+            <div className="postDate">{prettyDate}</div>
+            <div className="postNameAndPicture">
+              <NameTag
+                name={name}
+                picture={picture}
+                user={safeUser}
+                size="sm"
+              />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

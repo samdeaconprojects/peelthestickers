@@ -85,6 +85,34 @@
   color: #fff;
 }
 
+.settingsStaticValue {
+  flex: 1;
+  margin-left: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: #2b2b2b;
+  border: 1px solid #3a3a3a;
+  color: #fff;
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.settingsActionButton {
+  margin-left: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  background: var(--primary-color);
+  color: var(--secondary-color);
+  cursor: pointer;
+}
+
+.settingsActionButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* Save button styling */
 .save-button {
   margin-top: 20px;

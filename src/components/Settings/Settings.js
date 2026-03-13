@@ -57,7 +57,14 @@ function normalizeTagConfig(input) {
   };
 }
 
-function Settings({ userID, onClose, onProfileUpdate }) {
+function Settings({
+  userID,
+  onClose,
+  onProfileUpdate,
+  statsContext = null,
+  onStatsRecompute,
+  onStatsImport,
+}) {
   const { settings, updateSettings, setAllSettings } = useSettings();
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -218,6 +225,7 @@ function Settings({ userID, onClose, onProfileUpdate }) {
     () => (Array.isArray(tagConfig?.CustomSlots) ? tagConfig.CustomSlots : []),
     [tagConfig]
   );
+  const canShowStatsSection = !!statsContext?.isStatsRouteActive;
 
   return (
     <div
@@ -549,6 +557,47 @@ function Settings({ userID, onClose, onProfileUpdate }) {
             </React.Fragment>
           ))}
         </div>
+
+        {canShowStatsSection && (
+          <>
+            <h2>Stats</h2>
+            <div className="settings-container">
+              <div className="setting-item">
+                <label>Event:</label>
+                <div className="settingsStaticValue">{statsContext?.eventLabel || "—"}</div>
+              </div>
+
+              <div className="setting-item">
+                <label>Session:</label>
+                <div className="settingsStaticValue">{statsContext?.sessionLabel || "—"}</div>
+              </div>
+
+              <div className="setting-item">
+                <label>Recompute Overall:</label>
+                <button
+                  type="button"
+                  className="settingsActionButton"
+                  onClick={onStatsRecompute}
+                  disabled={!statsContext?.canRecomputeOverall || statsContext?.loadingOverallStats}
+                >
+                  {statsContext?.loadingOverallStats ? "Recomputing..." : "Recompute"}
+                </button>
+              </div>
+
+              <div className="setting-item">
+                <label>Import Solves:</label>
+                <button
+                  type="button"
+                  className="settingsActionButton"
+                  onClick={onStatsImport}
+                  disabled={!statsContext?.canImport || statsContext?.importBusy}
+                >
+                  {statsContext?.importBusy ? "Importing..." : "Open Import"}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
 
         <button className="save-button" onClick={saveAllChanges} disabled={isSaving}>
           {isSaving ? "Saving..." : "Save All"}

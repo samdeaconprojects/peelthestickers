@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import './Social.css';
 import Post from '../Profile/Post';
 import PostDetail from '../Profile/PostDetail';
+import StatSharePost from '../Profile/StatSharePost';
 import { getPosts } from '../../services/getPosts';
 import { getUser } from '../../services/getUser';
 import { updatePostComments } from '../../services/updatePostComments';
@@ -25,6 +26,17 @@ import SocialMessagesIcon from '../../assets/SocialMessages.svg';
 
 import { hexToRgbString } from "../../utils/colorUtils";
 
+const withAlpha = (hex, alpha = 0.12) => {
+  if (!hex) return `rgba(255,255,255,${alpha})`;
+  let h = String(hex).replace('#', '').trim();
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  if (h.length !== 6) return `rgba(255,255,255,${alpha})`;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
 
 function Social({ user, deletePost, setSharedSession, mergeSharedSession, refreshTick }) {
   const [activeTab, setActiveTab] = useState(0);
@@ -44,6 +56,12 @@ function Social({ user, deletePost, setSharedSession, mergeSharedSession, refres
 
   const activityEndRef = useRef(null);
   const messagesEndRef = useRef(null);
+
+  const formatPostDate = (value) => {
+    const d = value instanceof Date ? value : new Date(value);
+    if (!d || isNaN(d.getTime())) return String(value ?? '');
+    return d.toLocaleString();
+  };
 
   const scrollActivityToBottom = () => {
     activityEndRef.current?.scrollIntoView({ behavior: 'instant' });
@@ -175,7 +193,7 @@ return {
       }
     };
     fetchFeed();
-  }, [user]);
+  }, [refreshTick, user?.UserID, user?.Friends, user?.Posts, user?.Name, user?.Color, user?.ProfileEvent, user?.ProfileScramble]);
 
   const handleDelete = async post => {
     if (!post.isOwn) return;
@@ -468,18 +486,37 @@ return {
                 key={`${post.DateTime || post.date}-${idx}`}
                 className={`chatBubble ${post.isOwn ? 'ownBubble' : 'otherBubble'}`}
               >
+                {(() => {
+                  const statShare = post.StatShare || post.statShare || null;
+                  const isStatShare = !!statShare;
+                  if (isStatShare) {
+                    return (
+                      <div className="statFeedPost" onClick={() => setSelectedPost(post)}>
+                        <div style={{ border: `2px solid ${withAlpha(post.postColor, 0.5)}`, borderRadius: 12 }}>
+                        <StatSharePost note={post.Note} statShare={statShare} />
+                        <div className="statFeedMeta">
+                          <div className="postDate">{formatPostDate(post.DateTime || post.date)}</div>
+                          <div className="statFeedAuthor">@{post.author}</div>
+                        </div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
                 <Post
                   name={post.author}
                   user={{
    UserID: post.authorID,
    Name: post.author,
-  Color: post.postColor,
+ Color: post.postColor,
   ProfileEvent: post.profileEvent,
    ProfileScramble: post.profileScramble,
  }}
-                  date={new Date(post.DateTime || post.date).toLocaleString()}
+                  date={formatPostDate(post.DateTime || post.date)}
                   solveList={
-                    post.SolveList && post.SolveList.length
+                    isStatShare
+                      ? []
+                      : post.SolveList && post.SolveList.length
                       ? post.SolveList
                       : [{
                         event: post.Event,
@@ -490,8 +527,13 @@ return {
                       }]
                   }
                   postColor={post.postColor}
+                  note={post.Note}
+                  postType={post.PostType}
+                  statShare={statShare}
                   onClick={() => setSelectedPost(post)}
                 />
+                  );
+                })()}
               </div>
             ))}
             <div ref={activityEndRef} />
@@ -589,9 +631,11 @@ return {
       {selectedPost && (
         <PostDetail
           author={selectedPost.author}
-          date={new Date(selectedPost.DateTime || selectedPost.date).toLocaleString()}
+          date={formatPostDate(selectedPost.DateTime || selectedPost.date)}
           solveList={
-            selectedPost.SolveList && selectedPost.SolveList.length
+            (selectedPost.StatShare || selectedPost.statShare)
+              ? []
+              : selectedPost.SolveList && selectedPost.SolveList.length
               ? selectedPost.SolveList
               : [{
                 event: selectedPost.Event,
@@ -602,6 +646,9 @@ return {
               }]
           }
           comments={selectedPost.Comments || []}
+          note={selectedPost.Note}
+          postType={selectedPost.PostType}
+          statShare={selectedPost.StatShare || selectedPost.statShare || null}
           onClose={() => setSelectedPost(null)}
           onDelete={() => handleDelete(selectedPost)}
           onAddComment={handleAddComment}

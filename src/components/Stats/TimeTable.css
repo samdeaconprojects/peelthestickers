@@ -121,6 +121,8 @@
   list-style: none;
   padding: 0 !important;
   margin: 0 !important;
+  font-size: 1.18rem;
+  font-weight: 800;
 
   width: 132px !important;
   min-width: 132px !important;
@@ -235,7 +237,6 @@
   align-items: start;
   gap: 6px;
   width: 100%;
-  max-width: 1000px;
 }
 
 .timelist-rows-view--12 .timelist-row {
@@ -244,7 +245,6 @@
 
 .timelist-rows-view--5 .timelist-row {
   grid-template-columns: repeat(5, 1fr) auto;
-  max-width: 1000px;
 }
 
 .timelist-row-cell-wrap {
@@ -257,6 +257,8 @@
 .timelist-row-cell {
   margin: 0;
   padding: 5px;
+  font-size: 1.08rem;
+  font-weight: 800;
   text-align: center;
   border-radius: 5px;
   display: grid;
@@ -290,7 +292,7 @@
   display: grid;
   place-items: center;
   box-sizing: border-box;
-  background-color: #2ec4b6;
+  background-color: #50B6FF;
   color: #08131a;
 }
 

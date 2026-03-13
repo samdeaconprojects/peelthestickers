@@ -1,3 +1,10 @@
+.profilePage {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
 .tabContainer {
     display: flex;
 }
@@ -28,6 +35,7 @@
 .profileContent {
     width: 100%;
     box-sizing: border-box;
+    overflow: visible;
 }
 
 .tabPanel {
@@ -36,6 +44,72 @@
     display: flex;
     flex-direction: column;
     row-gap: 30px;
+    min-height: 0;
+    overflow: visible;
+}
+
+.profileStatsPage {
+  width: 100%;
+  min-height: 0;
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  box-sizing: border-box;
+}
+
+.profileStatsGrid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.profileStatsItem {
+  width: 100%;
+  min-height: 240px;
+  padding: 12px;
+  box-sizing: border-box;
+  background-color: rgba(100, 100, 100, 0.1);
+  border: 2px solid rgba(200, 200, 200, 0.3);
+  border-radius: 10px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  overflow: hidden;
+}
+
+.profileStatsItem--summary {
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  overflow: visible;
+  grid-column: 1 / -1;
+}
+
+.profileStatsItem--line {
+  height: 360px;
+}
+
+.profileStatsItem--distribution,
+.profileStatsItem--bar,
+.profileStatsItem--pie {
+  height: 220px;
+}
+
+.profileStatsItem--table {
+  min-height: 260px;
+}
+
+.profileStatsItem--line > *,
+.profileStatsItem--distribution > *,
+.profileStatsItem--bar > *,
+.profileStatsItem--pie > *,
+.profileStatsItem--table > * {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0;
 }
 
 /* Make only the posts tab scroll */
@@ -111,9 +185,269 @@
     cursor: pointer;
 }
 
+.sharedStatCard {
+  width: min(920px, 100%);
+  margin: 12px 14px 0;
+  padding: 16px;
+  box-sizing: border-box;
+  border-radius: 18px;
+  border: 2px solid rgba(255,255,255,0.14);
+  background: linear-gradient(180deg, rgba(28, 37, 43, 0.96), rgba(15, 23, 29, 0.96));
+  color: white;
+  display: grid;
+  gap: 14px;
+}
+
+.sharedStatCard.is-detailed {
+  width: 100%;
+  margin: 0;
+}
+
+.sharedStatHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.sharedStatTitle {
+  font-size: 1.3rem;
+  font-weight: 800;
+}
+
+.sharedStatContext {
+  margin-top: 4px;
+  color: rgba(255,255,255,0.72);
+  font-size: 0.94rem;
+}
+
+.sharedStatHighlight {
+  color: #bff7f0;
+  font-size: 1.15rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.sharedStatDetails {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sharedStatDetailPill {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.78);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.sharedStatViz {
+  width: 100%;
+  min-height: 220px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 14px;
+  box-sizing: border-box;
+}
+
+.sharedStatViz--line {
+  min-height: 280px;
+}
+
+.sharedStatLineSvg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.sharedStatViz--bars {
+  min-height: 240px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18px, 1fr));
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.sharedStatBarSlot {
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.sharedStatBar {
+  width: 100%;
+  min-height: 10px;
+  border-radius: 999px 999px 6px 6px;
+  background: linear-gradient(180deg, #5ab2ff, #2ec4b6);
+}
+
+.sharedStatViz--table {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sharedStatTableCell {
+  padding: 14px 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.06);
+  color: white;
+  font-weight: 800;
+  text-align: center;
+}
+
+.sharedStatViz--summary {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sharedStatMetric {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.74);
+  font-size: 0.86rem;
+}
+
+.sharedStatMetric strong {
+  color: white;
+  font-size: 1.08rem;
+}
+
+@media (max-width: 900px) {
+  .profileStatsPage {
+    max-height: calc(100vh - 220px);
+  }
+
+  .profileStatsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .profileStatsItem--line {
+    height: 320px;
+  }
+
+  .profileStatsItem--distribution,
+  .profileStatsItem--bar,
+  .profileStatsItem--pie {
+    height: 200px;
+  }
+
+  .sharedStatHead {
+    flex-direction: column;
+  }
+
+  .sharedStatHighlight {
+    white-space: normal;
+  }
+
+  .sharedStatViz--summary,
+  .sharedStatViz--table {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .titleAndContent {
     display: flex;
     flex-direction: column;
+}
+
+.postCaption,
+.postDetailCaption {
+  max-width: 640px;
+  margin: 14px 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.92);
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.postDetailCaption {
+  margin: 0 0 14px;
+}
+
+.statSharePostShell {
+  width: 100%;
+}
+
+.statSharePostHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 14px 14px 0;
+  padding: 0 2px;
+}
+
+.statSharePostTitle {
+  color: white;
+  font-size: 1.08rem;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.statSharePostContext {
+  margin-top: 4px;
+  color: rgba(255,255,255,0.72);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.statSharePostHighlight {
+  color: #bff7f0;
+  font-size: 1rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.statFeedPost {
+  width: 94%;
+  border-radius: 12px;
+  transition: background-color 0.2s ease;
+}
+
+.statFeedPost:hover {
+  background-color: rgba(200, 200, 200, 0.05);
+  cursor: pointer;
+}
+
+.statFeedMeta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px 12px;
+}
+
+.statFeedAuthor {
+  color: white;
+  font-weight: 700;
+}
+
+.sharedStatExact {
+  width: min(980px, 100%);
+  margin: 14px 14px 0;
+  cursor: default;
+}
+
+.sharedStatExact.stats-item--header {
+  overflow: visible;
+}
+
+.sharedStatExact .time-table-toolbar,
+.sharedStatExact [data-bulk-modal],
+.sharedStatExact .bulk-controls {
+  display: none !important;
 }
 
 .dateAndName {
@@ -218,7 +552,8 @@
     flex-direction: column;
     gap: 15px;
     width: 100%;
-    height: 100%;
+    height: auto;
+    min-height: 0;
 }
 
 .profileStats {
@@ -372,4 +707,3 @@
 .postTitleCube--skewb    { --as: 1.8; --ax: -40px; --ay: 5px; }
 .postTitleCube--clock    { --as: 1.25; --ax: -80px; --ay: -40px; }
 .postTitleCube--sq1      { --as: 1.6; --ax: -70px; --ay: -55px; }
-

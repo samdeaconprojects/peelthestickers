@@ -10,6 +10,74 @@ import BulkSolveControls from "../SolveBulk/BulkSolveControls";
 import { normalizeEventCode } from "../SolveBulk/solveBulkUtils";
 
 const TABLE_LIMITS = ["100", "250", "500", "1000", "all"];
+const DEFAULT_BOLD_PERF_COLORS = {
+  fastest: "#00ff00",
+  faster: "#00e676",
+  "middle-fast": "#ffff00",
+  slower: "#ffa500",
+  slowest: "#ff0000",
+};
+
+function interpolateHexColor(a, b, ratio) {
+  const safeRatio = Math.min(1, Math.max(0, Number(ratio) || 0));
+  const parse = (hex) => String(hex || "").replace("#", "");
+  const start = parse(a);
+  const end = parse(b);
+  if (start.length !== 6 || end.length !== 6) return a || b || "#ffffff";
+
+  const parts = [0, 2, 4].map((offset) => {
+    const av = parseInt(start.slice(offset, offset + 2), 16);
+    const bv = parseInt(end.slice(offset, offset + 2), 16);
+    return Math.round(av + (bv - av) * safeRatio).toString(16).padStart(2, "0");
+  });
+
+  return `#${parts.join("")}`;
+}
+
+function resolvePaletteColor(style, ratio, fallback = "#2EC4B6") {
+  const safeRatio = Math.min(1, Math.max(0, Number(ratio) || 0));
+  if (!style) return fallback;
+  if (style.mode === "gradient" && Array.isArray(style.stops) && style.stops.length >= 3) {
+    if (safeRatio <= 0.5) {
+      return interpolateHexColor(style.stops[0], style.stops[1], safeRatio / 0.5);
+    }
+    return interpolateHexColor(style.stops[1], style.stops[2], (safeRatio - 0.5) / 0.5);
+  }
+  return style.primary || fallback;
+}
+
+function getPerfRatio(perfClass) {
+  switch (perfClass) {
+    case "fastest":
+      return 0.1;
+    case "faster":
+      return 0.3;
+    case "middle-fast":
+      return 0.5;
+    case "slower":
+      return 0.7;
+    case "slowest":
+      return 0.9;
+    default:
+      return null;
+  }
+}
+
+function getPerfBorderColor(perfClass, paletteStyle) {
+  if (!perfClass) return null;
+  if (!paletteStyle) return DEFAULT_BOLD_PERF_COLORS[perfClass] || null;
+  const ratio = getPerfRatio(perfClass);
+  if (ratio == null) return null;
+  return resolvePaletteColor(paletteStyle, ratio, paletteStyle.primary || "#2EC4B6");
+}
+
+function buildPerfBorderStyle(perfClass, paletteStyle, borderStyle = "solid") {
+  const borderColor = getPerfBorderColor(perfClass, paletteStyle);
+  if (!borderColor) return undefined;
+  return {
+    border: `2px ${borderStyle} ${borderColor}`,
+  };
+}
 
 function buildRank01Map(items) {
   const valid = items
@@ -125,6 +193,7 @@ const TimeTable = ({
   currentSession,
   eventKey,
   practiceMode = false,
+  seriesStyle = null,
 }) => {
   const [selectedSolve, setSelectedSolve] = useState(null);
 
@@ -516,7 +585,6 @@ const TimeTable = ({
                   boxShadow: "0 0 0 3px rgba(46,196,182,0.18)",
                 }
               : null;
-
             return (
               <button
                 type="button"
@@ -540,7 +608,9 @@ const TimeTable = ({
                       penalty={solve?.penalty}
                       rangeMin={timeRange.min}
                       rangeMax={timeRange.max}
-                      className={`time-items-time ${tablePerfClass}`}
+                      className="time-items-time"
+                      style={buildPerfBorderStyle(tablePerfClass, seriesStyle)}
+                      disablePerformanceClass={true}
                     />
                   </div>
 
@@ -594,6 +664,10 @@ const TimeTable = ({
                         boxShadow: "0 0 0 3px rgba(46,196,182,0.18)",
                       }
                     : null;
+                  const cellStyle = {
+                    ...(buildPerfBorderStyle(perfClass, seriesStyle, isBest || isWorst ? "dashed" : "solid") || {}),
+                    ...(selectStyleInline || {}),
+                  };
 
                   return (
                     <div
@@ -602,10 +676,8 @@ const TimeTable = ({
                     >
                       <button
                         type="button"
-                        className={`timelist-row-cell TimeItem ${perfClass} ${
-                          isBest ? "dashed-border-min" : ""
-                        } ${isWorst ? "dashed-border-max" : ""}`}
-                        style={selectStyleInline || undefined}
+                        className="timelist-row-cell TimeItem"
+                        style={cellStyle}
                         onClick={(e) => onSolveClick(e, solve, solve.__flatIndex)}
                         onMouseDown={(e) => {
                           if (e.shiftKey || e.ctrlKey || e.metaKey || selection.selectionCount > 0) {
@@ -681,6 +753,12 @@ TimeTable.propTypes = {
   currentSession: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
   eventKey: PropTypes.string,
   practiceMode: PropTypes.bool,
+  seriesStyle: PropTypes.shape({
+    mode: PropTypes.string,
+    primary: PropTypes.string,
+    accent: PropTypes.string,
+    stops: PropTypes.arrayOf(PropTypes.string),
+  }),
 };
 
 export default TimeTable;

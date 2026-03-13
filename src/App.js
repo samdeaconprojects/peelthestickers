@@ -3,6 +3,7 @@ import "./App.css";
 import Timer from "./components/Timer/Timer";
 import TimeList from "./components/TimeList/TimeList";
 import AveragesDisplay from "./components/AveragesDisplay/AveragesDisplay";
+import AverageDetailModal from "./components/Detail/AverageDetailModal";
 import Profile from "./components/Profile/Profile";
 import Stats from "./components/Stats/Stats";
 import Social from "./components/Social/Social";
@@ -15,6 +16,7 @@ import PuzzleSVG from "./components/PuzzleSVGs/PuzzleSVG";
 import SignInPopup from "./components/SignInPopup/SignInPopup";
 import NameTag from "./components/Profile/NameTag";
 import Detail from "./components/Detail/Detail";
+import SharePostModal from "./components/Social/SharePostModal";
 import { useSettings } from "./contexts/SettingsContext";
 import { generateScramble } from "./components/scrambleUtils";
 import { Routes, Route, useLocation } from "react-router-dom";
@@ -481,10 +483,30 @@ function App() {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [showSignInPopup, setShowSignInPopup] = useState(false);
   const [showSettingsPopup, setShowSettingsPopup] = useState(false);
+  const [statsSettingsContext, setStatsSettingsContext] = useState({
+    eventLabel: currentEvent || "333",
+    sessionLabel: currentSession || "main",
+    isAllEventsMode: false,
+    canRecomputeOverall: false,
+    canImport: false,
+    loadingOverallStats: false,
+    importBusy: false,
+    isStatsRouteActive: false,
+  });
+  const [statsRecomputeRequest, setStatsRecomputeRequest] = useState(0);
+  const [statsImportRequest, setStatsImportRequest] = useState(0);
   const [selectedAverageSolves, setSelectedAverageSolves] = useState([]);
-  const [selectedAverageIndex, setSelectedAverageIndex] = useState(0);
+  const [selectedAverageSolve, setSelectedAverageSolve] = useState(null);
   const [sharedSession, setSharedSession] = useState(null);
   const [sharedIndex, setSharedIndex] = useState(0);
+  const [shareComposer, setShareComposer] = useState({
+    isOpen: false,
+    post: null,
+    caption: "",
+    isSubmitting: false,
+    error: "",
+  });
+  const shareComposerResolveRef = useRef(null);
 
   const [socialRefreshTick, setSocialRefreshTick] = useState(0);
 
@@ -1681,20 +1703,84 @@ function App() {
     }
   };
 
-  const addPost = async ({ note, event, solveList = [], comments = [] }) => {
+  const publishPost = async ({
+    note,
+    event,
+    solveList = [],
+    comments = [],
+    postType,
+    statShare,
+  }) => {
     if (!user) return;
 
     try {
       await runDb("Creating post", () =>
-        createPost(user.UserID, note, event, solveList, comments)
+        createPost(user.UserID, note, event, solveList, comments, {
+          postType,
+          statShare,
+        })
       );
       const posts = await getPosts(user.UserID);
       setUser((prev) => ({
         ...prev,
         Posts: posts,
       }));
+      setSocialRefreshTick((t) => t + 1);
     } catch (err) {
       console.error("Error adding post:", err);
+      throw err;
+    }
+  };
+
+  const closeShareComposer = (published = false) => {
+    const resolve = shareComposerResolveRef.current;
+    shareComposerResolveRef.current = null;
+    setShareComposer({
+      isOpen: false,
+      post: null,
+      caption: "",
+      isSubmitting: false,
+      error: "",
+    });
+    if (typeof resolve === "function") resolve(published);
+  };
+
+  const addPost = async (post) => {
+    if (!user || !post) return false;
+
+    return new Promise((resolve) => {
+      shareComposerResolveRef.current = resolve;
+      setShareComposer({
+        isOpen: true,
+        post,
+        caption: String(post.note || ""),
+        isSubmitting: false,
+        error: "",
+      });
+    });
+  };
+
+  const handleConfirmShareComposer = async () => {
+    if (!shareComposer.post || shareComposer.isSubmitting) return;
+
+    setShareComposer((prev) => ({
+      ...prev,
+      isSubmitting: true,
+      error: "",
+    }));
+
+    try {
+      await publishPost({
+        ...shareComposer.post,
+        note: shareComposer.caption.trim(),
+      });
+      closeShareComposer(true);
+    } catch (err) {
+      setShareComposer((prev) => ({
+        ...prev,
+        isSubmitting: false,
+        error: err?.message || "Failed to share post.",
+      }));
     }
   };
 
@@ -1810,7 +1896,6 @@ function App() {
         const normalized = (items || []).map((it) => normalizeSolve(it)).filter(Boolean);
         if (normalized.length === count) {
           setSelectedAverageSolves(normalized);
-          setSelectedAverageIndex(0);
           return true;
         }
       } catch (err) {
@@ -1835,7 +1920,6 @@ function App() {
 
     if (selected.length > 0) {
       setSelectedAverageSolves(selected);
-      setSelectedAverageIndex(0);
       return true;
     }
 
@@ -2112,7 +2196,6 @@ function App() {
                     rowsToShow={3}
                     onAverageClick={(solveArray) => {
                       setSelectedAverageSolves(solveArray);
-                      setSelectedAverageIndex(0);
                     }}
                     setSessions={setSessions}
                     sessionsList={sessionsList}
@@ -2129,14 +2212,27 @@ function App() {
                   />
 
                   {selectedAverageSolves.length > 0 && (
-                    <Detail
-                      solve={selectedAverageSolves[selectedAverageIndex]}
+                    <AverageDetailModal
+                      isOpen={selectedAverageSolves.length > 0}
+                      title={`Average Detail (${selectedAverageSolves.length})`}
+                      subtitle={`${eventKey === "333" ? "3x3" : eventKey} · ${currentSession}`}
+                      solves={selectedAverageSolves}
                       onClose={() => {
                         setSelectedAverageSolves([]);
-                        setSelectedAverageIndex(0);
                       }}
+                      onSolveOpen={(solve) => {
+                        if (!solve) return;
+                        setSelectedAverageSolve({ ...solve, userID: user?.UserID });
+                      }}
+                    />
+                  )}
+
+                  {selectedAverageSolve && (
+                    <Detail
+                      solve={selectedAverageSolve}
+                      onClose={() => setSelectedAverageSolve(null)}
                       deleteTime={() => {
-                        const selected = selectedAverageSolves[selectedAverageIndex];
+                        const selected = selectedAverageSolve;
                         if (!selected) return;
 
                         if (practiceMode) {
@@ -2150,13 +2246,6 @@ function App() {
                         }
                       }}
                       addPost={addPost}
-                      showNavButtons={true}
-                      onPrev={() => setSelectedAverageIndex((i) => Math.max(0, i - 1))}
-                      onNext={() =>
-                        setSelectedAverageIndex((i) =>
-                          Math.min(selectedAverageSolves.length - 1, i + 1)
-                        )
-                      }
                       applyPenalty={applyPenalty}
                       userID={user?.UserID}
                       setSessions={setSessions}
@@ -2201,6 +2290,7 @@ function App() {
                   sessionsList={sessionsList}
                   statsMutationTick={statsMutationTick}
                   setSessions={setSessions}
+                  setUser={setUser}
                   currentEvent={currentEvent}
                   currentSession={currentSession}
                   user={user}
@@ -2208,6 +2298,9 @@ function App() {
                     deleteTime(eventKeyParam, index)
                   }
                   addPost={addPost}
+                  onSettingsContextChange={setStatsSettingsContext}
+                  recomputeRequest={statsRecomputeRequest}
+                  importRequest={statsImportRequest}
                 />
               }
             />
@@ -2282,6 +2375,15 @@ function App() {
         <Settings
           userID={user?.UserID}
           onClose={() => setShowSettingsPopup(false)}
+          statsContext={statsSettingsContext}
+          onStatsRecompute={() => {
+            setShowSettingsPopup(false);
+            setStatsRecomputeRequest((prev) => prev + 1);
+          }}
+          onStatsImport={() => {
+            setShowSettingsPopup(false);
+            setStatsImportRequest((prev) => prev + 1);
+          }}
           onProfileUpdate={(fresh) => {
             setUser((prev) => ({ ...prev, ...fresh }));
             if (fresh?.Settings && typeof fresh.Settings === "object") {
@@ -2410,6 +2512,23 @@ function App() {
           </div>
         </div>
       )}
+
+      <SharePostModal
+        isOpen={shareComposer.isOpen}
+        title="Share to Social"
+        caption={shareComposer.caption}
+        onCaptionChange={(caption) =>
+          setShareComposer((prev) => ({
+            ...prev,
+            caption,
+            error: "",
+          }))
+        }
+        onCancel={() => closeShareComposer(false)}
+        onConfirm={handleConfirmShareComposer}
+        isSubmitting={shareComposer.isSubmitting}
+        error={shareComposer.error}
+      />
     </div>
   );
 }

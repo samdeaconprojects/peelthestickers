@@ -91,17 +91,8 @@ function TagBreakdownPie({ solves, title = "Tag Breakdown" }) {
   }, [solves, mode]);
 
   return (
-    <div
-      className="percentBar"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        margin: "5%",
-        gap: "10px",
-      }}
-    >
-      <div style={{ width: "100%", display: "flex", justifyContent: "center" }}>
+    <div className="pieChartPanel pieChartPanel--withControl">
+      <div className="pieChartPanelHeader">
         <select
           className="statsSelect"
           value={mode}
@@ -117,8 +108,8 @@ function TagBreakdownPie({ solves, title = "Tag Breakdown" }) {
       </div>
 
       <PieChartBuilder
-        width={220}
-        height={220}
+        width="100%"
+        height="100%"
         data={data}
         onSliceClick={(solvesInSlice) => setSelectedSolve(solvesInSlice?.[0] || null)}
       />

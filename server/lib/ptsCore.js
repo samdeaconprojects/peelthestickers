@@ -3,6 +3,7 @@ const {
   GetCommand,
   PutCommand,
   BatchWriteCommand,
+  BatchGetCommand,
 } = require("@aws-sdk/lib-dynamodb");
 const crypto = require("crypto");
 
@@ -45,6 +46,22 @@ function parseSolveSK(sk) {
     createdAt: rest.slice(0, idx),
     solveID: rest.slice(idx + 1),
   };
+}
+
+function buildTagStatsSK(event, sessionID, tagKey, tagValue) {
+  const ev = normalizeEvent(event);
+  const sid = sessionID == null || sessionID === "" ? null : normalizeSessionID(sessionID);
+  const key = String(tagKey || "").trim();
+  const rawValue = cleanTagValue(tagValue);
+  const tagValueNorm = normalizeTagIndexValue(rawValue);
+
+  if (!ev || !key || !tagValueNorm) {
+    throw new Error("Invalid tag stats scope");
+  }
+
+  return sid
+    ? `TAGSTATS#${ev}#${sid}#${key}#${tagValueNorm}`
+    : `TAGSTATS#${ev}#${key}#${tagValueNorm}`;
 }
 
 function computeFinalTimeMs(rawTimeMs, penalty) {
@@ -645,6 +662,48 @@ async function batchWriteAll(ddb, tableName, requests) {
   }
 }
 
+async function batchGetAll(ddb, tableName, keys) {
+  const input = Array.isArray(keys) ? keys.filter((key) => key?.PK && key?.SK) : [];
+  if (!input.length) return [];
+
+  const deduped = Array.from(
+    new Map(input.map((key) => [`${key.PK}|${key.SK}`, key])).values()
+  );
+  const out = [];
+
+  for (let i = 0; i < deduped.length; i += 100) {
+    let pendingKeys = deduped.slice(i, i + 100);
+    let attempt = 0;
+
+    while (pendingKeys.length > 0) {
+      const result = await ddb.send(
+        new BatchGetCommand({
+          RequestItems: {
+            [tableName]: {
+              Keys: pendingKeys,
+            },
+          },
+        })
+      );
+
+      out.push(...(result?.Responses?.[tableName] || []));
+      pendingKeys = result?.UnprocessedKeys?.[tableName]?.Keys || [];
+
+      if (!pendingKeys.length) break;
+
+      attempt += 1;
+      if (attempt > 8) {
+        throw new Error(`BatchGet exceeded retries: ${pendingKeys.length} unprocessed`);
+      }
+
+      const delay = Math.round(80 * Math.pow(2, attempt));
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+
+  return out;
+}
+
 async function putSolveAndTagItems(ddb, tableName, solveItem) {
   const tagItems = buildSolveTagItems(solveItem);
   const requests = [
@@ -782,6 +841,64 @@ async function getAllSolvesByEvent(ddb, tableName, userID, event) {
   return all.reverse();
 }
 
+async function getAllSolvesByTag(
+  ddb,
+  tableName,
+  userID,
+  tagKey,
+  tagValue,
+  { event = "", sessionID = "" } = {}
+) {
+  const key = String(tagKey || "").trim();
+  const cleanValue = cleanTagValue(tagValue);
+  const tagValueNorm = normalizeTagIndexValue(cleanValue);
+  const ev = normalizeEvent(event || "");
+  const sid = sessionID ? normalizeSessionID(sessionID) : "";
+
+  if (!userID || !key || !tagValueNorm) return [];
+
+  let keyConditionExpression = "GSI3PK = :pk";
+  const expressionAttributeValues = {
+    ":pk": `TAG#${userID}#${key}#${tagValueNorm}`,
+  };
+
+  if (ev && sid) {
+    keyConditionExpression += " AND begins_with(GSI3SK, :skPrefix)";
+    expressionAttributeValues[":skPrefix"] = `${ev}#${sid}#`;
+  } else if (ev) {
+    keyConditionExpression += " AND begins_with(GSI3SK, :skPrefix)";
+    expressionAttributeValues[":skPrefix"] = `${ev}#`;
+  }
+
+  let cursor = undefined;
+  const tagItems = [];
+
+  do {
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: tableName,
+        IndexName: "GSI3",
+        KeyConditionExpression: keyConditionExpression,
+        ExpressionAttributeValues: expressionAttributeValues,
+        ScanIndexForward: false,
+        ExclusiveStartKey: cursor,
+        Limit: 1000,
+      })
+    );
+
+    if (out.Items?.length) tagItems.push(...out.Items);
+    cursor = out.LastEvaluatedKey;
+  } while (cursor);
+
+  const solveKeys = tagItems.map((item) => ({
+    PK: item?.SolvePK,
+    SK: item?.SolveSK,
+  }));
+  const solves = await batchGetAll(ddb, tableName, solveKeys);
+
+  return solves.sort((a, b) => String(a?.CreatedAt || "").localeCompare(String(b?.CreatedAt || "")));
+}
+
 async function getLastNSolvesBySession(ddb, tableName, userID, event, sessionID, n) {
   const ev = normalizeEvent(event);
   const sid = normalizeSessionID(sessionID);
@@ -860,6 +977,49 @@ async function recomputeEventStats(ddb, tableName, userID, event) {
     stale: false,
     ...stats,
   };
+
+  await ddb.send(new PutCommand({ TableName: tableName, Item: item }));
+  return item;
+}
+
+async function recomputeTagStats(
+  ddb,
+  tableName,
+  userID,
+  event,
+  sessionID,
+  tagKey,
+  tagValue
+) {
+  const ev = normalizeEvent(event);
+  const sid = sessionID == null || sessionID === "" ? null : normalizeSessionID(sessionID);
+  const key = String(tagKey || "").trim();
+  const cleanValue = cleanTagValue(tagValue);
+  const tagValueNorm = normalizeTagIndexValue(cleanValue);
+
+  if (!ev || !key || !tagValueNorm) {
+    throw new Error("Invalid tag stats scope");
+  }
+
+  const solves = await getAllSolvesByTag(ddb, tableName, userID, key, cleanValue, {
+    event: ev,
+    sessionID: sid || "",
+  });
+  const stats = buildStatsFromSolves(solves);
+
+  const item = {
+    PK: `USER#${userID}`,
+    SK: buildTagStatsSK(ev, sid, key, cleanValue),
+    ItemType: "TAGSTATS",
+    Event: ev,
+    TagKey: key,
+    TagValue: cleanValue,
+    TagValueNorm: tagValueNorm,
+    UpdatedAt: nowIso(),
+    stale: false,
+    ...stats,
+  };
+  if (sid) item.SessionID = sid;
 
   await ddb.send(new PutCommand({ TableName: tableName, Item: item }));
   return item;
@@ -1078,6 +1238,7 @@ module.exports = {
   cleanTagValue,
   normalizeTagIndexValue,
   sanitizeTags,
+  buildTagStatsSK,
 
   buildSolveItem,
   getSolveTagPairsFromItem,
@@ -1088,11 +1249,13 @@ module.exports = {
 
   getAllSolvesBySession,
   getAllSolvesByEvent,
+  getAllSolvesByTag,
   getLastNSolvesBySession,
   getLastNSolvesByEvent,
 
   recomputeSessionStats,
   recomputeEventStats,
+  recomputeTagStats,
   upsertSessionStatsOnNewSolve,
   upsertEventStatsOnNewSolve,
 };

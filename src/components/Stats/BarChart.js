@@ -1,6 +1,105 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-function BarChart({ solves }) {
+function getSolveMs(solve) {
+  if (!solve) return null;
+  if (solve.penalty === "+2") return (solve.originalTime || solve.time) + 2000;
+  if (solve.penalty === "DNF") return "DNF";
+  return Number.isFinite(Number(solve.time)) ? Number(solve.time) : null;
+}
+
+function interpolateHexColor(a, b, ratio) {
+  const safeRatio = Math.min(1, Math.max(0, Number(ratio) || 0));
+  const parse = (hex) => String(hex || "").replace("#", "");
+  const start = parse(a);
+  const end = parse(b);
+  if (start.length !== 6 || end.length !== 6) return a || b || "#ffffff";
+
+  const parts = [0, 2, 4].map((offset) => {
+    const av = parseInt(start.slice(offset, offset + 2), 16);
+    const bv = parseInt(end.slice(offset, offset + 2), 16);
+    return Math.round(av + (bv - av) * safeRatio).toString(16).padStart(2, "0");
+  });
+
+  return `#${parts.join("")}`;
+}
+
+function resolvePaletteColor(style, ratio, fallback = "#2EC4B6") {
+  const safeRatio = Math.min(1, Math.max(0, Number(ratio) || 0));
+  if (!style) return fallback;
+  if (style.mode === "gradient" && Array.isArray(style.stops) && style.stops.length >= 3) {
+    if (safeRatio <= 0.5) {
+      return interpolateHexColor(style.stops[0], style.stops[1], safeRatio / 0.5);
+    }
+    return interpolateHexColor(style.stops[1], style.stops[2], (safeRatio - 0.5) / 0.5);
+  }
+  return style.primary || fallback;
+}
+
+function resolveStandardHeatColor(ratio) {
+  const safeRatio = Math.min(1, Math.max(0, Number(ratio) || 0));
+  if (safeRatio <= 0.2) {
+    return interpolateHexColor("#00ff00", "#00e676", safeRatio / 0.2);
+  }
+  if (safeRatio <= 0.6) {
+    return interpolateHexColor("#00e676", "#ffff00", (safeRatio - 0.2) / 0.4);
+  }
+  if (safeRatio <= 0.8) {
+    return interpolateHexColor("#ffff00", "#ffa500", (safeRatio - 0.6) / 0.2);
+  }
+  return interpolateHexColor("#ffa500", "#ff0000", (safeRatio - 0.8) / 0.2);
+}
+
+function buildHistogramSeries(solves, style = null, fallbackColor = "#2EC4B6") {
+  const times = (Array.isArray(solves) ? solves : []).map(getSolveMs);
+  const numericTimes = times.filter((value) => typeof value === "number" && isFinite(value));
+  const dnfCount = times.filter((value) => value === "DNF").length;
+
+  if (numericTimes.length === 0 && dnfCount === 0) {
+    return { minTimeSec: 0, maxTimeSec: 0, buckets: [] };
+  }
+
+  const minTimeSec = numericTimes.length ? Math.floor(Math.min(...numericTimes) / 1000) : 0;
+  const maxTimeSec = numericTimes.length ? Math.ceil(Math.max(...numericTimes) / 1000) : minTimeSec;
+  const counts = new Map();
+
+  numericTimes.forEach((time) => {
+    const bucket = Math.floor(time / 1000);
+    counts.set(bucket, (counts.get(bucket) || 0) + 1);
+  });
+
+  if (dnfCount > 0) counts.set("DNF", dnfCount);
+
+  const orderedKeys = Array.from(counts.keys()).sort((a, b) => {
+    if (a === "DNF") return 1;
+    if (b === "DNF") return -1;
+    return Number(a) - Number(b);
+  });
+
+  const span = Math.max(1, maxTimeSec - minTimeSec || 1);
+  const buckets = orderedKeys.map((key) => {
+    const ratio =
+      key === "DNF"
+        ? 1
+        : span === 0
+          ? 0.5
+          : (Number(key) - minTimeSec) / span;
+    return {
+      key,
+      label: key === "DNF" ? "DNF" : String(key),
+      count: counts.get(key) || 0,
+      color:
+        key === "DNF"
+          ? "#dc143c"
+          : style
+            ? resolvePaletteColor(style, ratio, fallbackColor)
+            : resolveStandardHeatColor(ratio),
+    };
+  });
+
+  return { minTimeSec, maxTimeSec, buckets };
+}
+
+function BarChart({ solves, comparisonSeries = [], seriesStyle = null, legendItems = [] }) {
   const containerRef = useRef(null);
 
   const [tooltip, setTooltip] = useState({
@@ -9,70 +108,97 @@ function BarChart({ solves }) {
     y: 0,
     count: 0,
     label: "",
+    series: "",
   });
 
   const [size, setSize] = useState({ w: 0, h: 0 });
 
-  // Measure the *container*, not the window
   useEffect(() => {
     if (!containerRef.current) return;
 
     const el = containerRef.current;
     const ro = new ResizeObserver(() => {
-      const w = el.clientWidth || 0;
-      const h = el.clientHeight || 0;
-      setSize({ w, h });
+      setSize({
+        w: el.clientWidth || 0,
+        h: el.clientHeight || 0,
+      });
     });
 
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  // Keep some breathing room for axes/labels
   const padding = Math.max(14, Math.min(26, Math.floor(size.w * 0.05)));
   const chartWidth = Math.max(0, size.w);
   const chartHeight = Math.max(0, size.h);
+  const hasComparison = Array.isArray(comparisonSeries) && comparisonSeries.length > 0;
 
   const computed = useMemo(() => {
-    if (!Array.isArray(solves) || solves.length === 0) return null;
+    const primary = buildHistogramSeries(solves, seriesStyle, "#2EC4B6");
+    const secondary = (comparisonSeries || []).map((series, index) => ({
+      id: series?.id || `compare-${index}`,
+      label: series?.label || `Compare ${index + 1}`,
+      ...buildHistogramSeries(series?.solves || [], series?.style || null, "#7c8cff"),
+    }));
 
-    const times = solves.map((solve) => {
-      if (solve.penalty === "+2") return (solve.originalTime || solve.time) + 2000;
-      if (solve.penalty === "DNF") return "DNF";
-      return solve.time;
-    });
-
-    const numericTimes = times.filter((t) => typeof t === "number" && isFinite(t));
-    const dnfCount = times.filter((t) => t === "DNF").length;
-
-    if (numericTimes.length === 0) {
-      const counts = dnfCount > 0 ? [dnfCount] : [];
+    if (!hasComparison) {
+      if (primary.buckets.length === 0) return null;
+      const counts = primary.buckets.map((bucket) => bucket.count);
       return {
-        counts,
-        dnfCount,
-        minTimeSec: 0,
-        maxTimeSec: 0,
+        mode: "single",
+        buckets: primary.buckets,
         maxCount: Math.max(...counts, 1),
       };
     }
 
-    const minTimeSec = Math.floor(Math.min(...numericTimes) / 1000);
-    const maxTimeSec = Math.ceil(Math.max(...numericTimes) / 1000);
-
-    const bucketCount = Math.max(1, maxTimeSec - minTimeSec + 1);
-    const counts = Array(bucketCount + (dnfCount > 0 ? 1 : 0)).fill(0);
-
-    numericTimes.forEach((time) => {
-      const bucketIndex = Math.floor(time / 1000) - minTimeSec;
-      if (bucketIndex >= 0 && bucketIndex < bucketCount) counts[bucketIndex]++;
+    const bucketKeySet = new Set(primary.buckets.map((bucket) => bucket.key));
+    secondary.forEach((series) => {
+      series.buckets.forEach((bucket) => bucketKeySet.add(bucket.key));
     });
 
-    if (dnfCount > 0) counts[counts.length - 1] = dnfCount;
+    const orderedKeys = Array.from(bucketKeySet).sort((a, b) => {
+      if (a === "DNF") return 1;
+      if (b === "DNF") return -1;
+      return Number(a) - Number(b);
+    });
 
-    const maxCount = Math.max(...counts, 1);
+    const seriesList = [
+      {
+        id: "primary",
+        label: legendItems[0]?.label || "Primary",
+        buckets: primary.buckets,
+      },
+      ...secondary,
+    ];
 
-    return { counts, dnfCount, minTimeSec, maxTimeSec, maxCount };
-  }, [solves]);
+    const groups = orderedKeys.map((key) => ({
+      key,
+      label: key === "DNF" ? "DNF" : String(key),
+      bars: seriesList.map((series, index) => {
+        const bucket = series.buckets.find((item) => item.key === key);
+        return {
+          id: `${series.id}-${key}`,
+          seriesLabel: series.label,
+          count: bucket?.count || 0,
+          color:
+            bucket?.color ||
+            legendItems[index]?.color ||
+            (index === 0 ? "#2EC4B6" : "#7c8cff"),
+        };
+      }),
+    }));
+
+    const maxCount = Math.max(
+      1,
+      ...groups.flatMap((group) => group.bars.map((bar) => bar.count))
+    );
+
+    return {
+      mode: "compare",
+      groups,
+      maxCount,
+    };
+  }, [comparisonSeries, hasComparison, legendItems, seriesStyle, solves]);
 
   if (!computed) {
     return (
@@ -82,38 +208,15 @@ function BarChart({ solves }) {
     );
   }
 
-  // If the parent/card hasn't given us a real size yet
   if (chartWidth < 20 || chartHeight < 20) {
     return <div ref={containerRef} style={{ width: "100%", height: "100%" }} />;
-  }
-
-  const { counts, dnfCount, minTimeSec, maxTimeSec, maxCount } = computed;
-
-  if (!counts || counts.length === 0) {
-    return (
-      <div ref={containerRef} style={{ width: "100%", height: "100%" }}>
-        No data available for this chart.
-      </div>
-    );
   }
 
   const innerW = Math.max(1, chartWidth - padding * 2);
   const innerH = Math.max(1, chartHeight - padding * 2);
 
-  const barWidth = innerW / counts.length;
-
-  const getColor = (index) => {
-    if (dnfCount > 0 && index === counts.length - 1) return "crimson";
-    const denom = maxTimeSec - minTimeSec || 1;
-    const timeSec = minTimeSec + index;
-    const normalized = (timeSec - minTimeSec) / denom;
-    const r = Math.floor(255 * normalized);
-    const g = Math.floor(255 * (1 - normalized));
-    return `rgb(${r}, ${g}, 100)`;
-  };
-
-  // Reduce x-axis label density if many buckets
-  const labelEvery = counts.length > 24 ? Math.ceil(counts.length / 12) : 1;
+  const items = computed.mode === "compare" ? computed.groups : computed.buckets;
+  const labelEvery = items.length > 24 ? Math.ceil(items.length / 12) : 1;
 
   return (
     <div
@@ -124,8 +227,21 @@ function BarChart({ solves }) {
         height: "100%",
       }}
     >
+      {hasComparison && legendItems.length > 0 && (
+        <div className="lineChartLegend lineChartLegend--bar">
+          {legendItems.map((item) => (
+            <div key={item.id || item.label} className="lineChartLegendItem">
+              <span
+                className="lineChartLegendSwatch"
+                style={{ backgroundColor: item.color || "#2EC4B6" }}
+              />
+              <span className="lineChartLegendLabel">{item.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       <svg width={chartWidth} height={chartHeight}>
-        {/* Axes */}
         <line
           x1={padding}
           y1={chartHeight - padding}
@@ -135,66 +251,118 @@ function BarChart({ solves }) {
         />
         <line x1={padding} y1={padding} x2={padding} y2={chartHeight - padding} stroke="#ccc" />
 
-        {/* Bars */}
-        {counts.map((count, index) => {
-          const h = (count / maxCount) * innerH;
-          const x = padding + index * barWidth;
-          const y = chartHeight - padding - h;
+        {computed.mode === "single" &&
+          computed.buckets.map((bucket, index) => {
+            const barWidth = innerW / Math.max(1, computed.buckets.length);
+            const h = (bucket.count / computed.maxCount) * innerH;
+            const x = padding + index * barWidth;
+            const y = chartHeight - padding - h;
 
-          const label =
-            dnfCount > 0 && index === counts.length - 1 ? "DNF" : `${minTimeSec + index}`;
+            return (
+              <g key={bucket.key}>
+                <rect
+                  x={x}
+                  y={y}
+                  width={Math.max(1, barWidth - 2)}
+                  height={h}
+                  rx={4}
+                  ry={4}
+                  fill={bucket.color}
+                  onMouseOver={() =>
+                    setTooltip({
+                      visible: true,
+                      x: x + barWidth / 2,
+                      y: y - 8,
+                      count: bucket.count,
+                      label: bucket.label,
+                      series: "",
+                    })
+                  }
+                  onMouseOut={() =>
+                    setTooltip({ visible: false, x: 0, y: 0, count: 0, label: "", series: "" })
+                  }
+                />
 
-          return (
-            <g key={index}>
-              <rect
-                x={x}
-                y={y}
-                width={Math.max(1, barWidth - 2)}
-                height={h}
-                rx={4}
-                ry={4}
-                fill={getColor(index)}
-                onMouseOver={() =>
-                  setTooltip({
-                    visible: true,
-                    x: x + barWidth / 2,
-                    y: y - 8,
-                    count,
-                    label,
-                  })
-                }
-                onMouseOut={() =>
-                  setTooltip({ visible: false, x: 0, y: 0, count: 0, label: "" })
-                }
-              />
+                {index % labelEvery === 0 && (
+                  <text
+                    x={x + barWidth / 2}
+                    y={chartHeight - padding + 14}
+                    textAnchor="middle"
+                    fontSize="10px"
+                    fill="white"
+                  >
+                    {bucket.label}
+                  </text>
+                )}
+              </g>
+            );
+          })}
 
-              {/* X-axis labels (thinned) */}
-              {index % labelEvery === 0 && (
-                <text
-                  x={x + barWidth / 2}
-                  y={chartHeight - padding + 14}
-                  textAnchor="middle"
-                  fontSize="10px"
-                  fill="white"
-                >
-                  {label}
-                </text>
-              )}
-            </g>
-          );
-        })}
+        {computed.mode === "compare" &&
+          computed.groups.map((group, groupIndex) => {
+            const groupWidth = innerW / Math.max(1, computed.groups.length);
+            const gap = Math.min(6, groupWidth * 0.12);
+            const barWidth = Math.max(3, (groupWidth - gap * 2) / Math.max(1, group.bars.length));
 
-        {/* Y-axis labels */}
-        {[0, maxCount].map((c, i) => (
+            return (
+              <g key={group.key}>
+                {group.bars.map((bar, barIndex) => {
+                  const h = (bar.count / computed.maxCount) * innerH;
+                  const x = padding + groupIndex * groupWidth + gap + barIndex * barWidth;
+                  const y = chartHeight - padding - h;
+
+                  return (
+                    <rect
+                      key={bar.id}
+                      x={x}
+                      y={y}
+                      width={Math.max(1, barWidth - 2)}
+                      height={h}
+                      rx={4}
+                      ry={4}
+                      fill={bar.color}
+                      onMouseOver={() =>
+                        setTooltip({
+                          visible: true,
+                          x: x + barWidth / 2,
+                          y: y - 8,
+                          count: bar.count,
+                          label: group.label,
+                          series: bar.seriesLabel,
+                        })
+                      }
+                      onMouseOut={() =>
+                        setTooltip({ visible: false, x: 0, y: 0, count: 0, label: "", series: "" })
+                      }
+                    />
+                  );
+                })}
+
+                {groupIndex % labelEvery === 0 && (
+                  <text
+                    x={padding + groupIndex * groupWidth + groupWidth / 2}
+                    y={chartHeight - padding + 14}
+                    textAnchor="middle"
+                    fontSize="10px"
+                    fill="white"
+                  >
+                    {group.label}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+
+        {[0, computed.maxCount].map((value, index) => (
           <text
-            key={i}
+            key={index}
             x={padding - 8}
-            y={chartHeight - padding - (c / maxCount) * innerH + 4}
+            y={chartHeight - padding - (value / computed.maxCount) * innerH + 4}
             textAnchor="end"
             fontSize="10px"
             fill="white"
           >
-            {c}
+            {value}
           </text>
         ))}
       </svg>
@@ -215,6 +383,7 @@ function BarChart({ solves }) {
             whiteSpace: "nowrap",
           }}
         >
+          {tooltip.series ? `${tooltip.series} · ` : ""}
           {tooltip.label}: {tooltip.count}
         </div>
       )}

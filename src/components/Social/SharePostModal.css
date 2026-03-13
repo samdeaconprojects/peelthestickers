@@ -1,0 +1,81 @@
+.sharePostOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2400;
+  background: rgba(6, 10, 14, 0.76);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.sharePostModal {
+  width: min(560px, 100%);
+  border-radius: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, rgba(18, 28, 34, 0.98), rgba(10, 16, 20, 0.98));
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  padding: 18px;
+  box-sizing: border-box;
+}
+
+.sharePostHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sharePostTitle {
+  color: white;
+  font-size: 1.2rem;
+  font-weight: 900;
+}
+
+.sharePostClose {
+  width: 38px;
+  min-width: 38px;
+  padding: 0;
+  font-size: 1.3rem;
+  opacity: 0.8;
+}
+
+.sharePostLabel {
+  display: block;
+  margin-top: 16px;
+  margin-bottom: 8px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.sharePostInput {
+  width: 100%;
+  border-radius: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: white;
+  padding: 12px 14px;
+  box-sizing: border-box;
+  font: inherit;
+  resize: vertical;
+  outline: none;
+}
+
+.sharePostInput:focus {
+  border-color: rgba(46, 196, 182, 0.7);
+}
+
+.sharePostError {
+  margin-top: 10px;
+  color: #ff8f8f;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.sharePostActions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}

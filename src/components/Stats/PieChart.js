@@ -1,28 +1,47 @@
-import React, { useState } from "react";
-import PercentBarBuilder from "./PercentBarBuilder";
-import Detail from "../Detail/Detail";
+import React, { useMemo } from "react";
+import PieChartBuilder from "./PieChartBuilder";
 import "./Stats.css";
 
-function PercentBar({ solves, title }) {
-  const [selectedSolve, setSelectedSolve] = useState(null);
+function PieChart({ solves, data: dataProp, title }) {
+  const data = useMemo(() => {
+    if (Array.isArray(dataProp) && dataProp.length > 0) {
+      return dataProp
+        .filter((entry) => Number(entry?.value) > 0)
+        .map((entry) => ({
+          label: String(entry?.label || "Unknown"),
+          value: Number(entry?.value || 0),
+          solves: Array.isArray(entry?.solves) ? entry.solves : [],
+        }));
+    }
+
+    const grouped = new Map();
+
+    for (const solve of Array.isArray(solves) ? solves : []) {
+      const event = String(solve?.event || solve?.Event || "").trim() || "Unknown";
+      if (!grouped.has(event)) grouped.set(event, []);
+      grouped.get(event).push(solve);
+    }
+
+    return Array.from(grouped.entries()).map(([label, eventSolves]) => ({
+      label,
+      value: eventSolves.length,
+      solves: eventSolves,
+    }));
+  }, [dataProp, solves]);
 
   return (
-    <div
-      className="percentBar"
-      style={{ display: "flex", flexDirection: "column", alignItems: "center", margin: "5%" }}
-    >
+    <div className="pieChartPanel">
       {/*<ChartTitle text={title} />*/}
 
-      <PercentBarBuilder
-        width={150}
-        height={300}
-        solves={solves}
-        onSliceClick={(solvesInSlice) => setSelectedSolve(solvesInSlice?.[0] || null)}
+      <PieChartBuilder
+        width="100%"
+        height="100%"
+        data={data}
+        legendValueMode="count"
+        interactive={false}
       />
-
-      {selectedSolve && <Detail solve={selectedSolve} onClose={() => setSelectedSolve(null)} />}
     </div>
   );
 }
 
-export default React.memo(PercentBar);
+export default React.memo(PieChart);

@@ -4,6 +4,14 @@
 }
 
 .statsSummaryShell {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(360px, 1fr);
+  gap: 12px;
+  width: 100%;
+  align-items: start;
+}
+
+.ssCard {
   --ss-bg-left: linear-gradient(135deg, rgba(35, 42, 48, 0.96), rgba(26, 32, 38, 0.96));
   --ss-bg-right: linear-gradient(135deg, rgba(32, 67, 95, 0.92), rgba(21, 57, 90, 0.92));
   --ss-line: rgba(255, 255, 255, 0.18);
@@ -15,15 +23,6 @@
   --ss-lime: #dff46d;
   --ss-text: #f3f4f6;
   --ss-muted: rgba(243, 244, 246, 0.66);
-
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(360px, 1fr);
-  gap: 12px;
-  width: 100%;
-  align-items: start;
-}
-
-.ssCard {
   border-radius: 22px;
   border: 2px solid var(--ss-line);
   color: var(--ss-text);
@@ -35,7 +34,7 @@
 .ssCard--view {
   background: var(--ss-bg-left);
   display: grid;
-  grid-template-columns: 128px minmax(0, 1fr) 228px;
+  grid-template-columns: 128px 228px minmax(0, 1fr);
   gap: 8px;
   padding: 12px 14px 10px 14px;
 }
@@ -83,6 +82,78 @@
 
 .ssViewBody {
   min-width: 0;
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ssCompareStrip {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 2px;
+  padding: 8px 10px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.ssCompareStripHeader {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(243,244,246,0.68);
+}
+
+.ssCompareStripGrid,
+.ssOverallCompare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ssComparePill {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.ssComparePillLabel {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: rgba(243,244,246,0.66);
+}
+
+.ssComparePillValue {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: white;
+}
+
+.ssComparePillMeta,
+.ssCompareMiniLabel {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: rgba(243,244,246,0.66);
+}
+
+.ssCompareMiniStat {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+}
+
+.ssCompareMiniValue {
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: white;
 }
 
 .ssTimeLead,
@@ -155,6 +226,7 @@
   grid-template-columns: repeat(2, minmax(220px, 1fr));
   gap: 8px 12px;
   align-content: start;
+  justify-content: end;
 }
 
 .ssMetricColumn {
@@ -177,6 +249,24 @@
   font-weight: 700;
   letter-spacing: -0.02em;
   white-space: nowrap;
+}
+
+.ssStatButton {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.ssStatButton:hover .ssMetricValue,
+.ssStatButton:focus-visible .ssMetricValue {
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
 }
 
 .ssMetricValues,
@@ -222,6 +312,8 @@
   gap: 2px;
   align-content: start;
   min-width: 0;
+  grid-column: 2;
+  grid-row: 1;
 }
 
 .ssSingleRow {

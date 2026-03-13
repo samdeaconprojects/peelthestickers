@@ -29,7 +29,9 @@ const {
   normalizeTagIndexValue,
   getRawTimeMs,
   getFinalTimeMs,
+  buildTagStatsSK,
   buildSolveItem,
+  getSolveTagPairsFromItem,
   buildSolveTagItems,
   buildStatsFromSolves,
   buildTopWindowCandidatesFromSolves,
@@ -37,6 +39,7 @@ const {
   getLastNSolvesByEvent,
   recomputeSessionStats,
   recomputeEventStats,
+  recomputeTagStats,
   putSolveAndTagItems,
   replaceSolveAndTagItems,
   deleteSolveAndTagItems,
@@ -780,6 +783,50 @@ async function applySolveMutationStats({ userID, oldSolve = null, newSolve = nul
       })
     );
   }
+
+  const tagScopeKeys = new Map();
+  const addTagScopeRecomputes = (solve) => {
+    if (!solve) return;
+    const event = normalizeEvent(solve.Event);
+    const sessionID = normalizeSessionID(solve.SessionID);
+
+    for (const pair of getSolveTagPairsFromItem(solve)) {
+      const tagKey = String(pair?.key || "").trim();
+      const tagValue = String(pair?.value || "").trim();
+      if (!event || !sessionID || !tagKey || !tagValue) continue;
+
+      tagScopeKeys.set(`TS|${event}|${sessionID}|${tagKey}|${tagValue}`, {
+        event,
+        sessionID,
+        tagKey,
+        tagValue,
+      });
+      tagScopeKeys.set(`TE|${event}|${tagKey}|${tagValue}`, {
+        event,
+        sessionID: null,
+        tagKey,
+        tagValue,
+      });
+    }
+  };
+
+  addTagScopeRecomputes(oldSolve);
+  addTagScopeRecomputes(newSolve);
+
+  for (const entry of tagScopeKeys.values()) {
+    jobs.push(
+      recomputeTagStats(
+        ddb,
+        TABLE,
+        userID,
+        entry.event,
+        entry.sessionID,
+        entry.tagKey,
+        entry.tagValue
+      )
+    );
+  }
+
   await Promise.all(jobs);
 }
 
@@ -1286,6 +1333,44 @@ app.get("/api/eventStats/:userID", async (req, res) => {
   }
 });
 
+// -------------------- TAGSTATS --------------------
+app.get("/api/tagStats/:userID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const userID = String(req.params.userID || "").trim();
+  const event = normalizeEvent(req.query?.event);
+  const sessionIDRaw = String(req.query?.sessionID || "").trim();
+  const tagKey = String(req.query?.tagKey || "").trim();
+  const tagValue = String(req.query?.tagValue || "").trim();
+  const sessionID = sessionIDRaw ? normalizeSessionID(sessionIDRaw) : null;
+
+  if (!userID) return res.status(400).json({ error: "Missing userID" });
+  if (!event) return res.status(400).json({ error: "Missing event" });
+  if (!tagKey) return res.status(400).json({ error: "Missing tagKey" });
+  if (!tagValue) return res.status(400).json({ error: "Missing tagValue" });
+
+  try {
+    const statsKey = buildTagStatsSK(event, sessionID, tagKey, tagValue);
+    const out = await ddb.send(
+      new GetCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${userID}`, SK: statsKey },
+        ConsistentRead: true,
+      })
+    );
+
+    let item = out.Item || null;
+    if (!item) {
+      item = await recomputeTagStats(ddb, TABLE, userID, event, sessionID, tagKey, tagValue);
+    }
+
+    return res.json({ ok: true, item });
+  } catch (e) {
+    console.error("GET /api/tagStats error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
 // -------------------- SOLVES --------------------
 app.get("/api/solves/:userID", async (req, res) => {
   if (!requirePkSk(res)) return;
@@ -1339,7 +1424,8 @@ app.get("/api/solvesLastN/:userID", async (req, res) => {
 
   const userID = String(req.params.userID || "").trim();
   const event = normalizeEvent(req.query?.event);
-  const sessionID = normalizeSessionID(req.query?.sessionID || "main");
+  const rawSessionID = String(req.query?.sessionID || "").trim();
+  const sessionID = rawSessionID ? normalizeSessionID(rawSessionID) : null;
   const n = Math.max(1, Math.min(5000, Number(req.query?.n || 100)));
 
   if (!userID) return res.status(400).json({ error: "Missing userID" });
@@ -1347,16 +1433,29 @@ app.get("/api/solvesLastN/:userID", async (req, res) => {
 
   try {
     const out = await ddb.send(
-      new QueryCommand({
-        TableName: TABLE,
-        IndexName: "GSI1",
-        KeyConditionExpression: "GSI1PK = :pk",
-        ExpressionAttributeValues: {
-          ":pk": `SESSION#${userID}#${event}#${sessionID}`,
-        },
-        ScanIndexForward: false,
-        Limit: n,
-      })
+      new QueryCommand(
+        sessionID
+          ? {
+              TableName: TABLE,
+              IndexName: "GSI1",
+              KeyConditionExpression: "GSI1PK = :pk",
+              ExpressionAttributeValues: {
+                ":pk": `SESSION#${userID}#${event}#${sessionID}`,
+              },
+              ScanIndexForward: false,
+              Limit: n,
+            }
+          : {
+              TableName: TABLE,
+              IndexName: "GSI2",
+              KeyConditionExpression: "GSI2PK = :pk",
+              ExpressionAttributeValues: {
+                ":pk": `EVENT#${userID}#${event}`,
+              },
+              ScanIndexForward: false,
+              Limit: n,
+            }
+      )
     );
 
     return res.json({ ok: true, items: out.Items || [] });
@@ -1706,7 +1805,31 @@ app.post("/api/solves/move-session", async (req, res) => {
     const writeRequests = [];
     const sessionScopes = new Map();
     const eventScopes = new Set();
+    const tagScopes = new Map();
     let skipped = 0;
+
+    const addTagScopesForSolve = (solve) => {
+      if (!solve) return;
+      const event = normalizeEvent(solve.Event);
+      const sessionID = normalizeSessionID(solve.SessionID);
+      for (const pair of getSolveTagPairsFromItem(solve)) {
+        const tagKey = String(pair?.key || "").trim();
+        const tagValue = String(pair?.value || "").trim();
+        if (!event || !sessionID || !tagKey || !tagValue) continue;
+        tagScopes.set(`TS|${event}|${sessionID}|${tagKey}|${tagValue}`, {
+          event,
+          sessionID,
+          tagKey,
+          tagValue,
+        });
+        tagScopes.set(`TE|${event}|${tagKey}|${tagValue}`, {
+          event,
+          sessionID: null,
+          tagKey,
+          tagValue,
+        });
+      }
+    };
 
     for (const solveRef of solveRefs) {
       const existing = existingBySK.get(solveRef);
@@ -1752,6 +1875,8 @@ app.post("/api/solves/move-session", async (req, res) => {
       sessionScopes.set(`${nextEvent}|${nextSessionID}`, { event: nextEvent, sessionID: nextSessionID });
       eventScopes.add(oldEvent);
       eventScopes.add(nextEvent);
+      addTagScopesForSolve(existing);
+      addTagScopesForSolve(rebuilt);
     }
 
     const writeStartedAt = Date.now();
@@ -1764,6 +1889,9 @@ app.post("/api/solves/move-session", async (req, res) => {
         recomputeSessionStats(ddb, TABLE, userID, scope.event, scope.sessionID)
       ),
       ...Array.from(eventScopes.values()).map((event) => recomputeEventStats(ddb, TABLE, userID, event)),
+      ...Array.from(tagScopes.values()).map((scope) =>
+        recomputeTagStats(ddb, TABLE, userID, scope.event, scope.sessionID, scope.tagKey, scope.tagValue)
+      ),
     ]);
     const recomputeMs = Date.now() - recomputeStartedAt;
 
@@ -2075,6 +2203,28 @@ app.post("/api/recomputeEventStats", async (req, res) => {
   }
 });
 
+app.post("/api/recomputeTagStats", async (req, res) => {
+  try {
+    const userID = String(req.body?.userID || "").trim();
+    const event = normalizeEvent(req.body?.event);
+    const sessionIDRaw = String(req.body?.sessionID || "").trim();
+    const tagKey = String(req.body?.tagKey || "").trim();
+    const tagValue = String(req.body?.tagValue || "").trim();
+    const sessionID = sessionIDRaw ? normalizeSessionID(sessionIDRaw) : null;
+
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+    if (!event) return res.status(400).json({ error: "Missing event" });
+    if (!tagKey) return res.status(400).json({ error: "Missing tagKey" });
+    if (!tagValue) return res.status(400).json({ error: "Missing tagValue" });
+
+    const item = await recomputeTagStats(ddb, TABLE, userID, event, sessionID, tagKey, tagValue);
+    return res.json({ ok: true, item });
+  } catch (e) {
+    console.error("POST /api/recomputeTagStats error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
 app.post("/api/admin/backfill-session-stats/:userID", async (req, res) => {
   try {
     const userID = String(req.params.userID || "").trim();
@@ -2130,9 +2280,11 @@ app.post("/api/post", async (req, res) => {
       PK: `USER#${userID}`,
       SK: `POST#${timestamp}`,
       ItemType: "POST",
+      PostType: req.body?.postType ?? "solve",
       Note: req.body?.note ?? "",
       Event: req.body?.event ?? "",
       SolveList: req.body?.solveList ?? [],
+      StatShare: req.body?.statShare ?? null,
       Comments: req.body?.comments ?? [],
       CreatedAt: timestamp,
       UpdatedAt: timestamp,

@@ -2,14 +2,8 @@ import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import "./Profile.css";
 import EventSelectorDetail from "../Detail/EventSelectorDetail";
-import { formatTime, calculateAverage } from "../TimeList/TimeUtils";
+import { formatTime } from "../TimeList/TimeUtils";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
-
-function flattenEventSolves(sessions, event) {
-  if (!sessions?.[event]) return [];
-  if (Array.isArray(sessions[event])) return sessions[event];
-  return Object.values(sessions[event]).flat();
-}
 
 function getEventOverallStats(sessionStats, event) {
   const map = sessionStats?.[event];
@@ -71,64 +65,6 @@ function getEventOverallStats(sessionStats, event) {
   };
 }
 
-function fallbackEventStatsFromSolves(sessions, event) {
-  const solves = flattenEventSolves(sessions, event);
-
-  const valid = solves.filter((s) => {
-    if (String(s?.penalty || "").toUpperCase() === "DNF") return false;
-    return typeof s?.time === "number" && isFinite(s.time);
-  });
-
-  const times = valid.map((s) => s.time);
-  const bestSingleMs = times.length ? Math.min(...times) : null;
-
-  let bestAo5Ms = null;
-  if (times.length >= 5) {
-    for (let i = 0; i <= times.length - 5; i++) {
-      const out = calculateAverage(times.slice(i, i + 5), true)?.average;
-      if (typeof out === "number" && isFinite(out)) {
-        if (bestAo5Ms == null || out < bestAo5Ms) bestAo5Ms = out;
-      }
-    }
-  }
-
-  let bestAo12Ms = null;
-  if (times.length >= 12) {
-    for (let i = 0; i <= times.length - 12; i++) {
-      const out = calculateAverage(times.slice(i, i + 12), true)?.average;
-      if (typeof out === "number" && isFinite(out)) {
-        if (bestAo12Ms == null || out < bestAo12Ms) bestAo12Ms = out;
-      }
-    }
-  }
-
-  const lastSolveAt =
-    solves.length > 0
-      ? solves
-          .map((s) => s?.datetime)
-          .filter(Boolean)
-          .sort()
-          .slice(-1)[0] || null
-      : null;
-
-  const meanMs =
-    times.length > 0
-      ? Math.round(times.reduce((a, b) => a + b, 0) / times.length)
-      : null;
-
-  return {
-    SolveCountTotal: solves.length,
-    SolveCountIncluded: valid.length,
-    DNFCount: solves.length - valid.length,
-    Plus2Count: solves.filter((s) => String(s?.penalty || "") === "+2").length,
-    BestSingleMs: bestSingleMs,
-    BestAo5Ms: bestAo5Ms,
-    BestAo12Ms: bestAo12Ms,
-    MeanMs: meanMs,
-    LastSolveAt: lastSolveAt,
-  };
-}
-
 function displayTime(value) {
   if (value == null || value === "N/A") return "—";
   if (typeof value === "number" && isFinite(value)) return formatTime(value);
@@ -142,7 +78,7 @@ function formatDateText(value) {
   return d.toLocaleDateString();
 }
 
-export default function ProfileHeader({ user, sessions, sessionStats }) {
+export default function ProfileHeader({ user, sessionStats }) {
   const {
     Name,
     UserID,
@@ -181,18 +117,16 @@ export default function ProfileHeader({ user, sessions, sessionStats }) {
 
   const selectedEventStats = useMemo(() => {
     return selectedEvents.map((event) => {
-      const overall = getEventOverallStats(sessionStats, event);
       return {
         event,
-        stats: overall || fallbackEventStatsFromSolves(sessions, event),
+        stats: getEventOverallStats(sessionStats, event),
       };
     });
-  }, [selectedEvents, sessionStats, sessions]);
+  }, [selectedEvents, sessionStats]);
 
   const profileEventOverall = useMemo(() => {
-    const overall = getEventOverallStats(sessionStats, ProfileEvent);
-    return overall || fallbackEventStatsFromSolves(sessions, ProfileEvent);
-  }, [sessionStats, sessions, ProfileEvent]);
+    return getEventOverallStats(sessionStats, ProfileEvent);
+  }, [sessionStats, ProfileEvent]);
 
   const totalSolveCountAcrossEvents = useMemo(() => {
     if (sessionStats && typeof sessionStats === "object") {
@@ -206,12 +140,8 @@ export default function ProfileHeader({ user, sessions, sessionStats }) {
       if (total > 0) return total;
     }
 
-    let fallback = 0;
-    for (const eventKey of Object.keys(sessions || {})) {
-      fallback += flattenEventSolves(sessions, eventKey).length;
-    }
-    return fallback;
-  }, [sessionStats, sessions]);
+    return 0;
+  }, [sessionStats]);
 
   const widgets = [
     {

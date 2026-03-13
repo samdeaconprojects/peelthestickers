@@ -164,9 +164,117 @@ function rollingAverageSeconds(data, windowSize) {
   return out;
 }
 
+function interpolateHexColor(a, b, ratio) {
+  const safeRatio = Math.min(1, Math.max(0, Number(ratio) || 0));
+  const parse = (hex) => String(hex || "").replace("#", "");
+  const start = parse(a);
+  const end = parse(b);
+  if (start.length !== 6 || end.length !== 6) return a || b || "#ffffff";
+
+  const parts = [0, 2, 4].map((offset) => {
+    const av = parseInt(start.slice(offset, offset + 2), 16);
+    const bv = parseInt(end.slice(offset, offset + 2), 16);
+    return Math.round(av + (bv - av) * safeRatio).toString(16).padStart(2, "0");
+  });
+
+  return `#${parts.join("")}`;
+}
+
+function resolvePaletteColor(style, ratio, fallback = "#2EC4B6") {
+  const safeRatio = Math.min(1, Math.max(0, Number(ratio) || 0));
+  if (!style) return fallback;
+  if (style.mode === "gradient" && Array.isArray(style.stops) && style.stops.length >= 3) {
+    if (safeRatio <= 0.5) {
+      return interpolateHexColor(style.stops[0], style.stops[1], safeRatio / 0.5);
+    }
+    return interpolateHexColor(style.stops[1], style.stops[2], (safeRatio - 0.5) / 0.5);
+  }
+  return style.primary || fallback;
+}
+
+function resolveStandardHeatColor(ratio) {
+  const safeRatio = Math.min(1, Math.max(0, Number(ratio) || 0));
+  if (safeRatio <= 0.2) {
+    return interpolateHexColor("#00ff00", "#00e676", safeRatio / 0.2);
+  }
+  if (safeRatio <= 0.6) {
+    return interpolateHexColor("#00e676", "#ffff00", (safeRatio - 0.2) / 0.4);
+  }
+  if (safeRatio <= 0.8) {
+    return interpolateHexColor("#ffff00", "#ffa500", (safeRatio - 0.6) / 0.2);
+  }
+  return interpolateHexColor("#ffa500", "#ff0000", (safeRatio - 0.8) / 0.2);
+}
+
+function buildProcessedChartData(solves, groupMode, style = null, useHeatmap = true) {
+  const baseValid = (Array.isArray(solves) ? solves : []).filter((solve) => {
+    const ms = getSolveBaseMs(solve);
+    return typeof ms === "number" && isFinite(ms);
+  });
+
+  let processed = [];
+  if (groupMode === "solve") {
+    processed = baseValid;
+  } else {
+    processed = groupByDate(baseValid, groupMode);
+  }
+
+  if (processed.length === 0) {
+    return { data: [], solveCountText: "Solve Count: 0" };
+  }
+
+  const timesMs = processed
+    .map((item) => (item.isBucket ? item.time : getSolveBaseMs(item)))
+    .filter((v) => typeof v === "number" && isFinite(v));
+
+  const minTime = Math.min(...timesMs);
+  const maxTime = Math.max(...timesMs);
+  const denom = maxTime - minTime || 1;
+
+  const getColor = (timeMs) => {
+    if (style) {
+      const ratio = (timeMs - minTime) / denom;
+      return resolvePaletteColor(style, ratio, style.primary || "#2EC4B6");
+    }
+
+    if (!useHeatmap) return "#2EC4B6";
+
+    const ratio = (timeMs - minTime) / denom;
+    return resolveStandardHeatColor(ratio);
+  };
+
+  const data = processed.map((item, index) => {
+    const baseTimeMs = item.isBucket ? item.time : getSolveBaseMs(item);
+    const label = item.isBucket ? item.bucketLabel : `${index + 1}`;
+    const solveForDetail = item.isBucket ? item.solve : item;
+    const selectionIndex = item.isBucket ? null : index;
+
+    return {
+      label,
+      x: index,
+      y: baseTimeMs / 1000,
+      color: getColor(baseTimeMs),
+      time: formatTime(baseTimeMs),
+      solve: solveForDetail,
+      fullIndex: item.fullIndex,
+      isDNF: item.isBucket ? false : item.penalty === "DNF",
+      isBucket: !!item.isBucket,
+      selectionIndex,
+    };
+  });
+
+  return {
+    data,
+    solveCountText: `${groupMode === "solve" ? "Solve" : "Bucket"} Count: ${data.length}`,
+  };
+}
+
 function LineChart({
   user,
   solves,
+  comparisonSeries = [],
+  seriesStyle = null,
+  legendItems = [],
   title,
   deleteTime,
   addPost,
@@ -181,6 +289,7 @@ function LineChart({
   viewMode = "standard",
   selectedDay = "",
   onSelectedDayChange = null,
+  onSolveOpen = null,
 }) {
   const DEFAULT_DOT_SIZE = 5;
   const MIN_DOT_SIZE = 2;
@@ -196,7 +305,7 @@ function LineChart({
   const [yMaxInput, setYMaxInput] = useState("");
 
   const selection = useSolveSelection();
-
+  const hasComparison = Array.isArray(comparisonSeries) && comparisonSeries.length > 0;
   const baseValid = useMemo(() => {
     const input = Array.isArray(solves) ? solves : [];
     return input.filter((solve) => {
@@ -206,8 +315,8 @@ function LineChart({
   }, [solves]);
 
   const bulkSelectableSolves = useMemo(() => {
-    return groupMode === "solve" ? baseValid : [];
-  }, [groupMode, baseValid]);
+    return groupMode === "solve" && !hasComparison ? baseValid : [];
+  }, [groupMode, baseValid, hasComparison]);
 
   const bulkActions = useBulkSolveActions({
     user,
@@ -241,62 +350,13 @@ function LineChart({
   }, [selection, bulkActions]);
 
   const computed = useMemo(() => {
-    let processed = [];
-
-    if (groupMode === "solve") {
-      processed = baseValid;
-    } else {
-      processed = groupByDate(baseValid, groupMode);
-    }
-
-    if (processed.length === 0) {
-      return { data: [], solveCountText: "Solve Count: 0", extraSeries: [] };
-    }
-
-    const timesMs = processed
-      .map((item) => (item.isBucket ? item.time : getSolveBaseMs(item)))
-      .filter((v) => typeof v === "number" && isFinite(v));
-
-    const minTime = Math.min(...timesMs);
-    const maxTime = Math.max(...timesMs);
-    const averageTime =
-      timesMs.reduce((sum, v) => sum + v, 0) / Math.max(1, timesMs.length);
-    const denom = maxTime - minTime || 1;
-
-    const getColor = (timeMs) => {
-      const ratio = (timeMs - minTime) / denom;
-      if (timeMs <= averageTime) return `rgb(${255 * ratio}, 255, 0)`;
-      return `rgb(255, ${255 * (1 - ratio)}, 0)`;
-    };
-
-    const data = processed.map((item, index) => {
-      const baseTimeMs = item.isBucket ? item.time : getSolveBaseMs(item);
-      const label = item.isBucket ? item.bucketLabel : `${index + 1}`;
-      const solveForDetail = item.isBucket ? item.solve : item;
-
-      let selectionIndex = null;
-      if (!item.isBucket) {
-        selectionIndex = index;
-      }
-
-      return {
-        label,
-        x: index,
-        y: baseTimeMs / 1000,
-        color: getColor(baseTimeMs),
-        time: formatTime(baseTimeMs),
-        solve: solveForDetail,
-        fullIndex: item.isBucket ? item.fullIndex : item.fullIndex,
-        isDNF: item.isBucket ? false : item.penalty === "DNF",
-        isBucket: !!item.isBucket,
-        selectionIndex,
-      };
-    });
-
+    const shouldUseHeatmap = !seriesStyle;
+    const primary = buildProcessedChartData(solves, groupMode, seriesStyle, shouldUseHeatmap);
+    const data = primary.data;
     const extraSeries = [];
     const solveLevel = groupMode === "solve";
 
-    if (solveLevel && showAo5) {
+    if (solveLevel && showAo5 && !hasComparison) {
       const ao5 = rollingAverageSeconds(data, 5);
       extraSeries.push({
         id: "ao5",
@@ -306,7 +366,7 @@ function LineChart({
       });
     }
 
-    if (solveLevel && showAo12) {
+    if (solveLevel && showAo12 && !hasComparison) {
       const ao12 = rollingAverageSeconds(data, 12);
       extraSeries.push({
         id: "ao12",
@@ -316,20 +376,40 @@ function LineChart({
       });
     }
 
+    const compareData = (comparisonSeries || []).map((series, index) => {
+      const resolved = buildProcessedChartData(series?.solves || [], groupMode, series?.style || null, false);
+      return {
+        id: series?.id || `compare-${index}`,
+        label: series?.label || `Compare ${index + 1}`,
+        stroke: resolvePaletteColor(series?.style || null, 0.5, "#7c8cff"),
+        points: resolved.data,
+      };
+    });
+
     return {
       data,
-      solveCountText: `${solveLevel ? "Solve" : "Bucket"} Count: ${data.length}`,
+      solveCountText: primary.solveCountText,
       extraSeries,
+      compareData,
     };
-  }, [baseValid, groupMode, showAo5, showAo12]);
+  }, [comparisonSeries, groupMode, hasComparison, seriesStyle, showAo5, showAo12, solves]);
 
   const solveLevel = groupMode === "solve";
-  const bulkEnabled = solveLevel;
+  const bulkEnabled = solveLevel && !hasComparison;
   const isTimeView = viewMode === "time";
 
+  useEffect(() => {
+    if (!isTimeView) return;
+    if (groupMode === "solve") {
+      setGroupMode("day");
+    }
+  }, [groupMode, isTimeView]);
+
   const autoScale = useMemo(() => {
-    const values = computed.data
-      .map((point) => point?.y)
+    const values = [
+      ...computed.data.map((point) => point?.y),
+      ...computed.compareData.flatMap((series) => (series.points || []).map((point) => point?.y)),
+    ]
       .filter((value) => typeof value === "number" && isFinite(value));
 
     if (values.length === 0) {
@@ -341,7 +421,7 @@ function LineChart({
       min: 0,
       max: Math.max(1, Math.ceil(maxValue)),
     };
-  }, [computed.data]);
+  }, [computed.compareData, computed.data]);
 
   const parsedYMin = Number(yMinInput);
   const parsedYMax = Number(yMaxInput);
@@ -351,9 +431,20 @@ function LineChart({
     yMaxInput !== "" && Number.isFinite(parsedYMax) ? parsedYMax : autoScale.max;
   const hasCustomYRange = resolvedYMax > resolvedYMin;
 
-  const handleDotClick = (solve, fullIndex, point) => {
+  const openSolveDetail = (solve) => {
+    if (typeof onSolveOpen === "function") {
+      onSolveOpen(solve);
+      return;
+    }
+    setSelectedSolve(solve);
+  };
+
+  const handleDotClick = (event, solve, fullIndex, point) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+
     if (!point || point.isBucket || point.selectionIndex == null || !bulkEnabled) {
-      setSelectedSolve(solve);
+      openSolveDetail(solve);
       return;
     }
 
@@ -367,7 +458,7 @@ function LineChart({
     const handledAsSelection = selection.handleSelectionClick(syntheticEvent, point.selectionIndex);
     if (handledAsSelection) return;
 
-    setSelectedSolve(solve);
+    openSolveDetail(solve);
   };
 
   useEffect(() => {
@@ -405,11 +496,9 @@ function LineChart({
           addPost={addPost}
           applyPenalty={applyPenalty}
           setSessions={setSessions}
-          selectedDay={selectedDay}
-          onSelectedDayChange={onSelectedDayChange}
         />
       ) : (
-        <>
+      <>
       {bulkEnabled && (
         <BulkSolveControls
           selectionCount={selection.selectionCount}
@@ -456,7 +545,7 @@ function LineChart({
               setGroupMode(e.target.value);
             }}
           >
-            <option value="solve">By Solve</option>
+            {!isTimeView && <option value="solve">By Solve</option>}
             <option value="day">By Day</option>
             <option value="week">By Week</option>
             <option value="month">By Month</option>
@@ -466,7 +555,7 @@ function LineChart({
           <button
             type="button"
             className={`statsToggleBtn ${showAo5 ? "is-active" : ""}`}
-            disabled={!solveLevel}
+            disabled={!solveLevel || isTimeView || hasComparison}
             onClick={() => setShowAo5((value) => !value)}
           >
             Ao5
@@ -475,7 +564,7 @@ function LineChart({
           <button
             type="button"
             className={`statsToggleBtn ${showAo12 ? "is-active" : ""}`}
-            disabled={!solveLevel}
+            disabled={!solveLevel || isTimeView || hasComparison}
             onClick={() => setShowAo12((value) => !value)}
           >
             Ao12
@@ -534,6 +623,19 @@ function LineChart({
               Auto
             </button>
           </div>
+          {hasComparison && legendItems.length > 0 && (
+            <div className="lineChartLegend">
+              {legendItems.map((item) => (
+                <div key={item.id || item.label} className="lineChartLegendItem">
+                  <span
+                    className="lineChartLegendSwatch"
+                    style={{ backgroundColor: item.color || "#2EC4B6" }}
+                  />
+                  <span className="lineChartLegendLabel">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -545,6 +647,8 @@ function LineChart({
           height={320}
           data={computed.data}
           extraSeries={computed.extraSeries}
+          comparisonSeries={computed.compareData}
+          primaryStroke={hasComparison ? computed.data?.[0]?.color || "#2EC4B6" : "#2EC4B6"}
           horizontalGuides={5}
           precision={2}
           verticalGuides={7}
@@ -553,15 +657,15 @@ function LineChart({
           selectedDotRadius={dotSize + 3}
           yMin={hasCustomYRange ? resolvedYMin : null}
           yMax={hasCustomYRange ? resolvedYMax : null}
-          onDotClick={(solve, fullIndex, point) => {
-            handleDotClick(solve, fullIndex, point);
+          onDotClick={(event, solve, fullIndex, point) => {
+            handleDotClick(event, solve, fullIndex, point);
           }}
         />
       </div>
 
       <Label text={computed.solveCountText} />
 
-      {selectedSolve && (
+      {!onSolveOpen && selectedSolve && (
         <Detail
           solve={selectedSolve}
           userID={user?.UserID}
@@ -575,7 +679,7 @@ function LineChart({
           setSessions={setSessions}
         />
       )}
-        </>
+      </>
       )}
     </div>
   );

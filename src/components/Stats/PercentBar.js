@@ -3,7 +3,7 @@ import PercentBarBuilder from "./PercentBarBuilder";
 import Detail from "../Detail/Detail";
 import "./Stats.css";
 
-function PercentBar({ solves, title }) {
+function PercentBar({ solves, title, comparisonSeries = [], legendItems = [] }) {
   const [selectedSolve, setSelectedSolve] = useState(null);
 
   return (
@@ -17,6 +17,8 @@ function PercentBar({ solves, title }) {
     >
       <PercentBarBuilder
         solves={solves}
+        comparisonSeries={comparisonSeries}
+        legendItems={legendItems}
         onSliceClick={(solvesArr) => setSelectedSolve(solvesArr?.[0] || null)}
       />
 

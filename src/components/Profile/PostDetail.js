@@ -5,11 +5,15 @@ import RubiksCubeSVG from '../PuzzleSVGs/RubiksCubeSVG';
 import { getScrambledFaces } from '../cubeStructure';
 import { calculateAverage, formatTime } from '../TimeList/TimeUtils';
 import { currentEventToString } from "../../components/scrambleUtils";
+import StatSharePost from './StatSharePost';
 
 function PostDetail({
   author,
   date,
   solveList = [],
+  note = "",
+  postType = "solve",
+  statShare = null,
   comments = [],
   onClose,
   onDelete,
@@ -21,6 +25,8 @@ function PostDetail({
   const avg = times.length
     ? calculateAverage(times, true).average
     : null;
+  const trimmedNote = String(note || "").trim();
+  const resolvedPostType = statShare ? "stat-share" : postType;
 
   const handleAdd = () => {
     if (!newComment.trim()) return;
@@ -32,32 +38,51 @@ function PostDetail({
     <div className="detailPopup" onClick={e=> e.target.className==='detailPopup' && onClose()}>
       <div className="detailPopupContent" style={{ maxHeight:'80vh', overflowY:'auto' }}>
         <span className="closePopup" onClick={onClose}>×</span>
-
-        <h2>{currentEventToString(solveList[0]?.event)} {solveList.length>1?'Average':'Single'}</h2>
-        {avg != null && (
+        {(author || date) ? (
           <div style={{ marginBottom: '1em' }}>
-            <strong>{formatTime(avg)}</strong> 
+            {author ? (
+              <div style={{ color: 'white', fontWeight: 700, marginBottom: '0.25em' }}>
+                @{author}
+              </div>
+            ) : null}
+            {date ? <div className="postDate" style={{ marginLeft: 0, padding: 0 }}>{date}</div> : null}
           </div>
-        )}
+        ) : null}
 
-        <div className="solvesList" style={{ marginBottom:'1em' }}>
-          {solveList.map((s, i) => (
-            <div key={i} style={{ display:'flex', alignItems:'center', marginBottom:'0.5em', border: '2px solid #fff', borderRadius: '8px' }}>
-              <RubiksCubeSVG
-                n={s.event}
-                faces={getScrambledFaces(s.scramble, s.event)}
-                isMusicPlayer={true}
-                isTimerCube={false}
-                style={{ width: '40px', height: '40px', marginRight: '0.5em' }}
-              />
-              <div style={{ width: '4em' }}> <strong>{formatTime(s.time)}</strong> </div>
+        {resolvedPostType === "stat-share" ? (
+          <div style={{ marginBottom: "1em", color: "white" }}>
+            <StatSharePost note={trimmedNote} statShare={statShare} />
+          </div>
+        ) : (
+          <>
+            {trimmedNote ? <div className="postDetailCaption">{trimmedNote}</div> : null}
+            <h2>{currentEventToString(solveList[0]?.event)} {solveList.length>1?'Average':'Single'}</h2>
+            {avg != null && (
+              <div style={{ marginBottom: '1em' }}>
+                <strong>{formatTime(avg)}</strong> 
+              </div>
+            )}
 
-              <code style={{ fontSize: '0.8em', wordBreak:'break-all' }}>
-                {s.scramble}
-              </code>
+            <div className="solvesList" style={{ marginBottom:'1em' }}>
+              {solveList.map((s, i) => (
+                <div key={i} style={{ display:'flex', alignItems:'center', marginBottom:'0.5em', border: '2px solid #fff', borderRadius: '8px' }}>
+                  <RubiksCubeSVG
+                    n={s.event}
+                    faces={getScrambledFaces(s.scramble, s.event)}
+                    isMusicPlayer={true}
+                    isTimerCube={false}
+                    style={{ width: '40px', height: '40px', marginRight: '0.5em' }}
+                  />
+                  <div style={{ width: '4em' }}> <strong>{formatTime(s.time)}</strong> </div>
+
+                  <code style={{ fontSize: '0.8em', wordBreak:'break-all' }}>
+                    {s.scramble}
+                  </code>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </>
+        )}
 
         <div className="commentsSection" style={{ marginBottom:'1em' }}>
           <h3>Comments</h3>

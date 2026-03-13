@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import Detail from "../Detail/Detail";
 import { formatTime } from "../TimeList/TimeUtils";
 import "./Stats.css";
@@ -30,26 +30,6 @@ function parseSolveDate(solve) {
   if (!raw) return null;
   const date = new Date(raw);
   return Number.isFinite(date.getTime()) ? date : null;
-}
-
-function getLocalDayKey(date) {
-  if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return "";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function formatDayLabel(dayKey) {
-  if (!dayKey) return "No day selected";
-  const date = new Date(`${dayKey}T12:00:00`);
-  if (!Number.isFinite(date.getTime())) return dayKey;
-  return date.toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
 }
 
 function formatHourLabel(hour) {
@@ -91,21 +71,6 @@ function formatClockTime(solve) {
     hour: "numeric",
     minute: "2-digit",
   });
-}
-
-function getDayOptions(solves) {
-  const map = new Map();
-
-  for (const solve of Array.isArray(solves) ? solves : []) {
-    const date = parseSolveDate(solve);
-    if (!date) continue;
-    const key = getLocalDayKey(date);
-    const entry = map.get(key) || { key, count: 0 };
-    entry.count += 1;
-    map.set(key, entry);
-  }
-
-  return Array.from(map.values()).sort((a, b) => String(b.key).localeCompare(String(a.key)));
 }
 
 function sortDaySolves(solves, mode) {
@@ -244,32 +209,33 @@ function TimePeriodChart({
   addPost,
   applyPenalty,
   setSessions,
-  selectedDay,
-  onSelectedDayChange,
 }) {
   const [selectedSolve, setSelectedSolve] = useState(null);
   const [segmentSort, setSegmentSort] = useState("chronological");
   const [colorMode, setColorMode] = useState("speed");
 
-  const dayOptions = useMemo(() => getDayOptions(solves), [solves]);
-
-  useEffect(() => {
-    if (!dayOptions.length) return;
-    if (selectedDay && dayOptions.some((option) => option.key === selectedDay)) return;
-    onSelectedDayChange?.(dayOptions[0].key);
-  }, [dayOptions, selectedDay, onSelectedDayChange]);
-
-  const daySolves = useMemo(() => {
-    return (Array.isArray(solves) ? solves : []).filter((solve) => {
-      const date = parseSolveDate(solve);
-      return date && getLocalDayKey(date) === selectedDay;
-    });
-  }, [solves, selectedDay]);
-
   const timeline = useMemo(
-    () => buildTimeline(daySolves, segmentSort, colorMode),
-    [daySolves, segmentSort, colorMode]
+    () => buildTimeline(Array.isArray(solves) ? solves : [], segmentSort, colorMode),
+    [solves, segmentSort, colorMode]
   );
+
+  const rangeLabel = useMemo(() => {
+    const items = (Array.isArray(solves) ? solves : [])
+      .map((solve) => parseSolveDate(solve))
+      .filter(Boolean)
+      .sort((a, b) => a - b);
+
+    if (!items.length) return "No range selected";
+
+    const fmt = (date) =>
+      date.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+
+    return `${fmt(items[0])} - ${fmt(items[items.length - 1])}`;
+  }, [solves]);
 
   const hourGuides = useMemo(() => {
     const chartInnerWidth = CHART_WIDTH - CHART_PADDING_X * 2;
@@ -287,18 +253,6 @@ function TimePeriodChart({
   return (
     <div className="timePeriodChart">
       <div className="lineChartControls">
-        <select
-          className="statsSelect statsSelect--chart"
-          value={selectedDay || ""}
-          onChange={(e) => onSelectedDayChange?.(e.target.value)}
-        >
-          {dayOptions.map((option) => (
-            <option key={option.key} value={option.key}>
-              {formatDayLabel(option.key)} ({option.count})
-            </option>
-          ))}
-        </select>
-
         <select
           className="statsSelect statsSelect--chart"
           value={segmentSort}
@@ -322,8 +276,8 @@ function TimePeriodChart({
         </select>
 
         <div className="chartControlGroup">
-          <span className="chartControlLabel">Day</span>
-          <span className="chartControlValue">{formatDayLabel(selectedDay)}</span>
+          <span className="chartControlLabel">Range</span>
+          <span className="chartControlValue">{rangeLabel}</span>
         </div>
 
         <div className="chartControlGroup">
