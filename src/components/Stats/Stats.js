@@ -15,8 +15,11 @@ import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
 import { getSolvesBySession, getSolvesBySessionPage } from "../../services/getSolvesBySession";
 import { getSolvesByTag } from "../../services/getSolvesByTag";
 import { getSessionStats } from "../../services/getSessionStats";
+import { getEventStats } from "../../services/getEventStats";
 import { getTagStats } from "../../services/getTagStats";
 import { recomputeSessionStats } from "../../services/recomputeSessionStats";
+import { recomputeEventStats } from "../../services/recomputeEventStats";
+import { recomputeTagStats } from "../../services/recomputeTagStats";
 import { updateUser } from "../../services/updateUser";
 import { getSolveWindowFromStart } from "../../services/getSolveWindow";
 
@@ -24,16 +27,28 @@ import ImportSolvesModal from "./ImportSolvesModal";
 import { importSolvesBatch } from "../../services/importSolvesBatch";
 import { createSession } from "../../services/createSession";
 import DbStatusIndicator from "../Navigation/DbStatusIndicator";
+import { findBestStrictWindow } from "../../utils/strictAverageUtils";
+import { getProfileChartStyle } from "../../utils/profileChartStyle";
 
 /* -------------------------------------------------------------------------- */
 /*                              TAG/TIME HELPERS                              */
 /* -------------------------------------------------------------------------- */
 
 const TAG_NONE = "__none__";
+const DEFAULT_SOLVE_SOURCE_OPTIONS = [
+  "Standard",
+  "Practice",
+  "Shared",
+  "Relay",
+  "Import",
+  "SmartCube",
+  "WCA",
+];
 
 const ALL_EVENTS = "__all_events__";
 const ALL_SESSIONS = "__all_sessions__";
 const DEFAULT_HEATMAP_PALETTE = "default";
+const PROFILE_PALETTE = "profile";
 const COMPARE_PALETTES = {
   "solid-teal": {
     label: "Pastel Teal",
@@ -113,6 +128,7 @@ function clampNumber(value, min, max) {
 
 function getPaletteOptions() {
   return [
+    { value: PROFILE_PALETTE, label: "Profile" },
     { value: DEFAULT_HEATMAP_PALETTE, label: "Default" },
     ...Object.entries(COMPARE_PALETTES).map(([value, meta]) => ({
       value,
@@ -121,8 +137,9 @@ function getPaletteOptions() {
   ];
 }
 
-function getSeriesStyle(paletteKey, fallbackKey = DEFAULT_PRIMARY_PALETTE) {
+function getSeriesStyle(paletteKey, fallbackKey = DEFAULT_PRIMARY_PALETTE, profileStyle = null) {
   const resolvedKey = paletteKey || fallbackKey || DEFAULT_PRIMARY_PALETTE;
+  if (resolvedKey === PROFILE_PALETTE) return profileStyle;
   if (resolvedKey === DEFAULT_HEATMAP_PALETTE) return null;
   return COMPARE_PALETTES[resolvedKey] || null;
 }
@@ -227,6 +244,9 @@ function findWindowForMetric(solves, spec, variant) {
   const items = Array.isArray(solves) ? solves : [];
   if (items.length < spec.size) return null;
   if (variant === "current") return items.slice(items.length - spec.size);
+  if (variant === "strict-best") {
+    return findBestStrictWindow(items, spec.size, spec.kind)?.solves ?? null;
+  }
 
   let selected = null;
   let selectedValue = null;
@@ -544,6 +564,7 @@ function getTagValueForKey(solve, tagKey) {
   if (tagKey === "CubeModel") return String(tags.CubeModel || "");
   if (tagKey === "CrossColor") return String(tags.CrossColor || "");
   if (tagKey === "TimerInput") return String(tags.TimerInput || tags.InputType || "");
+  if (tagKey === "SolveSource") return String(tags.SolveSource || "");
 
   const v = tags?.[tagKey];
   if (v == null) return "";
@@ -567,6 +588,24 @@ function getLocalDayKey(date) {
 
 function getTodayLocalDayKey() {
   return getLocalDayKey(new Date());
+}
+
+function buildTagValueOptionList(discoveredValues = [], presetValues = []) {
+  const seen = new Set();
+  const values = [];
+
+  [...(presetValues || []), ...(discoveredValues || [])].forEach((value) => {
+    const text = String(value || "").trim();
+    if (!text) return;
+    const key = text.toUpperCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    values.push(text);
+  });
+
+  values.sort((a, b) => String(a).localeCompare(String(b)));
+
+  return [{ value: "", label: "All" }, ...values.map((value) => ({ value, label: value }))];
 }
 
 function filterSolvesByDateRange(input, startDay, endDay) {
@@ -617,6 +656,7 @@ function Stats({
   const [compareSessionMenuOpen, setCompareSessionMenuOpen] = useState(false);
   const [compareSessionSolves, setCompareSessionSolves] = useState([]);
   const [compareLoading, setCompareLoading] = useState(false);
+  const [scopeModalState, setScopeModalState] = useState(null);
   const compareRequestTokenRef = useRef(0);
   const compareSessionMenuWrapRef = useRef(null);
 
@@ -636,6 +676,7 @@ function Stats({
 
   const [overallStatsForEvent, setOverallStatsForEvent] = useState(null);
   const [loadingOverallStats, setLoadingOverallStats] = useState(false);
+  const [recomputeStatusText, setRecomputeStatusText] = useState("");
 
   const [loadingInitial, setLoadingInitial] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -672,6 +713,7 @@ function Stats({
   const [selectedSolve, setSelectedSolve] = useState(null);
   const [selectedAverageDetail, setSelectedAverageDetail] = useState(null);
   const [tableCompareView, setTableCompareView] = useState("primary");
+  const profileChartStyle = useMemo(() => getProfileChartStyle(user), [user]);
   const paletteOptions = useMemo(() => getPaletteOptions(), []);
   const compareEnabled = !!compareSelection;
 
@@ -868,12 +910,22 @@ function Stats({
   const compareTagKey = compareSelection?.tagKey || TAG_NONE;
   const compareTagValue = compareSelection?.tagValue || "";
   const compareStyle = useMemo(
-    () => getSeriesStyle(compareSelection?.paletteKey || DEFAULT_COMPARE_PALETTE, DEFAULT_COMPARE_PALETTE),
-    [compareSelection?.paletteKey]
+    () =>
+      getSeriesStyle(
+        compareSelection?.paletteKey || DEFAULT_COMPARE_PALETTE,
+        DEFAULT_COMPARE_PALETTE,
+        profileChartStyle
+      ),
+    [compareSelection?.paletteKey, profileChartStyle]
   );
   const primaryCompareStyle = useMemo(
-    () => getSeriesStyle(compareSelection?.primaryPaletteKey ?? primaryPaletteKey, DEFAULT_PRIMARY_PALETTE),
-    [compareSelection?.primaryPaletteKey, primaryPaletteKey]
+    () =>
+      getSeriesStyle(
+        compareSelection?.primaryPaletteKey ?? primaryPaletteKey,
+        DEFAULT_PRIMARY_PALETTE,
+        profileChartStyle
+      ),
+    [compareSelection?.primaryPaletteKey, primaryPaletteKey, profileChartStyle]
   );
 
   const compareSessionsForEvent = useMemo(() => {
@@ -950,6 +1002,12 @@ function Stats({
     setTagFilterValue("");
     setSelectedTimeDay("");
   }, [currentEvent, currentSession]);
+
+  useEffect(() => {
+    if (scopeModalState === "compare" && !compareEnabled) {
+      setScopeModalState(null);
+    }
+  }, [compareEnabled, scopeModalState]);
 
   useEffect(() => {
     const userID = user?.UserID;
@@ -1100,7 +1158,7 @@ function Stats({
           tagKey: tagFilterKey,
           tagValue: tagFilterValue,
           event: String(statsEvent || "").toUpperCase(),
-          sessionID: String(sessionId || "main"),
+          sessionID: isAllSessionsMode ? "" : String(sessionId || "main"),
           limit: DEFAULT_PAGE_FETCH,
           hydrate: true,
           cursor: null,
@@ -1178,6 +1236,7 @@ function Stats({
     normalizeSolve,
     setSessions,
     isSolveLevelMode,
+    isAllSessionsMode,
   ]);
 
   useEffect(() => {
@@ -1274,6 +1333,7 @@ function Stats({
       cubeModels: new Set(),
       crossColors: new Set(),
       timerInputs: new Set(),
+      solveSources: new Set(),
     };
 
     for (const s of selectedSessionSolves || []) {
@@ -1285,6 +1345,7 @@ function Stats({
       if (tags.TimerInput || tags.InputType) {
         info.timerInputs.add(String(tags.TimerInput || tags.InputType));
       }
+      if (tags.SolveSource) info.solveSources.add(String(tags.SolveSource));
     }
 
     return info;
@@ -1295,6 +1356,7 @@ function Stats({
       cubeModels: new Set(),
       crossColors: new Set(),
       timerInputs: new Set(),
+      solveSources: new Set(),
     };
 
     for (const s of compareSessionSolves || []) {
@@ -1306,6 +1368,7 @@ function Stats({
       if (tags.TimerInput || tags.InputType) {
         info.timerInputs.add(String(tags.TimerInput || tags.InputType));
       }
+      if (tags.SolveSource) info.solveSources.add(String(tags.SolveSource));
     }
 
     return info;
@@ -1317,6 +1380,7 @@ function Stats({
       { value: "CubeModel", label: "Cube Model" },
       { value: "CrossColor", label: "Cross Color" },
       { value: "TimerInput", label: "Timer Input" },
+      { value: "SolveSource", label: "Solve Source" },
     ];
   }, []);
 
@@ -1324,34 +1388,38 @@ function Stats({
     if (tagFilterKey === TAG_NONE) return [];
 
     let values = [];
+    let presetValues = [];
     if (tagFilterKey === "CubeModel") {
       values = Array.from(discoveredTagInfo.cubeModels || []);
     } else if (tagFilterKey === "CrossColor") {
       values = Array.from(discoveredTagInfo.crossColors || []);
     } else if (tagFilterKey === "TimerInput") {
       values = Array.from(discoveredTagInfo.timerInputs || []);
+    } else if (tagFilterKey === "SolveSource") {
+      values = Array.from(discoveredTagInfo.solveSources || []);
+      presetValues = DEFAULT_SOLVE_SOURCE_OPTIONS;
     }
 
-    values.sort((a, b) => String(a).localeCompare(String(b)));
-
-    return [{ value: "", label: "All" }, ...values.map((v) => ({ value: v, label: v }))];
+    return buildTagValueOptionList(values, presetValues);
   }, [tagFilterKey, discoveredTagInfo]);
 
   const compareTagValueOptions = useMemo(() => {
     if (compareTagKey === TAG_NONE) return [];
 
     let values = [];
+    let presetValues = [];
     if (compareTagKey === "CubeModel") {
       values = Array.from(compareDiscoveredTagInfo.cubeModels || []);
     } else if (compareTagKey === "CrossColor") {
       values = Array.from(compareDiscoveredTagInfo.crossColors || []);
     } else if (compareTagKey === "TimerInput") {
       values = Array.from(compareDiscoveredTagInfo.timerInputs || []);
+    } else if (compareTagKey === "SolveSource") {
+      values = Array.from(compareDiscoveredTagInfo.solveSources || []);
+      presetValues = DEFAULT_SOLVE_SOURCE_OPTIONS;
     }
 
-    values.sort((a, b) => String(a).localeCompare(String(b)));
-
-    return [{ value: "", label: "All" }, ...values.map((v) => ({ value: v, label: v }))];
+    return buildTagValueOptionList(values, presetValues);
   }, [compareDiscoveredTagInfo, compareTagKey]);
 
   useEffect(() => {
@@ -1583,7 +1651,7 @@ function Stats({
           tagKey: tagFilterKey,
           tagValue: tagFilterValue,
           event: String(statsEvent || "").toUpperCase(),
-          sessionID: String(sessionId || "main"),
+          sessionID: isAllSessionsMode ? "" : String(sessionId || "main"),
           limit: DEFAULT_PAGE_FETCH,
           hydrate: true,
           cursor: pageCursor,
@@ -1664,6 +1732,7 @@ function Stats({
     hasSpecificTagFilter,
     tagFilterKey,
     tagFilterValue,
+    isAllSessionsMode,
   ]);
 
   const loadAllSessionSolves = useCallback(async () => {
@@ -1741,7 +1810,7 @@ function Stats({
           tagKey: tagFilterKey,
           tagValue: tagFilterValue,
           event: String(statsEvent || "").toUpperCase(),
-          sessionID: String(sessionId || "main"),
+          sessionID: isAllSessionsMode ? "" : String(sessionId || "main"),
           limit: 1000,
           hydrate: true,
           cursor,
@@ -1775,6 +1844,7 @@ function Stats({
     statsEvent,
     tagFilterKey,
     tagFilterValue,
+    isAllSessionsMode,
     user?.UserID,
   ]);
 
@@ -2165,30 +2235,85 @@ function Stats({
 
   const handleRecomputeOverall = useCallback(async () => {
     if (!user?.UserID) return;
-    if (isAllEventsMode || isAllSessionsMode) return;
+    if (isAllEventsMode) return;
 
     try {
       setLoadingOverallStats(true);
-      const updated = await recomputeSessionStats(user.UserID, statsEvent, sessionId);
+      const scopeLabel = hasSpecificTagFilter
+        ? `${statsEvent} · ${isAllSessionsMode ? "all sessions" : sessionId} · ${tagFilterKey}: ${tagFilterValue}`
+        : isAllSessionsMode
+          ? `${statsEvent} · all sessions`
+          : `${statsEvent} · ${sessionId}`;
+      setRecomputeStatusText(`Recomputing ${scopeLabel}...`);
+
+      let updated = null;
+
+      if (hasSpecificTagFilter) {
+        updated = await recomputeTagStats(user.UserID, {
+          event: statsEvent,
+          sessionID: isAllSessionsMode ? "" : sessionId,
+          tagKey: tagFilterKey,
+          tagValue: tagFilterValue,
+        });
+      } else if (isAllSessionsMode) {
+        updated = await recomputeEventStats(user.UserID, statsEvent);
+      } else {
+        updated = await recomputeSessionStats(user.UserID, statsEvent, sessionId);
+      }
 
       if (updated) {
         setOverallStatsForEvent(updated);
+      } else if (hasSpecificTagFilter) {
+        const item = await getTagStats(user.UserID, {
+          event: statsEvent,
+          sessionID: isAllSessionsMode ? "" : sessionId,
+          tagKey: tagFilterKey,
+          tagValue: tagFilterValue,
+        });
+        setOverallStatsForEvent(item || null);
+      } else if (isAllSessionsMode) {
+        const item = await getEventStats(user.UserID, statsEvent);
+        setOverallStatsForEvent(item || null);
       } else {
         const item = await getSessionStats(user.UserID, statsEvent, sessionId);
         setOverallStatsForEvent(item || null);
       }
+      setRecomputeStatusText(`Recomputed ${scopeLabel}.`);
     } catch (e) {
       console.error("Recompute overall stats failed:", e);
+      setRecomputeStatusText("Recompute failed.");
       try {
-        const item = await getSessionStats(user.UserID, statsEvent, sessionId);
-        setOverallStatsForEvent(item || null);
+        if (hasSpecificTagFilter) {
+          const item = await getTagStats(user.UserID, {
+            event: statsEvent,
+            sessionID: isAllSessionsMode ? "" : sessionId,
+            tagKey: tagFilterKey,
+            tagValue: tagFilterValue,
+          });
+          setOverallStatsForEvent(item || null);
+        } else if (isAllSessionsMode) {
+          const item = await getEventStats(user.UserID, statsEvent);
+          setOverallStatsForEvent(item || null);
+        } else {
+          const item = await getSessionStats(user.UserID, statsEvent, sessionId);
+          setOverallStatsForEvent(item || null);
+        }
       } catch (e2) {
         console.error("Refetch after recompute failed:", e2);
       }
     } finally {
       setLoadingOverallStats(false);
     }
-  }, [user?.UserID, statsEvent, sessionId, isAllEventsMode, isAllSessionsMode]);
+  }, [
+    user?.UserID,
+    statsEvent,
+    sessionId,
+    isAllEventsMode,
+    isAllSessionsMode,
+    hasSpecificTagFilter,
+    tagFilterKey,
+    tagFilterValue,
+  ]);
 
   const slugify = (s) =>
     String(s || "")
@@ -2245,7 +2370,10 @@ function Stats({
             penalty: s.penalty ?? null,
             note: s.note ?? "",
             datetime: s.datetime || new Date().toISOString(),
-            tags: s.tags || {},
+            tags: {
+              SolveSource: String(s?.tags?.SolveSource || "").trim() || "Import",
+              ...(s.tags || {}),
+            },
             originalTime: s.originalTime ?? undefined,
           };
         })
@@ -2383,9 +2511,8 @@ function Stats({
     !!user?.UserID &&
     !loadingOverallStats &&
     !isAllEventsMode &&
-    !isAllSessionsMode &&
     !hasActiveDateFilter &&
-    !hasActiveTagFilter;
+    (!hasActiveTagFilter || hasSpecificTagFilter);
 
   const headerStatusText = useMemo(() => {
     if (compareEnabled && statsViewMode === "standard") {
@@ -2457,7 +2584,7 @@ function Stats({
       {
         id: "primary",
         label: `${eventSelectLabel} · ${selectedSessionDisplay}${selectedTagLabel ? ` · ${selectedTagLabel}` : ""}`,
-        color: resolveSeriesColor(primaryCompareStyle, 0.5, "#2EC4B6"),
+        color: resolveSeriesColor(primaryCompareStyle, 0.5, profileChartStyle?.primary || "#2EC4B6"),
       },
       {
         id: "compare",
@@ -2472,20 +2599,32 @@ function Stats({
     compareStyle,
     compareTagLabel,
     eventSelectLabel,
+    profileChartStyle,
     primaryCompareStyle,
     selectedSessionDisplay,
     selectedTagLabel,
   ]);
 
   const primaryAccentColor = compareEnabled
-    ? resolveSeriesColor(primaryCompareStyle, 0.5, "#2EC4B6")
-    : "#2EC4B6";
+    ? resolveSeriesColor(primaryCompareStyle, 0.5, profileChartStyle?.primary || "#2EC4B6")
+    : profileChartStyle?.primary || "#2EC4B6";
   const compareAccentColor = resolveSeriesColor(compareStyle, 0.5, "#7c8cff");
 
   const compareSelectedTagSummaryLabel = useMemo(() => {
     if (!compareSelection || compareTagKey === TAG_NONE) return "";
     return compareTagLabel;
   }, [compareSelection, compareTagKey, compareTagLabel]);
+
+  const primaryPaletteLabel = useMemo(() => {
+    return paletteOptions.find((option) => option.value === primaryPaletteKey)?.label || "Default";
+  }, [paletteOptions, primaryPaletteKey]);
+
+  const comparePaletteLabel = useMemo(() => {
+    return (
+      paletteOptions.find((option) => option.value === (compareSelection?.paletteKey || DEFAULT_COMPARE_PALETTE))
+        ?.label || "Default"
+    );
+  }, [compareSelection?.paletteKey, paletteOptions]);
 
   const showEventBreakdownCard = statsViewMode === "time" && isAllEventsMode;
 
@@ -3055,8 +3194,13 @@ function Stats({
 
       let solvesForWindow = null;
       const startSolveRef =
-        selection.scope === "overall" && selection.variant === "best"
-          ? overallStatsForEvent?.[spec.startField] ?? null
+        selection.scope === "overall" &&
+        (selection.variant === "best" || selection.variant === "strict-best")
+          ? overallStatsForEvent?.[
+              selection.variant === "strict-best"
+                ? `${spec.startField.replace("StartSolveSK", "StrictStartSolveSK")}`
+                : spec.startField
+            ] ?? null
           : null;
 
       if (startSolveRef) {
@@ -3435,6 +3579,7 @@ function Stats({
       canRecomputeOverall,
       canImport: !!user?.UserID && !importBusy && !isAllEventsMode,
       loadingOverallStats,
+      recomputeStatusText,
       importBusy,
       isStatsRouteActive: true,
     });
@@ -3454,6 +3599,7 @@ function Stats({
     user?.UserID,
     importBusy,
     loadingOverallStats,
+    recomputeStatusText,
   ]);
 
   useEffect(() => {
@@ -3486,6 +3632,128 @@ function Stats({
 
   const canCompare = statsViewMode === "standard" && showSolveCharts;
 
+  const closeScopeModal = useCallback(() => {
+    setScopeModalState(null);
+  }, []);
+
+  useEffect(() => {
+    if (!scopeModalState) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") closeScopeModal();
+    };
+    document.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => document.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [closeScopeModal, scopeModalState]);
+
+  const renderTagScopeModal = ({
+    isOpen,
+    title,
+    subtitle,
+    tagKeyValue,
+    onTagKeyChange,
+    tagValueValue,
+    tagValueItems,
+    onTagValueChange,
+    paletteValue,
+    paletteLabel,
+    onPaletteChange,
+    accentColor,
+  }) => {
+    if (!isOpen) return null;
+
+    const selectedTagKeyLabel =
+      tagKeyOptions.find((option) => option.value === tagKeyValue)?.label || "All tags";
+    const showTagValues = tagKeyValue !== TAG_NONE;
+
+    return (
+      <div
+        className="detailPopup"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(event) => {
+          if (event.target.classList?.contains("detailPopup")) closeScopeModal();
+        }}
+      >
+        <div className="detailPopupContent statsScopeModal">
+          <button type="button" className="closePopup statsScopeModalClose" onClick={closeScopeModal}>
+            x
+          </button>
+
+          <div className="statsScopeModalHeader">
+            <p className="statsScopeModalEyebrow">Current Stats</p>
+            <h3>{title}</h3>
+            <p>{subtitle}</p>
+          </div>
+
+          <div className="statsScopeModalSection">
+            <div className="statsScopeModalSectionTitle">Filter by tag</div>
+            <div className="statsScopeChipGrid">
+              {tagKeyOptions.map((option) => {
+                const active = option.value === tagKeyValue;
+                return (
+                  <button
+                    key={`tag-key-${title}-${option.value}`}
+                    type="button"
+                    className={`statsScopeChip ${active ? "active" : ""}`}
+                    style={active ? { borderColor: accentColor, background: `${accentColor}22` } : undefined}
+                    onClick={() => onTagKeyChange(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {showTagValues && (
+            <div className="statsScopeModalSection">
+              <div className="statsScopeModalSectionTitle">{selectedTagKeyLabel}</div>
+              <div className="statsScopeChipGrid">
+                {tagValueItems.map((option) => {
+                  const active = option.value === tagValueValue;
+                  return (
+                    <button
+                      key={`tag-value-${title}-${option.value || "all"}`}
+                      type="button"
+                      className={`statsScopeChip ${active ? "active" : ""}`}
+                      style={active ? { borderColor: accentColor, background: `${accentColor}22` } : undefined}
+                      onClick={() => onTagValueChange(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {typeof onPaletteChange === "function" && (
+            <div className="statsScopeModalSection">
+              <div className="statsScopeModalSectionTitle">Color style</div>
+              <div className="statsScopeChipGrid">
+                {paletteOptions.map((option) => {
+                  const active = option.value === paletteValue;
+                  return (
+                    <button
+                      key={`palette-${title}-${option.value}`}
+                      type="button"
+                      className={`statsScopeChip ${active ? "active" : ""}`}
+                      style={active ? { borderColor: accentColor, background: `${accentColor}22` } : undefined}
+                      onClick={() => onPaletteChange(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="statsScopeModalMeta">Selected style: {paletteLabel}</div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderScopeRow = ({
     rowLabel,
     rowAccentColor = "rgba(255,255,255,0.22)",
@@ -3499,16 +3767,15 @@ function Stats({
     onToggleSessionMenu,
     onPickSession,
     tagKeyValue,
-    onTagKeyChange,
     tagValueValue,
-    tagValueItems,
-    onTagValueChange,
     showPalette = true,
     paletteValue,
     onPaletteChange,
+    paletteLabel,
     allowRemove = false,
     onRemove = null,
     loading = false,
+    scopeModalKey,
   }) => (
     <div className={`statsScopeRow ${loading ? "is-loading" : ""}`}>
       <span
@@ -3561,44 +3828,32 @@ function Stats({
         </div>
       )}
 
-      <select
-        className="statsSelect"
-        value={tagKeyValue}
-        onChange={(e) => onTagKeyChange(e.target.value)}
-        title="Filter stats by tag"
+      <button
+        type="button"
+        className="statsFilterBtn"
+        onClick={() => setScopeModalState(scopeModalKey)}
       >
-        {tagKeyOptions.map((o) => (
-          <option key={`${rowLabel}-${o.value}`} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-
-      {tagValueItems.length > 0 && (
-        <select
-          className="statsSelect"
-          value={tagValueValue}
-          onChange={(e) => onTagValueChange(e.target.value)}
-          title="Tag value"
-        >
-          {tagValueItems.map((o) => (
-            <option key={`${rowLabel}-${o.value}`} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      )}
+        <span className="statsFilterBtnLabel">Current Stats</span>
+        <span className="statsFilterBtnValue">
+          {tagKeyValue === TAG_NONE
+            ? "All tags"
+            : tagValueValue
+              ? `${tagKeyOptions.find((o) => o.value === tagKeyValue)?.label || tagKeyValue}: ${tagValueValue}`
+              : `${tagKeyOptions.find((o) => o.value === tagKeyValue)?.label || tagKeyValue}: All`}
+        </span>
+        {showPalette && <span className="statsFilterBtnMeta">Style: {paletteLabel}</span>}
+      </button>
 
       {showPalette && (
         <select
-          className="statsSelect"
+          className="statsSelect statsPaletteSelect"
           value={paletteValue}
           onChange={(e) => onPaletteChange(e.target.value)}
           title="Series color style"
         >
-          {paletteOptions.map((o) => (
-            <option key={`${rowLabel}-palette-${o.value}`} value={o.value}>
-              {o.label}
+          {paletteOptions.map((option) => (
+            <option key={`${rowLabel}-palette-${option.value}`} value={option.value}>
+              {option.label}
             </option>
           ))}
         </select>
@@ -3656,10 +3911,12 @@ function Stats({
               onTagValueChange: setTagFilterValue,
               showPalette: showSolveCharts,
               paletteValue: compareSelection?.primaryPaletteKey ?? primaryPaletteKey,
+              paletteLabel: primaryPaletteLabel,
               onPaletteChange: (value) => {
                 setPrimaryPaletteKey(value);
                 setCompareSelection((prev) => (prev ? { ...prev, primaryPaletteKey: value } : prev));
               },
+              scopeModalKey: "primary",
             })}
 
             {compareEnabled &&
@@ -3692,10 +3949,12 @@ function Stats({
                 tagValueItems: compareTagValueOptions,
                 onTagValueChange: (value) => updateCompareSelection({ tagValue: value }),
                 paletteValue: compareSelection?.paletteKey || DEFAULT_COMPARE_PALETTE,
+                paletteLabel: comparePaletteLabel,
                 onPaletteChange: (value) => updateCompareSelection({ paletteKey: value }),
                 allowRemove: true,
                 onRemove: handleRemoveCompareRow,
                 loading: compareLoading,
+                scopeModalKey: "compare",
               })}
 
             {canCompare && !compareEnabled && (
@@ -3798,6 +4057,46 @@ function Stats({
       </div>
 
       {headerStatusText ? <div className="statsStatusLine">{headerStatusText}</div> : null}
+
+      {renderTagScopeModal({
+        isOpen: scopeModalState === "primary",
+        title: "Scope A",
+        subtitle: `${eventSelectLabel} · ${selectedSessionDisplay}`,
+        tagKeyValue: tagFilterKey,
+        onTagKeyChange: (value) => {
+          setTagFilterKey(value);
+          setTagFilterValue("");
+        },
+        tagValueValue: tagFilterValue,
+        tagValueItems: tagValueOptions,
+        onTagValueChange: setTagFilterValue,
+        paletteValue: compareSelection?.primaryPaletteKey ?? primaryPaletteKey,
+        paletteLabel: primaryPaletteLabel,
+        onPaletteChange: showSolveCharts
+          ? (value) => {
+              setPrimaryPaletteKey(value);
+              setCompareSelection((prev) => (prev ? { ...prev, primaryPaletteKey: value } : prev));
+            }
+          : null,
+        accentColor: primaryAccentColor,
+      })}
+
+      {renderTagScopeModal({
+        isOpen: scopeModalState === "compare" && compareEnabled,
+        title: "Scope B",
+        subtitle: `${compareEventLabel} · ${compareSessionDisplay}`,
+        tagKeyValue: compareTagKey,
+        onTagKeyChange: (value) => updateCompareSelection({ tagKey: value, tagValue: "" }),
+        tagValueValue: compareTagValue,
+        tagValueItems: compareTagValueOptions,
+        onTagValueChange: (value) => updateCompareSelection({ tagValue: value }),
+        paletteValue: compareSelection?.paletteKey || DEFAULT_COMPARE_PALETTE,
+        paletteLabel: comparePaletteLabel,
+        onPaletteChange: showSolveCharts
+          ? (value) => updateCompareSelection({ paletteKey: value })
+          : null,
+        accentColor: compareAccentColor,
+      })}
 
       <div className="stats-page">
         <div className={`stats-grid stats-grid--figma ${(loadingInitial || loadingTimeScope) ? "stats-grid--loading" : ""}`}>

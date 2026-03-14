@@ -5,11 +5,24 @@ const VIEWBOX_SIZE = 220;
 const CHART_RADIUS = 86;
 const CHART_CENTER = VIEWBOX_SIZE / 2;
 
-const PieChartBuilder = ({ data, width, height, onSliceClick, legendValueMode, interactive }) => {
+const PieChartBuilder = ({
+  data,
+  width,
+  height,
+  onSliceClick,
+  legendValueMode,
+  interactive,
+  colorPalette,
+  showLegend,
+  showCenterLabel,
+}) => {
   const total = data.reduce((sum, entry) => sum + entry.value, 0);
   const [hoveredSlice, setHoveredSlice] = useState(null);
 
-  const colorPalette = ["#2EC4B6", "#FFB044", "#50B6FF", "#FB596D", "#FFE863", "#FDFFFC"];
+  const resolvedPalette =
+    Array.isArray(colorPalette) && colorPalette.length > 0
+      ? colorPalette
+      : ["#2EC4B6", "#FFB044", "#50B6FF", "#FB596D", "#FFE863", "#FDFFFC"];
 
   const sortedData = useMemo(
     () => [...data].filter((entry) => entry.value > 0).sort((a, b) => b.value - a.value),
@@ -32,7 +45,7 @@ const PieChartBuilder = ({ data, width, height, onSliceClick, legendValueMode, i
     const startY = CHART_CENTER + CHART_RADIUS * Math.sin(startAngle);
     const endX = CHART_CENTER + CHART_RADIUS * Math.cos(endAngle);
     const endY = CHART_CENTER + CHART_RADIUS * Math.sin(endAngle);
-    const fill = colorPalette[index % colorPalette.length];
+    const fill = resolvedPalette[index % resolvedPalette.length];
     const isHovered = hoveredSlice === index;
 
     const pathData = [
@@ -79,24 +92,28 @@ const PieChartBuilder = ({ data, width, height, onSliceClick, legendValueMode, i
           preserveAspectRatio="xMidYMid meet"
         >
           {slices}
-          <circle
-            cx={CHART_CENTER}
-            cy={CHART_CENTER}
-            r="42"
-            fill="rgba(7, 12, 15, 0.88)"
-            stroke="rgba(255,255,255,0.08)"
-            strokeWidth="1.5"
-          />
-          <text x={CHART_CENTER} y={CHART_CENTER - 6} textAnchor="middle" className="pieChartCenterValue">
-            {activePercent}%
-          </text>
-          <text x={CHART_CENTER} y={CHART_CENTER + 16} textAnchor="middle" className="pieChartCenterLabel">
-            {activeSlice.label}
-          </text>
+          {showCenterLabel && (
+            <>
+              <circle
+                cx={CHART_CENTER}
+                cy={CHART_CENTER}
+                r="42"
+                fill="rgba(7, 12, 15, 0.88)"
+                stroke="rgba(255,255,255,0.08)"
+                strokeWidth="1.5"
+              />
+              <text x={CHART_CENTER} y={CHART_CENTER - 6} textAnchor="middle" className="pieChartCenterValue">
+                {activePercent}%
+              </text>
+              <text x={CHART_CENTER} y={CHART_CENTER + 16} textAnchor="middle" className="pieChartCenterLabel">
+                {activeSlice.label}
+              </text>
+            </>
+          )}
         </svg>
       </div>
 
-      <div className="pieChartLegend">
+      {showLegend && <div className="pieChartLegend">
         {sortedData.map((entry, index) => {
           const percent = Math.round((entry.value / total) * 100);
           const isActive = hoveredSlice === index;
@@ -115,7 +132,7 @@ const PieChartBuilder = ({ data, width, height, onSliceClick, legendValueMode, i
             >
               <span
                 className="pieChartLegendSwatch"
-                style={{ backgroundColor: colorPalette[index % colorPalette.length] }}
+                style={{ backgroundColor: resolvedPalette[index % resolvedPalette.length] }}
               />
               <span className="pieChartLegendText" title={entry.label}>
                 {entry.label}
@@ -126,7 +143,7 @@ const PieChartBuilder = ({ data, width, height, onSliceClick, legendValueMode, i
             </button>
           );
         })}
-      </div>
+      </div>}
     </div>
   );
 };
@@ -150,6 +167,9 @@ PieChartBuilder.propTypes = {
   onSliceClick: PropTypes.func,
   legendValueMode: PropTypes.oneOf(["count", "count-percent"]),
   interactive: PropTypes.bool,
+  colorPalette: PropTypes.arrayOf(PropTypes.string),
+  showLegend: PropTypes.bool,
+  showCenterLabel: PropTypes.bool,
 };
 
 PieChartBuilder.defaultProps = {
@@ -158,6 +178,9 @@ PieChartBuilder.defaultProps = {
   onSliceClick: null,
   legendValueMode: "count-percent",
   interactive: true,
+  colorPalette: undefined,
+  showLegend: true,
+  showCenterLabel: true,
 };
 
 export default PieChartBuilder;

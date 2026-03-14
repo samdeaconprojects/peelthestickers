@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
+import { findBestStrictWindow } from "../../utils/strictAverageUtils";
 import "./StatsSummary.css";
 
 const WINDOW_SPECS = [
@@ -251,7 +252,13 @@ function buildViewSummary(solves, totalSolveCount = null, loadedSolveCount = nul
 
   const metrics = {};
   for (const spec of WINDOW_SPECS) {
-    metrics[spec.key] = computeWindowStat(input, spec);
+    metrics[spec.key] = {
+      ...computeWindowStat(input, spec),
+      strictBest:
+        spec.key === "mo3" || spec.key === "ao5" || spec.key === "ao12"
+          ? findBestStrictWindow(input, spec.size, spec.kind)?.value ?? null
+          : null,
+    };
   }
 
   return {
@@ -286,6 +293,9 @@ function buildOverallDerived(solves) {
 
   return {
     singleWorst: numeric.length ? Math.max(...numeric) : null,
+    mo3Strict: findBestStrictWindow(input, 3, "mo3")?.value ?? null,
+    ao5Strict: findBestStrictWindow(input, 5, "ao")?.value ?? null,
+    ao12Strict: findBestStrictWindow(input, 12, "ao")?.value ?? null,
     mo3Worst: computeWindowStat(input, { size: 3, kind: "mo3" }).worst,
     ao5Worst: computeWindowStat(input, { size: 5, kind: "ao" }).worst,
     ao12Worst: computeWindowStat(input, { size: 12, kind: "ao" }).worst,
@@ -412,9 +422,11 @@ function MetricRow({
   scope,
   current,
   best,
+  strictBest = null,
   worst,
   showWorst = true,
   showCurrent = true,
+  inlineStrictLabel = true,
   onStatSelect,
 }) {
   const selectValue = (variant, value) => {
@@ -436,6 +448,19 @@ function MetricRow({
         <StatValueButton onClick={() => selectValue("best", best)} disabled={best == null}>
           <span className="ssMetricValue ssMetricValue--best">{formatStatTime(best)}</span>
         </StatValueButton>
+        {strictBest !== null && (
+          <>
+            <span className="ssMetricDot">·</span>
+            <StatValueButton
+              onClick={() => selectValue("strict-best", strictBest)}
+              disabled={strictBest == null}
+            >
+              <span className="ssMetricValue ssMetricValue--strict">
+                {inlineStrictLabel ? `Strict ${formatStatTime(strictBest)}` : formatStatTime(strictBest)}
+              </span>
+            </StatValueButton>
+          </>
+        )}
         {showWorst && (
           <>
             <span className="ssMetricDot">·</span>
@@ -457,7 +482,16 @@ function MetricRow({
   );
 }
 
-function OverallMetricRow({ label, metricKey, best, worst = null, average = true, onStatSelect }) {
+function OverallMetricRow({
+  label,
+  metricKey,
+  best,
+  strictBest = null,
+  worst = null,
+  average = true,
+  inlineStrictLabel = true,
+  onStatSelect,
+}) {
   const selectValue = (variant, value) => {
     if (typeof onStatSelect !== "function") return;
     onStatSelect({
@@ -479,6 +513,21 @@ function OverallMetricRow({ label, metricKey, best, worst = null, average = true
             {formatStatTime(best, { average })}
           </span>
         </StatValueButton>
+        {strictBest !== null && (
+          <>
+            <span className="ssMetricSpacer" />
+            <StatValueButton
+              onClick={() => selectValue("strict-best", strictBest)}
+              disabled={strictBest == null}
+            >
+              <span className="ssMetricValue ssMetricValue--strict">
+                {inlineStrictLabel
+                  ? `Strict ${formatStatTime(strictBest, { average })}`
+                  : formatStatTime(strictBest, { average })}
+              </span>
+            </StatValueButton>
+          </>
+        )}
         {worst !== null && (
           <>
             <span className="ssMetricSpacer" />
@@ -534,6 +583,15 @@ function useStatsSummaryData({
       ao50: overallStats?.BestAo50Ms ?? overallFallback?.metrics?.ao50?.best ?? null,
       ao100: overallStats?.BestAo100Ms ?? overallFallback?.metrics?.ao100?.best ?? null,
       ao1000: overallStats?.BestAo1000Ms ?? overallFallback?.metrics?.ao1000?.best ?? null,
+      mo3Strict:
+        overallStats?.BestMo3StrictMs ??
+        (allowOverallDerived ? overallDerived?.mo3Strict ?? null : null),
+      ao5Strict:
+        overallStats?.BestAo5StrictMs ??
+        (allowOverallDerived ? overallDerived?.ao5Strict ?? null : null),
+      ao12Strict:
+        overallStats?.BestAo12StrictMs ??
+        (allowOverallDerived ? overallDerived?.ao12Strict ?? null : null),
       mean: overallStats?.MeanMs ?? (allowOverallDerived ? overallDerived?.mean ?? null : null),
       stdDev: allowOverallDerived ? overallDerived?.stdDev ?? null : null,
       sum: overallStats?.SumFinalTimeMs ?? (allowOverallDerived ? overallDerived?.sum ?? null : null),
@@ -741,178 +799,207 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
           </div>
 
           <div className="ssViewBody">
-            <div className="ssMetricGrid">
-              <div className="ssMetricColumn">
-                <div className="ssViewLegend">
-                  <span className="ssMetricValue--best">Best</span>
-                  <span className="ssMetricDot">·</span>
-                  <span className="ssMetricValue--worst">Worst</span>
-                  {showCurrentMetrics && (
-                    <>
-                      <span className="ssMetricDot">·</span>
-                      <span className="ssMetricValue--current">Current</span>
-                    </>
-                  )}
+            <div className="ssCurrentSummaryGrid">
+              <div className="ssCurrentSummaryColumn ssCurrentSummaryColumn--meta">
+                <div className="ssCurrentSummaryRow ssCurrentSummaryRow--single">
+                  <div className="ssSingleRow">
+                    <div className="ssSingleLabel">Single</div>
+                    <div className="ssSingleValues">
+                      <StatValueButton
+                        onClick={() =>
+                          onStatSelect?.({
+                            scope: "current",
+                            kind: "single",
+                            metricKey: "single",
+                            label: "Single",
+                            variant: "best",
+                            value: view?.single?.best,
+                          })
+                        }
+                        disabled={view?.single?.best == null}
+                      >
+                        <span className="ssMetricValue ssMetricValue--best">
+                          {formatStatTime(view?.single?.best, { average: false })}
+                        </span>
+                      </StatValueButton>
+                      <StatValueButton
+                        onClick={() =>
+                          onStatSelect?.({
+                            scope: "current",
+                            kind: "single",
+                            metricKey: "single",
+                            label: "Single",
+                            variant: "worst",
+                            value: view?.single?.worst,
+                          })
+                        }
+                        disabled={view?.single?.worst == null}
+                      >
+                        <span className="ssMetricValue ssMetricValue--worst">
+                          {formatStatTime(view?.single?.worst, { average: false })}
+                        </span>
+                      </StatValueButton>
+                      {showCurrentMetrics && (
+                        <StatValueButton
+                          onClick={() =>
+                            onStatSelect?.({
+                              scope: "current",
+                              kind: "single",
+                              metricKey: "single",
+                              label: "Single",
+                              variant: "current",
+                              value: view?.single?.current,
+                            })
+                          }
+                          disabled={view?.single?.current == null}
+                        >
+                          <span className="ssMetricValue ssMetricValue--current">
+                            {formatStatTime(view?.single?.current, { average: false })}
+                          </span>
+                        </StatValueButton>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <MetricRow
-                  label="AO5"
-                  metricKey="ao5"
-                  scope="current"
-                  current={view?.metrics?.ao5?.current}
-                  best={view?.metrics?.ao5?.best}
-                  worst={view?.metrics?.ao5?.worst}
-                  showCurrent={showCurrentMetrics}
-                  onStatSelect={onStatSelect}
-                />
-                <MetricRow
-                  label="AO12"
-                  metricKey="ao12"
-                  scope="current"
-                  current={view?.metrics?.ao12?.current}
-                  best={view?.metrics?.ao12?.best}
-                  worst={view?.metrics?.ao12?.worst}
-                  showCurrent={showCurrentMetrics}
-                  onStatSelect={onStatSelect}
-                />
-                <MetricRow
-                  label="MO3"
-                  metricKey="mo3"
-                  scope="current"
-                  current={view?.metrics?.mo3?.current}
-                  best={view?.metrics?.mo3?.best}
-                  worst={view?.metrics?.mo3?.worst}
-                  showCurrent={showCurrentMetrics}
-                  onStatSelect={onStatSelect}
-                />
+
+                <div className="ssCurrentSummaryRow">
+                  <div className="ssTopMetaRow">
+                    <MetaStat label="Mean" value={formatStatTime(view?.mean)} tone="accent" stacked />
+                    <MetaStat label="Median" value={formatStatTime(view?.median)} tone="accent" stacked />
+                    <MetaStat label="SD" value={formatStatTime(view?.stdDev)} tone="accent" stacked />
+                  </div>
+                </div>
+
+                <div className="ssCurrentSummaryRow">
+                  <div className="ssMetaGrid ssMetaGrid--currentRow">
+                    <MetaStat label="+2 Count" value={formatCount(view?.plus2Count)} tone="lime" />
+                    <MetaStat label="Sum" value={formatDurationMs(view?.sum)} tone="blue" />
+                  </div>
+                </div>
+
+                <div className="ssCurrentSummaryRow">
+                  <div className="ssMetaGrid ssMetaGrid--currentRow">
+                    <MetaStat
+                      label="+2 Best"
+                      value={formatStatTime(view?.plus2Best, { average: false })}
+                      tone="teal"
+                    />
+                    <MetaStat label="DNF Count" value={formatCount(view?.dnfCount)} tone="danger" />
+                  </div>
+                </div>
               </div>
 
-              <div className="ssMetricColumn">
-                <MetricRow
-                  label="AO25"
-                  metricKey="ao25"
-                  scope="current"
-                  current={view?.metrics?.ao25?.current}
-                  best={view?.metrics?.ao25?.best}
-                  worst={view?.metrics?.ao25?.worst}
-                  showWorst={false}
-                  showCurrent={showCurrentMetrics}
-                  onStatSelect={onStatSelect}
-                />
-                <MetricRow
-                  label="AO50"
-                  metricKey="ao50"
-                  scope="current"
-                  current={view?.metrics?.ao50?.current}
-                  best={view?.metrics?.ao50?.best}
-                  worst={view?.metrics?.ao50?.worst}
-                  showWorst={false}
-                  showCurrent={showCurrentMetrics}
-                  onStatSelect={onStatSelect}
-                />
-                <MetricRow
-                  label="AO100"
-                  metricKey="ao100"
-                  scope="current"
-                  current={view?.metrics?.ao100?.current}
-                  best={view?.metrics?.ao100?.best}
-                  worst={view?.metrics?.ao100?.worst}
-                  showWorst={false}
-                  showCurrent={showCurrentMetrics}
-                  onStatSelect={onStatSelect}
-                />
-                <MetricRow
-                  label="AO1000"
-                  metricKey="ao1000"
-                  scope="current"
-                  current={view?.metrics?.ao1000?.current}
-                  best={view?.metrics?.ao1000?.best}
-                  worst={view?.metrics?.ao1000?.worst}
-                  showWorst={false}
-                  showCurrent={showCurrentMetrics}
-                  onStatSelect={onStatSelect}
-                />
-              </div>
-            </div>
-          </div>
+              <div className="ssCurrentSummaryColumn ssCurrentSummaryColumn--metrics">
+                <div className="ssCurrentSummaryRow ssCurrentSummaryRow--legend">
+                  <div className="ssViewLegend">
+                    <span className="ssMetricLegendSpacer" aria-hidden="true" />
+                    <span className="ssMetricValue--best">Best</span>
+                    <span className="ssMetricValue--strict">Strict</span>
+                    <span className="ssMetricValue--worst">Worst</span>
+                    {showCurrentMetrics && <span className="ssMetricValue--current">Current</span>}
+                  </div>
+                </div>
 
-          <div className="ssViewSide">
-            <div className="ssSingleRow">
-              <div className="ssSingleLabel">Single</div>
-              <div className="ssSingleValues">
-                <StatValueButton
-                  onClick={() =>
-                    onStatSelect?.({
-                      scope: "current",
-                      kind: "single",
-                      metricKey: "single",
-                      label: "Single",
-                      variant: "best",
-                      value: view?.single?.best,
-                    })
-                  }
-                  disabled={view?.single?.best == null}
-                >
-                  <span className="ssMetricValue ssMetricValue--best">
-                    {formatStatTime(view?.single?.best, { average: false })}
-                  </span>
-                </StatValueButton>
-                <StatValueButton
-                  onClick={() =>
-                    onStatSelect?.({
-                      scope: "current",
-                      kind: "single",
-                      metricKey: "single",
-                      label: "Single",
-                      variant: "worst",
-                      value: view?.single?.worst,
-                    })
-                  }
-                  disabled={view?.single?.worst == null}
-                >
-                  <span className="ssMetricValue ssMetricValue--worst">
-                    {formatStatTime(view?.single?.worst, { average: false })}
-                  </span>
-                </StatValueButton>
-                {showCurrentMetrics && (
-                  <StatValueButton
-                    onClick={() =>
-                      onStatSelect?.({
-                        scope: "current",
-                        kind: "single",
-                        metricKey: "single",
-                        label: "Single",
-                        variant: "current",
-                        value: view?.single?.current,
-                      })
-                    }
-                    disabled={view?.single?.current == null}
-                  >
-                    <span className="ssMetricValue ssMetricValue--current">
-                      {formatStatTime(view?.single?.current, { average: false })}
-                    </span>
-                  </StatValueButton>
-                )}
-              </div>
-            </div>
+                <div className="ssCurrentSummaryRow">
+                  <div className="ssMetricGrid ssMetricGrid--current">
+                    <MetricRow
+                      label="AO5"
+                      metricKey="ao5"
+                      scope="current"
+                      current={view?.metrics?.ao5?.current}
+                      best={view?.metrics?.ao5?.best}
+                      strictBest={view?.metrics?.ao5?.strictBest}
+                      worst={view?.metrics?.ao5?.worst}
+                      showCurrent={showCurrentMetrics}
+                      inlineStrictLabel={false}
+                      onStatSelect={onStatSelect}
+                    />
+                    <MetricRow
+                      label="AO25"
+                      metricKey="ao25"
+                      scope="current"
+                      current={view?.metrics?.ao25?.current}
+                      best={view?.metrics?.ao25?.best}
+                      worst={view?.metrics?.ao25?.worst}
+                      showWorst={false}
+                      showCurrent={showCurrentMetrics}
+                      onStatSelect={onStatSelect}
+                    />
+                  </div>
+                </div>
 
-            <div className="ssTopMetaRow">
-              <MetaStat label="Mean" value={formatStatTime(view?.mean)} tone="accent" stacked />
-              <MetaStat label="Median" value={formatStatTime(view?.median)} tone="accent" stacked />
-              <MetaStat label="SD" value={formatStatTime(view?.stdDev)} tone="accent" stacked />
-            </div>
+                <div className="ssCurrentSummaryRow">
+                  <div className="ssMetricGrid ssMetricGrid--current">
+                    <MetricRow
+                      label="AO12"
+                      metricKey="ao12"
+                      scope="current"
+                      current={view?.metrics?.ao12?.current}
+                      best={view?.metrics?.ao12?.best}
+                      strictBest={view?.metrics?.ao12?.strictBest}
+                      worst={view?.metrics?.ao12?.worst}
+                      showCurrent={showCurrentMetrics}
+                      inlineStrictLabel={false}
+                      onStatSelect={onStatSelect}
+                    />
+                    <MetricRow
+                      label="AO50"
+                      metricKey="ao50"
+                      scope="current"
+                      current={view?.metrics?.ao50?.current}
+                      best={view?.metrics?.ao50?.best}
+                      worst={view?.metrics?.ao50?.worst}
+                      showWorst={false}
+                      showCurrent={showCurrentMetrics}
+                      onStatSelect={onStatSelect}
+                    />
+                  </div>
+                </div>
 
-            <div className="ssMetaGrid">
-              <div className="ssMetaColumn">
-                <MetaStat label="+2 Count" value={formatCount(view?.plus2Count)} tone="lime" />
-                <MetaStat
-                  label="+2 Best"
-                  value={formatStatTime(view?.plus2Best, { average: false })}
-                  tone="teal"
-                />
-              </div>
-              <div className="ssMetaColumn">
-                <MetaStat label="Sum" value={formatDurationMs(view?.sum)} tone="blue" />
-                <MetaStat label="DNF Count" value={formatCount(view?.dnfCount)} tone="danger" />
+                <div className="ssCurrentSummaryRow">
+                  <div className="ssMetricGrid ssMetricGrid--current">
+                    <MetricRow
+                      label="MO3"
+                      metricKey="mo3"
+                      scope="current"
+                      current={view?.metrics?.mo3?.current}
+                      best={view?.metrics?.mo3?.best}
+                      strictBest={view?.metrics?.mo3?.strictBest}
+                      worst={view?.metrics?.mo3?.worst}
+                      showCurrent={showCurrentMetrics}
+                      inlineStrictLabel={false}
+                      onStatSelect={onStatSelect}
+                    />
+                    <MetricRow
+                      label="AO100"
+                      metricKey="ao100"
+                      scope="current"
+                      current={view?.metrics?.ao100?.current}
+                      best={view?.metrics?.ao100?.best}
+                      worst={view?.metrics?.ao100?.worst}
+                      showWorst={false}
+                      showCurrent={showCurrentMetrics}
+                      onStatSelect={onStatSelect}
+                    />
+                  </div>
+                </div>
+
+                <div className="ssCurrentSummaryRow">
+                  <div className="ssMetricGrid ssMetricGrid--current">
+                    <div className="ssMetricGridSlot ssMetricGridSlot--empty" aria-hidden="true" />
+                    <MetricRow
+                      label="AO1000"
+                      metricKey="ao1000"
+                      scope="current"
+                      current={view?.metrics?.ao1000?.current}
+                      best={view?.metrics?.ao1000?.best}
+                      worst={view?.metrics?.ao1000?.worst}
+                      showWorst={false}
+                      showCurrent={showCurrentMetrics}
+                      onStatSelect={onStatSelect}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1002,22 +1089,54 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
       )}
 
       <div className="ssOverallBody">
-        <div className="ssOverallMetricGrid">
-          <OverallMetricRow
-            label="Single"
-            metricKey="single"
-            best={overall.single}
-            worst={overall.singleWorst}
-            average={false}
-            onStatSelect={onStatSelect}
-          />
-          <OverallMetricRow label="AO25" metricKey="ao25" best={overall.ao25} onStatSelect={onStatSelect} />
-          <OverallMetricRow label="AO5" metricKey="ao5" best={overall.ao5} worst={overall.ao5Worst} onStatSelect={onStatSelect} />
-          <OverallMetricRow label="AO50" metricKey="ao50" best={overall.ao50} onStatSelect={onStatSelect} />
-          <OverallMetricRow label="AO12" metricKey="ao12" best={overall.ao12} worst={overall.ao12Worst} onStatSelect={onStatSelect} />
-          <OverallMetricRow label="AO100" metricKey="ao100" best={overall.ao100} onStatSelect={onStatSelect} />
-          <OverallMetricRow label="MO3" metricKey="mo3" best={overall.mo3} worst={overall.mo3Worst} onStatSelect={onStatSelect} />
-          <OverallMetricRow label="AO1000" metricKey="ao1000" best={overall.ao1000} onStatSelect={onStatSelect} />
+        <div className="ssOverallMetricsSection">
+          <div className="ssOverallLegend">
+            <span className="ssMetricLegendSpacer" aria-hidden="true" />
+            <span className="ssMetricValue--best">Best</span>
+            <span className="ssMetricValue--strict">Strict</span>
+            <span className="ssMetricValue--worst">Worst</span>
+          </div>
+          <div className="ssOverallMetricGrid">
+            <OverallMetricRow
+              label="Single"
+              metricKey="single"
+              best={overall.single}
+              worst={overall.singleWorst}
+              average={false}
+              onStatSelect={onStatSelect}
+            />
+            <OverallMetricRow label="AO25" metricKey="ao25" best={overall.ao25} onStatSelect={onStatSelect} />
+            <OverallMetricRow
+              label="AO5"
+              metricKey="ao5"
+              best={overall.ao5}
+              strictBest={overall.ao5Strict}
+              worst={overall.ao5Worst}
+              inlineStrictLabel={false}
+              onStatSelect={onStatSelect}
+            />
+            <OverallMetricRow label="AO50" metricKey="ao50" best={overall.ao50} onStatSelect={onStatSelect} />
+            <OverallMetricRow
+              label="AO12"
+              metricKey="ao12"
+              best={overall.ao12}
+              strictBest={overall.ao12Strict}
+              worst={overall.ao12Worst}
+              inlineStrictLabel={false}
+              onStatSelect={onStatSelect}
+            />
+            <OverallMetricRow label="AO100" metricKey="ao100" best={overall.ao100} onStatSelect={onStatSelect} />
+            <OverallMetricRow
+              label="MO3"
+              metricKey="mo3"
+              best={overall.mo3}
+              strictBest={overall.mo3Strict}
+              worst={overall.mo3Worst}
+              inlineStrictLabel={false}
+              onStatSelect={onStatSelect}
+            />
+            <OverallMetricRow label="AO1000" metricKey="ao1000" best={overall.ao1000} onStatSelect={onStatSelect} />
+          </div>
         </div>
 
         <div className="ssOverallMeta">

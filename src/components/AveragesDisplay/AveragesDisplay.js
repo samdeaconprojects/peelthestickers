@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatTime, calculateAverage, calculateBestAverageOfFive } from '../TimeList/TimeUtils';
+import { findBestStrictWindow } from '../../utils/strictAverageUtils';
 import './AveragesDisplay.css';
 
 function safeAverage(solves, count) {
@@ -21,6 +22,7 @@ function AveragesDisplay({
   const bestAvgOfFive = Number.isFinite(bestAvgOfFiveOverall)
     ? bestAvgOfFiveOverall
     : fallbackBestAvgOfFive;
+  const strictAo5 = findBestStrictWindow(currentSolves, 5, "ao");
 
   // Best AO12
   let bestAvgOfTwelve = "N/A";
@@ -36,6 +38,7 @@ function AveragesDisplay({
   }
   const bestAvgOfTwelveOverall = Number(overallSessionStats?.BestAo12Ms);
   if (Number.isFinite(bestAvgOfTwelveOverall)) bestAvgOfTwelve = bestAvgOfTwelveOverall;
+  const strictAo12 = findBestStrictWindow(currentSolves, 12, "ao");
 
   const selectBestWindow = async (count, targetAvg, startSolveRef = null) => {
     if (typeof onRequestBestAverageWindow === "function") {
@@ -54,6 +57,11 @@ function AveragesDisplay({
       }
     }
     if (selected.length > 0) setSelectedAverageSolves(selected);
+  };
+
+  const selectStrictWindow = (result) => {
+    if (!result?.solves?.length) return;
+    setSelectedAverageSolves(result.solves);
   };
 
   // BPA/WPA
@@ -101,6 +109,7 @@ function AveragesDisplay({
       <div className="header"></div>
       <div className="header current-col">Current</div>
       <div className="header">Best</div>
+      <div className="header strict-header">Strict</div>
       <div className="header bpa-header">BPA</div>
       <div className="header wpa-header">WPA</div>
 
@@ -119,6 +128,9 @@ function AveragesDisplay({
       >
         {bestAvgOfFive === "N/A" ? "N/A" : bestAvgOfFive === "DNF" ? "DNF" : formatTime(bestAvgOfFive)}
       </div>
+      <div className="cell strict ao5" onClick={() => selectStrictWindow(strictAo5)}>
+        {strictAo5?.value == null ? "N/A" : formatTime(strictAo5.value)}
+      </div>
       <div className="cell less-important">{bpa5}</div>
       <div className="cell less-important">{wpa5}</div>
 
@@ -136,6 +148,9 @@ function AveragesDisplay({
         }
       >
         {bestAvgOfTwelve === "N/A" ? "N/A" : bestAvgOfTwelve === "DNF" ? "DNF" : formatTime(bestAvgOfTwelve)}
+      </div>
+      <div className="cell strict ao12" onClick={() => selectStrictWindow(strictAo12)}>
+        {strictAo12?.value == null ? "N/A" : formatTime(strictAo12.value)}
       </div>
       <div className="cell less-important">{bpa12}</div>
       <div className="cell less-important">{wpa12}</div>

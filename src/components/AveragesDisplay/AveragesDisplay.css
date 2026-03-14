@@ -1,6 +1,6 @@
 .averages-table {
   display: grid;
-  grid-template-columns: 80px repeat(4, 1fr);
+  grid-template-columns: 80px repeat(5, 1fr);
   gap: 8px;
   align-items: center;
   text-align: center;
@@ -28,6 +28,10 @@
 
 .header.bpa-header {
   color: #00FF00; /* green title */
+}
+
+.header.strict-header {
+  color: #38d6c9;
 }
 
 .header.wpa-header {
@@ -68,6 +72,12 @@
   font-size: 18pt;
   opacity: 0.8;
   color: #00FF00;
+}
+
+.cell.strict {
+  font-size: 16pt;
+  opacity: 0.85;
+  color: #38d6c9;
 }
 
 .cell.less-important {

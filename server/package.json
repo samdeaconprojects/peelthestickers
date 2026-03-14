@@ -11,6 +11,10 @@
     "recomputeStats": "node scripts/recomputeSessionStats.js",
     "backfillStats": "node scripts/backfillSessionStats.js",
     "backfillSingles": "node scripts/backfillSingleRanks.js",
+    "backfillSolveSource": "node scripts/backfillSolveSource.js",
+    "repairWcaImportDates": "node scripts/repairWcaImportDates.js",
+    "resetWcaImport": "node scripts/resetWcaImport.js",
+    "deleteWcaImport": "node scripts/deleteWcaImport.js",
     "backfillBestCandidates": "node scripts/backfillBestCandidates.js",
     "repairOutliers": "node scripts/repairSessionOutliers.js",
     "migrateUser": "node scripts/migrateUserToProd.js"

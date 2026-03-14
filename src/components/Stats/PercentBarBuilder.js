@@ -88,6 +88,8 @@ const PercentBarBuilder = ({
   comparisonSeries = [],
   legendItems = [],
   seriesStyle = null,
+  initialThresholdSeconds = null,
+  compact = false,
   onSliceClick,
 }) => {
   const containerRef = useRef(null);
@@ -112,11 +114,19 @@ const PercentBarBuilder = ({
 
   // set threshold to median (seconds) when solves change
   useEffect(() => {
+    if (initialThresholdSeconds != null && initialThresholdSeconds !== "") {
+      const seededThreshold = Number(initialThresholdSeconds);
+      if (Number.isFinite(seededThreshold) && seededThreshold > 0) {
+        setThreshold(Number(seededThreshold.toFixed(2)));
+        return;
+      }
+    }
+
     if (Array.isArray(solves) && solves.length > 0) {
       const medianSec = calculateMedianTime(solves) / 1000;
       setThreshold(Number(medianSec.toFixed(2)));
     }
-  }, [solves]);
+  }, [initialThresholdSeconds, solves]);
 
   const computed = useMemo(() => {
     const input = Array.isArray(solves) ? solves : [];
@@ -255,7 +265,7 @@ const PercentBarBuilder = ({
   const h = Math.max(0, size.h);
 
   // Layout inside the card
-  const pad = 14;
+  const pad = compact ? 0 : 14;
   const barW = Math.max(44, Math.min(64, Math.floor(w * 0.22))); // nice chunky bar
   const gap = 16;
   const hasComparison = comparisonComputed.length > 0;
@@ -300,7 +310,7 @@ const PercentBarBuilder = ({
             width: barW,
             height: chartHeight,
             borderRadius: 8,
-            border: "2px solid white",
+            border: compact ? "0" : "2px solid white",
             overflow: "hidden",
             position: "relative",
             flex: "0 0 auto",
@@ -372,7 +382,7 @@ const PercentBarBuilder = ({
                   width: barW,
                   height: "100%",
                   borderRadius: 8,
-                  border: "2px solid white",
+                  border: compact ? "0" : "2px solid white",
                   overflow: "hidden",
                   position: "relative",
                   alignSelf: "stretch",
@@ -430,6 +440,7 @@ const PercentBarBuilder = ({
         </div>
       )}
 
+      {!compact && (
       <div
         data-interactive="percent-bar-control"
         style={{
@@ -498,6 +509,7 @@ const PercentBarBuilder = ({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 };
@@ -518,6 +530,8 @@ PercentBarBuilder.propTypes = {
     accent: PropTypes.string,
     stops: PropTypes.arrayOf(PropTypes.string),
   }),
+  initialThresholdSeconds: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+  compact: PropTypes.bool,
   onSliceClick: PropTypes.func.isRequired,
 };
 

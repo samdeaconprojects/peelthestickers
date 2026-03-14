@@ -265,7 +265,7 @@ function BulkSolveControls({
                   style={inputStyle}
                   value={bulkSolveSource}
                   onChange={(e) => setBulkSolveSource(e.target.value)}
-                  placeholder="Normal"
+                  placeholder="Standard"
                 />
               </div>
             </div>

@@ -14,7 +14,7 @@ const DEFAULT_TAG_CONFIG = {
     },
     SolveSource: {
       label: "Solve Source",
-      options: ["Normal", "Practice", "Shared", "Relay", "Import", "SmartCube"],
+      options: ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA"],
     },
   },
   CustomSlots: [
@@ -53,7 +53,7 @@ function normalizeTagConfig(input) {
         label: fixed?.SolveSource?.label || "Solve Source",
         options: Array.isArray(fixed?.SolveSource?.options)
           ? fixed.SolveSource.options
-          : ["Normal", "Practice", "Shared", "Relay", "Import", "SmartCube"],
+          : ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA"],
       },
     },
     CustomSlots: Array.from({ length: 5 }, (_, i) => {

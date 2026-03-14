@@ -4,6 +4,8 @@
   justify-content: center;
   align-items: center;
   width: 100%;
+  position: relative;
+  z-index: 2;
 }
 
 /* Timer text when in keyboard mode */
@@ -115,6 +117,7 @@
   position: relative;
   display: inline-block;   /* keeps Timer sizing/position behavior */
   text-align: center;
+  z-index: 2;
 }
 
 /* Controls column positioned to the LEFT of the timer (no layout shift) */

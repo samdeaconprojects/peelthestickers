@@ -15,6 +15,7 @@
   --ss-line: rgba(255, 255, 255, 0.18);
   --ss-current: #5ab2ff;
   --ss-best: #38d6c9;
+  --ss-strict: #f2ef62;
   --ss-worst: #ff6078;
   --ss-accent: #f2ef62;
   --ss-blue: #64b5ff;
@@ -33,7 +34,7 @@
 .ssCard--view {
   display: grid;
   grid-template-columns: 128px 228px minmax(0, 1fr);
-  gap: 8px;
+  gap: 10px;
   padding: 12px 14px 10px 14px;
 }
 
@@ -78,10 +79,42 @@
 
 .ssViewBody {
   min-width: 0;
-  grid-column: 3;
+  grid-column: 2 / 4;
   grid-row: 1;
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
+}
+
+.ssCurrentSummaryGrid {
+  display: grid;
+  grid-template-columns: minmax(230px, 290px) minmax(360px, 1fr);
+  gap: 8px;
+  width: 100%;
+  align-items: start;
+}
+
+.ssCurrentSummaryColumn {
+  display: grid;
+  grid-auto-rows: minmax(0, auto);
+  gap: 4px;
+  align-content: start;
+}
+
+.ssCurrentSummaryRow {
+  min-height: 0;
+}
+
+.ssCurrentSummaryRow--legend {
+  display: flex;
+  align-items: flex-end;
+  min-height: 24px;
+}
+
+.ssMetricSection,
+.ssOverallMetricsSection {
+  display: grid;
+  gap: 10px;
+  width: 100%;
 }
 
 .ssCompareStrip {
@@ -201,47 +234,68 @@
   color: var(--ss-best);
 }
 
+.ssMetricValue--strict {
+  color: var(--ss-strict);
+}
+
 .ssTimeSide {
   display: grid;
   gap: 8px;
   align-content: start;
 }
 
-.ssViewLegend {
-  display: flex;
+.ssViewLegend,
+.ssOverallLegend {
+  display: grid;
+  grid-template-columns: 46px repeat(4, max-content);
   align-items: center;
-  gap: 6px;
-  font-size: 0.76rem;
+  gap: 2px 6px;
+  font-size: 0.72rem;
   font-weight: 700;
   margin-bottom: 0;
   min-height: 18px;
 }
 
+.ssOverallLegend {
+  grid-template-columns: 46px repeat(3, max-content);
+}
+
+.ssMetricLegendSpacer {
+  display: block;
+  width: 100%;
+  min-height: 1px;
+}
+
 .ssMetricGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(220px, 1fr));
-  gap: 8px 12px;
+  grid-template-columns: repeat(2, minmax(190px, 1fr));
+  gap: 4px 8px;
   align-content: start;
-  justify-content: end;
+  justify-content: stretch;
+}
+
+.ssMetricGrid--current {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 8px;
 }
 
 .ssMetricColumn {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   align-content: start;
 }
 
 .ssMetricRow,
 .ssOverallMetricRow {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 10px;
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: start;
+  gap: 4px;
 }
 
 .ssMetricLabel,
 .ssOverallMetricLabel {
-  font-size: clamp(0.88rem, 1.15vw, 1.02rem);
+  font-size: clamp(0.82rem, 1.02vw, 0.98rem);
   font-weight: 700;
   letter-spacing: -0.02em;
   white-space: nowrap;
@@ -268,19 +322,22 @@
 .ssMetricValues,
 .ssOverallMetricValues {
   min-width: 0;
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
   align-items: baseline;
-  gap: 6px;
-  flex-wrap: nowrap;
+  gap: 2px 6px;
+  justify-content: start;
   white-space: nowrap;
 }
 
-.ssMetricRow .ssMetricValues {
-  justify-content: flex-start;
+.ssMetricDot,
+.ssMetricSpacer {
+  display: none;
 }
 
 .ssMetricValue {
-  font-size: clamp(0.92rem, 1.1vw, 1.04rem);
+  font-size: clamp(0.88rem, 1vw, 1rem);
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -315,12 +372,12 @@
 .ssSingleRow {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 10px;
+  gap: 6px;
   align-items: baseline;
 }
 
 .ssSingleLabel {
-  font-size: clamp(1rem, 1.4vw, 1.18rem);
+  font-size: clamp(0.96rem, 1.25vw, 1.12rem);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -328,19 +385,20 @@
 .ssSingleValues {
   display: flex;
   justify-content: flex-start;
-  gap: 10px;
+  gap: 8px;
   white-space: nowrap;
 }
 
 .ssSingleValues .ssMetricValue {
-  font-size: clamp(1.08rem, 1.55vw, 1.34rem);
+  font-size: clamp(1rem, 1.35vw, 1.22rem);
 }
 
 .ssTopMetaRow {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 2px;
+  grid-template-columns: repeat(3, minmax(64px, max-content));
+  gap: 6px;
   align-items: start;
+  justify-content: start;
 }
 
 .ssMetaGrid,
@@ -349,6 +407,12 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px 8px;
   align-content: start;
+}
+
+.ssMetaGrid--currentRow {
+  grid-template-columns: repeat(2, minmax(99px, max-content));
+  gap: 2px 14px;
+  justify-content: start;
 }
 
 .ssMetaColumn {
@@ -360,7 +424,7 @@
   display: grid;
   grid-template-columns: auto auto;
   justify-content: space-between;
-  gap: 6px;
+  gap: 4px;
   align-items: baseline;
 }
 
@@ -382,14 +446,14 @@
 }
 
 .ssMetaLabel {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   color: var(--ss-muted);
   font-weight: 700;
   white-space: nowrap;
 }
 
 .ssMetaValue {
-  font-size: clamp(0.9rem, 1.05vw, 1rem);
+  font-size: clamp(0.86rem, 0.98vw, 0.96rem);
   font-weight: 700;
   color: var(--ss-text);
   white-space: nowrap;
@@ -440,15 +504,19 @@
 
 .ssOverallBody {
   display: grid;
-  grid-template-columns: minmax(0, 2.15fr) minmax(136px, 0.85fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, 2.3fr) minmax(156px, 0.9fr);
+  gap: 6px;
   align-content: start;
 }
 
 .ssOverallMetricGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(132px, 1fr));
-  gap: 8px 20px;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 4px 8px;
+}
+
+.ssMetricGridSlot--empty {
+  min-height: 1px;
 }
 
 .ssOverallMeta {
@@ -459,7 +527,7 @@
 .ssOverallMetaRow {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 6px;
+  gap: 4px;
 }
 
 .ssOverallMetaRow--pair {
@@ -478,9 +546,31 @@
     grid-template-columns: 1fr;
   }
 
-  .ssViewSide {
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    padding-top: 16px;
+  .ssCurrentSummaryGrid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .ssMetricGrid {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+    gap: 4px 8px;
+  }
+
+  .ssMetricGrid--current {
+    gap: 2px 6px;
+  }
+
+  .ssViewLegend,
+  .ssOverallLegend {
+    grid-template-columns: repeat(4, max-content);
+  }
+
+  .ssOverallLegend {
+    grid-template-columns: repeat(3, max-content);
+  }
+
+  .ssMetricLegendSpacer {
+    display: none;
   }
 
   .ssSingleValues {
@@ -489,6 +579,7 @@
 }
 
 @media (max-width: 820px) {
+  .ssCurrentSummaryGrid,
   .ssTopMetaRow,
   .ssMetricGrid,
   .ssOverallMetricGrid,
@@ -515,7 +606,16 @@
   .ssOverallMetricValues,
   .ssSingleValues {
     justify-content: flex-start;
-    flex-wrap: wrap;
     white-space: normal;
+  }
+
+  .ssMetricValues,
+  .ssOverallMetricValues {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(auto-fit, minmax(72px, max-content));
+  }
+
+  .ssMetaGrid--currentRow {
+    grid-template-columns: 1fr;
   }
 }

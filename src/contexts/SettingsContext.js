@@ -6,6 +6,11 @@ import React, {
   useMemo,
   useEffect,
 } from "react";
+import {
+  getDefaultHomeStatsSlots,
+  normalizeHomeStatsSlots,
+  normalizeHomeStatsSolveLimit,
+} from "../components/HomeStats/homeStatsConfig";
 
 const SettingsContext = createContext(null);
 
@@ -55,10 +60,24 @@ export const defaultSettings = {
   showPlayerBar: true,
   lastEvent: "333",
   lastSessionByEvent: {},
+  homeStatsSolveLimit: 50,
+  homeStatsSlots: getDefaultHomeStatsSlots(),
+
+  wcaImportSessionByEvent: {},
+  wcaImportSolveSource: "WCA",
+  wcaImportLastSyncAt: "",
 };
 
 function mergeSettings(input) {
   const safe = input && typeof input === "object" ? input : {};
+  const normalizedHomeStatsSlots = normalizeHomeStatsSlots(safe.homeStatsSlots);
+  const legacyLineSolveLimits = Object.values(normalizedHomeStatsSlots)
+    .map((slot) => Number(slot?.lineSolveLimit))
+    .filter((value) => Number.isFinite(value) && value >= 0);
+  const fallbackHomeStatsSolveLimit =
+    legacyLineSolveLimits.find((value) => value > 0) ??
+    legacyLineSolveLimits[0] ??
+    defaultSettings.homeStatsSolveLimit;
 
   return {
     ...defaultSettings,
@@ -71,6 +90,21 @@ function mergeSettings(input) {
       safe.lastSessionByEvent && typeof safe.lastSessionByEvent === "object"
         ? safe.lastSessionByEvent
         : {},
+    homeStatsSolveLimit: normalizeHomeStatsSolveLimit(
+      safe.homeStatsSolveLimit,
+      fallbackHomeStatsSolveLimit
+    ),
+    homeStatsSlots: normalizedHomeStatsSlots,
+    wcaImportSessionByEvent:
+      safe.wcaImportSessionByEvent && typeof safe.wcaImportSessionByEvent === "object"
+        ? safe.wcaImportSessionByEvent
+        : {},
+    wcaImportSolveSource:
+      typeof safe.wcaImportSolveSource === "string" && safe.wcaImportSolveSource.trim()
+        ? safe.wcaImportSolveSource.trim()
+        : "WCA",
+    wcaImportLastSyncAt:
+      typeof safe.wcaImportLastSyncAt === "string" ? safe.wcaImportLastSyncAt : "",
   };
 }
 

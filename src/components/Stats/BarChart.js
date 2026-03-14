@@ -99,7 +99,15 @@ function buildHistogramSeries(solves, style = null, fallbackColor = "#2EC4B6") {
   return { minTimeSec, maxTimeSec, buckets };
 }
 
-function BarChart({ solves, comparisonSeries = [], seriesStyle = null, legendItems = [] }) {
+function BarChart({
+  solves,
+  comparisonSeries = [],
+  seriesStyle = null,
+  legendItems = [],
+  showAxes = true,
+  showLabels = true,
+  showLegend = true,
+}) {
   const containerRef = useRef(null);
 
   const [tooltip, setTooltip] = useState({
@@ -227,7 +235,7 @@ function BarChart({ solves, comparisonSeries = [], seriesStyle = null, legendIte
         height: "100%",
       }}
     >
-      {hasComparison && legendItems.length > 0 && (
+      {showLegend && hasComparison && legendItems.length > 0 && (
         <div className="lineChartLegend lineChartLegend--bar">
           {legendItems.map((item) => (
             <div key={item.id || item.label} className="lineChartLegendItem">
@@ -242,14 +250,18 @@ function BarChart({ solves, comparisonSeries = [], seriesStyle = null, legendIte
       )}
 
       <svg width={chartWidth} height={chartHeight}>
-        <line
-          x1={padding}
-          y1={chartHeight - padding}
-          x2={chartWidth - padding}
-          y2={chartHeight - padding}
-          stroke="#ccc"
-        />
-        <line x1={padding} y1={padding} x2={padding} y2={chartHeight - padding} stroke="#ccc" />
+        {showAxes && (
+          <>
+            <line
+              x1={padding}
+              y1={chartHeight - padding}
+              x2={chartWidth - padding}
+              y2={chartHeight - padding}
+              stroke="#ccc"
+            />
+            <line x1={padding} y1={padding} x2={padding} y2={chartHeight - padding} stroke="#ccc" />
+          </>
+        )}
 
         {computed.mode === "single" &&
           computed.buckets.map((bucket, index) => {
@@ -283,7 +295,7 @@ function BarChart({ solves, comparisonSeries = [], seriesStyle = null, legendIte
                   }
                 />
 
-                {index % labelEvery === 0 && (
+                {showLabels && index % labelEvery === 0 && (
                   <text
                     x={x + barWidth / 2}
                     y={chartHeight - padding + 14}
@@ -338,7 +350,7 @@ function BarChart({ solves, comparisonSeries = [], seriesStyle = null, legendIte
                   );
                 })}
 
-                {groupIndex % labelEvery === 0 && (
+                {showLabels && groupIndex % labelEvery === 0 && (
                   <text
                     x={padding + groupIndex * groupWidth + groupWidth / 2}
                     y={chartHeight - padding + 14}
@@ -353,7 +365,7 @@ function BarChart({ solves, comparisonSeries = [], seriesStyle = null, legendIte
             );
           })}
 
-        {[0, computed.maxCount].map((value, index) => (
+        {showLabels && [0, computed.maxCount].map((value, index) => (
           <text
             key={index}
             x={padding - 8}

@@ -3,6 +3,38 @@ import "./Settings.css";
 import { useSettings } from "../../contexts/SettingsContext";
 import { getUser } from "../../services/getUser";
 import { updateUser } from "../../services/updateUser";
+import { getSessions } from "../../services/getSessions";
+import { syncWcaImport } from "../../services/syncWcaImport";
+import { recomputeSessionStats } from "../../services/recomputeSessionStats";
+import { recomputeEventStats } from "../../services/recomputeEventStats";
+import { recomputeTagStats } from "../../services/recomputeTagStats";
+import {
+  HOME_STAT_COLOR_SCHEME_OPTIONS,
+  getHomeStatMetricOptions,
+  HOME_STAT_CHART_TYPE_OPTIONS,
+  HOME_STAT_LINE_GROUP_OPTIONS,
+  HOME_STAT_SLOT_META,
+  HOME_STAT_SLOT_ORDER,
+  normalizeHomeStatsSlots,
+} from "../HomeStats/homeStatsConfig";
+
+const WCA_IMPORT_EVENT_OPTIONS = [
+  { code: "222", label: "2x2" },
+  { code: "333", label: "3x3" },
+  { code: "444", label: "4x4" },
+  { code: "555", label: "5x5" },
+  { code: "666", label: "6x6" },
+  { code: "777", label: "7x7" },
+  { code: "333OH", label: "3x3 OH" },
+  { code: "333BLD", label: "3x3 BLD" },
+  { code: "444BLD", label: "4x4 BLD" },
+  { code: "555BLD", label: "5x5 BLD" },
+  { code: "CLOCK", label: "Clock" },
+  { code: "MEGAMINX", label: "Megaminx" },
+  { code: "PYRAMINX", label: "Pyraminx" },
+  { code: "SKEWB", label: "Skewb" },
+  { code: "SQ1", label: "Square-1" },
+];
 
 const DEFAULT_TAG_CONFIG = {
   Fixed: {
@@ -10,6 +42,14 @@ const DEFAULT_TAG_CONFIG = {
     CrossColor: {
       label: "Cross Color",
       options: ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
+    },
+    TimerInput: {
+      label: "Timer Input",
+      options: ["Keyboard", "Type", "Stackmat", "GAN Bluetooth", "GAN Cube"],
+    },
+    SolveSource: {
+      label: "Solve Source",
+      options: ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA"],
     },
   },
   CustomSlots: [
@@ -20,6 +60,24 @@ const DEFAULT_TAG_CONFIG = {
     { slot: "Custom5", label: "", options: [] },
   ],
 };
+
+const RECOMPUTE_SCOPE_OPTIONS = [
+  { value: "session", label: "Session" },
+  { value: "event", label: "All Sessions In Event" },
+  { value: "tag", label: "Tag Scope" },
+];
+
+const TAG_KEY_OPTIONS = [
+  { value: "SolveSource", label: "Solve Source" },
+  { value: "CubeModel", label: "Cube Model" },
+  { value: "CrossColor", label: "Cross Color" },
+  { value: "TimerInput", label: "Timer Input" },
+  { value: "Custom1", label: "Custom 1" },
+  { value: "Custom2", label: "Custom 2" },
+  { value: "Custom3", label: "Custom 3" },
+  { value: "Custom4", label: "Custom 4" },
+  { value: "Custom5", label: "Custom 5" },
+];
 
 function cleanArrayInput(value) {
   return String(value || "")
@@ -45,6 +103,18 @@ function normalizeTagConfig(input) {
           ? fixed.CrossColor.options
           : ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
       },
+      TimerInput: {
+        label: fixed?.TimerInput?.label || "Timer Input",
+        options: Array.isArray(fixed?.TimerInput?.options)
+          ? fixed.TimerInput.options
+          : ["Keyboard", "Type", "Stackmat", "GAN Bluetooth", "GAN Cube"],
+      },
+      SolveSource: {
+        label: fixed?.SolveSource?.label || "Solve Source",
+        options: Array.isArray(fixed?.SolveSource?.options)
+          ? fixed.SolveSource.options
+          : ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA"],
+      },
     },
     CustomSlots: Array.from({ length: 5 }, (_, i) => {
       const existing = customSlots[i] || {};
@@ -65,10 +135,21 @@ function Settings({
   statsContext = null,
   onStatsRecompute,
   onStatsImport,
+  onSessionsRefresh,
 }) {
   const { settings, updateSettings, setAllSettings } = useSettings();
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isSyncingWca, setIsSyncingWca] = useState(false);
+  const [wcaSyncSummary, setWcaSyncSummary] = useState("");
+  const [sessionItems, setSessionItems] = useState([]);
+  const [recomputeScope, setRecomputeScope] = useState("session");
+  const [recomputeEvent, setRecomputeEvent] = useState("");
+  const [recomputeSessionID, setRecomputeSessionID] = useState("main");
+  const [recomputeTagKey, setRecomputeTagKey] = useState("SolveSource");
+  const [recomputeTagValue, setRecomputeTagValue] = useState("WCA");
+  const [recomputeBusy, setRecomputeBusy] = useState(false);
+  const [recomputeMessage, setRecomputeMessage] = useState("");
 
   const [profileData, setProfileData] = useState({
     Name: "",
@@ -96,6 +177,9 @@ function Settings({
         if (user?.Settings && typeof user.Settings === "object") {
           setAllSettings(user.Settings);
         }
+
+        const sessions = await getSessions(userID);
+        if (!cancelled) setSessionItems(Array.isArray(sessions) ? sessions : []);
 
         setProfileData({
           Name: user?.Name || "",
@@ -174,39 +258,51 @@ function Settings({
     });
   };
 
+  const handleWcaSessionChange = (eventCode, sessionID) => {
+    updateSettings({
+      wcaImportSessionByEvent: {
+        ...(settings?.wcaImportSessionByEvent || {}),
+        [eventCode]: String(sessionID || "main"),
+      },
+    });
+  };
+
+  const persistCurrentSettings = async () => {
+    const normalizedTagConfig = normalizeTagConfig(tagConfig);
+    const updates = {
+      ...profileData,
+      Settings: { ...settings },
+      TagConfig: normalizedTagConfig,
+    };
+    const fresh = await updateUser(userID, updates);
+
+    setProfileData({
+      Name: fresh?.Name || "",
+      Color: fresh?.Color || "#0E171D",
+      ProfileEvent: fresh?.ProfileEvent || "",
+      ProfileScramble: fresh?.ProfileScramble || "",
+      ChosenStats: Array.isArray(fresh?.ChosenStats) ? fresh.ChosenStats : [],
+      DateFounded: fresh?.DateFounded || "",
+      CubeCollection: Array.isArray(fresh?.CubeCollection) ? fresh.CubeCollection : [],
+      WCAID: fresh?.WCAID || "",
+    });
+
+    if (fresh?.Settings && typeof fresh.Settings === "object") {
+      setAllSettings(fresh.Settings);
+    }
+
+    setTagConfig(normalizeTagConfig(fresh?.TagConfig));
+    onProfileUpdate?.(fresh);
+
+    return fresh;
+  };
+
   const saveAllChanges = async () => {
     if (!userID || isSaving) return;
 
     try {
       setIsSaving(true);
-
-      const normalizedTagConfig = normalizeTagConfig(tagConfig);
-
-      const updates = {
-        ...profileData,
-        Settings: { ...settings },
-        TagConfig: normalizedTagConfig,
-      };
-
-      const fresh = await updateUser(userID, updates);
-
-      setProfileData({
-        Name: fresh?.Name || "",
-        Color: fresh?.Color || "#0E171D",
-        ProfileEvent: fresh?.ProfileEvent || "",
-        ProfileScramble: fresh?.ProfileScramble || "",
-        ChosenStats: Array.isArray(fresh?.ChosenStats) ? fresh.ChosenStats : [],
-        DateFounded: fresh?.DateFounded || "",
-        CubeCollection: Array.isArray(fresh?.CubeCollection) ? fresh.CubeCollection : [],
-        WCAID: fresh?.WCAID || "",
-      });
-
-      if (fresh?.Settings && typeof fresh.Settings === "object") {
-        setAllSettings(fresh.Settings);
-      }
-
-      setTagConfig(normalizeTagConfig(fresh?.TagConfig));
-      onProfileUpdate?.(fresh);
+      await persistCurrentSettings();
 
       setStatusMessage("✅ Settings saved.");
       setTimeout(() => setStatusMessage(""), 2200);
@@ -226,7 +322,208 @@ function Settings({
     () => (Array.isArray(tagConfig?.CustomSlots) ? tagConfig.CustomSlots : []),
     [tagConfig]
   );
+  const homeStatSlots = useMemo(
+    () => normalizeHomeStatsSlots(settings?.homeStatsSlots),
+    [settings?.homeStatsSlots]
+  );
+  const homeStatsSolveLimit = Number(settings?.homeStatsSolveLimit ?? 50);
   const canShowStatsSection = !!statsContext?.isStatsRouteActive;
+  const wcaLastSyncText = settings?.wcaImportLastSyncAt
+    ? new Date(settings.wcaImportLastSyncAt).toLocaleString()
+    : "Never";
+  const wcaButtonLabel = settings?.wcaImportLastSyncAt ? "Refresh WCA Import" : "Connect WCA";
+  const defaultWcaSolveSource = String(settings?.wcaImportSolveSource || "WCA").trim() || "WCA";
+
+  const sessionOptionsByEvent = useMemo(() => {
+    const grouped = {};
+
+    for (const { code } of WCA_IMPORT_EVENT_OPTIONS) {
+      const relevant = (sessionItems || []).filter(
+        (item) => String(item?.Event || "").toUpperCase() === code
+      );
+      const unique = new Map();
+      unique.set("main", { id: "main", label: "Main" });
+
+      for (const item of relevant) {
+        const id = String(item?.SessionID || "main");
+        if (!id || unique.has(id)) continue;
+        unique.set(id, {
+          id,
+          label: String(item?.SessionName || id),
+        });
+      }
+
+      grouped[code] = Array.from(unique.values());
+    }
+
+    return grouped;
+  }, [sessionItems]);
+
+  const recomputeEventOptions = useMemo(() => {
+    const labels = new Map(WCA_IMPORT_EVENT_OPTIONS.map((item) => [item.code, item.label]));
+    const uniqueEvents = Array.from(
+      new Set((sessionItems || []).map((item) => String(item?.Event || "").toUpperCase()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
+
+    return uniqueEvents.map((eventCode) => ({
+      value: eventCode,
+      label: labels.get(eventCode) || eventCode,
+    }));
+  }, [sessionItems]);
+
+  const recomputeSessionOptions = useMemo(() => {
+    if (!recomputeEvent) return [{ value: "main", label: "Main" }];
+    return (sessionOptionsByEvent?.[recomputeEvent] || [{ id: "main", label: "Main" }]).map((option) => ({
+      value: option.id,
+      label: option.label,
+    }));
+  }, [recomputeEvent, sessionOptionsByEvent]);
+
+  const recomputeTagValueOptions = useMemo(() => {
+    if (recomputeTagKey === "SolveSource") {
+      return tagConfig?.Fixed?.SolveSource?.options || DEFAULT_TAG_CONFIG.Fixed.SolveSource.options;
+    }
+    if (recomputeTagKey === "CubeModel") return tagConfig?.Fixed?.CubeModel?.options || [];
+    if (recomputeTagKey === "CrossColor") {
+      return tagConfig?.Fixed?.CrossColor?.options || DEFAULT_TAG_CONFIG.Fixed.CrossColor.options;
+    }
+    if (recomputeTagKey === "TimerInput") {
+      return tagConfig?.Fixed?.TimerInput?.options || DEFAULT_TAG_CONFIG.Fixed.TimerInput.options;
+    }
+
+    const customSlot = customSlots.find((slot) => slot?.slot === recomputeTagKey);
+    return Array.isArray(customSlot?.options) ? customSlot.options : [];
+  }, [customSlots, recomputeTagKey, tagConfig]);
+
+  useEffect(() => {
+    if (recomputeEvent) return;
+    const preferredEvent = String(statsContext?.eventCode || statsContext?.eventLabel || "").toUpperCase();
+    if (preferredEvent && recomputeEventOptions.some((option) => option.value === preferredEvent)) {
+      setRecomputeEvent(preferredEvent);
+      return;
+    }
+    if (recomputeEventOptions[0]?.value) {
+      setRecomputeEvent(recomputeEventOptions[0].value);
+    }
+  }, [recomputeEvent, recomputeEventOptions, statsContext?.eventCode, statsContext?.eventLabel]);
+
+  useEffect(() => {
+    if (!recomputeSessionOptions.some((option) => option.value === recomputeSessionID)) {
+      setRecomputeSessionID(recomputeSessionOptions[0]?.value || "main");
+    }
+  }, [recomputeSessionID, recomputeSessionOptions]);
+
+  useEffect(() => {
+    if (!recomputeTagValueOptions.length) return;
+    if (!recomputeTagValueOptions.includes(recomputeTagValue)) {
+      setRecomputeTagValue(recomputeTagValueOptions[0]);
+    }
+  }, [recomputeTagValue, recomputeTagValueOptions]);
+
+  const handleWcaSync = async () => {
+    if (!userID || isSyncingWca) return;
+    if (!String(profileData.WCAID || "").trim()) {
+      setStatusMessage("❌ Add your WCA ID first.");
+      setTimeout(() => setStatusMessage(""), 2200);
+      return;
+    }
+
+    try {
+      setIsSyncingWca(true);
+      setWcaSyncSummary("");
+
+      await persistCurrentSettings();
+
+      const result = await syncWcaImport(userID, {
+        wcaID: profileData.WCAID,
+        settings: {
+          ...settings,
+          wcaImportSolveSource: defaultWcaSolveSource,
+          wcaImportSessionByEvent: settings?.wcaImportSessionByEvent || {},
+        },
+      });
+
+      if (result?.user) {
+        onProfileUpdate?.(result.user);
+      }
+
+      const refreshedSessions = await getSessions(userID);
+      setSessionItems(Array.isArray(refreshedSessions) ? refreshedSessions : []);
+      onSessionsRefresh?.(refreshedSessions);
+
+      const importedCount = Number(result?.importedSolveCount || 0);
+      const importedEventCount = Number(result?.importedEventCount || 0);
+      const skippedText = Array.isArray(result?.skippedEvents) && result.skippedEvents.length
+        ? ` Skipped: ${result.skippedEvents.join(", ")}.`
+        : "";
+
+      setWcaSyncSummary(
+        `Imported ${importedCount} solves across ${importedEventCount} events.${skippedText}`
+      );
+      setStatusMessage("✅ WCA import finished.");
+      setTimeout(() => setStatusMessage(""), 2200);
+    } catch (err) {
+      console.error("❌ Error syncing WCA import:", err);
+      setWcaSyncSummary("");
+      const rawMessage = String(err?.message || "WCA import failed.");
+      const friendlyMessage = rawMessage.includes("Cannot POST /api/wca/import")
+        ? "Backend is missing /api/wca/import. Restart or redeploy the server."
+        : rawMessage;
+      setStatusMessage(`❌ ${friendlyMessage}`);
+      setTimeout(() => setStatusMessage(""), 3200);
+    } finally {
+      setIsSyncingWca(false);
+    }
+  };
+
+  const updateHomeStatSlot = (slotKey, patch) => {
+    const nextSlots = {
+      ...homeStatSlots,
+      [slotKey]: {
+        ...homeStatSlots[slotKey],
+        ...patch,
+      },
+    };
+    updateSettings({ homeStatsSlots: nextSlots });
+  };
+
+  const handleManualRecompute = async () => {
+    if (!userID || !recomputeEvent || recomputeBusy) return;
+
+    const selectedSessionLabel =
+      recomputeSessionOptions.find((option) => option.value === recomputeSessionID)?.label || recomputeSessionID;
+    const scopeDescription =
+      recomputeScope === "session"
+        ? `${recomputeEvent} · ${selectedSessionLabel}`
+        : recomputeScope === "event"
+        ? `${recomputeEvent} · all sessions`
+        : `${recomputeEvent} · ${selectedSessionLabel} · ${recomputeTagKey}: ${recomputeTagValue}`;
+
+    try {
+      setRecomputeBusy(true);
+      setRecomputeMessage(`Recomputing ${scopeDescription}...`);
+
+      if (recomputeScope === "session") {
+        await recomputeSessionStats(userID, recomputeEvent, recomputeSessionID);
+      } else if (recomputeScope === "event") {
+        await recomputeEventStats(userID, recomputeEvent);
+      } else {
+        await recomputeTagStats(userID, {
+          event: recomputeEvent,
+          sessionID: recomputeSessionID,
+          tagKey: recomputeTagKey,
+          tagValue: recomputeTagValue,
+        });
+      }
+
+      setRecomputeMessage(`Recomputed ${scopeDescription}.`);
+    } catch (err) {
+      console.error("Manual recompute failed:", err);
+      setRecomputeMessage(String(err?.message || "Recompute failed."));
+    } finally {
+      setRecomputeBusy(false);
+    }
+  };
 
   return (
     <div
@@ -427,6 +724,178 @@ function Settings({
             </select>
           </div>
 
+          <h2>Home Stat Overlays</h2>
+          <div className="settingsHintText settingsHintText--tight">
+            These charts float on top of the home page without changing the timer or averages
+            layout underneath.
+          </div>
+
+          <div className="setting-item">
+            <label>Home Graph Recent Solves (0 = all)</label>
+            <input
+              type="number"
+              min="0"
+              max="10000"
+              step="1"
+              value={Number.isFinite(homeStatsSolveLimit) ? homeStatsSolveLimit : 50}
+              onChange={(e) =>
+                updateSettings({
+                  homeStatsSolveLimit: Math.max(0, Number(e.target.value) || 0),
+                })
+              }
+            />
+          </div>
+
+          {HOME_STAT_SLOT_ORDER.map((slotKey) => {
+            const slot = homeStatSlots[slotKey];
+            const meta = HOME_STAT_SLOT_META[slotKey];
+            const metricOptions = getHomeStatMetricOptions(slot.chartType);
+
+            return (
+              <div className="settingsSubsection" key={slotKey}>
+                <div className="settingsSubsectionTitle">{meta.label}</div>
+
+                <div className="setting-item">
+                  <label>Enabled</label>
+                  <input
+                    type="checkbox"
+                    checked={!!slot.enabled}
+                    onChange={(e) => updateHomeStatSlot(slotKey, { enabled: e.target.checked })}
+                  />
+                </div>
+
+                <div className="setting-item">
+                  <label>Chart Type</label>
+                  <select
+                    value={slot.chartType}
+                    onChange={(e) => updateHomeStatSlot(slotKey, { chartType: e.target.value })}
+                  >
+                    {HOME_STAT_CHART_TYPE_OPTIONS.map((option) => (
+                      <option key={`${slotKey}-${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="setting-item">
+                  <label>Color Scheme</label>
+                  <select
+                    value={slot.colorScheme || "default"}
+                    onChange={(e) => updateHomeStatSlot(slotKey, { colorScheme: e.target.value })}
+                  >
+                    {HOME_STAT_COLOR_SCHEME_OPTIONS.map((option) => (
+                      <option key={`${slotKey}-color-${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {metricOptions.length > 0 && (
+                  <div className="setting-item">
+                    <label>{slot.chartType === "pie" ? "Breakdown" : "Metric"}</label>
+                    <select
+                      value={slot.chartType === "pie" ? slot.pieBreakdown : slot.lineMetric}
+                      onChange={(e) =>
+                        updateHomeStatSlot(
+                          slotKey,
+                          slot.chartType === "pie"
+                            ? { pieBreakdown: e.target.value }
+                            : { lineMetric: e.target.value }
+                        )
+                      }
+                    >
+                      {metricOptions.map((option) => (
+                        <option key={`${slotKey}-metric-${option.value}`} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {slot.chartType === "line" && (
+                  <div className="setting-item">
+                    <label>Group By</label>
+                    <select
+                      value={slot.lineGroupBy}
+                      onChange={(e) => updateHomeStatSlot(slotKey, { lineGroupBy: e.target.value })}
+                    >
+                      {HOME_STAT_LINE_GROUP_OPTIONS.map((option) => (
+                        <option key={`${slotKey}-group-${option.value}`} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {slot.chartType === "percent" && (
+                  <div className="setting-item">
+                    <label>Threshold (s)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="300"
+                      step="0.1"
+                      value={slot.percentThresholdSeconds}
+                      onChange={(e) =>
+                        updateHomeStatSlot(slotKey, {
+                          percentThresholdSeconds: Number(e.target.value) || 10,
+                        })
+                      }
+                    />
+                  </div>
+                )}
+
+                <div className="setting-item">
+                  <label>Width (px)</label>
+                  <input
+                    type="number"
+                    min="120"
+                    max="1200"
+                    step="10"
+                    value={slot.width}
+                    onChange={(e) =>
+                      updateHomeStatSlot(slotKey, { width: Number(e.target.value) || slot.width })
+                    }
+                  />
+                </div>
+
+                <div className="setting-item">
+                  <label>Height (px)</label>
+                  <input
+                    type="number"
+                    min="90"
+                    max="700"
+                    step="10"
+                    value={slot.height}
+                    onChange={(e) =>
+                      updateHomeStatSlot(slotKey, { height: Number(e.target.value) || slot.height })
+                    }
+                  />
+                </div>
+
+                <div className="setting-item">
+                  <label>Opacity</label>
+                  <input
+                    type="number"
+                    min="0.05"
+                    max="1"
+                    step="0.05"
+                    value={slot.opacity}
+                    onChange={(e) =>
+                      updateHomeStatSlot(slotKey, {
+                        opacity: Math.max(0.05, Math.min(1, Number(e.target.value) || slot.opacity)),
+                      })
+                    }
+                  />
+                </div>
+              </div>
+            );
+          })}
+
           <h2>Key Bindings</h2>
           <div className="settings-container">
             {Object.entries(settings.eventKeyBindings || {}).map(([event, combo]) => (
@@ -516,6 +985,61 @@ function Settings({
           </div>
         </div>
 
+        <h2>WCA Import</h2>
+        <div className="settings-container">
+          <div className="setting-item">
+            <label>Sync:</label>
+            <button
+              type="button"
+              className="settingsActionButton"
+              onClick={handleWcaSync}
+              disabled={!userID || isSaving || isSyncingWca || !String(profileData.WCAID || "").trim()}
+            >
+              {isSyncingWca ? "Importing..." : wcaButtonLabel}
+            </button>
+          </div>
+
+          <div className="setting-item">
+            <label>Last Sync:</label>
+            <div className="settingsStaticValue">{wcaLastSyncText}</div>
+          </div>
+
+          <div className="setting-item">
+            <label>Solve Source:</label>
+            <input
+              type="text"
+              value={defaultWcaSolveSource}
+              onChange={(e) => updateSettings({ wcaImportSolveSource: e.target.value })}
+              placeholder="WCA"
+            />
+          </div>
+
+          {WCA_IMPORT_EVENT_OPTIONS.map(({ code, label }) => (
+            <div className="setting-item" key={code}>
+              <label>{label} Session:</label>
+              <select
+                value={settings?.wcaImportSessionByEvent?.[code] || "main"}
+                onChange={(e) => handleWcaSessionChange(code, e.target.value)}
+              >
+                {(sessionOptionsByEvent?.[code] || [{ id: "main", label: "Main" }]).map(
+                  (option) => (
+                    <option key={`${code}-${option.id}`} value={option.id}>
+                      {option.label}
+                    </option>
+                  )
+                )}
+              </select>
+            </div>
+          ))}
+
+          <div className="settingsHintText">
+            WCA imports use the selected session for each event and tag imported solves with
+            the fixed `Solve Source` tag so you can filter them later.
+          </div>
+
+          {wcaSyncSummary ? <div className="settingsHintText">{wcaSyncSummary}</div> : null}
+        </div>
+
         <h2>Tag Configuration</h2>
         <div className="settings-container">
           <div className="setting-item">
@@ -565,42 +1089,141 @@ function Settings({
           ))}
         </div>
 
-        {canShowStatsSection && (
+        {userID && (
           <>
-            <h2>Stats</h2>
+            <h2>Stats Recompute</h2>
             <div className="settings-container">
               <div className="setting-item">
+                <label>Scope:</label>
+                <select
+                  value={recomputeScope}
+                  onChange={(e) => setRecomputeScope(e.target.value)}
+                >
+                  {RECOMPUTE_SCOPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="setting-item">
                 <label>Event:</label>
-                <div className="settingsStaticValue">{statsContext?.eventLabel || "—"}</div>
-              </div>
-
-              <div className="setting-item">
-                <label>Session:</label>
-                <div className="settingsStaticValue">{statsContext?.sessionLabel || "—"}</div>
-              </div>
-
-              <div className="setting-item">
-                <label>Recompute Overall:</label>
-                <button
-                  type="button"
-                  className="settingsActionButton"
-                  onClick={onStatsRecompute}
-                  disabled={!statsContext?.canRecomputeOverall || statsContext?.loadingOverallStats}
+                <select
+                  value={recomputeEvent}
+                  onChange={(e) => setRecomputeEvent(e.target.value)}
                 >
-                  {statsContext?.loadingOverallStats ? "Recomputing..." : "Recompute"}
-                </button>
+                  {recomputeEventOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="setting-item">
-                <label>Import Solves:</label>
-                <button
-                  type="button"
-                  className="settingsActionButton"
-                  onClick={onStatsImport}
-                  disabled={!statsContext?.canImport || statsContext?.importBusy}
+                <label>{recomputeScope === "event" ? "Scope View:" : "Session:"}</label>
+                <select
+                  value={recomputeSessionID}
+                  onChange={(e) => setRecomputeSessionID(e.target.value)}
+                  disabled={recomputeScope === "event"}
                 >
-                  {statsContext?.importBusy ? "Importing..." : "Open Import"}
-                </button>
+                  {recomputeSessionOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {recomputeScope === "tag" && (
+                <>
+                  <div className="setting-item">
+                    <label>Tag Key:</label>
+                    <select
+                      value={recomputeTagKey}
+                      onChange={(e) => setRecomputeTagKey(e.target.value)}
+                    >
+                      {TAG_KEY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {recomputeTagValueOptions.length > 0 ? (
+                    <div className="setting-item">
+                      <label>Tag Value:</label>
+                      <select
+                        value={recomputeTagValue}
+                        onChange={(e) => setRecomputeTagValue(e.target.value)}
+                      >
+                        {recomputeTagValueOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="setting-item">
+                      <label>Tag Value:</label>
+                      <input
+                        type="text"
+                        value={recomputeTagValue}
+                        onChange={(e) => setRecomputeTagValue(e.target.value)}
+                        placeholder="WCA"
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div className="setting-item settingsActionsRow">
+                <label>Run:</label>
+                <div className="settingsActionGroup">
+                  <button
+                    type="button"
+                    className="settingsActionButton"
+                    onClick={handleManualRecompute}
+                    disabled={
+                      !recomputeEvent ||
+                      recomputeBusy ||
+                      (recomputeScope === "tag" && !String(recomputeTagValue || "").trim())
+                    }
+                  >
+                    {recomputeBusy ? "Recomputing..." : "Recompute Selected Scope"}
+                  </button>
+
+                  {canShowStatsSection ? (
+                    <button
+                      type="button"
+                      className="settingsActionButton settingsActionButtonSecondary"
+                      onClick={onStatsRecompute}
+                      disabled={!statsContext?.canRecomputeOverall || statsContext?.loadingOverallStats}
+                    >
+                      {statsContext?.loadingOverallStats ? "Recomputing..." : "Use Current Stats Scope"}
+                    </button>
+                  ) : null}
+
+                  {onStatsImport ? (
+                    <button
+                      type="button"
+                      className="settingsActionButton settingsActionButtonSecondary"
+                      onClick={onStatsImport}
+                      disabled={!!statsContext?.importBusy}
+                    >
+                      {statsContext?.importBusy ? "Importing..." : "Open Import"}
+                    </button>
+                  ) : null}
+
+                  {recomputeMessage ? (
+                    <div className="settingsHelpText">{recomputeMessage}</div>
+                  ) : statsContext?.recomputeStatusText ? (
+                    <div className="settingsHelpText">{statsContext.recomputeStatusText}</div>
+                  ) : null}
+                </div>
               </div>
             </div>
           </>

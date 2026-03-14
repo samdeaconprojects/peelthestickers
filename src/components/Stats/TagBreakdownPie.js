@@ -7,6 +7,7 @@ const BREAKDOWN_OPTIONS = [
   { value: "CubeModel", label: "Cube Model" },
   { value: "CrossColor", label: "Cross Color" },
   { value: "TimerInput", label: "Timer Input" },
+  { value: "SolveSource", label: "Solve Source" },
   { value: "Shared", label: "Shared" },
   { value: "Imports", label: "Imports" },
 ];
@@ -54,6 +55,10 @@ function getBucketValue(solve, mode) {
 
   if (mode === "TimerInput") {
     return String(tags?.TimerInput || tags?.InputType || "").trim() || "Unknown";
+  }
+
+  if (mode === "SolveSource") {
+    return String(tags?.SolveSource || "").trim() || "Unknown";
   }
 
   if (mode === "Shared") {

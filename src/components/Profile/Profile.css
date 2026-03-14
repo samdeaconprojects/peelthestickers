@@ -112,6 +112,20 @@
   min-height: 0;
 }
 
+.profileStatsItem--pie .pieChartRoot {
+  grid-template-columns: minmax(0, 0.82fr) minmax(140px, 1fr);
+}
+
+.profileStatsItem--pie .pieChartCanvas {
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.profileStatsItem--pie .pieChartSvg {
+  width: 84%;
+  height: 84%;
+}
+
 /* Make only the posts tab scroll */
 .tabPanel.postsPanel {
   flex: 1;

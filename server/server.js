@@ -24,6 +24,7 @@ const {
   normalizeEvent,
   normalizeSessionID,
   normalizePenalty,
+  STRICT_WINDOW_VERSION,
   CACHED_WINDOW_CONFIGS,
   parseSolveSK,
   normalizeTagIndexValue,
@@ -67,6 +68,10 @@ function requirePkSk(res) {
   return true;
 }
 
+function hasCurrentStrictWindowVersion(item) {
+  return Number(item?.StrictWindowVersion || 0) === STRICT_WINDOW_VERSION;
+}
+
 function buildDefaultTagConfig(tagOptions = null) {
   return {
     Fixed: {
@@ -80,6 +85,14 @@ function buildDefaultTagConfig(tagOptions = null) {
           ? tagOptions.CrossColors
           : ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
       },
+      TimerInput: {
+        label: "Timer Input",
+        options: ["Keyboard", "Type", "Stackmat", "GAN Bluetooth", "GAN Cube"],
+      },
+      SolveSource: {
+        label: "Solve Source",
+        options: ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA"],
+      },
     },
     CustomSlots: [
       { slot: "Custom1", label: "", options: [] },
@@ -89,6 +102,640 @@ function buildDefaultTagConfig(tagOptions = null) {
       { slot: "Custom5", label: "", options: [] },
     ],
   };
+}
+
+const WCA_EVENT_CODE_MAP = Object.freeze({
+  "222": "222",
+  "333": "333",
+  "444": "444",
+  "555": "555",
+  "666": "666",
+  "777": "777",
+  "333oh": "333OH",
+  "333bf": "333BLD",
+  "444bf": "444BLD",
+  "555bf": "555BLD",
+  clock: "CLOCK",
+  minx: "MEGAMINX",
+  pyram: "PYRAMINX",
+  skewb: "SKEWB",
+  sq1: "SQ1",
+  "333fm": "FMC",
+  "333mbf": "MBLD",
+});
+
+const WCA_SUPPORTED_IMPORT_EVENTS = new Set([
+  "222",
+  "333",
+  "444",
+  "555",
+  "666",
+  "777",
+  "333OH",
+  "333BLD",
+  "444BLD",
+  "555BLD",
+  "CLOCK",
+  "MEGAMINX",
+  "PYRAMINX",
+  "SKEWB",
+  "SQ1",
+]);
+
+function normalizeWcaId(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase();
+}
+
+function titleizeSessionID(sessionID) {
+  const sid = String(sessionID || "").trim();
+  if (!sid || sid === "main") return "Main";
+  return sid
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+async function ensureSessionRecordExists(userID, event, sessionID, sessionName = null) {
+  const ev = normalizeEvent(event);
+  const sid = normalizeSessionID(sessionID);
+  const key = { PK: `USER#${userID}`, SK: `SESSION#${ev}#${sid}` };
+
+  const existing = await ddb.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: key,
+    })
+  );
+
+  if (existing.Item) return existing.Item;
+
+  const ts = nowIso();
+  const item = {
+    ...key,
+    ItemType: "SESSION",
+    Event: ev,
+    SessionID: sid,
+    SessionName: String(sessionName || titleizeSessionID(sid) || "Main"),
+    CreatedAt: ts,
+    UpdatedAt: ts,
+  };
+
+  await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+  await ensureSessionStatsExists(userID, ev, sid);
+  return item;
+}
+
+async function getAllSolvesForSession(userID, event, sessionID) {
+  const ev = normalizeEvent(event);
+  const sid = normalizeSessionID(sessionID);
+  const items = [];
+  let cursor = null;
+
+  do {
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        IndexName: "GSI1",
+        KeyConditionExpression: "GSI1PK = :pk",
+        ExpressionAttributeValues: {
+          ":pk": `SESSION#${userID}#${ev}#${sid}`,
+        },
+        ScanIndexForward: true,
+        ExclusiveStartKey: cursor || undefined,
+      })
+    );
+
+    if (Array.isArray(out.Items) && out.Items.length) items.push(...out.Items);
+    cursor = out.LastEvaluatedKey || null;
+  } while (cursor);
+
+  return items;
+}
+
+async function getAllSolvesForEvent(userID, event) {
+  const ev = normalizeEvent(event);
+  const items = [];
+  let cursor = null;
+
+  do {
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        IndexName: "GSI2",
+        KeyConditionExpression: "GSI2PK = :pk",
+        ExpressionAttributeValues: {
+          ":pk": `EVENT#${userID}#${ev}`,
+        },
+        ScanIndexForward: true,
+        ExclusiveStartKey: cursor || undefined,
+      })
+    );
+
+    if (Array.isArray(out.Items) && out.Items.length) items.push(...out.Items);
+    cursor = out.LastEvaluatedKey || null;
+  } while (cursor);
+
+  return items;
+}
+
+async function fetchJsonWithTimeout(url, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "PTS-Timer-WCA-Import",
+      },
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      throw new Error(`WCA request failed (${res.status})`);
+    }
+
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error("WCA response was not valid JSON");
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchWcaResultsPayload(wcaID) {
+  const urls = [
+    `https://www.worldcubeassociation.org/api/v0/persons/${encodeURIComponent(wcaID)}/results`,
+    `https://www.worldcubeassociation.org/api/v0/persons/${encodeURIComponent(wcaID)}/results.json`,
+    `https://www.worldcubeassociation.org/api/v0/persons/${encodeURIComponent(wcaID)}`,
+    `https://www.worldcubeassociation.org/persons/${encodeURIComponent(wcaID)}.json`,
+  ];
+
+  let lastError = null;
+  for (const url of urls) {
+    try {
+      return await fetchJsonWithTimeout(url);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error("Unable to fetch WCA results");
+}
+
+async function fetchWcaCompetitionPayload(competitionID) {
+  const encoded = encodeURIComponent(String(competitionID || "").trim());
+  if (!encoded) return null;
+
+  const urls = [
+    `https://www.worldcubeassociation.org/api/v0/competitions/${encoded}`,
+    `https://www.worldcubeassociation.org/api/v0/competitions/${encoded}.json`,
+    `https://www.worldcubeassociation.org/competitions/${encoded}.json`,
+  ];
+
+  let lastError = null;
+  for (const url of urls) {
+    try {
+      return await fetchJsonWithTimeout(url);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  if (lastError) {
+    console.warn(`[wca/import] Failed to fetch competition ${competitionID}: ${lastError.message}`);
+  }
+  return null;
+}
+
+function getWcaEventCode(raw) {
+  const key = String(raw || "")
+    .trim()
+    .toLowerCase();
+
+  if (!key) return "";
+  if (WCA_EVENT_CODE_MAP[key]) return WCA_EVENT_CODE_MAP[key];
+
+  const upper = String(raw || "").trim().toUpperCase();
+  return WCA_SUPPORTED_IMPORT_EVENTS.has(upper) ? upper : "";
+}
+
+function getWcaAttemptValues(entry) {
+  if (!entry || typeof entry !== "object") return [];
+
+  if (Array.isArray(entry.attempts)) return entry.attempts;
+  if (Array.isArray(entry.solves)) return entry.solves;
+  if (Array.isArray(entry.results)) return entry.results;
+
+  const values = [];
+  for (let i = 1; i <= 5; i++) {
+    const key = `value${i}`;
+    if (typeof entry[key] !== "undefined" && entry[key] !== null) {
+      values.push(entry[key]);
+    }
+  }
+  return values;
+}
+
+function parseWcaAttemptValue(input) {
+  const rawValue =
+    input && typeof input === "object"
+      ? input.result ?? input.value ?? input.time ?? input.best ?? null
+      : input;
+  const n = Number(rawValue);
+
+  if (!Number.isFinite(n) || n === 0) return null;
+  if (n < 0) {
+    return {
+      rawTimeMs: 0,
+      penalty: "DNF",
+    };
+  }
+
+  return {
+    rawTimeMs: Math.round(n * 10),
+    penalty: null,
+  };
+}
+
+function parseWcaDateCandidate(input) {
+  if (input instanceof Date && Number.isFinite(input.getTime())) {
+    return input;
+  }
+
+  if (typeof input === "number" && Number.isFinite(input)) {
+    const ms = Math.abs(input) >= 1e11 ? Math.round(input) : Math.round(input * 1000);
+    const parsed = new Date(ms);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  const value = String(input || "").trim();
+  if (!value) return null;
+  if (/^-?\d+(\.\d+)?$/.test(value)) return parseWcaDateCandidate(Number(value));
+
+  const dateOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const parsed = dateOnlyMatch
+    ? new Date(
+        Date.UTC(
+          Number(dateOnlyMatch[1]),
+          Number(dateOnlyMatch[2]) - 1,
+          Number(dateOnlyMatch[3]),
+          12,
+          0,
+          0,
+          0
+        )
+      )
+    : new Date(value);
+
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function resolveImportedCreatedAt(input, fallbackMs = Date.now()) {
+  const candidates = [
+    input?.createdAt,
+    input?.created_at,
+    input?.CreatedAt,
+    input?.datetime,
+    input?.DateTime,
+    input?.dateTime,
+    input?.date,
+    input?.Date,
+    input?.timestamp,
+    input?.timestamp_ms,
+    input?.timestampMs,
+    input?.ts,
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = parseWcaDateCandidate(candidate);
+    if (parsed) return parsed.toISOString();
+  }
+
+  return new Date(fallbackMs).toISOString();
+}
+
+function getWcaRoundOrderValue(entry) {
+  const rawRound =
+    entry?.round_type_id ||
+    entry?.roundTypeId ||
+    entry?.round?.id ||
+    entry?.round ||
+    "";
+  const round = String(rawRound || "").trim().toLowerCase();
+  if (!round) return 0;
+
+  if (round === "f") return 100;
+  const match = round.match(/^r(\d+)$/);
+  if (match) return Number(match[1]) || 0;
+  return 0;
+}
+
+function getWcaCompetitionID(entry) {
+  const directCompetition =
+    entry?.competition?.id || entry?.competition_id || entry?.competitionId || entry?.competition;
+  if (typeof directCompetition === "string" && directCompetition.trim()) {
+    return directCompetition.trim();
+  }
+
+  const rootID = entry?.id;
+  const looksLikeCompetitionPayload =
+    typeof rootID === "string" &&
+    rootID.trim() &&
+    (entry?.class === "competition" ||
+      entry?.start_date ||
+      entry?.startDate ||
+      entry?.end_date ||
+      entry?.endDate ||
+      Array.isArray(entry?.event_ids));
+
+  if (looksLikeCompetitionPayload) {
+    return rootID.trim();
+  }
+
+  return String(
+    ""
+  ).trim();
+}
+
+function buildWcaCompetitionDateMap(payload) {
+  const queue = [payload];
+  const seen = new Set();
+  const out = new Map();
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") continue;
+    if (seen.has(current)) continue;
+    seen.add(current);
+
+    if (Array.isArray(current)) {
+      for (const item of current) queue.push(item);
+      continue;
+    }
+
+    const competitionID = getWcaCompetitionID(current);
+    const start = parseWcaDateCandidate(
+      current?.start_date ||
+        current?.startDate ||
+        current?.competition?.start_date ||
+        current?.competition?.startDate
+    );
+    const end = parseWcaDateCandidate(
+      current?.end_date ||
+        current?.endDate ||
+        current?.competition?.end_date ||
+        current?.competition?.endDate
+    );
+    const single =
+      parseWcaDateCandidate(current?.date) ||
+      parseWcaDateCandidate(current?.competition_date) ||
+      parseWcaDateCandidate(current?.competitionDate) ||
+      parseWcaDateCandidate(current?.competition?.date);
+
+    if (competitionID && (start || end || single)) {
+      const prior = out.get(competitionID) || {};
+      out.set(competitionID, {
+        start: prior.start || start || single || null,
+        end: prior.end || end || single || start || null,
+        single: prior.single || single || start || end || null,
+      });
+    }
+
+    for (const value of Object.values(current)) {
+      if (value && typeof value === "object") queue.push(value);
+    }
+  }
+
+  return out;
+}
+
+async function hydrateWcaCompetitionDateMap(payload) {
+  const out = buildWcaCompetitionDateMap(payload);
+  const queue = [payload];
+  const seen = new Set();
+  const missingCompetitionIDs = new Set();
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") continue;
+    if (seen.has(current)) continue;
+    seen.add(current);
+
+    if (Array.isArray(current)) {
+      for (const item of current) queue.push(item);
+      continue;
+    }
+
+    const competitionID = getWcaCompetitionID(current);
+    if (competitionID && !out.has(competitionID)) {
+      missingCompetitionIDs.add(competitionID);
+    }
+
+    for (const value of Object.values(current)) {
+      if (value && typeof value === "object") queue.push(value);
+    }
+  }
+
+  for (const competitionID of missingCompetitionIDs) {
+    const payload = await fetchWcaCompetitionPayload(competitionID);
+    if (!payload) continue;
+
+    const fetchedDates = buildWcaCompetitionDateMap(payload).get(competitionID);
+    if (fetchedDates) {
+      out.set(competitionID, fetchedDates);
+    }
+  }
+
+  return out;
+}
+
+function getWcaResultDate(entry, competitionDateMap = null) {
+  const candidates = [
+    entry?.date,
+    entry?.start_date,
+    entry?.startDate,
+    entry?.end_date,
+    entry?.endDate,
+    entry?.competition_date,
+    entry?.competitionDate,
+    entry?.round_date,
+    entry?.roundDate,
+    entry?.competition?.start_date,
+    entry?.competition?.startDate,
+    entry?.competition?.end_date,
+    entry?.competition?.endDate,
+    entry?.competition?.date,
+    entry?.competition?.schedule?.start_date,
+    entry?.competition?.schedule?.startDate,
+    entry?.competition?.schedule?.end_date,
+    entry?.competition?.schedule?.endDate,
+    ...(Array.isArray(entry?.competition?.dates) ? entry.competition.dates : []),
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = parseWcaDateCandidate(candidate);
+    if (parsed) return parsed;
+  }
+
+  let start = parseWcaDateCandidate(entry?.competition?.start_date || entry?.competition?.startDate);
+  let end = parseWcaDateCandidate(entry?.competition?.end_date || entry?.competition?.endDate);
+  if ((!start || !end) && competitionDateMap instanceof Map) {
+    const competitionDates = competitionDateMap.get(getWcaCompetitionID(entry));
+    if (competitionDates) {
+      start = start || competitionDates.start || competitionDates.single || null;
+      end = end || competitionDates.end || competitionDates.single || null;
+    }
+  }
+  if (start && end) {
+    const startUtc = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+    const endUtc = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+    const spanDays = Math.max(0, Math.round((endUtc - startUtc) / 86400000));
+    const roundOrder = getWcaRoundOrderValue(entry);
+    const derivedDayOffset = Math.min(spanDays, Math.max(0, roundOrder - 1));
+    return new Date(startUtc + derivedDayOffset * 86400000 + 12 * 3600000);
+  }
+
+  return null;
+}
+
+function getWcaCompetitionLabel(entry) {
+  const competition = getWcaCompetitionID(entry);
+  const round = entry?.round_type_id || entry?.roundTypeId || entry?.round?.id || entry?.round || "";
+  return [competition, round].filter(Boolean).join(" · ");
+}
+
+function extractWcaResultEntries(payload, competitionDateMap = null) {
+  const resolvedCompetitionDateMap =
+    competitionDateMap instanceof Map ? competitionDateMap : buildWcaCompetitionDateMap(payload);
+  const queue = [payload];
+  const seen = new Set();
+  const rows = [];
+  const rowSignatures = new Set();
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") continue;
+    if (seen.has(current)) continue;
+    seen.add(current);
+
+    if (Array.isArray(current)) {
+      for (const item of current) queue.push(item);
+      continue;
+    }
+
+    const eventCode = getWcaEventCode(
+      current.event_id || current.eventId || current.event?.id || current.event
+    );
+    const attemptValues = getWcaAttemptValues(current);
+    if (eventCode && attemptValues.length) {
+      const happenedAt = getWcaResultDate(current, resolvedCompetitionDateMap);
+      const signature = JSON.stringify({
+        eventCode,
+        attemptValues,
+        happenedAt: happenedAt?.toISOString?.() || "",
+        noteLabel: getWcaCompetitionLabel(current),
+      });
+
+      if (!rowSignatures.has(signature)) {
+        rowSignatures.add(signature);
+        rows.push({
+          eventCode,
+          attemptValues,
+          happenedAt,
+          noteLabel: getWcaCompetitionLabel(current),
+        });
+      }
+    }
+
+    for (const value of Object.values(current)) {
+      if (value && typeof value === "object") queue.push(value);
+    }
+  }
+
+  return rows;
+}
+
+function buildWcaImportSolves(rows, settings = {}) {
+  const orderedRows = [...(Array.isArray(rows) ? rows : [])].sort((a, b) => {
+    const aTime = Number(a?.happenedAt?.getTime?.()) || 0;
+    const bTime = Number(b?.happenedAt?.getTime?.()) || 0;
+    if (aTime !== bTime) return aTime - bTime;
+    return String(a?.noteLabel || "").localeCompare(String(b?.noteLabel || ""));
+  });
+  const grouped = new Map();
+  const skippedEvents = new Set();
+  let timestampSeed = Date.now();
+
+  const solveSource = String(settings?.wcaImportSolveSource || "WCA").trim();
+  const sessionByEvent =
+    settings?.wcaImportSessionByEvent && typeof settings.wcaImportSessionByEvent === "object"
+      ? settings.wcaImportSessionByEvent
+      : {};
+
+  for (const row of orderedRows) {
+    const eventCode = String(row?.eventCode || "").trim();
+    if (!WCA_SUPPORTED_IMPORT_EVENTS.has(eventCode)) {
+      if (eventCode) skippedEvents.add(eventCode);
+      continue;
+    }
+
+    const sessionID = normalizeSessionID(sessionByEvent[eventCode] || "main");
+    const bucketKey = `${eventCode}#${sessionID}`;
+    const existing = grouped.get(bucketKey) || {
+      event: eventCode,
+      sessionID,
+      solves: [],
+    };
+
+    const baseTime =
+      row?.happenedAt && Number.isFinite(row.happenedAt.getTime())
+        ? row.happenedAt.getTime()
+        : timestampSeed;
+
+    const notePrefix = row?.noteLabel ? `WCA import · ${row.noteLabel}` : "WCA import";
+    const tags = solveSource ? { SolveSource: solveSource } : {};
+
+    const attempts = Array.isArray(row?.attemptValues) ? row.attemptValues : [];
+    for (let i = 0; i < attempts.length; i++) {
+      const parsed = parseWcaAttemptValue(attempts[i]);
+      if (!parsed) continue;
+
+      existing.solves.push({
+        rawTimeMs: parsed.rawTimeMs,
+        penalty: parsed.penalty,
+        scramble: "",
+        note: notePrefix,
+        datetime: new Date(baseTime + i * 1000).toISOString(),
+        tags,
+      });
+    }
+
+    timestampSeed = Math.max(timestampSeed + attempts.length + 1, baseTime + attempts.length + 1);
+    grouped.set(bucketKey, existing);
+  }
+
+  return {
+    groups: Array.from(grouped.values()),
+    skippedEvents: Array.from(skippedEvents.values()),
+  };
+}
+
+function buildWcaSolveSignature(input) {
+  const createdAt = String(
+    input?.datetime || input?.createdAt || input?.created_at || input?.CreatedAt || ""
+  ).trim();
+  const rawTimeMs = Number(input?.rawTimeMs ?? input?.RawTimeMs);
+  const penalty = normalizePenalty(input?.penalty ?? input?.Penalty ?? null) || "";
+  const note = String(input?.note ?? input?.Note ?? "").trim();
+
+  return `${createdAt}|${Number.isFinite(rawTimeMs) ? rawTimeMs : "NaN"}|${penalty}|${note}`;
 }
 
 async function getSolveItem(userID, solveSKOrTimestamp) {
@@ -1631,6 +2278,10 @@ app.get("/api/sessionStats/:userID", async (req, res) => {
     );
     let item = out.Item || null;
 
+    if (item && !hasCurrentStrictWindowVersion(item)) {
+      item = await recomputeSessionStats(ddb, TABLE, userID, event, sessionID);
+    }
+
     if (
       item &&
       Number(item.SolveCountIncluded || 0) > 0 &&
@@ -1678,6 +2329,10 @@ app.get("/api/eventStats/:userID", async (req, res) => {
       })
     );
     let item = out.Item || null;
+
+    if (item && !hasCurrentStrictWindowVersion(item)) {
+      item = await recomputeEventStats(ddb, TABLE, userID, event);
+    }
 
     if (
       item &&
@@ -1734,7 +2389,7 @@ app.get("/api/tagStats/:userID", async (req, res) => {
     );
 
     let item = out.Item || null;
-    if (!item) {
+    if (!item || !hasCurrentStrictWindowVersion(item)) {
       item = await recomputeTagStats(ddb, TABLE, userID, event, sessionID, tagKey, tagValue);
     }
 
@@ -1890,7 +2545,8 @@ app.get("/api/solvesByTag/:userID", async (req, res) => {
   const rawTagKey = String(req.query?.tagKey || "").trim();
   const rawTagValue = String(req.query?.tagValue || "").trim();
   const event = normalizeEvent(req.query?.event || "");
-  const sessionID = normalizeSessionID(req.query?.sessionID || "");
+  const sessionIDRaw = String(req.query?.sessionID || "").trim();
+  const sessionID = sessionIDRaw ? normalizeSessionID(sessionIDRaw) : "";
   const limit = Math.max(1, Math.min(500, Number(req.query?.limit || 100)));
   const hydrate = String(req.query?.hydrate || "true").toLowerCase() !== "false";
   const cursorRaw = req.query?.cursor ? String(req.query.cursor) : null;
@@ -1903,6 +2559,7 @@ app.get("/api/solvesByTag/:userID", async (req, res) => {
     "CubeModel",
     "CrossColor",
     "TimerInput",
+    "SolveSource",
     "Custom1",
     "Custom2",
     "Custom3",
@@ -1992,7 +2649,7 @@ app.post("/api/solve", async (req, res) => {
     const event = normalizeEvent(req.body?.event);
     const sessionID = normalizeSessionID(req.body?.sessionID || "main");
     const rawTimeMs = Number(req.body?.rawTimeMs ?? req.body?.ms);
-    const createdAt = String(req.body?.createdAt || req.body?.ts || nowIso());
+    const createdAt = resolveImportedCreatedAt(req.body, Date.now());
 
     if (!userID) return res.status(400).json({ error: "Missing userID" });
     if (!event) return res.status(400).json({ error: "Missing event" });
@@ -2083,10 +2740,7 @@ app.post("/api/importSolvesBatch", async (req, res) => {
         rawTimeMs = Math.max(0, rawTimeMs - 2000);
       }
 
-      let createdAt = String(s.datetime || s.DateTime || "").trim();
-      if (!createdAt || !Number.isFinite(new Date(createdAt).getTime())) {
-        createdAt = new Date(baseNow + i).toISOString();
-      }
+      const createdAt = resolveImportedCreatedAt(s, baseNow + i);
 
       const solveItem = buildSolveItem({
         userID,
@@ -2129,6 +2783,151 @@ app.post("/api/importSolvesBatch", async (req, res) => {
     return res.json({ ok: true, addedSolves, wrote });
   } catch (e) {
     console.error("POST /api/importSolvesBatch error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.post("/api/wca/import", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const userID = String(req.body?.userID || "").trim();
+    const wcaID = normalizeWcaId(req.body?.wcaID || req.body?.WCAID || "");
+    const incomingSettings =
+      req.body?.settings && typeof req.body.settings === "object" ? req.body.settings : {};
+
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+    if (!wcaID) return res.status(400).json({ error: "Missing WCA ID" });
+
+    const userOut = await ddb.send(
+      new GetCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${userID}`, SK: "PROFILE" },
+      })
+    );
+
+    const userItem = userOut.Item || null;
+    if (!userItem) return res.status(404).json({ error: "User not found" });
+
+    const payload = await fetchWcaResultsPayload(wcaID);
+    const competitionDateMap = await hydrateWcaCompetitionDateMap(payload);
+    const rows = extractWcaResultEntries(payload, competitionDateMap);
+    const { groups, skippedEvents } = buildWcaImportSolves(rows, incomingSettings);
+
+    if (!groups.length) {
+      return res.status(400).json({
+        error: "No importable WCA solve data was found for that ID.",
+      });
+    }
+
+    const requests = [];
+    let importedSolveCount = 0;
+    let importedEventCount = 0;
+
+    for (const group of groups) {
+      const event = normalizeEvent(group.event);
+      const sessionID = normalizeSessionID(group.sessionID);
+      const solves = Array.isArray(group.solves) ? group.solves : [];
+      if (!solves.length) continue;
+
+      await ensureSessionRecordExists(
+        userID,
+        event,
+        sessionID,
+        sessionID === "main" ? "Main" : null
+      );
+
+      const existingSolves = await getAllSolvesForSession(userID, event, sessionID);
+      const existingSignatures = new Set(existingSolves.map((item) => buildWcaSolveSignature(item)));
+      let groupAddedCount = 0;
+
+      for (let i = 0; i < solves.length; i++) {
+        const s = solves[i] || {};
+        const createdAt = resolveImportedCreatedAt(s, Date.now() + i * 1000);
+        const signature = buildWcaSolveSignature({
+          datetime: createdAt,
+          rawTimeMs: s.rawTimeMs,
+          penalty: s.penalty,
+          note: s.note,
+        });
+        if (existingSignatures.has(signature)) continue;
+
+        const solveItem = buildSolveItem({
+          userID,
+          event,
+          sessionID,
+          rawTimeMs: s.rawTimeMs,
+          penalty: s.penalty,
+          scramble: s.scramble ?? "",
+          note: s.note ?? "",
+          tags: s.tags ?? {},
+          createdAt,
+        });
+
+        requests.push({ PutRequest: { Item: solveItem } });
+        for (const tagItem of buildSolveTagItems(solveItem)) {
+          requests.push({ PutRequest: { Item: tagItem } });
+        }
+        for (const rankItem of buildSingleRankItemsForSolve(userID, solveItem)) {
+          requests.push({ PutRequest: { Item: rankItem } });
+        }
+        existingSignatures.add(signature);
+        importedSolveCount += 1;
+        groupAddedCount += 1;
+      }
+
+      if (groupAddedCount > 0) importedEventCount += 1;
+    }
+
+    if (requests.length) {
+      await batchWriteRequestsWithRetry(requests);
+
+      for (const group of groups) {
+        if (!Array.isArray(group.solves) || !group.solves.length) continue;
+        await recomputeSessionStats(ddb, TABLE, userID, group.event, group.sessionID);
+      }
+    }
+
+    const mergedSettings = {
+      ...(userItem.Settings && typeof userItem.Settings === "object" ? userItem.Settings : {}),
+      ...incomingSettings,
+      wcaImportLastSyncAt: nowIso(),
+    };
+
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${userID}`, SK: "PROFILE" },
+        UpdateExpression: "SET #WCAID = :wcaid, #Settings = :settings, #UpdatedAt = :updatedAt",
+        ExpressionAttributeNames: {
+          "#WCAID": "WCAID",
+          "#Settings": "Settings",
+          "#UpdatedAt": "UpdatedAt",
+        },
+        ExpressionAttributeValues: {
+          ":wcaid": wcaID,
+          ":settings": mergedSettings,
+          ":updatedAt": nowIso(),
+        },
+      })
+    );
+
+    const updatedUser = await ddb.send(
+      new GetCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${userID}`, SK: "PROFILE" },
+      })
+    );
+
+    return res.json({
+      ok: true,
+      importedSolveCount,
+      importedEventCount,
+      skippedEvents,
+      user: updatedUser.Item || null,
+    });
+  } catch (e) {
+    console.error("POST /api/wca/import error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
   }
 });

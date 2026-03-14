@@ -6,6 +6,7 @@ const {
   BatchGetCommand,
 } = require("@aws-sdk/lib-dynamodb");
 const crypto = require("crypto");
+const STRICT_WINDOW_VERSION = 2;
 
 function nowIso() {
   return new Date().toISOString();
@@ -305,9 +306,96 @@ function bestMeanForWindow(solves, n) {
   return { value: best, startSolveSK: bestStart };
 }
 
+function getSolveSourceForStrict(solve) {
+  return String(solve?.Tags?.SolveSource || solve?.tags?.SolveSource || "").trim().toUpperCase();
+}
+
+function getSolveNoteForStrict(solve) {
+  return String(solve?.Note || solve?.note || "").trim();
+}
+
+function getStrictWindowCandidates(solves, size) {
+  const input = Array.isArray(solves) ? solves : [];
+  const wcaGroups = new Map();
+  const out = [];
+
+  for (let i = 0; i < input.length; i += 1) {
+    const solve = input[i];
+    const source = getSolveSourceForStrict(solve);
+    const note = getSolveNoteForStrict(solve);
+
+    if (source === "WCA" && note) {
+      const existing = wcaGroups.get(note) || [];
+      existing.push(solve);
+      wcaGroups.set(note, existing);
+    }
+  }
+
+  for (let i = 0; i < input.length; ) {
+    const solve = input[i];
+    const source = getSolveSourceForStrict(solve);
+    const note = getSolveNoteForStrict(solve);
+
+    if (source === "WCA" && note) {
+      i += 1;
+      continue;
+    }
+
+    let j = i + 1;
+    while (j < input.length) {
+      if (
+        getSolveSourceForStrict(input[j]) === "WCA" &&
+        getSolveNoteForStrict(input[j])
+      ) {
+        break;
+      }
+      j += 1;
+    }
+
+    const segment = input.slice(i, j);
+    for (let offset = 0; offset + size <= segment.length; offset += size) {
+      out.push(segment.slice(offset, offset + size));
+    }
+
+    i = j;
+  }
+
+  for (const group of wcaGroups.values()) {
+    if (group.length < size) continue;
+    for (let offset = 0; offset + size <= group.length; offset += size) {
+      out.push(group.slice(offset, offset + size));
+    }
+  }
+
+  return out;
+}
+
+function bestStrictWindow(solves, n, kind = "ao") {
+  if (!Array.isArray(solves) || solves.length < n) {
+    return { value: null, startSolveSK: null };
+  }
+
+  let best = null;
+  let bestStart = null;
+  const candidates = getStrictWindowCandidates(solves, n);
+
+  for (const slice of candidates) {
+    if (!Array.isArray(slice) || slice.length !== n) continue;
+    const value = kind === "mo3" ? computeWindowMeanMs(slice) : computeWindowAverageMs(slice);
+    if (!Number.isFinite(value)) continue;
+    if (best === null || value < best) {
+      best = value;
+      bestStart = slice[0]?.SK || null;
+    }
+  }
+
+  return { value: best, startSolveSK: bestStart };
+}
+
 function buildStatsFromSolves(solves = []) {
   if (!Array.isArray(solves) || solves.length === 0) {
     return {
+      StrictWindowVersion: STRICT_WINDOW_VERSION,
       SolveCountTotal: 0,
       SolveCountIncluded: 0,
       DNFCount: 0,
@@ -321,12 +409,18 @@ function buildStatsFromSolves(solves = []) {
 
       BestMo3Ms: null,
       BestMo3StartSolveSK: null,
+      BestMo3StrictMs: null,
+      BestMo3StrictStartSolveSK: null,
 
       BestAo5Ms: null,
       BestAo5StartSolveSK: null,
+      BestAo5StrictMs: null,
+      BestAo5StrictStartSolveSK: null,
 
       BestAo12Ms: null,
       BestAo12StartSolveSK: null,
+      BestAo12StrictMs: null,
+      BestAo12StrictStartSolveSK: null,
 
       BestAo25Ms: null,
       BestAo25StartSolveSK: null,
@@ -383,8 +477,11 @@ function buildStatsFromSolves(solves = []) {
     SolveCountIncluded > 0 ? Math.round(SumFinalTimeMs / SolveCountIncluded) : null;
 
   const mo3 = bestMeanForWindow(solves, 3);
+  const mo3Strict = bestStrictWindow(solves, 3, "mo3");
   const ao5 = bestAoForWindow(solves, 5);
+  const ao5Strict = bestStrictWindow(solves, 5, "ao");
   const ao12 = bestAoForWindow(solves, 12);
+  const ao12Strict = bestStrictWindow(solves, 12, "ao");
   const ao25 = bestAoForWindow(solves, 25);
   const ao50 = bestAoForWindow(solves, 50);
   const ao100 = bestAoForWindow(solves, 100);
@@ -393,6 +490,7 @@ function buildStatsFromSolves(solves = []) {
   const lastSolve = solves[solves.length - 1];
 
   return {
+    StrictWindowVersion: STRICT_WINDOW_VERSION,
     SolveCountTotal,
     SolveCountIncluded,
     DNFCount,
@@ -406,12 +504,18 @@ function buildStatsFromSolves(solves = []) {
 
     BestMo3Ms: mo3.value,
     BestMo3StartSolveSK: mo3.startSolveSK,
+    BestMo3StrictMs: mo3Strict.value,
+    BestMo3StrictStartSolveSK: mo3Strict.startSolveSK,
 
     BestAo5Ms: ao5.value,
     BestAo5StartSolveSK: ao5.startSolveSK,
+    BestAo5StrictMs: ao5Strict.value,
+    BestAo5StrictStartSolveSK: ao5Strict.startSolveSK,
 
     BestAo12Ms: ao12.value,
     BestAo12StartSolveSK: ao12.startSolveSK,
+    BestAo12StrictMs: ao12Strict.value,
+    BestAo12StrictStartSolveSK: ao12Strict.startSolveSK,
 
     BestAo25Ms: ao25.value,
     BestAo25StartSolveSK: ao25.startSolveSK,
@@ -447,11 +551,22 @@ function normalizeTagIndexValue(v) {
 
 function sanitizeTags(input = {}) {
   const legacyCustom = input?.Custom && typeof input.Custom === "object" ? input.Custom : {};
+  const solveSourceRaw = cleanTagValue(input?.SolveSource);
+  const derivedSolveSource = solveSourceRaw
+    ? solveSourceRaw
+    : input?.IsShared || input?.Shared
+    ? "Shared"
+    : input?.IsRelay
+    ? "Relay"
+    : input?.SmartCube
+    ? "SmartCube"
+    : "Standard";
 
   return {
     CubeModel: cleanTagValue(input?.CubeModel),
     CrossColor: cleanTagValue(input?.CrossColor),
     TimerInput: cleanTagValue(input?.TimerInput || input?.InputType),
+    SolveSource: derivedSolveSource,
     Custom1: cleanTagValue(input?.Custom1),
     Custom2: cleanTagValue(input?.Custom2),
     Custom3: cleanTagValue(input?.Custom3),
@@ -517,6 +632,7 @@ function buildSolveItem({
     Tag_CubeModel: canonicalTags.CubeModel,
     Tag_CrossColor: canonicalTags.CrossColor,
     Tag_TimerInput: canonicalTags.TimerInput,
+    Tag_SolveSource: canonicalTags.SolveSource,
     Tag_Custom1: canonicalTags.Custom1,
     Tag_Custom2: canonicalTags.Custom2,
     Tag_Custom3: canonicalTags.Custom3,
@@ -527,6 +643,7 @@ function buildSolveItem({
       CubeModel: canonicalTags.CubeModel,
       CrossColor: canonicalTags.CrossColor,
       TimerInput: canonicalTags.TimerInput,
+      SolveSource: canonicalTags.SolveSource,
       Custom1: canonicalTags.Custom1,
       Custom2: canonicalTags.Custom2,
       Custom3: canonicalTags.Custom3,
@@ -554,6 +671,7 @@ function getSolveTagPairsFromItem(solveItem) {
   add("CubeModel", solveItem?.Tag_CubeModel);
   add("CrossColor", solveItem?.Tag_CrossColor);
   add("TimerInput", solveItem?.Tag_TimerInput);
+  add("SolveSource", solveItem?.Tag_SolveSource);
   add("Custom1", solveItem?.Tag_Custom1);
   add("Custom2", solveItem?.Tag_Custom2);
   add("Custom3", solveItem?.Tag_Custom3);
@@ -1043,6 +1161,7 @@ function mergeIncrementalStats(
   if (includeCounters) {
     next = {
       ...next,
+      StrictWindowVersion: STRICT_WINDOW_VERSION,
       SolveCountTotal: Number(prev.SolveCountTotal || 0) + 1,
       SolveCountIncluded: Number(prev.SolveCountIncluded || 0) + (isIncluded ? 1 : 0),
       DNFCount: Number(prev.DNFCount || 0) + (penalty === "DNF" ? 1 : 0),
@@ -1096,6 +1215,26 @@ function mergeIncrementalStats(
         next[valueField] = avg;
         next[startField] = candidateSlice[0]?.SK || null;
       }
+    }
+  }
+
+  if ([3, 5, 12].includes(Number(windowSize)) && Array.isArray(recentSolves) && recentSolves.length >= windowSize) {
+    const strict =
+      windowSize === 3
+        ? bestStrictWindow(recentSolves, windowSize, "mo3")
+        : bestStrictWindow(recentSolves, windowSize, "ao");
+    const strictValueField =
+      windowSize === 3 ? "BestMo3StrictMs" : windowSize === 5 ? "BestAo5StrictMs" : "BestAo12StrictMs";
+    const strictStartField =
+      windowSize === 3
+        ? "BestMo3StrictStartSolveSK"
+        : windowSize === 5
+        ? "BestAo5StrictStartSolveSK"
+        : "BestAo12StrictStartSolveSK";
+
+    if (Number.isFinite(strict.value) && (next[strictValueField] == null || strict.value < next[strictValueField])) {
+      next[strictValueField] = strict.value;
+      next[strictStartField] = strict.startSolveSK || null;
     }
   }
 
@@ -1229,6 +1368,7 @@ module.exports = {
   computeWindowAverageMs,
   computeWindowMeanMs,
   buildStatsFromSolves,
+  STRICT_WINDOW_VERSION,
   BEST_WINDOW_CONFIGS,
   CACHED_WINDOW_CONFIGS,
   buildTopWindowCandidatesFromSolves,

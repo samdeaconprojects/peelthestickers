@@ -135,11 +135,25 @@ export default function ImportSolvesModal({
   const normalizeDate = (d) => {
     if (d == null) return null;
     if (typeof d === "number") {
-      // seconds vs ms
-      return d < 2e12 ? d * 1000 : d;
+      if (!Number.isFinite(d)) return null;
+      // Unix seconds are ~1e9, Unix milliseconds are ~1e12.
+      return Math.abs(d) >= 1e11 ? Math.round(d) : Math.round(d * 1000);
     }
     const s = String(d).trim();
     if (!s) return null;
+    if (/^-?\d+(\.\d+)?$/.test(s)) return normalizeDate(Number(s));
+    const dateOnlyMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnlyMatch) {
+      return Date.UTC(
+        Number(dateOnlyMatch[1]),
+        Number(dateOnlyMatch[2]) - 1,
+        Number(dateOnlyMatch[3]),
+        12,
+        0,
+        0,
+        0
+      );
+    }
     const dt = new Date(s);
     if (Number.isFinite(dt.getTime())) return dt.getTime();
     return null;
@@ -265,7 +279,21 @@ export default function ImportSolvesModal({
         scramble: s?.scramble ?? s?.Scramble ?? "",
         penalty,
         note: s?.note ?? s?.Note ?? "",
-        datetime: s?.datetime ?? s?.DateTime ?? new Date().toISOString(),
+        datetime:
+          (() => {
+            const dtMs = normalizeDate(
+              s?.datetime ??
+                s?.DateTime ??
+                s?.createdAt ??
+                s?.CreatedAt ??
+                s?.date ??
+                s?.Date ??
+                s?.timestamp ??
+                s?.timestampMs ??
+                s?.ts
+            );
+            return dtMs ? new Date(dtMs).toISOString() : new Date().toISOString();
+          })(),
         tags: s?.tags ?? s?.Tags ?? {},
         originalTime: originalTime ?? s?.time ?? null,
         event: s?.event ?? s?.Event ?? event,
@@ -290,8 +318,12 @@ export default function ImportSolvesModal({
     const iNote = idx("note");
     const iPenalty = idx("penalty");
     const iEvent = idx("event");
-    const iDate = idx("date");
-    const iTimestampMs = idx("timestampms");
+    const iDate = [idx("datetime"), idx("date"), idx("createdat"), idx("created_at")].find(
+      (value) => value >= 0
+    ) ?? -1;
+    const iTimestampMs = [idx("timestampms"), idx("timestamp"), idx("ts")].find(
+      (value) => value >= 0
+    ) ?? -1;
 
     const splitRow = (row) => (row.includes("\t") ? row.split("\t") : row.split(","));
 

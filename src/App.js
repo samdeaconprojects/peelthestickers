@@ -10,6 +10,7 @@ import Social from "./components/Social/Social";
 import Settings from "./components/Settings/Settings";
 import Navigation from "./components/Navigation/Navigation";
 import PlayerBar from "./components/PlayerBar/PlayerBar";
+import HomeStatsOverlay from "./components/HomeStats/HomeStatsOverlay";
 import EventSelector from "./components/EventSelector";
 import Scramble from "./components/Scramble/Scramble";
 import PuzzleSVG from "./components/PuzzleSVGs/PuzzleSVG";
@@ -56,6 +57,14 @@ const DEFAULT_TAG_CONFIG = {
       label: "Cross Color",
       options: ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
     },
+    TimerInput: {
+      label: "Timer Input",
+      options: ["Keyboard", "Type", "Stackmat", "GAN Bluetooth", "GAN Cube"],
+    },
+    SolveSource: {
+      label: "Solve Source",
+      options: ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA"],
+    },
   },
   CustomSlots: [
     { slot: "Custom1", label: "", options: [] },
@@ -94,6 +103,18 @@ function normalizeTagConfig(input) {
         options: Array.isArray(fixed?.CrossColor?.options)
           ? fixed.CrossColor.options
           : ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
+      },
+      TimerInput: {
+        label: fixed?.TimerInput?.label || "Timer Input",
+        options: Array.isArray(fixed?.TimerInput?.options)
+          ? fixed.TimerInput.options
+          : ["Keyboard", "Type", "Stackmat", "GAN Bluetooth", "GAN Cube"],
+      },
+      SolveSource: {
+        label: fixed?.SolveSource?.label || "Solve Source",
+        options: Array.isArray(fixed?.SolveSource?.options)
+          ? fixed.SolveSource.options
+          : ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA"],
       },
     },
     CustomSlots: Array.from({ length: 5 }, (_, i) => {
@@ -493,6 +514,7 @@ function App() {
     canRecomputeOverall: false,
     canImport: false,
     loadingOverallStats: false,
+    recomputeStatusText: "",
     importBusy: false,
     isStatsRouteActive: false,
   });
@@ -774,6 +796,13 @@ function App() {
     if (t.Custom4) payload.Custom4 = t.Custom4;
     if (t.Custom5) payload.Custom5 = t.Custom5;
 
+    if (!payload.SolveSource) {
+      if (payload.IsShared || payload.Shared) payload.SolveSource = "Shared";
+      else if (payload.IsRelay) payload.SolveSource = "Relay";
+      else if (payload.SmartCube) payload.SolveSource = "SmartCube";
+      else payload.SolveSource = "Standard";
+    }
+
     return payload;
   };
 
@@ -984,8 +1013,6 @@ function App() {
             RelayLegTimes: relayLegTimesLocal ?? baseTags.RelayLegTimes,
           }
         : baseTags;
-
-    delete mergedTags.SolveSource;
 
     const isDNF =
       item?.IsDNF === true || item?.isDNF === true || item?.Penalty === "DNF" || item?.penalty === "DNF";
@@ -1885,6 +1912,7 @@ function App() {
       canRecomputeOverall: false,
       canImport: false,
       loadingOverallStats: false,
+      recomputeStatusText: "",
       importBusy: false,
       isStatsRouteActive: false,
     });
@@ -2201,6 +2229,7 @@ function App() {
                               left: "10px",
                               display: "flex",
                               pointerEvents: "auto",
+                              zIndex: 4,
                             }}
                           >
                             <TagBarInline
@@ -2221,6 +2250,8 @@ function App() {
                       </div>
                     </div>
                   </div>
+
+                  <HomeStatsOverlay solves={currentSolves} settings={settings} user={user} />
 
                   <Timer addTime={addSolve} activeScramble={displayedScramble} />
 
@@ -2427,7 +2458,6 @@ function App() {
           onSignOut={handleSignOut}
           statsContext={statsSettingsContext}
           onStatsRecompute={() => {
-            setShowSettingsPopup(false);
             setStatsRecomputeRequest((prev) => prev + 1);
           }}
           onStatsImport={() => {
@@ -2442,6 +2472,9 @@ function App() {
               lastSavedSettingsJsonRef.current = JSON.stringify(fresh.Settings);
             }
             setTagConfig(normalizeTagConfig(fresh?.TagConfig));
+          }}
+          onSessionsRefresh={(items) => {
+            if (Array.isArray(items)) setSessionsList(items);
           }}
         />
       )}

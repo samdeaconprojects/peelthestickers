@@ -60,6 +60,7 @@ function getSolveTagValue(solve, key) {
   if (key === "CubeModel") return String(tags?.CubeModel || "").trim();
   if (key === "CrossColor") return String(tags?.CrossColor || "").trim();
   if (key === "TimerInput") return String(tags?.TimerInput || tags?.InputType || "").trim();
+  if (key === "SolveSource") return String(tags?.SolveSource || "").trim();
   if (key === "Event") return String(solve?.event || solve?.Event || "").trim();
   return "";
 }

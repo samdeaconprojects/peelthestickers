@@ -20,6 +20,9 @@ const LineChartBuilder = ({
   selectedDotRadius = 8,
   yMin = null,
   yMax = null,
+  showAxes = true,
+  showGuides = true,
+  showAxisLabels = true,
 }) => {
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, time: "" });
 
@@ -253,13 +256,13 @@ const LineChartBuilder = ({
   return (
     <div style={{ position: "relative", width: "100%", overflow: "visible" }}>
       <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: "100%", overflow: "visible" }}>
-        <XAxis />
-        <LabelsXAxis />
-        <YAxis />
-        <LabelsYAxis />
+        {showAxes && <XAxis />}
+        {showAxisLabels && <LabelsXAxis />}
+        {showAxes && <YAxis />}
+        {showAxisLabels && <LabelsYAxis />}
 
-        {numberOfVerticalGuides && <VerticalGuides />}
-        <HorizontalGuides />
+        {showGuides && numberOfVerticalGuides && <VerticalGuides />}
+        {showGuides && <HorizontalGuides />}
 
         <polyline
           fill="none"
@@ -370,6 +373,9 @@ LineChartBuilder.defaultProps = {
   selectedDotRadius: 8,
   yMin: null,
   yMax: null,
+  showAxes: true,
+  showGuides: true,
+  showAxisLabels: true,
 };
 
 LineChartBuilder.propTypes = {
@@ -422,6 +428,9 @@ LineChartBuilder.propTypes = {
   selectedDotRadius: PropTypes.number,
   yMin: PropTypes.number,
   yMax: PropTypes.number,
+  showAxes: PropTypes.bool,
+  showGuides: PropTypes.bool,
+  showAxisLabels: PropTypes.bool,
 };
 
 export default LineChartBuilder;

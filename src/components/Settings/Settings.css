@@ -93,7 +93,8 @@
 
 .setting-item select,
 .setting-item input[type="color"],
-.setting-item input[type="text"] {
+.setting-item input[type="text"],
+.setting-item input[type="number"] {
   flex: 1;
   padding: 8px;
   border-radius: 4px;
@@ -131,6 +132,62 @@
   cursor: default;
 }
 
+.settingsActionButtonSecondary {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.settingsActionsRow {
+  align-items: flex-start;
+}
+
+.settingsActionGroup {
+  flex: 1;
+  margin-left: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.settingsHintText {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.92rem;
+  line-height: 1.45;
+  margin: 6px 0 0 150px;
+}
+
+.settingsHelpText {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.84rem;
+  line-height: 1.4;
+  margin: 6px 0 0 10px;
+  max-width: 320px;
+}
+
+.settingsHintText--tight {
+  margin-top: -6px;
+  margin-bottom: 8px;
+}
+
+.settingsSubsection {
+  margin: 14px 0 20px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.settingsSubsectionTitle {
+  color: #50B6FF;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
 /* Save button styling */
 .save-button {
   margin-top: 20px;
@@ -163,4 +220,26 @@
   border-radius: 4px;
   text-align: center;
   font-size: 0.9rem;
+}
+
+@media (max-width: 640px) {
+  .setting-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .setting-item label {
+    flex: none;
+  }
+
+  .setting-item select,
+  .setting-item input[type="color"],
+  .setting-item input[type="text"],
+  .setting-item input[type="number"],
+  .settingsStaticValue,
+  .settingsActionButton,
+  .settingsActionGroup {
+    margin-left: 0;
+  }
 }

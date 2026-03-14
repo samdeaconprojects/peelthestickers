@@ -134,6 +134,43 @@ td:nth-child(13) {
   padding: 0 14px;
 }
 
+.statsFilterBtn {
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.04);
+  color: white;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.statsFilterBtn:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+.statsFilterBtnLabel {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.statsFilterBtnValue {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.statsFilterBtnMeta {
+  font-size: 11px;
+  opacity: 0.72;
+}
+
 .statsCompareRemoveBtn {
   border-style: solid;
 }
@@ -147,6 +184,10 @@ td:nth-child(13) {
   color: white;
   font-weight: 900;
   outline: none;
+}
+
+.statsPaletteSelect {
+  min-width: 138px;
 }
 
 .statsSessionWrap{
@@ -222,6 +263,90 @@ td:nth-child(13) {
 .statsSessionItem.active{
   background: rgba(46,196,182,0.10);
   border: 1px solid rgba(46,196,182,0.25);
+}
+
+.statsScopeModal {
+  width: 640px;
+  max-width: 92vw;
+  max-height: 74vh;
+  text-align: left;
+}
+
+.statsScopeModalClose {
+  background: transparent;
+  border: none;
+}
+
+.statsScopeModalHeader {
+  padding-right: 32px;
+  margin-bottom: 18px;
+}
+
+.statsScopeModalHeader h3 {
+  margin: 0;
+  color: white;
+  font-size: 26px;
+}
+
+.statsScopeModalHeader p {
+  margin: 6px 0 0;
+  color: rgba(255,255,255,0.68);
+}
+
+.statsScopeModalEyebrow {
+  margin: 0 0 8px !important;
+  color: #2EC4B6 !important;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.statsScopeModalSection {
+  padding: 12px 0;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+.statsScopeModalSectionTitle {
+  margin-bottom: 10px;
+  color: rgba(255,255,255,0.82);
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.statsScopeChipGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.statsScopeChip {
+  background: #3D3D3D;
+  color: white;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.statsScopeChip:hover {
+  background: rgba(255,255,255,0.14);
+}
+
+.statsScopeChip.active {
+  background: rgba(46,196,182,0.16);
+  border-color: rgba(46,196,182,0.5);
+}
+
+.statsScopeModalMeta {
+  margin-top: 10px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.62);
 }
 
 .statsTopMiddle{

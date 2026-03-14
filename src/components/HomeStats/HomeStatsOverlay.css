@@ -1,0 +1,143 @@
+.homeStatsOverlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.homeStatsSlot {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.homeStatsSlot--left {
+  right: calc(50% + clamp(250px, 26vw, 440px));
+  top: 455px;
+}
+
+.homeStatsSlot--right {
+  left: calc(50% + clamp(250px, 26vw, 440px));
+  top: 455px;
+}
+
+.homeStatsSlot--background {
+  left: 50%;
+  top: clamp(310px, 34vw, 380px);
+  transform: translate(calc(-50% - 36px), -50%);
+  pointer-events: none;
+  z-index: 0;
+  width: min(var(--home-stat-max-width, 860px), calc(100vw - 120px));
+  height: var(--home-stat-height, 360px);
+}
+
+.homeStatsSlot--backgroundLine {
+  height: min(
+    var(--home-stat-height, 360px),
+    calc((100vw - 120px) / var(--home-stat-aspect-ratio, 2.39))
+  );
+}
+
+@media (max-width: 980px) {
+  .homeStatsSlot--background {
+    top: 370px;
+  }
+}
+
+.homeStatsCard {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
+  overflow: hidden;
+  position: relative;
+}
+
+.homeStatsCard.is-side-slot {
+  opacity: var(--home-stat-rest-opacity, 0.4);
+  transition: opacity 160ms ease;
+}
+
+.homeStatsCard.is-side-slot.is-hovered {
+  opacity: var(--home-stat-hover-opacity, 0.92);
+}
+
+.homeStatsCard.is-background {
+  background: transparent;
+  box-shadow: none;
+}
+
+.homeStatsCard--pie {
+  overflow: visible;
+}
+
+.homeStatsCardTitle {
+  position: absolute;
+  top: 6px;
+  left: 10px;
+  z-index: 2;
+  padding: 4px 8px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0;
+  transition: opacity 140ms ease;
+  background: rgba(8, 12, 16, 0.5);
+  border-radius: 999px;
+}
+
+.homeStatsCardBody {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.homeStatsChartFrame {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.homeStatsChartFrame--pie {
+  width: 112%;
+  height: 112%;
+  margin-left: -6%;
+  margin-top: -2%;
+}
+
+.homeStatsCard--pie.is-hovered .homeStatsChartFrame--pie {
+  width: 122%;
+  margin-left: -6%;
+}
+
+.homeStatsChartFrame--bar {
+  width: 90%;
+  height: 90%;
+  margin: 5% auto;
+}
+
+.homeStatsCard:hover .homeStatsCardTitle {
+  opacity: 1;
+}
+
+.homeStatsEmpty {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+@media (max-width: 1040px) {
+  .homeStatsSlot--left,
+  .homeStatsSlot--right {
+    display: none;
+  }
+}
