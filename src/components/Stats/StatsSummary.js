@@ -95,6 +95,25 @@ function formatCompareLabel(label) {
   return String(label || "").trim() || "Compare";
 }
 
+function normalizeHexColor(input, fallback = "#50B6FF") {
+  const value = String(input || "").trim();
+  if (/^#([0-9a-f]{3})$/i.test(value)) {
+    const hex = value.slice(1);
+    return `#${hex.split("").map((ch) => ch + ch).join("")}`;
+  }
+  if (/^#([0-9a-f]{6})$/i.test(value)) return value;
+  return fallback;
+}
+
+function withAlpha(hex, alpha) {
+  const safeHex = normalizeHexColor(hex);
+  const raw = safeHex.slice(1);
+  const r = parseInt(raw.slice(0, 2), 16);
+  const g = parseInt(raw.slice(2, 4), 16);
+  const b = parseInt(raw.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function formatDateRange(solves) {
   const input = Array.isArray(solves) ? solves : [];
   if (!input.length) return "—";
@@ -915,6 +934,7 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
   loadedSolveCount = null,
   onStatSelect,
   compareSummary = null,
+  profileColor = "#50B6FF",
 }) {
   const { view, overall, overallTitle } = useStatsSummaryData({
     solves,
@@ -930,6 +950,18 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
     () => buildOverallDerived(compareSummary?.overallSolves || compareSummary?.solves || []),
     [compareSummary?.overallSolves, compareSummary?.solves]
   );
+  const resolvedProfileColor = normalizeHexColor(profileColor, "#50B6FF");
+  const overallCardStyle = useMemo(
+    () => ({
+      background: `linear-gradient(135deg, ${withAlpha(resolvedProfileColor, 0.26)}, ${withAlpha(
+        resolvedProfileColor,
+        0.14
+      )})`,
+      borderColor: withAlpha(resolvedProfileColor, 0.82),
+      boxShadow: `inset 0 1px 0 ${withAlpha(resolvedProfileColor, 0.18)}`,
+    }),
+    [resolvedProfileColor]
+  );
 
   if (mode === "all-events") {
     return null;
@@ -937,14 +969,14 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
 
   if (!view && !overallStats && !overallSolves?.length) {
     return (
-      <section className="ssCard ssCard--overall">
+      <section className="ssCard ssCard--overall" style={overallCardStyle}>
         <div className="statsSummaryEmpty">No solves available</div>
       </section>
     );
   }
 
   return (
-    <section className="ssCard ssCard--overall">
+    <section className="ssCard ssCard--overall" style={overallCardStyle}>
       <div className="ssOverallHeader">
         <div className="ssOverallTitle">{overallTitle}</div>
         <div className="ssOverallCount">{formatCount(overall.solveCountTotal)} solves</div>

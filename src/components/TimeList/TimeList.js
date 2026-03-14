@@ -74,6 +74,7 @@ function TimeList({
   currentSession,
   eventKey,
   practiceMode,
+  onAverageClick,
   onLoadMore,
   canLoadMore = true,
   isLoadingMore = false,
@@ -374,6 +375,23 @@ function TimeList({
     handleSolvePrimaryAction(solve, solveIndex);
   };
 
+  const openAverageWindow = (slice) => {
+    const solvesForAverage = Array.isArray(slice) ? slice.filter(Boolean) : [];
+    if (!solvesForAverage.length) return;
+
+    if (typeof onAverageClick === "function") {
+      onAverageClick(solvesForAverage);
+      return;
+    }
+
+    setSelectedSolveList(
+      solvesForAverage.map((s) => ({
+        ...s,
+        userID: user?.UserID,
+      }))
+    );
+  };
+
   const requestLoadMore = () => {
     if (!onLoadMore) return;
     if (!canLoadMore) return;
@@ -604,7 +622,9 @@ function TimeList({
               &nbsp;
             </td>
           ))}
-        <td className="TimeItem current-five">{formatTime(averageData.average)}</td>
+        <td className="TimeItem current-five" onClick={() => openAverageWindow(timesRow)}>
+          {formatTime(averageData.average)}
+        </td>
       </tr>
     );
   }
@@ -745,14 +765,7 @@ function TimeList({
                   <div
                     key={index}
                     className={`ao12 TimeItem ${textClass}`}
-                    onClick={() =>
-                      setSelectedSolveList(
-                        slice.map((s) => ({
-                          ...s,
-                          userID: user?.UserID,
-                        }))
-                      )
-                    }
+                    onClick={() => openAverageWindow(slice)}
                   >
                     {formatTime(avg)}
                   </div>
@@ -781,14 +794,7 @@ function TimeList({
                   <div
                     key={index}
                     className={`ao5 TimeItem ${textClass}`}
-                    onClick={() =>
-                      setSelectedSolveList(
-                        slice.map((s) => ({
-                          ...s,
-                          userID: user?.UserID,
-                        }))
-                      )
-                    }
+                    onClick={() => openAverageWindow(slice)}
                   >
                     {formatTime(avg)}
                   </div>

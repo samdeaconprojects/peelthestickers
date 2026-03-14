@@ -960,6 +960,380 @@ async function ensureSessionStatsExists(userID, event, sessionID) {
   return item;
 }
 
+function normalizeConversationType(value) {
+  const raw = String(value || "").trim().toUpperCase();
+  if (raw === "GROUP") return "GROUP";
+  return "DM";
+}
+
+function normalizeMemberIDs(memberIDs) {
+  return Array.from(
+    new Set(
+      (Array.isArray(memberIDs) ? memberIDs : [])
+        .map((id) => String(id || "").trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function parseLegacyDmConversationID(conversationID) {
+  const raw = String(conversationID || "").trim();
+  const parts = raw.split("#").map((part) => String(part || "").trim()).filter(Boolean);
+  if (parts.length !== 2) return null;
+
+  const sorted = [...parts].sort();
+  if (sorted.join("#") !== raw) return null;
+  return sorted;
+}
+
+function buildConversationMetaItem({
+  conversationID,
+  conversationType,
+  memberIDs,
+  name = "",
+  createdBy = "",
+  createdAt,
+}) {
+  const ts = String(createdAt || nowIso());
+  const type = normalizeConversationType(conversationType);
+  const members = normalizeMemberIDs(memberIDs);
+  const item = {
+    PK: `CONVO#${conversationID}`,
+    SK: "META",
+    ItemType: "CONVERSATION",
+    ConversationID: conversationID,
+    ConversationType: type,
+    Name: String(name || "").trim(),
+    CreatedBy: String(createdBy || members[0] || "").trim() || null,
+    MemberCount: members.length,
+    CreatedAt: ts,
+    UpdatedAt: ts,
+    LastMessageAt: null,
+    LastMessagePreview: "",
+  };
+
+  if (type === "DM") {
+    item.DMKey = [...members].sort().join("#");
+  }
+
+  return item;
+}
+
+function buildConversationMemberItems(conversationID, memberIDs, conversationType, createdAt) {
+  const ts = String(createdAt || nowIso());
+  const type = normalizeConversationType(conversationType);
+  return normalizeMemberIDs(memberIDs).map((userID) => ({
+    PK: `CONVO#${conversationID}`,
+    SK: `MEMBER#${userID}`,
+    ItemType: "CONVOMEMBER",
+    ConversationID: conversationID,
+    ConversationType: type,
+    UserID: userID,
+    Role: type === "GROUP" ? "MEMBER" : "PARTICIPANT",
+    JoinedAt: ts,
+    CreatedAt: ts,
+    UpdatedAt: ts,
+  }));
+}
+
+function buildUserConversationItems({
+  conversationID,
+  conversationType,
+  memberIDs,
+  name = "",
+  createdAt,
+}) {
+  const ts = String(createdAt || nowIso());
+  const type = normalizeConversationType(conversationType);
+  const members = normalizeMemberIDs(memberIDs);
+
+  return members.map((userID) => {
+    const otherMemberIDs = members.filter((id) => id !== userID);
+    const displayName =
+      type === "DM" ? otherMemberIDs[0] || userID : String(name || "").trim() || conversationID;
+
+    return {
+      PK: `USER#${userID}`,
+      SK: `CONVO#${conversationID}`,
+      ItemType: "USERCONVO",
+      ConversationID: conversationID,
+      ConversationType: type,
+      Name: String(name || "").trim(),
+      DisplayName: displayName,
+      OtherUserID: type === "DM" ? otherMemberIDs[0] || null : null,
+      MemberIDs: members,
+      CreatedAt: ts,
+      UpdatedAt: ts,
+      LastMessageAt: null,
+      LastMessagePreview: "",
+    };
+  });
+}
+
+async function getConversationMeta(conversationID) {
+  const out = await ddb.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: { PK: `CONVO#${conversationID}`, SK: "META" },
+      ConsistentRead: true,
+    })
+  );
+  return out.Item || null;
+}
+
+async function listConversationMembers(conversationID) {
+  const out = await ddb.send(
+    new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
+      ExpressionAttributeValues: {
+        ":pk": `CONVO#${conversationID}`,
+        ":pfx": "MEMBER#",
+      },
+      ConsistentRead: true,
+    })
+  );
+  return out.Items || [];
+}
+
+async function createConversationRecords({
+  conversationID,
+  conversationType,
+  memberIDs,
+  name = "",
+  createdBy = "",
+}) {
+  const members = normalizeMemberIDs(memberIDs);
+  const ts = nowIso();
+  const meta = buildConversationMetaItem({
+    conversationID,
+    conversationType,
+    memberIDs: members,
+    name,
+    createdBy,
+    createdAt: ts,
+  });
+  const memberItems = buildConversationMemberItems(
+    conversationID,
+    members,
+    conversationType,
+    ts
+  );
+  const userItems = buildUserConversationItems({
+    conversationID,
+    conversationType,
+    memberIDs: members,
+    name,
+    createdAt: ts,
+  });
+
+  await batchWriteRequestsWithRetry(
+    [meta, ...memberItems, ...userItems].map((Item) => ({ PutRequest: { Item } }))
+  );
+
+  return { meta, members: memberItems, userItems };
+}
+
+async function ensureLegacyConversationRecords(conversationID, actorUserID = "") {
+  const existing = await getConversationMeta(conversationID);
+  if (existing) {
+    const members = await listConversationMembers(conversationID);
+    return { meta: existing, members, created: false };
+  }
+
+  const legacyMembers = parseLegacyDmConversationID(conversationID);
+  if (!legacyMembers) return { meta: null, members: [], created: false };
+  if (actorUserID && !legacyMembers.includes(String(actorUserID || "").trim())) {
+    return { meta: null, members: [], created: false };
+  }
+
+  const created = await createConversationRecords({
+    conversationID,
+    conversationType: "DM",
+    memberIDs: legacyMembers,
+    createdBy: actorUserID || legacyMembers[0],
+  });
+
+  return { meta: created.meta, members: created.members, created: true };
+}
+
+async function touchConversationActivity({
+  conversationID,
+  meta,
+  members,
+  timestamp,
+  preview,
+}) {
+  const ts = String(timestamp || nowIso());
+  const lastMessagePreview = String(preview || "").slice(0, 280);
+  const memberItems = Array.isArray(members) ? members : [];
+  const memberIDs = memberItems
+    .map((item) => String(item?.UserID || "").trim())
+    .filter(Boolean);
+  const type = normalizeConversationType(meta?.ConversationType);
+  const name = String(meta?.Name || "").trim();
+
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { PK: `CONVO#${conversationID}`, SK: "META" },
+      UpdateExpression:
+        "SET LastMessageAt = :last, LastMessagePreview = :preview, UpdatedAt = :updated, MemberCount = :count",
+      ExpressionAttributeValues: {
+        ":last": ts,
+        ":preview": lastMessagePreview,
+        ":updated": ts,
+        ":count": memberIDs.length,
+      },
+    })
+  );
+
+  await Promise.all(
+    memberIDs.map((userID) => {
+      const otherMemberIDs = memberIDs.filter((id) => id !== userID);
+      const displayName = type === "DM" ? otherMemberIDs[0] || userID : name || conversationID;
+      return ddb.send(
+        new UpdateCommand({
+          TableName: TABLE,
+          Key: { PK: `USER#${userID}`, SK: `CONVO#${conversationID}` },
+          UpdateExpression:
+            "SET ConversationID = :cid, ConversationType = :type, #name = :name, DisplayName = :displayName, OtherUserID = :other, MemberIDs = :members, LastMessageAt = :last, LastMessagePreview = :preview, UpdatedAt = :updated, ItemType = :itemType",
+          ExpressionAttributeNames: {
+            "#name": "Name",
+          },
+          ExpressionAttributeValues: {
+            ":cid": conversationID,
+            ":type": type,
+            ":name": name,
+            ":displayName": displayName,
+            ":other": type === "DM" ? otherMemberIDs[0] || null : null,
+            ":members": memberIDs,
+            ":last": ts,
+            ":preview": lastMessagePreview,
+            ":updated": ts,
+            ":itemType": "USERCONVO",
+          },
+        })
+      );
+    })
+  );
+}
+
+function normalizeGroupID(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^A-Za-z0-9#_-]/g, "")
+    .slice(0, 120);
+}
+
+function buildGroupMetaItem({
+  groupID,
+  name,
+  ownerID,
+  memberIDs,
+  conversationID,
+  color = "",
+  photo = "",
+  createdAt,
+}) {
+  const ts = String(createdAt || nowIso());
+  const members = normalizeMemberIDs(memberIDs);
+  return {
+    PK: `GROUP#${groupID}`,
+    SK: "META",
+    ItemType: "GROUP",
+    GroupID: groupID,
+    Name: String(name || "").trim(),
+    OwnerID: String(ownerID || "").trim(),
+    ConversationID: String(conversationID || "").trim(),
+    MemberCount: members.length,
+    Color: String(color || "").trim(),
+    Photo: String(photo || "").trim(),
+    CreatedAt: ts,
+    UpdatedAt: ts,
+  };
+}
+
+function buildGroupMemberItems({ groupID, memberIDs, ownerID, createdAt }) {
+  const ts = String(createdAt || nowIso());
+  return normalizeMemberIDs(memberIDs).map((userID) => ({
+    PK: `GROUP#${groupID}`,
+    SK: `MEMBER#${userID}`,
+    ItemType: "GROUPMEMBER",
+    GroupID: groupID,
+    UserID: userID,
+    Role: userID === ownerID ? "OWNER" : "MEMBER",
+    JoinedAt: ts,
+    CreatedAt: ts,
+    UpdatedAt: ts,
+  }));
+}
+
+function buildUserGroupItems({
+  groupID,
+  memberIDs,
+  ownerID,
+  name,
+  conversationID,
+  color = "",
+  photo = "",
+  createdAt,
+}) {
+  const ts = String(createdAt || nowIso());
+  return normalizeMemberIDs(memberIDs).map((userID) => ({
+    PK: `USER#${userID}`,
+    SK: `GROUP#${groupID}`,
+    ItemType: "USERGROUP",
+    GroupID: groupID,
+    Name: String(name || "").trim(),
+    ConversationID: String(conversationID || "").trim(),
+    Role: userID === ownerID ? "OWNER" : "MEMBER",
+    Color: String(color || "").trim(),
+    Photo: String(photo || "").trim(),
+    CreatedAt: ts,
+    UpdatedAt: ts,
+  }));
+}
+
+async function getGroupMeta(groupID) {
+  const out = await ddb.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: { PK: `GROUP#${groupID}`, SK: "META" },
+      ConsistentRead: true,
+    })
+  );
+  return out.Item || null;
+}
+
+async function listGroupMembers(groupID) {
+  const out = await ddb.send(
+    new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
+      ExpressionAttributeValues: {
+        ":pk": `GROUP#${groupID}`,
+        ":pfx": "MEMBER#",
+      },
+      ConsistentRead: true,
+    })
+  );
+  return out.Items || [];
+}
+
+async function isUserInGroup(groupID, userID) {
+  if (!groupID || !userID) return false;
+  const out = await ddb.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: { PK: `GROUP#${groupID}`, SK: `MEMBER#${userID}` },
+      ConsistentRead: true,
+    })
+  );
+  return !!out.Item;
+}
+
 // -------------------- Health --------------------
 app.get("/api/health", (_, res) => res.json({ ok: true }));
 
@@ -2437,7 +2811,183 @@ app.get("/api/customEvents/:userID", async (req, res) => {
   }
 });
 
+// -------------------- GROUPS --------------------
+app.post("/api/group", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const ownerID = String(req.body?.ownerID || "").trim();
+    const name = String(req.body?.name || "").trim();
+    const providedGroupID = normalizeGroupID(req.body?.groupID || "");
+    const color = String(req.body?.color || "").trim();
+    const photo = String(req.body?.photo || "").trim();
+    const memberIDs = normalizeMemberIDs([ownerID, ...(req.body?.memberIDs || [])]);
+
+    if (!ownerID) return res.status(400).json({ error: "Missing ownerID" });
+    if (!name) return res.status(400).json({ error: "Missing name" });
+    if (memberIDs.length < 2) {
+      return res.status(400).json({ error: "Groups require at least 2 members" });
+    }
+
+    const groupID =
+      providedGroupID ||
+      `grp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const conversationID = `GROUP#${groupID}`;
+
+    const existing = await getGroupMeta(groupID);
+    if (existing) {
+      const members = await listGroupMembers(groupID);
+      return res.json({ ok: true, item: existing, members, existed: true });
+    }
+
+    const ts = nowIso();
+    const groupMeta = buildGroupMetaItem({
+      groupID,
+      name,
+      ownerID,
+      memberIDs,
+      conversationID,
+      color,
+      photo,
+      createdAt: ts,
+    });
+    const groupMembers = buildGroupMemberItems({ groupID, memberIDs, ownerID, createdAt: ts });
+    const userGroups = buildUserGroupItems({
+      groupID,
+      memberIDs,
+      ownerID,
+      name,
+      conversationID,
+      color,
+      photo,
+      createdAt: ts,
+    });
+
+    await createConversationRecords({
+      conversationID,
+      conversationType: "GROUP",
+      memberIDs,
+      name,
+      createdBy: ownerID,
+    });
+    await batchWriteRequestsWithRetry(
+      [groupMeta, ...groupMembers, ...userGroups].map((Item) => ({ PutRequest: { Item } }))
+    );
+
+    return res.json({ ok: true, item: groupMeta, members: groupMembers, existed: false });
+  } catch (e) {
+    console.error("POST /api/group error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.get("/api/groups/:userID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const userID = String(req.params.userID || "").trim();
+  if (!userID) return res.status(400).json({ error: "Missing userID" });
+
+  try {
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
+        ExpressionAttributeValues: {
+          ":pk": `USER#${userID}`,
+          ":pfx": "GROUP#",
+        },
+      })
+    );
+
+    const items = (out.Items || []).sort((a, b) =>
+      String(a.Name || "").localeCompare(String(b.Name || ""))
+    );
+
+    return res.json({ ok: true, items });
+  } catch (e) {
+    console.error("GET /api/groups error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
 // -------------------- MESSAGES --------------------
+app.post("/api/conversation", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const conversationType = normalizeConversationType(req.body?.conversationType);
+    const memberIDs = normalizeMemberIDs(req.body?.memberIDs);
+    const createdBy = String(req.body?.createdBy || "").trim();
+    const providedConversationID = String(req.body?.conversationID || "").trim();
+    const name = String(req.body?.name || "").trim();
+
+    if (memberIDs.length < 2) {
+      return res.status(400).json({ error: "conversation requires at least 2 members" });
+    }
+
+    if (conversationType === "DM" && memberIDs.length !== 2) {
+      return res.status(400).json({ error: "DM conversations require exactly 2 members" });
+    }
+
+    const sortedMembers = [...memberIDs].sort();
+    const conversationID =
+      providedConversationID ||
+      (conversationType === "DM"
+        ? sortedMembers.join("#")
+        : `GROUP#${Date.now().toString(36)}#${Math.random().toString(36).slice(2, 8)}`);
+
+    const existing = await getConversationMeta(conversationID);
+    if (existing) {
+      const members = await listConversationMembers(conversationID);
+      return res.json({ ok: true, item: existing, members, existed: true });
+    }
+
+    const created = await createConversationRecords({
+      conversationID,
+      conversationType,
+      memberIDs: sortedMembers,
+      name,
+      createdBy: createdBy || sortedMembers[0],
+    });
+
+    return res.json({ ok: true, item: created.meta, members: created.members, existed: false });
+  } catch (e) {
+    console.error("POST /api/conversation error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.get("/api/conversations/:userID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const userID = String(req.params.userID || "").trim();
+  if (!userID) return res.status(400).json({ error: "Missing userID" });
+
+  try {
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
+        ExpressionAttributeValues: {
+          ":pk": `USER#${userID}`,
+          ":pfx": "CONVO#",
+        },
+      })
+    );
+
+    const items = (out.Items || []).sort((a, b) =>
+      String(b.LastMessageAt || b.UpdatedAt || "").localeCompare(
+        String(a.LastMessageAt || a.UpdatedAt || "")
+      )
+    );
+
+    return res.json({ ok: true, items });
+  } catch (e) {
+    console.error("GET /api/conversations error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
 app.post("/api/message", async (req, res) => {
   if (!requirePkSk(res)) return;
 
@@ -2448,24 +2998,51 @@ app.post("/api/message", async (req, res) => {
   if (!conversationID) return res.status(400).json({ error: "Missing conversationID" });
   if (!senderID) return res.status(400).json({ error: "Missing senderID" });
 
-  const timestamp = nowIso();
-
-  const item = {
-    PK: `CONVO#${conversationID}`,
-    SK: `MSG#${timestamp}`,
-    ItemType: "MESSAGE",
-    SenderID: senderID,
-    Text: text,
-    CreatedAt: timestamp,
-    UpdatedAt: timestamp,
-  };
-
   try {
+    let meta = await getConversationMeta(conversationID);
+    let members = [];
+
+    if (!meta) {
+      const legacy = await ensureLegacyConversationRecords(conversationID, senderID);
+      meta = legacy.meta;
+      members = legacy.members;
+    } else {
+      members = await listConversationMembers(conversationID);
+    }
+
+    if (!meta) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    const senderIsMember = members.some((member) => member?.UserID === senderID);
+    if (!senderIsMember) {
+      return res.status(403).json({ error: "Sender is not a member of this conversation" });
+    }
+
+    const timestamp = nowIso();
+    const item = {
+      PK: `CONVO#${conversationID}`,
+      SK: `MSG#${timestamp}`,
+      ItemType: "MESSAGE",
+      SenderID: senderID,
+      Text: text,
+      CreatedAt: timestamp,
+      UpdatedAt: timestamp,
+    };
+
     await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
-    return res.json({ ok: true, item });
+    await touchConversationActivity({
+      conversationID,
+      meta,
+      members,
+      timestamp,
+      preview: text,
+    });
+
+    return res.json({ ok: true, item, conversation: { ...meta, LastMessageAt: timestamp } });
   } catch (e) {
     console.error("POST /api/message error:", e);
-    return res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: e?.message || "Server error" });
   }
 });
 
@@ -2473,9 +3050,28 @@ app.get("/api/messages/:conversationID", async (req, res) => {
   if (!requirePkSk(res)) return;
 
   const conversationID = String(req.params.conversationID || "").trim();
+  const viewerID = String(req.query?.userID || "").trim();
   if (!conversationID) return res.status(400).json({ error: "Missing conversationID" });
 
   try {
+    let meta = await getConversationMeta(conversationID);
+    let members = [];
+
+    if (!meta) {
+      const legacy = await ensureLegacyConversationRecords(conversationID, viewerID);
+      meta = legacy.meta;
+      members = legacy.members;
+    } else {
+      members = await listConversationMembers(conversationID);
+    }
+
+    if (meta && viewerID) {
+      const viewerIsMember = members.some((member) => member?.UserID === viewerID);
+      if (!viewerIsMember) {
+        return res.status(403).json({ error: "User is not a member of this conversation" });
+      }
+    }
+
     const out = await ddb.send(
       new QueryCommand({
         TableName: TABLE,
@@ -2484,6 +3080,7 @@ app.get("/api/messages/:conversationID", async (req, res) => {
           ":pk": `CONVO#${conversationID}`,
           ":pfx": "MSG#",
         },
+        ConsistentRead: true,
         ScanIndexForward: true,
       })
     );
@@ -2494,10 +3091,169 @@ app.get("/api/messages/:conversationID", async (req, res) => {
       timestamp: it.CreatedAt,
     }));
 
-    return res.json({ ok: true, items });
+    return res.json({ ok: true, items, conversation: meta });
   } catch (e) {
     console.error("GET /api/messages error:", e);
-    return res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+// -------------------- GROUP POSTS --------------------
+app.post("/api/groupPost", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const groupID = normalizeGroupID(req.body?.groupID || "");
+    const authorID = String(req.body?.authorID || "").trim();
+    const authorName = String(req.body?.authorName || "").trim();
+
+    if (!groupID) return res.status(400).json({ error: "Missing groupID" });
+    if (!authorID) return res.status(400).json({ error: "Missing authorID" });
+
+    const isMember = await isUserInGroup(groupID, authorID);
+    if (!isMember) {
+      return res.status(403).json({ error: "Author is not a member of this group" });
+    }
+
+    const timestamp = nowIso();
+    const item = {
+      PK: `GROUP#${groupID}`,
+      SK: `POST#${timestamp}`,
+      ItemType: "POST",
+      PostOwnerType: "GROUP",
+      GroupID: groupID,
+      AuthorID: authorID,
+      AuthorName: authorName || authorID,
+      PostType: req.body?.postType ?? "solve",
+      Note: req.body?.note ?? "",
+      Event: req.body?.event ?? "",
+      SolveList: req.body?.solveList ?? [],
+      StatShare: req.body?.statShare ?? null,
+      Comments: req.body?.comments ?? [],
+      CreatedAt: timestamp,
+      UpdatedAt: timestamp,
+    };
+
+    await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+    return res.json({ ok: true, item });
+  } catch (e) {
+    console.error("POST /api/groupPost error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.get("/api/groupPosts/:groupID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const groupID = normalizeGroupID(req.params.groupID || "");
+  const viewerID = String(req.query?.userID || "").trim();
+
+  if (!groupID) return res.status(400).json({ error: "Missing groupID" });
+
+  try {
+    if (viewerID) {
+      const isMember = await isUserInGroup(groupID, viewerID);
+      if (!isMember) {
+        return res.status(403).json({ error: "User is not a member of this group" });
+      }
+    }
+
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
+        ExpressionAttributeValues: {
+          ":pk": `GROUP#${groupID}`,
+          ":pfx": "POST#",
+        },
+        ScanIndexForward: false,
+      })
+    );
+
+    return res.json({ ok: true, items: out.Items || [] });
+  } catch (e) {
+    console.error("GET /api/groupPosts error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.put("/api/groupPostComments/:groupID/:timestamp", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const groupID = normalizeGroupID(req.params.groupID || "");
+  const timestamp = String(req.params.timestamp || "").trim();
+  const userID = String(req.body?.userID || "").trim();
+  const comments = req.body?.comments;
+
+  if (!groupID) return res.status(400).json({ error: "Missing groupID" });
+  if (!timestamp) return res.status(400).json({ error: "Missing timestamp" });
+  if (!userID) return res.status(400).json({ error: "Missing userID" });
+  if (!Array.isArray(comments)) {
+    return res.status(400).json({ error: "comments must be an array" });
+  }
+
+  try {
+    const isMember = await isUserInGroup(groupID, userID);
+    if (!isMember) {
+      return res.status(403).json({ error: "User is not a member of this group" });
+    }
+
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `GROUP#${groupID}`, SK: `POST#${timestamp}` },
+        UpdateExpression: "SET Comments = :c, UpdatedAt = :u",
+        ExpressionAttributeValues: {
+          ":c": comments,
+          ":u": nowIso(),
+        },
+      })
+    );
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("PUT /api/groupPostComments error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.delete("/api/groupPost/:groupID/:timestamp/:userID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const groupID = normalizeGroupID(req.params.groupID || "");
+  const timestamp = String(req.params.timestamp || "").trim();
+  const userID = String(req.params.userID || "").trim();
+
+  if (!groupID) return res.status(400).json({ error: "Missing groupID" });
+  if (!timestamp) return res.status(400).json({ error: "Missing timestamp" });
+  if (!userID) return res.status(400).json({ error: "Missing userID" });
+
+  try {
+    const out = await ddb.send(
+      new GetCommand({
+        TableName: TABLE,
+        Key: { PK: `GROUP#${groupID}`, SK: `POST#${timestamp}` },
+        ConsistentRead: true,
+      })
+    );
+
+    const post = out.Item || null;
+    if (!post) return res.status(404).json({ error: "Group post not found" });
+    if (String(post.AuthorID || "").trim() !== userID) {
+      return res.status(403).json({ error: "Only the post author can delete this group post" });
+    }
+
+    await ddb.send(
+      new DeleteCommand({
+        TableName: TABLE,
+        Key: { PK: `GROUP#${groupID}`, SK: `POST#${timestamp}` },
+      })
+    );
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("DELETE /api/groupPost error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
   }
 });
 

@@ -194,14 +194,25 @@ const TimeTable = ({
   eventKey,
   practiceMode = false,
   seriesStyle = null,
+  onSolveOpen = null,
+  showToolbar = true,
+  showBulkControls = true,
+  initialDisplayMode = "items",
+  initialSortBy = "date",
+  initialSortDirection = "desc",
+  initialItemRowSize = 12,
+  initialTableLimit = "1000",
+  preserveInputOrder = false,
+  showSolveAverages = true,
+  containerClassName = "",
 }) => {
   const [selectedSolve, setSelectedSolve] = useState(null);
 
-  const [displayMode, setDisplayMode] = useState("items");
-  const [sortBy, setSortBy] = useState("date");
-  const [sortDirection, setSortDirection] = useState("desc");
-  const [itemRowSize, setItemRowSize] = useState(12);
-  const [tableLimit, setTableLimit] = useState("1000");
+  const [displayMode, setDisplayMode] = useState(initialDisplayMode);
+  const [sortBy, setSortBy] = useState(initialSortBy);
+  const [sortDirection, setSortDirection] = useState(initialSortDirection);
+  const [itemRowSize, setItemRowSize] = useState(initialItemRowSize);
+  const [tableLimit, setTableLimit] = useState(initialTableLimit);
 
   const selection = useSolveSelection();
 
@@ -212,7 +223,7 @@ const TimeTable = ({
     return arr.slice(-n);
   }, [solves, tableLimit]);
 
-  const showAverages = sortBy !== "time";
+  const showAverages = showSolveAverages && sortBy !== "time";
   const totalDisplayed = Array.isArray(limitedSolves) ? limitedSolves.length : 0;
 
   const timeRange = useMemo(() => {
@@ -265,6 +276,8 @@ const TimeTable = ({
 
   const sortedSolves = useMemo(() => {
     const arr = Array.isArray(limitedSolves) ? [...limitedSolves] : [];
+    if (preserveInputOrder) return arr;
+
     const dir = sortDirection === "asc" ? 1 : -1;
 
     arr.sort((a, b) => {
@@ -290,7 +303,7 @@ const TimeTable = ({
     });
 
     return arr;
-  }, [limitedSolves, sortBy, sortDirection]);
+  }, [limitedSolves, preserveInputOrder, sortBy, sortDirection]);
 
   const bulkActions = useBulkSolveActions({
     user,
@@ -338,6 +351,32 @@ const TimeTable = ({
         time: getSolveMs(solve),
       }))
     );
+  }, [sortedSolves]);
+
+  const tableBestWorst = useMemo(() => {
+    const bestIdxSet = new Set();
+    const worstIdxSet = new Set();
+    if (!sortedSolves.length) return { bestIdxSet, worstIdxSet };
+
+    const comparable = sortedSolves.map((solve, idx) => ({
+      idx,
+      time: getComparableSolveTime(solve),
+    }));
+
+    const finite = comparable.filter((entry) => Number.isFinite(entry.time));
+    if (finite.length) {
+      const minTime = Math.min(...finite.map((entry) => entry.time));
+      finite.forEach((entry) => {
+        if (entry.time === minTime) bestIdxSet.add(entry.idx);
+      });
+    }
+
+    const maxTime = Math.max(...comparable.map((entry) => entry.time));
+    comparable.forEach((entry) => {
+      if (entry.time === maxTime) worstIdxSet.add(entry.idx);
+    });
+
+    return { bestIdxSet, worstIdxSet };
   }, [sortedSolves]);
 
   const tableRows = useMemo(() => {
@@ -432,6 +471,10 @@ const TimeTable = ({
   ]);
 
   const handleSolvePrimaryAction = (solve) => {
+    if (typeof onSolveOpen === "function") {
+      onSolveOpen(solve);
+      return;
+    }
     setSelectedSolve({ ...solve, userID: user?.UserID });
   };
 
@@ -446,41 +489,44 @@ const TimeTable = ({
   };
 
   return (
-    <div className="time-table-container">
-      <BulkSolveControls
-        selectionCount={selection.selectionCount}
-        clearSelection={selection.clearSelection}
-        showBulkTags={bulkActions.showBulkTags}
-        setShowBulkTags={bulkActions.setShowBulkTags}
-        showBulkMove={bulkActions.showBulkMove}
-        setShowBulkMove={bulkActions.setShowBulkMove}
-        showBulkShare={bulkActions.showBulkShare}
-        setShowBulkShare={bulkActions.setShowBulkShare}
-        openBulkTags={bulkActions.openBulkTags}
-        openBulkMove={bulkActions.openBulkMove}
-        openBulkShare={bulkActions.openBulkShare}
-        bulkTagMode={bulkActions.bulkTagMode}
-        setBulkTagMode={bulkActions.setBulkTagMode}
-        bulkCubeModel={bulkActions.bulkCubeModel}
-        setBulkCubeModel={bulkActions.setBulkCubeModel}
-        bulkCrossColor={bulkActions.bulkCrossColor}
-        setBulkCrossColor={bulkActions.setBulkCrossColor}
-        bulkCustomLines={bulkActions.bulkCustomLines}
-        setBulkCustomLines={bulkActions.setBulkCustomLines}
-        bulkMoveEvent={bulkActions.bulkMoveEvent}
-        setBulkMoveEvent={bulkActions.setBulkMoveEvent}
-        bulkMoveSession={bulkActions.bulkMoveSession}
-        setBulkMoveSession={bulkActions.setBulkMoveSession}
-        bulkShareNote={bulkActions.bulkShareNote}
-        setBulkShareNote={bulkActions.setBulkShareNote}
-        getSessionsForEvent={bulkActions.getSessionsForEvent}
-        applyBulkTags={bulkActions.applyBulkTags}
-        applyBulkMove={bulkActions.applyBulkMove}
-        applyBulkDelete={bulkActions.applyBulkDelete}
-        applyBulkShare={bulkActions.applyBulkShare}
-        enableShare={true}
-      />
+    <div className={`time-table-container ${containerClassName}`.trim()}>
+      {showBulkControls && (
+        <BulkSolveControls
+          selectionCount={selection.selectionCount}
+          clearSelection={selection.clearSelection}
+          showBulkTags={bulkActions.showBulkTags}
+          setShowBulkTags={bulkActions.setShowBulkTags}
+          showBulkMove={bulkActions.showBulkMove}
+          setShowBulkMove={bulkActions.setShowBulkMove}
+          showBulkShare={bulkActions.showBulkShare}
+          setShowBulkShare={bulkActions.setShowBulkShare}
+          openBulkTags={bulkActions.openBulkTags}
+          openBulkMove={bulkActions.openBulkMove}
+          openBulkShare={bulkActions.openBulkShare}
+          bulkTagMode={bulkActions.bulkTagMode}
+          setBulkTagMode={bulkActions.setBulkTagMode}
+          bulkCubeModel={bulkActions.bulkCubeModel}
+          setBulkCubeModel={bulkActions.setBulkCubeModel}
+          bulkCrossColor={bulkActions.bulkCrossColor}
+          setBulkCrossColor={bulkActions.setBulkCrossColor}
+          bulkCustomLines={bulkActions.bulkCustomLines}
+          setBulkCustomLines={bulkActions.setBulkCustomLines}
+          bulkMoveEvent={bulkActions.bulkMoveEvent}
+          setBulkMoveEvent={bulkActions.setBulkMoveEvent}
+          bulkMoveSession={bulkActions.bulkMoveSession}
+          setBulkMoveSession={bulkActions.setBulkMoveSession}
+          bulkShareNote={bulkActions.bulkShareNote}
+          setBulkShareNote={bulkActions.setBulkShareNote}
+          getSessionsForEvent={bulkActions.getSessionsForEvent}
+          applyBulkTags={bulkActions.applyBulkTags}
+          applyBulkMove={bulkActions.applyBulkMove}
+          applyBulkDelete={bulkActions.applyBulkDelete}
+          applyBulkShare={bulkActions.applyBulkShare}
+          enableShare={true}
+        />
+      )}
 
+      {showToolbar && (
       <div className="time-table-toolbar">
         <div className="time-table-toolbar-group">
           <button
@@ -570,12 +616,15 @@ const TimeTable = ({
           </div>
         )}
       </div>
+      )}
 
       {displayMode === "table" ? (
         <div className="time-items-view">
           {tableRows.map((solve, index) => {
             const ms = getSolveMs(solve);
             const tablePerfClass = getPerfClassByRank01(overallVisibleRankMap[index]);
+            const isBest = tableBestWorst.bestIdxSet.has(index);
+            const isWorst = tableBestWorst.worstIdxSet.has(index);
 
             const selected = selection.isIndexSelected(index);
             const selectStyleInline = selected
@@ -608,8 +657,14 @@ const TimeTable = ({
                       penalty={solve?.penalty}
                       rangeMin={timeRange.min}
                       rangeMax={timeRange.max}
-                      className="time-items-time"
-                      style={buildPerfBorderStyle(tablePerfClass, seriesStyle)}
+                      className={`time-items-time ${isBest ? "dashed-border-min" : ""} ${
+                        isWorst ? "dashed-border-max" : ""
+                      }`}
+                      style={buildPerfBorderStyle(
+                        tablePerfClass,
+                        seriesStyle,
+                        isBest || isWorst ? "dashed" : "solid"
+                      )}
                       disablePerformanceClass={true}
                     />
                   </div>
@@ -710,7 +765,7 @@ const TimeTable = ({
         </div>
       )}
 
-      {selectedSolve && (
+      {!onSolveOpen && selectedSolve && (
         <Detail
           solve={selectedSolve}
           userID={user?.UserID}
@@ -744,7 +799,7 @@ TimeTable.propTypes = {
       sessionID: PropTypes.string,
     })
   ).isRequired,
-  deleteTime: PropTypes.func.isRequired,
+  deleteTime: PropTypes.func,
   addPost: PropTypes.func,
   applyPenalty: PropTypes.func,
   setSessions: PropTypes.func,
@@ -759,6 +814,17 @@ TimeTable.propTypes = {
     accent: PropTypes.string,
     stops: PropTypes.arrayOf(PropTypes.string),
   }),
+  onSolveOpen: PropTypes.func,
+  showToolbar: PropTypes.bool,
+  showBulkControls: PropTypes.bool,
+  initialDisplayMode: PropTypes.oneOf(["items", "table"]),
+  initialSortBy: PropTypes.oneOf(["date", "time"]),
+  initialSortDirection: PropTypes.oneOf(["asc", "desc"]),
+  initialItemRowSize: PropTypes.oneOf([5, 12]),
+  initialTableLimit: PropTypes.oneOf(TABLE_LIMITS),
+  preserveInputOrder: PropTypes.bool,
+  showSolveAverages: PropTypes.bool,
+  containerClassName: PropTypes.string,
 };
 
 export default TimeTable;

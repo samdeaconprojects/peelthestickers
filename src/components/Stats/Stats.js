@@ -23,6 +23,7 @@ import { getSolveWindowFromStart } from "../../services/getSolveWindow";
 import ImportSolvesModal from "./ImportSolvesModal";
 import { importSolvesBatch } from "../../services/importSolvesBatch";
 import { createSession } from "../../services/createSession";
+import DbStatusIndicator from "../Navigation/DbStatusIndicator";
 
 /* -------------------------------------------------------------------------- */
 /*                              TAG/TIME HELPERS                              */
@@ -2410,8 +2411,8 @@ function Stats({
     if (isAllSessionsMode) return `Cached overall stats for ${statsEvent}`;
     if (showAllActive) return "All solves loaded";
     if (isAllLoaded) return "Loaded solves currently in memory for this session";
-    if (hasMoreOlder) return "Showing recent solves (paged)";
-    return "Showing recent solves";
+    if (hasMoreOlder) return "";
+    return "";
   }, [compareEnabled, compareLoading, statsViewMode, loadingTimeScope, chartVisibleSolves.length, allLoadedFilteredRawSolves.length, hasSpecificTagFilter, hasActiveTagFilter, hasActiveDateFilter, loadingInitial, loadingAllSolves, loadingMore, isAllEventsMode, isAllSessionsMode, statsEvent, showAllActive, isAllLoaded, hasMoreOlder]);
 
   const eventSelectLabel = useMemo(() => {
@@ -3234,6 +3235,7 @@ function Stats({
             selectedTagLabel={selectedTagLabel}
             loadedSolveCount={loadedSolveCountForSummary}
             onStatSelect={handleSummaryStatSelect}
+            profileColor={user?.Color || user?.color || "#50B6FF"}
           />
         );
       }
@@ -3267,6 +3269,7 @@ function Stats({
             selectedTagLabel={compareSelectedTagSummaryLabel}
             loadedSolveCount={compareFilteredRawSolves.length}
             onStatSelect={null}
+            profileColor={compareStyle?.primary || "#7c8cff"}
           />
         );
       }
@@ -3312,7 +3315,8 @@ function Stats({
           ? <PieChart solves={pieChartSolves} title="Event Breakdown" />
           : (
             <PercentBar
-              solves={compareEnabled ? comparisonPrimarySolves : pieChartSolves}
+              solves={compareEnabled ? comparisonPrimarySolves : chartVisibleSolves}
+              seriesStyle={primaryCompareStyle}
               comparisonSeries={
                 compareEnabled
                   ? [
@@ -3420,7 +3424,7 @@ function Stats({
 
   const isInteractiveTarget = (target) =>
     !!target?.closest?.(
-      "button, select, input, textarea, a, [data-interactive='solve-point'], [data-interactive='summary-stat'], .lineChartDot, svg .timeLineSegment, .timeLineSegment"
+      "button, select, input, textarea, a, [data-interactive='solve-point'], [data-interactive='summary-stat'], [data-interactive='percent-bar-control'], .lineChartDot, svg .timeLineSegment, .timeLineSegment"
     );
 
   useEffect(() => {
@@ -3793,11 +3797,15 @@ function Stats({
         </div>
       </div>
 
-      <div className="statsStatusLine">{headerStatusText}</div>
+      {headerStatusText ? <div className="statsStatusLine">{headerStatusText}</div> : null}
 
       <div className="stats-page">
         <div className={`stats-grid stats-grid--figma ${(loadingInitial || loadingTimeScope) ? "stats-grid--loading" : ""}`}>
-          {(loadingInitial || loadingTimeScope) && <div className="statsLoadingOverlay">Loading…</div>}
+          {(loadingInitial || loadingTimeScope) && (
+            <div className="statsLoadingOverlay" aria-label="Loading stats">
+              <DbStatusIndicator status={{ phase: "loading", tick: Number(loadingInitial) + Number(loadingTimeScope) }} />
+            </div>
+          )}
 
           <div
             className={`stats-item stats-item--header stats-item--minh stats-item--headerSplit${
@@ -3857,6 +3865,7 @@ function Stats({
                       selectedTagLabel={selectedTagLabel}
                       loadedSolveCount={loadedSolveCountForSummary}
                       onStatSelect={handleSummaryStatSelect}
+                      profileColor={user?.Color || user?.color || "#50B6FF"}
                     />
                   </div>
                 </>
@@ -3905,6 +3914,7 @@ function Stats({
                         selectedTagLabel={selectedTagLabel}
                         loadedSolveCount={loadedSolveCountForSummary}
                         onStatSelect={handleSummaryStatSelect}
+                        profileColor={user?.Color || user?.color || "#50B6FF"}
                       />
                     </div>
                   </div>
@@ -3942,18 +3952,19 @@ function Stats({
                         className="statsSummaryPanel statsCardShell"
                         {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-compare-secondary-overall")?.id)}
                       >
-                        <StatsSummaryOverall
-                          solves={compareVisiblePageFilteredRawSolves}
-                          overallSolves={compareFilteredRawSolves}
-                          overallStats={null}
+                      <StatsSummaryOverall
+                        solves={compareVisiblePageFilteredRawSolves}
+                        overallSolves={compareFilteredRawSolves}
+                        overallStats={null}
                           allowOverallDerived={true}
                           mode="session"
                           selectedEvent={compareEventLabel}
                           selectedSession={compareSessionDisplay}
-                          selectedTagLabel={compareSelectedTagSummaryLabel}
-                          loadedSolveCount={compareFilteredRawSolves.length}
-                          onStatSelect={null}
-                        />
+                        selectedTagLabel={compareSelectedTagSummaryLabel}
+                        loadedSolveCount={compareFilteredRawSolves.length}
+                        onStatSelect={null}
+                        profileColor={compareStyle?.primary || "#7c8cff"}
+                      />
                       </div>
                     </div>
                   </div>
@@ -4009,7 +4020,8 @@ function Stats({
                   <PieChart solves={pieChartSolves} title="Event Breakdown" />
                 ) : (
                   <PercentBar
-                    solves={compareEnabled ? comparisonPrimarySolves : pieChartSolves}
+                    solves={compareEnabled ? comparisonPrimarySolves : chartVisibleSolves}
+                    seriesStyle={primaryCompareStyle}
                     comparisonSeries={
                       compareEnabled
                         ? [

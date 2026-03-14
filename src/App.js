@@ -680,6 +680,9 @@ function App() {
   const relayCurrentScramble = isRelayActive
     ? relayScrambles[relayLegIndex] || ""
     : "";
+  const sharedCurrentEvent = sharedSession
+    ? sharedSession.events?.[sharedIndex] || sharedSession.event || currentEvent
+    : null;
 
   const displayedScramble = useMemo(() => {
     return sharedSession
@@ -697,8 +700,12 @@ function App() {
   ]);
 
   const displayedSvgEvent = useMemo(() => {
-    return isRelayActive ? relayCurrentEvent : currentEvent;
-  }, [isRelayActive, relayCurrentEvent, currentEvent]);
+    return sharedSession
+      ? sharedCurrentEvent || currentEvent
+      : isRelayActive
+      ? relayCurrentEvent
+      : currentEvent;
+  }, [sharedCurrentEvent, sharedSession, isRelayActive, relayCurrentEvent, currentEvent]);
 
   const scrambleProgressMode = "steps";
 
@@ -831,14 +838,22 @@ function App() {
   useEffect(() => {
     if (!sharedSession) return;
 
-    const { event, sessionID } = sharedSession;
-
-    setCurrentEvent(event);
-    setCurrentSession(sessionID);
     setSharedIndex(0);
+  }, [sharedSession]);
+
+  useEffect(() => {
+    if (!sharedSession) return;
+
+    const { sessionID } = sharedSession;
+    const nextSharedEvent =
+      sharedSession.events?.[sharedIndex] || sharedSession.event || "333";
+
+    setCurrentEvent(nextSharedEvent);
+    setCurrentSession(sessionID);
+    setShowPlayerBar(true);
 
     console.log("Loaded Shared Session:", sessionID);
-  }, [sharedSession]);
+  }, [sharedIndex, sharedSession]);
 
   useEffect(() => {
     const isRelay =
@@ -2363,6 +2378,7 @@ function App() {
           currentSession={currentSession}
           setCurrentSession={setCurrentSession}
           sharedSession={sharedSession}
+          sharedIndex={sharedIndex}
           clearSharedSession={() => setSharedSession(null)}
           sessionsList={sessionsList}
           customEvents={customEvents}

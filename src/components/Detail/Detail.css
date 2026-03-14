@@ -4,19 +4,22 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(8, 12, 16, 0.62);
+  backdrop-filter: blur(4px);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 3000;
+  padding: 28px;
+  box-sizing: border-box;
 }
 
 .detailPopupContent {
-  background: #1d1d1d;
-  opacity: 97%;
+  background: rgba(29, 29, 29, 0.97);
   padding: 20px;
-  border: 2px solid #FFFFFF;
-  border-radius: 12px;
+  border: 1.5px solid rgba(255,255,255,0.24);
+  border-radius: 22px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.45);
   max-width: 80%;
   text-align: center;
 
@@ -35,6 +38,8 @@
   right: 10px;
   cursor: pointer;
   font-size: 24px;
+  color: white;
+  opacity: 0.9;
 }
 
 .detailTopRow {
@@ -285,4 +290,17 @@
   border-bottom: 1px solid #ccc;
   margin-bottom: 20px;
   padding-bottom: 20px;
+}
+
+@media (max-width: 720px) {
+  .detailPopup {
+    padding: 14px;
+  }
+
+  .detailPopupContent {
+    width: calc(100vw - 28px);
+    max-width: calc(100vw - 28px);
+    max-height: calc(100vh - 28px);
+    padding: 14px;
+  }
 }

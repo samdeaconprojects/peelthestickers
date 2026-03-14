@@ -294,6 +294,24 @@
   text-align: center;
 }
 
+.sharedAverageScrambleSplit {
+  display: grid;
+  gap: 4px;
+}
+
+.sharedAverageScrambleTextThem,
+.sharedAverageScrambleTextYou {
+  font-size: 11px;
+}
+
+.sharedAverageScrambleTextThem {
+  color: rgba(var(--theirRgb), 0.95);
+}
+
+.sharedAverageScrambleTextYou {
+  color: rgba(var(--youRgb), 0.95);
+}
+
 /* Winner outline wrapper */
 .sharedAveragePillWrap {
   display: inline-flex;

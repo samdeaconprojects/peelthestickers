@@ -7,6 +7,7 @@ import EventSelector from "../EventSelector";
 import Scramble from "../Scramble/Scramble";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import { useLocation } from "react-router-dom";
+import { currentEventToString } from "../scrambleUtils";
 
 function PlayerBar({
   sessions,
@@ -26,6 +27,9 @@ function PlayerBar({
   customEvents,
   sessionsList,
   onHide,
+  sharedSession,
+  sharedIndex = 0,
+  clearSharedSession,
 }) {
   const location = useLocation();
   const { pathname } = location;
@@ -44,6 +48,9 @@ function PlayerBar({
   const currentSolves = allEventSolves.filter(
     (s) => String(s?.sessionID || s?.SessionID || "main") === String(currentSession || "main")
   );
+  const sharedTotal = Array.isArray(sharedSession?.scrambles) ? sharedSession.scrambles.length : 0;
+  const sharedSolveNumber = sharedSession ? Math.min(sharedIndex + 1, Math.max(sharedTotal, 1)) : 0;
+  const sharedEventLabel = currentEventToString(currentEvent);
 
   return (
     <div
@@ -59,6 +66,24 @@ function PlayerBar({
 
       {/* MIDDLE: Scramble + TimeList */}
       <div className="playerbar-center">
+        {sharedSession && (
+          <div className="playerbar-sharedBanner">
+            <div className="playerbar-sharedMeta">
+              <span className="playerbar-sharedPill">Shared Session</span>
+              <span className="playerbar-sharedLabel">{sharedEventLabel}</span>
+              <span className="playerbar-sharedLabel">
+                Solve {sharedSolveNumber} of {sharedTotal}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="playerbar-sharedExit"
+              onClick={clearSharedSession}
+            >
+              Exit Shared
+            </button>
+          </div>
+        )}
         <div className="scramble-box">
           <Scramble
             onScrambleClick={onScrambleClick}

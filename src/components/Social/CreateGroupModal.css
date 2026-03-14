@@ -1,0 +1,104 @@
+.createGroupOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+}
+
+.createGroupModal {
+  width: min(92vw, 460px);
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border: 2px solid #ffffff;
+  border-radius: 14px;
+  background: rgba(20, 20, 20, 0.96);
+  color: white;
+}
+
+.createGroupModal h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.createGroupNameInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 2px solid #696767;
+  background: transparent;
+  color: white;
+  font-size: 14pt;
+}
+
+.createGroupMembersLabel {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #b8b8b8;
+}
+
+.createGroupError {
+  color: #ff9d9d;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.createGroupMembersList {
+  min-height: 120px;
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 6px;
+}
+
+.createGroupMemberRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #4d4d4d;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+
+.createGroupMemberRow input {
+  width: 18px;
+  height: 18px;
+}
+
+.createGroupEmpty {
+  color: #9a9a9a;
+  padding: 12px 2px;
+}
+
+.createGroupActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.createGroupActions button {
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 2px solid #bcbcbc;
+  background: transparent;
+  color: white;
+  font-size: 13pt;
+  cursor: pointer;
+}
+
+.createGroupActions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

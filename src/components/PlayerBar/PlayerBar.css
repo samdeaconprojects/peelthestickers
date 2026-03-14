@@ -47,6 +47,53 @@
   gap: 6px;
 }
 
+.playerbar-sharedBanner {
+  width: min(100%, 720px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(80, 182, 255, 0.35);
+  background: rgba(80, 182, 255, 0.08);
+}
+
+.playerbar-sharedMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.playerbar-sharedPill,
+.playerbar-sharedLabel {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.playerbar-sharedPill {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(80, 182, 255, 0.18);
+  color: #8bd4ff;
+}
+
+.playerbar-sharedLabel {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.playerbar-sharedExit {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(14, 23, 29, 0.8);
+  color: white;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 /* just a wrapper to keep future additions easy */
 .event-and-scramble { display: flex; align-items: center; justify-content: center; }
 

@@ -853,6 +853,11 @@ td:nth-child(13) {
   border-radius: 12px;
 }
 
+.statsLoadingOverlay .db-indicator-wrap,
+.statsLoadingOverlay .db-indicator-spacer {
+  margin-left: 0;
+}
+
 .stats-item--minh { min-height: 160px; }
 .stats-item--line.stats-item--minh { min-height: 320px; }
 
@@ -863,8 +868,8 @@ td:nth-child(13) {
   display: grid;
   place-items: center;
   padding: 28px;
-  background: rgba(3, 8, 12, 0.78);
-  backdrop-filter: blur(8px);
+  background: rgba(8, 12, 16, 0.62);
+  backdrop-filter: blur(4px);
 }
 
 .statFocusModal {
@@ -875,8 +880,8 @@ td:nth-child(13) {
   gap: 12px;
   padding: 18px;
   border-radius: 22px;
-  background: linear-gradient(180deg, rgba(16, 24, 31, 0.98), rgba(9, 15, 20, 0.98));
-  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(29, 29, 29, 0.97);
+  border: 1.5px solid rgba(255,255,255,0.24);
   box-shadow: 0 24px 80px rgba(0,0,0,0.45);
   overflow: hidden;
 }

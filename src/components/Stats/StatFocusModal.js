@@ -8,6 +8,9 @@ function StatFocusModal({
   actionMessage,
   actionButtons = [],
   onClose,
+  overlayClassName = "",
+  modalClassName = "",
+  bodyClassName = "",
 }) {
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -24,12 +27,12 @@ function StatFocusModal({
 
   return (
     <div
-      className="statFocusOverlay"
+      className={`statFocusOverlay ${overlayClassName}`.trim()}
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose?.();
       }}
     >
-      <div className="statFocusModal">
+      <div className={`statFocusModal ${modalClassName}`.trim()}>
         <div className="statFocusHeader">
           <div>
             <div className="statFocusTitle">{title}</div>
@@ -57,7 +60,7 @@ function StatFocusModal({
 
         {actionMessage ? <div className="statFocusMessage">{actionMessage}</div> : null}
 
-        <div className="statFocusBody">{children}</div>
+        <div className={`statFocusBody ${bodyClassName}`.trim()}>{children}</div>
       </div>
     </div>
   );

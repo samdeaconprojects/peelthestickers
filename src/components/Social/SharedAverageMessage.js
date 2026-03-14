@@ -44,6 +44,26 @@ const normalizeEventKey = (evt) => {
   return e;
 };
 
+const eventDisplayLabel = (evt) => {
+  const eventKey = normalizeEventKey(evt);
+  const labels = {
+    "222": "2x2",
+    "333": "3x3",
+    "444": "4x4",
+    "555": "5x5",
+    "666": "6x6",
+    "777": "7x7",
+    "333OH": "3x3 OH",
+    "333BLD": "3x3 BLD",
+    "MEGAMINX": "Megaminx",
+    "PYRAMINX": "Pyraminx",
+    "SKEWB": "Skewb",
+    "SQ1": "Square-1",
+    "CLOCK": "Clock",
+  };
+  return labels[eventKey] || eventKey;
+};
+
 // PuzzleSVG likely only supports core puzzle keys.
 // OH/BLD should still show a 3x3 cube icon.
 const puzzleSvgEventKey = (eventKey) => {
@@ -150,7 +170,46 @@ function SharedAverageMessage({
   const parsed = useMemo(() => {
     try {
       if (!msg?.text || !msg.text.includes("]")) return null;
-      const [, payload] = msg.text.split("]");
+      const splitIndex = msg.text.indexOf("]");
+      if (splitIndex < 0) return null;
+      const payload = msg.text.slice(splitIndex + 1);
+
+      if (payload?.trim()?.startsWith("{")) {
+        const parsedPayload = JSON.parse(payload);
+        const creatorEvent = normalizeEventKey(parsedPayload?.creatorEvent || parsedPayload?.event);
+        const opponentEvent = normalizeEventKey(parsedPayload?.opponentEvent || parsedPayload?.event);
+        const creatorScrambles = Array.isArray(parsedPayload?.creatorScrambles)
+          ? parsedPayload.creatorScrambles.filter(Boolean)
+          : [];
+        const opponentScrambles = Array.isArray(parsedPayload?.opponentScrambles)
+          ? parsedPayload.opponentScrambles.filter(Boolean)
+          : [];
+        const creatorEvents = Array.isArray(parsedPayload?.creatorEvents)
+          ? parsedPayload.creatorEvents.map(normalizeEventKey)
+          : creatorScrambles.map(() => creatorEvent);
+        const opponentEvents = Array.isArray(parsedPayload?.opponentEvents)
+          ? parsedPayload.opponentEvents.map(normalizeEventKey)
+          : opponentScrambles.map(() => opponentEvent);
+        const count = Math.max(
+          parseInt(parsedPayload?.count, 10) || 0,
+          creatorScrambles.length,
+          opponentScrambles.length
+        );
+
+        return {
+          sharedID: parsedPayload?.sharedID,
+          count: Number.isFinite(count) ? count : 0,
+          creatorID: parsedPayload?.creatorID || msg?.sender || null,
+          creatorEvent,
+          opponentEvent,
+          creatorEvents,
+          opponentEvents,
+          creatorScrambles,
+          opponentScrambles,
+          event: creatorEvent,
+          scrambles: creatorScrambles,
+        };
+      }
 
       const first = payload.indexOf("|");
       const second = payload.indexOf("|", first + 1);
@@ -172,12 +231,19 @@ function SharedAverageMessage({
         event,
         count: Number.isFinite(count) ? count : 0,
         scrambles,
+        creatorID: msg?.sender || null,
+        creatorEvent: normalizeEventKey(event),
+        opponentEvent: normalizeEventKey(event),
+        creatorEvents: scrambles.map(() => normalizeEventKey(event)),
+        opponentEvents: scrambles.map(() => normalizeEventKey(event)),
+        creatorScrambles: scrambles,
+        opponentScrambles: scrambles,
       };
     } catch (err) {
       console.error("Failed to parse shared message:", msg?.text, err);
       return null;
     }
-  }, [msg?.text]);
+  }, [msg?.sender, msg?.text]);
 
   // -----------------------------
   // Parse [sharedUpdate] messages
@@ -305,9 +371,32 @@ function SharedAverageMessage({
   // NOW it's safe to early-return (no hooks below)
   if (!parsed) return null;
 
-  const eventKey = normalizeEventKey(parsed.event);
-  const uiThem = getUiForSide("them", eventKey);
-  const uiYou = getUiForSide("you", eventKey);
+  const isCreator = (parsed.creatorID || msg?.sender) === user?.UserID;
+  const yourEvent = isCreator ? parsed.creatorEvent : parsed.opponentEvent;
+  const theirEvent = isCreator ? parsed.opponentEvent : parsed.creatorEvent;
+  const yourEvents =
+    (isCreator ? parsed.creatorEvents : parsed.opponentEvents)?.length
+      ? (isCreator ? parsed.creatorEvents : parsed.opponentEvents)
+      : (isCreator ? parsed.creatorScrambles : parsed.opponentScrambles)?.map(() =>
+          normalizeEventKey(yourEvent)
+        ) || [];
+  const theirEvents =
+    (isCreator ? parsed.opponentEvents : parsed.creatorEvents)?.length
+      ? (isCreator ? parsed.opponentEvents : parsed.creatorEvents)
+      : (isCreator ? parsed.opponentScrambles : parsed.creatorScrambles)?.map(() =>
+          normalizeEventKey(theirEvent)
+        ) || [];
+  const yourScrambles =
+    (isCreator ? parsed.creatorScrambles : parsed.opponentScrambles)?.length
+      ? (isCreator ? parsed.creatorScrambles : parsed.opponentScrambles)
+      : parsed.scrambles;
+  const theirScrambles =
+    (isCreator ? parsed.opponentScrambles : parsed.creatorScrambles)?.length
+      ? (isCreator ? parsed.opponentScrambles : parsed.creatorScrambles)
+      : parsed.scrambles;
+
+  const uiThem = getUiForSide("them", normalizeEventKey(theirEvent));
+  const uiYou = getUiForSide("you", normalizeEventKey(yourEvent));
 
   const formatMs = (ms) => (ms || ms === 0 ? (ms / 1000).toFixed(2) : "–");
 
@@ -406,10 +495,28 @@ function SharedAverageMessage({
   };
 
   const MAX_VISIBLE = 12;
+  const visibleCount = expanded || parsed.count <= MAX_VISIBLE ? parsed.count : MAX_VISIBLE;
   const rowsToShow =
-    expanded || parsed.count <= MAX_VISIBLE
-      ? parsed.scrambles
-      : parsed.scrambles.slice(0, MAX_VISIBLE);
+    Array.from({ length: visibleCount }, (_, i) => ({
+          yourEvent: yourEvents?.[i] || normalizeEventKey(yourEvent),
+          theirEvent: theirEvents?.[i] || normalizeEventKey(theirEvent),
+          yourScramble: yourScrambles?.[i] || "",
+          theirScramble: theirScrambles?.[i] || "",
+        }));
+
+  const yourSolveCount = yourScrambles?.length || 0;
+  const theirSolveCount = theirScrambles?.length || 0;
+  const samePlan =
+    yourSolveCount === theirSolveCount &&
+    rowsToShow.every(
+      (row) =>
+        normalizeEventKey(row.yourEvent) === normalizeEventKey(row.theirEvent)
+    ) &&
+    yourEvents.length === theirEvents.length &&
+    yourEvents.every(
+      (event, index) => normalizeEventKey(event) === normalizeEventKey(theirEvents?.[index])
+    );
+  const useMixedLayout = !samePlan;
 
   return (
     <div
@@ -433,8 +540,8 @@ function SharedAverageMessage({
             onOpenSideDetail?.({
               side: "them",
               sharedID: parsed.sharedID,
-              event: parsed.event,
-              scrambles: parsed.scrambles,
+              event: theirEvent,
+              scrambles: theirScrambles,
               yourTimes: computed.yourTimes,
               theirTimes: computed.theirTimes,
               sourceMessage: msg,
@@ -449,7 +556,7 @@ function SharedAverageMessage({
               marginLeft: 0,
             }}
           >
-            <PuzzleSVG event={puzzleSvgEventKey(eventKey)} scramble={parsed.scrambles?.[0] || ""} />
+            <PuzzleSVG event={puzzleSvgEventKey(normalizeEventKey(theirEvent))} scramble={theirScrambles?.[0] || ""} />
           </div>
 
           <div className="sharedAverageSideMeta sharedAverageSideMetaThem">
@@ -469,14 +576,16 @@ function SharedAverageMessage({
             <div className="sharedAverageBig">
               {computed.theirAo != null ? formatMs(computed.theirAo) : "–"}
             </div>
-            <div className="sharedAverageSmallLabel">Ao{parsed.count}</div>
+            <div className="sharedAverageSmallLabel">Ao{theirSolveCount || parsed.count}</div>
           </div>
         </button>
 
         {/* CENTER */}
         <div className="sharedAverageCenter">
           <div className="sharedAverageCenterTitle">
-            Mixed average — {parsed.count} solves
+            {samePlan
+              ? `${eventDisplayLabel(yourEvent)} average`
+              : `Mixed average — ${theirSolveCount} vs ${yourSolveCount}`}
           </div>
 
           <div className="sharedAverageScoreRow">
@@ -505,8 +614,8 @@ function SharedAverageMessage({
             onOpenSideDetail?.({
               side: "you",
               sharedID: parsed.sharedID,
-              event: parsed.event,
-              scrambles: parsed.scrambles,
+              event: yourEvent,
+              scrambles: yourScrambles,
               yourTimes: computed.yourTimes,
               theirTimes: computed.theirTimes,
               sourceMessage: msg,
@@ -517,7 +626,7 @@ function SharedAverageMessage({
             <div className="sharedAverageBig">
               {computed.yourAo != null ? formatMs(computed.yourAo) : "–"}
             </div>
-            <div className="sharedAverageSmallLabel">Ao{parsed.count}</div>
+            <div className="sharedAverageSmallLabel">Ao{yourSolveCount || parsed.count}</div>
           </div>
 
           <div className="sharedAverageSideMeta sharedAverageSideMetaRight">
@@ -541,7 +650,7 @@ function SharedAverageMessage({
               marginLeft: 0,
             }}
           >
-            <PuzzleSVG event={puzzleSvgEventKey(eventKey)} scramble={parsed.scrambles?.[0] || ""} />
+            <PuzzleSVG event={puzzleSvgEventKey(normalizeEventKey(yourEvent))} scramble={yourScrambles?.[0] || ""} />
           </div>
         </button>
       </div>
@@ -550,7 +659,7 @@ function SharedAverageMessage({
       <div className="sharedAverageTableWrap">
         <table className="sharedAverageTable">
           <tbody>
-            {rowsToShow.map((scramble, i) => {
+            {rowsToShow.map((row, i) => {
               const w = winnerForIndex(i);
               const yourTime = computed.yourTimes[i]; // YOU on RIGHT
               const theirTime = computed.theirTimes[i]; // THEM on LEFT
@@ -573,7 +682,20 @@ function SharedAverageMessage({
                   </td>
 
                   <td className="sharedAverageScramble">
-                    <span className="sharedAverageScrambleText">{scramble}</span>
+                    {useMixedLayout ? (
+                      <div className="sharedAverageScrambleSplit">
+                        <span className="sharedAverageScrambleText sharedAverageScrambleTextThem">
+                          {eventDisplayLabel(row.theirEvent)}: {row.theirScramble || "—"}
+                        </span>
+                        <span className="sharedAverageScrambleText sharedAverageScrambleTextYou">
+                          {eventDisplayLabel(row.yourEvent)}: {row.yourScramble || "—"}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="sharedAverageScrambleText">
+                        {row.yourScramble || row.theirScramble}
+                      </span>
+                    )}
                   </td>
 
                   <td className="sharedAverageTimeCell sharedAverageTimeCellRight">
@@ -608,8 +730,9 @@ function SharedAverageMessage({
             onClick={() =>
               onLoadSession?.({
                 sharedID: parsed.sharedID,
-                event: parsed.event,
-                scrambles: parsed.scrambles,
+                event: yourEvent,
+                events: yourEvents,
+                scrambles: yourScrambles,
                 sourceMessage: msg,
               })
             }

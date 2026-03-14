@@ -6,31 +6,137 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
   z-index: 2000;
 }
 
 .sharedAverageModal {
   background: #1a1a1a;
-  padding: 20px;
-  border-radius: 12px;
+  padding: 24px;
+  border-radius: 16px;
   color: white;
-  min-width: 300px;
+  min-width: 320px;
+  width: min(96vw, 860px);
+  max-height: min(86vh, 760px);
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
 }
 
 .sharedAverageModal h2 {
-  margin-bottom: 12px;
+  margin-bottom: 18px;
+  font-size: 24px;
+}
+
+.sharedAverageModeToggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.sharedAverageModeToggle button {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: white;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.sharedAverageModeToggle button.isActive {
+  border-color: #2EC4B6;
+  background: rgba(46, 196, 182, 0.14);
 }
 
 .sharedAverageModal label {
   display: flex;
   flex-direction: column;
   margin-bottom: 12px;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.sharedAverageModal select {
+  background: rgba(255, 255, 255, 0.06);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.sharedAverageSplitGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.sharedAveragePlan {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sharedAveragePlanHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.sharedAveragePlanRows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sharedAveragePlanRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.sharedAverageAddRow,
+.sharedAverageRemoveRow {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: white;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.sharedAverageRemoveRow:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+@media (max-width: 560px) {
+  .sharedAverageSplitGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .sharedAveragePlanRow {
+    grid-template-columns: minmax(0, 1fr) 92px;
+  }
+
+  .sharedAverageRemoveRow {
+    grid-column: 1 / -1;
+  }
 }
 
 .sharedAverageButtons {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+  margin-top: 16px;
 }
 
 .sharedAverageButtons button {

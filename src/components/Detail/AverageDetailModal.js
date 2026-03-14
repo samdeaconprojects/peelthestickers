@@ -1,12 +1,16 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import StatFocusModal from "../Stats/StatFocusModal";
+import TimeTable from "../Stats/TimeTable";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
 import "./AverageDetailModal.css";
 
+function getSolvePenalty(solve) {
+  return String(solve?.penalty ?? solve?.Penalty ?? "").toUpperCase();
+}
+
 function getSolveValue(solve) {
-  const penalty = String(solve?.penalty ?? solve?.Penalty ?? "").toUpperCase();
-  if (penalty === "DNF") return "DNF";
+  if (getSolvePenalty(solve) === "DNF") return "DNF";
 
   const time = Number(
     solve?.time ?? solve?.finalTimeMs ?? solve?.FinalTimeMs ?? solve?.rawTimeMs ?? solve?.RawTimeMs
@@ -14,53 +18,35 @@ function getSolveValue(solve) {
   return Number.isFinite(time) ? time : "DNF";
 }
 
-function formatDateTime(datetime) {
-  if (!datetime) return "—";
-  const date = new Date(datetime);
-  if (!Number.isFinite(date.getTime())) return "—";
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+function getSolveDateTime(solve) {
+  return solve?.datetime || solve?.createdAt || solve?.CreatedAt || solve?.DateTime || null;
 }
 
-function AverageDetailModal({
-  isOpen,
-  title,
-  subtitle,
-  solves,
-  onClose,
-  onSolveOpen,
-}) {
+function AverageDetailModal({ isOpen, title, subtitle, solves, onClose, onSolveOpen }) {
+  const [displayMode, setDisplayMode] = useState("items");
+
   const detail = useMemo(() => {
     const items = Array.isArray(solves) ? solves.filter(Boolean) : [];
     if (!items.length) {
       return {
         average: null,
-        minIndex: -1,
-        maxIndex: -1,
         rows: [],
       };
     }
 
-    const result = calculateAverage(items.map(getSolveValue), true);
+    const values = items.map(getSolveValue);
+    const result = calculateAverage(values, true);
 
     return {
       average: result?.average ?? null,
-      minIndex: result?.minIndex ?? -1,
-      maxIndex: result?.maxIndex ?? -1,
       rows: items.map((solve, index) => ({
         solve,
         index,
-        isDropped:
-          items.length > 3 &&
-          (index === (result?.minIndex ?? -1) || index === (result?.maxIndex ?? -1)),
       })),
     };
   }, [solves]);
+
+  const itemRowSize = detail.rows.length <= 5 ? 5 : 12;
 
   return (
     <StatFocusModal
@@ -69,6 +55,9 @@ function AverageDetailModal({
       subtitle={subtitle}
       onClose={onClose}
       actionButtons={[]}
+      overlayClassName="averageDetailOverlay"
+      modalClassName="averageDetailFrame"
+      bodyClassName="averageDetailBody"
     >
       <div className="averageDetailModal">
         <div className="averageDetailHero">
@@ -80,39 +69,53 @@ function AverageDetailModal({
                 ? "—"
                 : formatTime(detail.average, true)}
           </div>
-          <div className="averageDetailHeroMeta">{detail.rows.length} solves</div>
+          <div className="averageDetailHeroMeta">{detail.rows.length} solves in this window</div>
         </div>
 
-        <div className="averageDetailList">
-          {detail.rows.map((row, idx) => {
-            const solve = row.solve;
-            const penalty = String(solve?.penalty ?? solve?.Penalty ?? "").toUpperCase();
-            const time = getSolveValue(solve);
+        <div className="averageDetailSection">
+          <div className="averageDetailSectionHeader">
+            <div>
+              <div className="averageDetailSectionTitle">
+                {displayMode === "items" ? "Time Items" : "Table"}
+              </div>
+              <div className="averageDetailSectionMeta">Tap a solve to open its detail</div>
+            </div>
 
-            return (
+            <div className="averageDetailViewToggle" role="tablist" aria-label="Average detail view">
               <button
-                key={`${solve?.solveRef || solve?.SK || solve?.datetime || idx}-${idx}`}
                 type="button"
-                className={`averageDetailRow ${row.isDropped ? "is-dropped" : ""}`}
-                onClick={() => onSolveOpen?.(solve)}
+                className={`averageDetailViewBtn ${displayMode === "items" ? "is-active" : ""}`}
+                onClick={() => setDisplayMode("items")}
               >
-                <div className="averageDetailRowIndex">{idx + 1}</div>
-                <div className="averageDetailRowMain">
-                  <div className="averageDetailRowTime">
-                    {time === "DNF" ? "DNF" : formatTime(time, false, penalty === "+2" ? "+2" : null)}
-                  </div>
-                  <div className="averageDetailRowMeta">{formatDateTime(solve?.datetime || solve?.createdAt)}</div>
-                </div>
-                {row.isDropped ? (
-                  <div className="averageDetailRowBadge">
-                    {idx === detail.minIndex ? "drop low" : "drop high"}
-                  </div>
-                ) : (
-                  <div className="averageDetailRowBadge averageDetailRowBadge--keep">counted</div>
-                )}
+                Time Items
               </button>
-            );
-          })}
+              <button
+                type="button"
+                className={`averageDetailViewBtn ${displayMode === "table" ? "is-active" : ""}`}
+                onClick={() => setDisplayMode("table")}
+              >
+                Table
+              </button>
+            </div>
+          </div>
+
+          <TimeTable
+            key={displayMode}
+            solves={detail.rows.map((row, idx) => ({
+              ...row.solve,
+              fullIndex: idx,
+              datetime: getSolveDateTime(row.solve),
+            }))}
+            onSolveOpen={onSolveOpen}
+            showToolbar={false}
+            showBulkControls={false}
+            initialDisplayMode={displayMode}
+            initialItemRowSize={itemRowSize}
+            initialTableLimit="all"
+            preserveInputOrder={true}
+            showSolveAverages={false}
+            containerClassName="averageDetailEmbeddedTable"
+          />
         </div>
       </div>
     </StatFocusModal>
