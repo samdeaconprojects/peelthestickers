@@ -163,19 +163,6 @@ body {
   padding-bottom: 6px;
 }
 
-.tagIcon {
-  scale: 30%;
-  right: 20px;
-  bottom: 35px;
-  position: relative;
-  opacity: 70%;
-}
-
-.tagIcon:hover {
-  opacity: 100%;
-  transition: 0.2s ease-out; 
-}
-
 /* left slot already 13% */
 .left-slot-auth {
   width: 13%;

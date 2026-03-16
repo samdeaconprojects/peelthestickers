@@ -18,6 +18,7 @@ import SignInPopup from "./components/SignInPopup/SignInPopup";
 import NameTag from "./components/Profile/NameTag";
 import Detail from "./components/Detail/Detail";
 import SharePostModal from "./components/Social/SharePostModal";
+import TagBar from "./components/TagBar/TagBar";
 import { useSettings } from "./contexts/SettingsContext";
 import { generateScramble } from "./components/scrambleUtils";
 import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
@@ -39,41 +40,16 @@ import { getSolveWindowFromStart } from "./services/getSolveWindow";
 import { sendMessage } from "./services/sendMessage";
 import { setGanCurrentScramble } from "./smart/ganScrambleProgress";
 
-import tagIcon from "./assets/ptstag.svg";
-
 import { DEFAULT_EVENTS } from "./defaultEvents";
+import {
+  DEFAULT_TAG_CONFIG,
+  makeEmptyTagSelection,
+  normalizeTagConfig,
+} from "./components/TagBar/tagUtils";
 import {
   calculateBestAverageOfFive,
   calculateAverage,
 } from "./components/TimeList/TimeUtils";
-
-/* -------------------------------------------------------------------------- */
-/*                               TAG CONFIG HELPERS                           */
-/* -------------------------------------------------------------------------- */
-const DEFAULT_TAG_CONFIG = {
-  Fixed: {
-    CubeModel: { label: "Cube Model", options: [] },
-    CrossColor: {
-      label: "Cross Color",
-      options: ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
-    },
-    TimerInput: {
-      label: "Timer Input",
-      options: ["Keyboard", "Type", "Stackmat", "GAN Bluetooth", "GAN Cube"],
-    },
-    SolveSource: {
-      label: "Solve Source",
-      options: ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA"],
-    },
-  },
-  CustomSlots: [
-    { slot: "Custom1", label: "", options: [] },
-    { slot: "Custom2", label: "", options: [] },
-    { slot: "Custom3", label: "", options: [] },
-    { slot: "Custom4", label: "", options: [] },
-    { slot: "Custom5", label: "", options: [] },
-  ],
-};
 
 const INITIAL_SESSIONS = {
   "222": [],
@@ -86,59 +62,6 @@ const INITIAL_SESSIONS = {
   "333BLD": [],
   RELAY: [],
 };
-
-function normalizeTagConfig(input) {
-  const cfg = input && typeof input === "object" ? input : {};
-  const fixed = cfg.Fixed || {};
-  const customSlots = Array.isArray(cfg.CustomSlots) ? cfg.CustomSlots : [];
-
-  return {
-    Fixed: {
-      CubeModel: {
-        label: fixed?.CubeModel?.label || "Cube Model",
-        options: Array.isArray(fixed?.CubeModel?.options) ? fixed.CubeModel.options : [],
-      },
-      CrossColor: {
-        label: fixed?.CrossColor?.label || "Cross Color",
-        options: Array.isArray(fixed?.CrossColor?.options)
-          ? fixed.CrossColor.options
-          : ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
-      },
-      TimerInput: {
-        label: fixed?.TimerInput?.label || "Timer Input",
-        options: Array.isArray(fixed?.TimerInput?.options)
-          ? fixed.TimerInput.options
-          : ["Keyboard", "Type", "Stackmat", "GAN Bluetooth", "GAN Cube"],
-      },
-      SolveSource: {
-        label: fixed?.SolveSource?.label || "Solve Source",
-        options: Array.isArray(fixed?.SolveSource?.options)
-          ? fixed.SolveSource.options
-          : ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA"],
-      },
-    },
-    CustomSlots: Array.from({ length: 5 }, (_, i) => {
-      const existing = customSlots[i] || {};
-      return {
-        slot: `Custom${i + 1}`,
-        label: existing?.label || "",
-        options: Array.isArray(existing?.options) ? existing.options : [],
-      };
-    }),
-  };
-}
-
-function makeEmptyTagSelection() {
-  return {
-    CubeModel: "",
-    CrossColor: "",
-    Custom1: "",
-    Custom2: "",
-    Custom3: "",
-    Custom4: "",
-    Custom5: "",
-  };
-}
 
 /* -------------------------------------------------------------------------- */
 /*                         SMART-CUBE SCRAMBLE HELPERS                         */
@@ -185,305 +108,6 @@ function tokenProgressToStepProgress(scramble, tokenProgress) {
     steps += String(t).trim().endsWith("2") ? 2 : 1;
   }
   return steps;
-}
-
-/* -------------------------------------------------------------------------- */
-/*                            INLINE TAG BAR (HOME)                           */
-/* -------------------------------------------------------------------------- */
-function TagBarInline({ tags, onChange, tagConfig, cubeModelOptions = [] }) {
-  const wrapRef = useRef(null);
-  const safeTags = tags || makeEmptyTagSelection();
-  const cfg = useMemo(() => normalizeTagConfig(tagConfig || DEFAULT_TAG_CONFIG), [tagConfig]);
-
-  const [addingCube, setAddingCube] = useState(false);
-  const [addingCross, setAddingCross] = useState(false);
-  const [newCube, setNewCube] = useState("");
-  const [newCross, setNewCross] = useState("");
-  const [localCubeOptions, setLocalCubeOptions] = useState([]);
-  const highestFilledCustomIndex = useMemo(() => {
-    for (let i = 4; i >= 0; i--) {
-      const slot = `Custom${i + 1}`;
-      if (String(safeTags?.[slot] || "").trim()) return i;
-    }
-    return -1;
-  }, [safeTags]);
-  const [visibleCustomCount, setVisibleCustomCount] = useState(() =>
-    Math.max(1, Math.min(5, highestFilledCustomIndex + 2))
-  );
-
-  const ADD_CUBE = "__ADD_CUBE__";
-  const ADD_CROSS = "__ADD_CROSS__";
-
-  const stopKeys = (e) => {
-    e.stopPropagation();
-  };
-
-  useEffect(() => {
-    const onDown = (e) => {
-      if (!wrapRef.current) return;
-      if (!wrapRef.current.contains(e.target)) {
-        setAddingCube(false);
-        setAddingCross(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, []);
-
-  useEffect(() => {
-    const required = Math.max(1, Math.min(5, highestFilledCustomIndex + 2));
-    setVisibleCustomCount((prev) => (prev < required ? required : prev));
-  }, [highestFilledCustomIndex]);
-
-  const setField = (field, value) => {
-    const v = String(value ?? "").trim();
-    if (field === "CubeModel" && v) {
-      setLocalCubeOptions((prev) => (prev.includes(v) ? prev : [...prev, v]));
-    }
-    const next = { ...(safeTags || {}) };
-    next[field] = v;
-    onChange?.(next);
-  };
-
-  const cubeOptionsBase = Array.isArray(cfg?.Fixed?.CubeModel?.options)
-    ? cfg.Fixed.CubeModel.options
-    : [];
-  const crossOptionsBase = Array.isArray(cfg?.Fixed?.CrossColor?.options)
-    ? cfg.Fixed.CrossColor.options
-    : [];
-
-  const cubeOptions = Array.from(
-    new Set(
-      [
-        ...cubeOptionsBase,
-        ...(Array.isArray(cubeModelOptions) ? cubeModelOptions : []),
-        ...localCubeOptions,
-        safeTags?.CubeModel || "",
-      ].filter(Boolean)
-    )
-  );
-
-  const crossOptions = safeTags?.CrossColor
-    ? Array.from(new Set([safeTags.CrossColor, ...crossOptionsBase]))
-    : crossOptionsBase;
-
-  const selectStyle = {
-    width: "120px",
-    height: "34px",
-    borderRadius: "8px",
-    border: "2px solid rgba(172, 172, 172, 0.75)",
-    background: "rgba(0,0,0,0.15)",
-    color: "white",
-    fontSize: "14px",
-    padding: "0 10px",
-    outline: "none",
-    boxSizing: "border-box",
-  };
-
-  const inputStyle = {
-    width: "120px",
-    height: "30px",
-    borderRadius: "8px",
-    border: "2px solid rgba(172, 172, 172, 0.95)",
-    background: "rgba(0,0,0,0.25)",
-    color: "white",
-    fontSize: "14px",
-    padding: "0 10px",
-    boxSizing: "border-box",
-    outline: "none",
-  };
-
-  const addBtnStyle = {
-    width: "120px",
-    height: "30px",
-    borderRadius: "8px",
-    border: "2px solid rgba(172, 172, 172, 0.6)",
-    background: "transparent",
-    color: "white",
-    cursor: "pointer",
-    opacity: 0.9,
-  };
-
-  const addCubeOption = () => {
-    const v = String(newCube ?? "").trim();
-    if (!v) return;
-    setLocalCubeOptions((prev) => (prev.includes(v) ? prev : [...prev, v]));
-    onChange?.({
-      ...(safeTags || {}),
-      CubeModel: v,
-    });
-    setNewCube("");
-    setAddingCube(false);
-  };
-
-  const addCrossOption = () => {
-    const v = String(newCross ?? "").trim();
-    if (!v) return;
-    onChange?.({
-      ...(safeTags || {}),
-      CrossColor: v,
-    });
-    setNewCross("");
-    setAddingCross(false);
-  };
-
-  return (
-    <div
-      ref={wrapRef}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "6px",
-        alignItems: "flex-end",
-        marginTop: "6px",
-        width: "170px",
-      }}
-      onKeyDownCapture={stopKeys}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      <div
-        style={{
-          width: "170px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "6px",
-          alignItems: "flex-end",
-        }}
-      >
-        <select
-          style={selectStyle}
-          value={safeTags?.CubeModel || ""}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === ADD_CUBE) {
-              setAddingCube(true);
-              return;
-            }
-            setField("CubeModel", v);
-          }}
-          onKeyDownCapture={stopKeys}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <option value="">{cfg.Fixed.CubeModel.label || "Cube Model"}</option>
-          {cubeOptions.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-          <option disabled value="__DIVIDER_CUBE__">
-            ──────────
-          </option>
-          <option value={ADD_CUBE}>+ Add Cube Model…</option>
-        </select>
-
-        {addingCube && (
-          <>
-            <input
-              style={inputStyle}
-              value={newCube}
-              onChange={(e) => setNewCube(e.target.value)}
-              placeholder="Add Cube Model"
-              autoFocus
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === "Enter") addCubeOption();
-                if (e.key === "Escape") setAddingCube(false);
-              }}
-              onKeyDownCapture={stopKeys}
-            />
-            <button type="button" style={addBtnStyle} onClick={addCubeOption}>
-              Add
-            </button>
-            <button type="button" style={addBtnStyle} onClick={() => setAddingCube(false)}>
-              Cancel
-            </button>
-          </>
-        )}
-      </div>
-
-      <div
-        style={{
-          width: "170px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "6px",
-          alignItems: "flex-end",
-        }}
-      >
-        <select
-          style={selectStyle}
-          value={safeTags?.CrossColor || ""}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === ADD_CROSS) {
-              setAddingCross(true);
-              return;
-            }
-            setField("CrossColor", v);
-          }}
-          onKeyDownCapture={stopKeys}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <option value="">{cfg.Fixed.CrossColor.label || "Cross Color"}</option>
-          {crossOptions.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-          <option disabled value="__DIVIDER_CROSS__">
-            ──────────
-          </option>
-          <option value={ADD_CROSS}>+ Add Cross Color…</option>
-        </select>
-
-        {addingCross && (
-          <>
-            <input
-              style={inputStyle}
-              value={newCross}
-              onChange={(e) => setNewCross(e.target.value)}
-              placeholder="Add Cross Color"
-              autoFocus
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === "Enter") addCrossOption();
-                if (e.key === "Escape") setAddingCross(false);
-              }}
-              onKeyDownCapture={stopKeys}
-            />
-            <button type="button" style={addBtnStyle} onClick={addCrossOption}>
-              Add
-            </button>
-            <button type="button" style={addBtnStyle} onClick={() => setAddingCross(false)}>
-              Cancel
-            </button>
-          </>
-        )}
-      </div>
-
-      {(cfg.CustomSlots || []).slice(0, visibleCustomCount).map((slot) => (
-        <input
-          key={slot.slot}
-          style={inputStyle}
-          value={safeTags?.[slot.slot] || ""}
-          onChange={(e) => setField(slot.slot, e.target.value)}
-          placeholder={slot.label || ""}
-          onKeyDownCapture={stopKeys}
-          onMouseDown={(e) => e.stopPropagation()}
-        />
-      ))}
-
-      {visibleCustomCount < 5 && (
-        <button
-          type="button"
-          style={addBtnStyle}
-          onClick={() => setVisibleCustomCount((prev) => Math.min(5, prev + 1))}
-        >
-          + Add Custom
-        </button>
-      )}
-    </div>
-  );
 }
 
 function App() {
@@ -2004,11 +1628,18 @@ function App() {
   };
   const cubeModelHistoryOptions = Array.from(
     new Set(
-      currentSolves
-        .map((s) => String(s?.tags?.CubeModel || "").trim())
-        .filter(Boolean)
+      [
+        ...Object.values(sessions || {}).flatMap((eventSolves) =>
+          (Array.isArray(eventSolves) ? eventSolves : [])
+            .map((solve) => String(solve?.tags?.CubeModel || solve?.Tags?.CubeModel || "").trim())
+            .filter(Boolean)
+        ),
+        ...Object.values(tagsByEvent || {})
+          .map((tagSelection) => String(tagSelection?.CubeModel || "").trim())
+          .filter(Boolean),
+      ].filter(Boolean)
     )
-  );
+  ).sort((a, b) => a.localeCompare(b));
 
   const avgOfFive = calculateAverage(
     currentSolves.slice(-5).map((s) => s.time),
@@ -2224,15 +1855,15 @@ function App() {
                           <div
                             style={{
                               position: "absolute",
-                              top: "52px",
-                              right: "0px",
-                              left: "10px",
+                              top: "76px",
+                              right: "28px",
+                              left: "auto",
                               display: "flex",
                               pointerEvents: "auto",
-                              zIndex: 4,
+                              zIndex: 200,
                             }}
                           >
-                            <TagBarInline
+                            <TagBar
                               key={`tagbar-${eventKey}`}
                               tags={currentTags}
                               onChange={(next) =>
@@ -2243,8 +1874,9 @@ function App() {
                               }
                               tagConfig={tagConfig}
                               cubeModelOptions={cubeModelHistoryOptions}
+                              variant="home"
+                              allowAdditions
                             />
-                            <img src={tagIcon} alt="tagIcon" className="tagIcon" />
                           </div>
                         </div>
                       </div>
@@ -2367,6 +1999,7 @@ function App() {
                   sessions={sessions}
                   sessionStats={sessionStats}
                   sessionsList={sessionsList}
+                  tagConfig={tagConfig}
                   statsMutationTick={statsMutationTick}
                   setSessions={setSessions}
                   setUser={setUser}

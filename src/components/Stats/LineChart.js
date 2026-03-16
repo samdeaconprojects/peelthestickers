@@ -1,7 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
 import LineChartBuilder from "./LineChartBuilder";
 import TimePeriodChart from "./TimePeriodChart";
-import Label from "./AxisLabel";
 import Detail from "../Detail/Detail";
 import "./Stats.css";
 import { formatTime } from "../TimeList/TimeUtils";
@@ -26,6 +25,11 @@ function safeDateFromSolve(s) {
   if (!raw) return null;
   const d = new Date(raw);
   return isNaN(d.getTime()) ? null : d;
+}
+
+function getSolveTimestamp(solve) {
+  const date = safeDateFromSolve(solve);
+  return date ? date.getTime() : null;
 }
 
 function formatBucketLabel(mode, key) {
@@ -206,7 +210,57 @@ function resolveStandardHeatColor(ratio) {
   return interpolateHexColor("#ffa500", "#ff0000", (safeRatio - 0.8) / 0.2);
 }
 
-function buildProcessedChartData(solves, groupMode, style = null, useHeatmap = true) {
+function formatXAxisLabel(groupMode, timestamp, fallbackLabel) {
+  if (typeof timestamp !== "number" || !isFinite(timestamp)) return fallbackLabel;
+
+  const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return fallbackLabel;
+
+  if (groupMode === "solve") {
+    return `${date.getMonth() + 1}/${date.getDate()}`;
+  }
+
+  if (groupMode === "day" || groupMode === "week") {
+    return `${date.getMonth() + 1}/${date.getDate()}`;
+  }
+
+  if (groupMode === "month") {
+    return `${date.getMonth() + 1}/${String(date.getFullYear()).slice(2)}`;
+  }
+
+  return `${date.getFullYear()}`;
+}
+
+function formatPointTime(baseTimeMs, solve, groupMode) {
+  const timeText = formatTime(baseTimeMs);
+  const timestamp = getSolveTimestamp(solve);
+  if (typeof timestamp !== "number" || !isFinite(timestamp)) return timeText;
+
+  const date = new Date(timestamp);
+  const dateText =
+    groupMode === "solve"
+      ? date.toLocaleString([], {
+          month: "numeric",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : date.toLocaleDateString([], {
+          year: "numeric",
+          month: "numeric",
+          day: "numeric",
+        });
+
+  return `${timeText} • ${dateText}`;
+}
+
+function buildProcessedChartData(
+  solves,
+  groupMode,
+  style = null,
+  useHeatmap = true,
+  xScaleMode = "ordinal"
+) {
   const baseValid = (Array.isArray(solves) ? solves : []).filter((solve) => {
     const ms = getSolveBaseMs(solve);
     return typeof ms === "number" && isFinite(ms);
@@ -245,16 +299,21 @@ function buildProcessedChartData(solves, groupMode, style = null, useHeatmap = t
 
   const data = processed.map((item, index) => {
     const baseTimeMs = item.isBucket ? item.time : getSolveBaseMs(item);
-    const label = item.isBucket ? item.bucketLabel : `${index + 1}`;
     const solveForDetail = item.isBucket ? item.solve : item;
+    const timestamp = getSolveTimestamp(solveForDetail);
+    const fallbackLabel = item.isBucket ? item.bucketLabel : `${index + 1}`;
+    const label =
+      xScaleMode === "datetime"
+        ? formatXAxisLabel(groupMode, timestamp, fallbackLabel)
+        : fallbackLabel;
     const selectionIndex = item.isBucket ? null : index;
 
     return {
       label,
-      x: index,
+      x: xScaleMode === "datetime" && timestamp != null ? timestamp : index,
       y: baseTimeMs / 1000,
       color: getColor(baseTimeMs),
-      time: formatTime(baseTimeMs),
+      time: formatPointTime(baseTimeMs, solveForDetail, groupMode),
       solve: solveForDetail,
       fullIndex: item.fullIndex,
       isDNF: item.isBucket ? false : item.penalty === "DNF",
@@ -299,7 +358,9 @@ function LineChart({
 
   const [showAo5, setShowAo5] = useState(false);
   const [showAo12, setShowAo12] = useState(false);
+  const [showMean, setShowMean] = useState(true);
   const [groupMode, setGroupMode] = useState("solve");
+  const [xScaleMode, setXScaleMode] = useState("ordinal");
   const [dotSize, setDotSize] = useState(DEFAULT_DOT_SIZE);
   const [yMinInput, setYMinInput] = useState("");
   const [yMaxInput, setYMaxInput] = useState("");
@@ -351,7 +412,13 @@ function LineChart({
 
   const computed = useMemo(() => {
     const shouldUseHeatmap = !seriesStyle;
-    const primary = buildProcessedChartData(solves, groupMode, seriesStyle, shouldUseHeatmap);
+    const primary = buildProcessedChartData(
+      solves,
+      groupMode,
+      seriesStyle,
+      shouldUseHeatmap,
+      xScaleMode
+    );
     const data = primary.data;
     const extraSeries = [];
     const solveLevel = groupMode === "solve";
@@ -377,7 +444,13 @@ function LineChart({
     }
 
     const compareData = (comparisonSeries || []).map((series, index) => {
-      const resolved = buildProcessedChartData(series?.solves || [], groupMode, series?.style || null, false);
+      const resolved = buildProcessedChartData(
+        series?.solves || [],
+        groupMode,
+        series?.style || null,
+        false,
+        xScaleMode
+      );
       return {
         id: series?.id || `compare-${index}`,
         label: series?.label || `Compare ${index + 1}`,
@@ -392,7 +465,7 @@ function LineChart({
       extraSeries,
       compareData,
     };
-  }, [comparisonSeries, groupMode, hasComparison, seriesStyle, showAo5, showAo12, solves]);
+  }, [comparisonSeries, groupMode, hasComparison, seriesStyle, showAo5, showAo12, solves, xScaleMode]);
 
   const solveLevel = groupMode === "solve";
   const bulkEnabled = solveLevel && !hasComparison;
@@ -422,6 +495,16 @@ function LineChart({
       max: Math.max(1, Math.ceil(maxValue)),
     };
   }, [computed.compareData, computed.data]);
+
+  const meanValue = useMemo(() => {
+    const values = computed.data
+      .map((point) => point?.y)
+      .filter((value) => typeof value === "number" && isFinite(value));
+
+    if (!values.length) return null;
+
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  }, [computed.data]);
 
   const parsedYMin = Number(yMinInput);
   const parsedYMax = Number(yMaxInput);
@@ -535,135 +618,211 @@ function LineChart({
         />
       )}
 
-      {allowViewPicker && (
-        <div className="lineChartControls">
-          <select
-            className="statsSelect statsSelect--chart"
-            value={groupMode}
-            onChange={(e) => {
-              selection.clearSelection();
-              setGroupMode(e.target.value);
+      <div className="lineChartBody">
+        <div className="lineChartCanvas">
+          <LineChartBuilder
+            width={560}
+            height={320}
+            data={computed.data}
+            extraSeries={computed.extraSeries}
+            comparisonSeries={computed.compareData}
+            referenceLines={
+              showMean && meanValue != null
+                ? [
+                    {
+                      id: "mean",
+                      y: meanValue,
+                      label: `Mean ${meanValue.toFixed(2)}s`,
+                      stroke: "#FFD54A",
+                    },
+                  ]
+                : []
+            }
+            primaryStroke={hasComparison ? computed.data?.[0]?.color || "#2EC4B6" : "#2EC4B6"}
+            horizontalGuides={5}
+            precision={2}
+            verticalGuides={7}
+            selectedIndices={selection.selectedIndices}
+            dotRadius={dotSize}
+            selectedDotRadius={dotSize + 3}
+            yMin={hasCustomYRange ? resolvedYMin : null}
+            yMax={hasCustomYRange ? resolvedYMax : null}
+            onDotClick={(event, solve, fullIndex, point) => {
+              handleDotClick(event, solve, fullIndex, point);
             }}
-          >
-            {!isTimeView && <option value="solve">By Solve</option>}
-            <option value="day">By Day</option>
-            <option value="week">By Week</option>
-            <option value="month">By Month</option>
-            <option value="year">By Year</option>
-          </select>
-
-          <button
-            type="button"
-            className={`statsToggleBtn ${showAo5 ? "is-active" : ""}`}
-            disabled={!solveLevel || isTimeView || hasComparison}
-            onClick={() => setShowAo5((value) => !value)}
-          >
-            Ao5
-          </button>
-
-          <button
-            type="button"
-            className={`statsToggleBtn ${showAo12 ? "is-active" : ""}`}
-            disabled={!solveLevel || isTimeView || hasComparison}
-            onClick={() => setShowAo12((value) => !value)}
-          >
-            Ao12
-          </button>
-
-          <div className="chartControlGroup">
-            <span className="chartControlLabel">Dots</span>
-            <button
-              type="button"
-              className="statsMiniBtn"
-              onClick={() => setDotSize((value) => Math.max(MIN_DOT_SIZE, value - 1))}
-            >
-              -
-            </button>
-            <span className="chartControlValue">{dotSize}</span>
-            <button
-              type="button"
-              className="statsMiniBtn"
-              onClick={() => setDotSize((value) => Math.min(MAX_DOT_SIZE, value + 1))}
-            >
-              +
-            </button>
-          </div>
-
-          <div className="chartControlGroup">
-            <span className="chartControlLabel">Scale</span>
-            <input
-              className="chartScaleInput"
-              type="number"
-              step="0.1"
-              inputMode="decimal"
-              placeholder={String(autoScale.min)}
-              value={yMinInput}
-              onChange={(e) => setYMinInput(e.target.value)}
-              aria-label="Minimum seconds"
-            />
-            <span className="chartControlDivider">to</span>
-            <input
-              className="chartScaleInput"
-              type="number"
-              step="0.1"
-              inputMode="decimal"
-              placeholder={String(autoScale.max)}
-              value={yMaxInput}
-              onChange={(e) => setYMaxInput(e.target.value)}
-              aria-label="Maximum seconds"
-            />
-            <button
-              type="button"
-              className="statsMiniBtn"
-              onClick={() => {
-                setYMinInput("");
-                setYMaxInput("");
-              }}
-            >
-              Auto
-            </button>
-          </div>
-          {hasComparison && legendItems.length > 0 && (
-            <div className="lineChartLegend">
-              {legendItems.map((item) => (
-                <div key={item.id || item.label} className="lineChartLegendItem">
-                  <span
-                    className="lineChartLegendSwatch"
-                    style={{ backgroundColor: item.color || "#2EC4B6" }}
-                  />
-                  <span className="lineChartLegendLabel">{item.label}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          />
         </div>
-      )}
 
-      <div className="chartTitle">{/* {title} */}</div>
+        {allowViewPicker && (
+          <div className="lineChartControls">
+            <div className="chartControlGroup chartControlGroup--mode">
+              <div className="chartModeGrid">
+                {!isTimeView && (
+                  <button
+                    type="button"
+                    className={`statsToggleBtn ${groupMode === "solve" ? "is-active" : ""}`}
+                    onClick={() => {
+                      selection.clearSelection();
+                      setGroupMode("solve");
+                    }}
+                  >
+                    Idx
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={`statsToggleBtn ${groupMode === "day" ? "is-active" : ""}`}
+                  onClick={() => {
+                    selection.clearSelection();
+                    setGroupMode("day");
+                  }}
+                >
+                  D
+                </button>
+                <button
+                  type="button"
+                  className={`statsToggleBtn ${groupMode === "week" ? "is-active" : ""}`}
+                  onClick={() => {
+                    selection.clearSelection();
+                    setGroupMode("week");
+                  }}
+                >
+                  W
+                </button>
+                <button
+                  type="button"
+                  className={`statsToggleBtn ${groupMode === "month" ? "is-active" : ""}`}
+                  onClick={() => {
+                    selection.clearSelection();
+                    setGroupMode("month");
+                  }}
+                >
+                  M
+                </button>
+                <button
+                  type="button"
+                  className={`statsToggleBtn ${groupMode === "year" ? "is-active" : ""}`}
+                  onClick={() => {
+                    selection.clearSelection();
+                    setGroupMode("year");
+                  }}
+                >
+                  Y
+                </button>
+              </div>
+            </div>
 
-      <div className="lineChartCanvas">
-        <LineChartBuilder
-          width={560}
-          height={320}
-          data={computed.data}
-          extraSeries={computed.extraSeries}
-          comparisonSeries={computed.compareData}
-          primaryStroke={hasComparison ? computed.data?.[0]?.color || "#2EC4B6" : "#2EC4B6"}
-          horizontalGuides={5}
-          precision={2}
-          verticalGuides={7}
-          selectedIndices={selection.selectedIndices}
-          dotRadius={dotSize}
-          selectedDotRadius={dotSize + 3}
-          yMin={hasCustomYRange ? resolvedYMin : null}
-          yMax={hasCustomYRange ? resolvedYMax : null}
-          onDotClick={(event, solve, fullIndex, point) => {
-            handleDotClick(event, solve, fullIndex, point);
-          }}
-        />
+            <button
+              type="button"
+              className={`statsToggleBtn ${showAo5 ? "is-active" : ""}`}
+              disabled={!solveLevel || isTimeView || hasComparison}
+              onClick={() => setShowAo5((value) => !value)}
+            >
+              Ao5
+            </button>
+
+            <button
+              type="button"
+              className={`statsToggleBtn ${showAo12 ? "is-active" : ""}`}
+              disabled={!solveLevel || isTimeView || hasComparison}
+              onClick={() => setShowAo12((value) => !value)}
+            >
+              Ao12
+            </button>
+
+            <button
+              type="button"
+              className={`statsToggleBtn ${xScaleMode === "datetime" ? "is-active" : ""}`}
+              onClick={() =>
+                setXScaleMode((value) => (value === "datetime" ? "ordinal" : "datetime"))
+              }
+            >
+              Date Gaps
+            </button>
+
+            <button
+              type="button"
+              className={`statsToggleBtn ${showMean ? "is-active" : ""}`}
+              onClick={() => setShowMean((value) => !value)}
+            >
+              Mean
+            </button>
+
+            <div className="chartControlGroup">
+              <span className="chartControlLabel">Dots</span>
+              <div className="chartControlRow">
+                <button
+                  type="button"
+                  className="statsMiniBtn"
+                  onClick={() => setDotSize((value) => Math.max(MIN_DOT_SIZE, value - 1))}
+                >
+                  -
+                </button>
+                <span className="chartControlValue">{dotSize}</span>
+                <button
+                  type="button"
+                  className="statsMiniBtn"
+                  onClick={() => setDotSize((value) => Math.min(MAX_DOT_SIZE, value + 1))}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            <div className="chartControlGroup">
+              <div className="chartControlHeader">
+                <span className="chartControlLabel">Scale</span>
+                <button
+                  type="button"
+                  className="statsMiniBtn"
+                  onClick={() => {
+                    setYMinInput("");
+                    setYMaxInput("");
+                  }}
+                >
+                  Auto
+                </button>
+              </div>
+              <div className="chartControlRow">
+                <input
+                  className="chartScaleInput"
+                  type="number"
+                  step="0.1"
+                  inputMode="decimal"
+                  placeholder={String(autoScale.min)}
+                  value={yMinInput}
+                  onChange={(e) => setYMinInput(e.target.value)}
+                  aria-label="Minimum seconds"
+                />
+                <span className="chartControlDivider">to</span>
+                <input
+                  className="chartScaleInput"
+                  type="number"
+                  step="0.1"
+                  inputMode="decimal"
+                  placeholder={String(autoScale.max)}
+                  value={yMaxInput}
+                  onChange={(e) => setYMaxInput(e.target.value)}
+                  aria-label="Maximum seconds"
+                />
+              </div>
+            </div>
+            {hasComparison && legendItems.length > 0 && (
+              <div className="lineChartLegend">
+                {legendItems.map((item) => (
+                  <div key={item.id || item.label} className="lineChartLegendItem">
+                    <span
+                      className="lineChartLegendSwatch"
+                      style={{ backgroundColor: item.color || "#2EC4B6" }}
+                    />
+                    <span className="lineChartLegendLabel">{item.label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
-
-      <Label text={computed.solveCountText} />
 
       {!onSolveOpen && selectedSolve && (
         <Detail

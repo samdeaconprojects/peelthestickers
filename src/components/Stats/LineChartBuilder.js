@@ -7,6 +7,7 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const LineChartBuilder = ({
   data,
   extraSeries,
+  referenceLines,
   comparisonSeries,
   primaryStroke,
   height,
@@ -35,7 +36,10 @@ const LineChartBuilder = ({
   );
 
   const {
-    padding,
+    leftPadding,
+    rightPadding,
+    topPadding,
+    bottomPadding,
     chartWidth,
     chartHeight,
     minX,
@@ -72,12 +76,20 @@ const LineChartBuilder = ({
     const digits = parseFloat(resolvedMaxY.toString()).toFixed(precision).length + 3;
     const yLabelRoom = digits * (FONT_SIZE * 0.62);
 
-    const _padding = Math.ceil(Math.max(FONT_SIZE * 2.2, yLabelRoom)) + 10;
+    const computedLeftPadding = Math.ceil(Math.max(FONT_SIZE * 2.05, yLabelRoom)) + 10;
+    const computedRightPadding = Math.max(13, Math.ceil(FONT_SIZE * 1.0));
+    const computedTopPadding = Math.max(13, Math.ceil(FONT_SIZE * 1.0));
+    const computedBottomPadding = showAxisLabels
+      ? Math.max(28, Math.ceil(FONT_SIZE * 2.4))
+      : Math.max(14, Math.ceil(FONT_SIZE * 1.1));
 
     return {
-      padding: _padding,
-      chartWidth: width - _padding * 2,
-      chartHeight: height - _padding * 2,
+      leftPadding: computedLeftPadding,
+      rightPadding: computedRightPadding,
+      topPadding: computedTopPadding,
+      bottomPadding: computedBottomPadding,
+      chartWidth: Math.max(1, width - computedLeftPadding - computedRightPadding),
+      chartHeight: Math.max(1, height - computedTopPadding - computedBottomPadding),
       minX: _minX,
       maxX: _maxX,
       minimumYFromData: resolvedMinY,
@@ -85,16 +97,26 @@ const LineChartBuilder = ({
       yDenom: resolvedMaxY - resolvedMinY || 1,
       xDenom: (_maxX - _minX) || 1,
     };
-  }, [safeComparisonSeries, safeData, width, height, FONT_SIZE, precision, yMin, yMax]);
+  }, [
+    safeComparisonSeries,
+    safeData,
+    width,
+    height,
+    FONT_SIZE,
+    precision,
+    yMin,
+    yMax,
+    showAxisLabels,
+  ]);
 
   const mainPoints = useMemo(() => {
     if (!safeData.length) return "";
     return safeData
       .map((element) => {
-        const x = ((element.x - minX) / xDenom) * chartWidth + padding;
+        const x = ((element.x - minX) / xDenom) * chartWidth + leftPadding;
         const rawY =
-          chartHeight - ((element.y - minimumYFromData) / yDenom) * chartHeight + padding;
-        const y = clamp(rawY, padding, chartHeight + padding);
+          chartHeight - ((element.y - minimumYFromData) / yDenom) * chartHeight + topPadding;
+        const y = clamp(rawY, topPadding, chartHeight + topPadding);
         return `${x},${y}`;
       })
       .join(" ");
@@ -104,22 +126,27 @@ const LineChartBuilder = ({
     xDenom,
     chartWidth,
     chartHeight,
-    padding,
+    leftPadding,
+    topPadding,
     minimumYFromData,
     yDenom,
   ]);
 
   const Axis = ({ points }) => <polyline fill="none" stroke="#ccc" strokeWidth=".7" points={points} />;
-  const XAxis = () => <Axis points={`${padding},${height - padding} ${width - padding},${height - padding}`} />;
-  const YAxis = () => <Axis points={`${padding},${padding} ${padding},${height - padding}`} />;
+  const XAxis = () =>
+    <Axis
+      points={`${leftPadding},${height - bottomPadding} ${width - rightPadding},${height - bottomPadding}`}
+    />;
+  const YAxis = () =>
+    <Axis points={`${leftPadding},${topPadding} ${leftPadding},${height - bottomPadding}`} />;
 
   const VerticalGuides = () => {
     const guideCount = numberOfVerticalGuides || Math.max(1, safeData.length - 1);
-    const startY = padding;
-    const endY = height - padding;
+    const startY = topPadding;
+    const endY = height - bottomPadding;
     return new Array(guideCount).fill(0).map((_, index) => {
       const ratio = (index + 1) / guideCount;
-      const xCoordinate = padding + ratio * (width - padding * 2);
+      const xCoordinate = leftPadding + ratio * chartWidth;
       return (
         <polyline
           key={index}
@@ -134,11 +161,11 @@ const LineChartBuilder = ({
   };
 
   const HorizontalGuides = () => {
-    const startX = padding;
-    const endX = width - padding;
+    const startX = leftPadding;
+    const endX = width - rightPadding;
     return new Array(numberOfHorizontalGuides).fill(0).map((_, index) => {
       const ratio = (index + 1) / numberOfHorizontalGuides;
-      const yCoordinate = chartHeight - chartHeight * ratio + padding;
+      const yCoordinate = chartHeight - chartHeight * ratio + topPadding;
       return (
         <polyline
           key={index}
@@ -153,14 +180,14 @@ const LineChartBuilder = ({
   };
 
   const LabelsXAxis = () => {
-    const y = height - padding + FONT_SIZE * 1.8;
+    const y = height - bottomPadding + FONT_SIZE * 1.35;
     const n = safeData.length;
     const step = n <= 12 ? 1 : Math.ceil(n / 10);
 
     return safeData.map((element, index) => {
       if (index % step !== 0 && index !== n - 1) return null;
 
-      const x = ((element.x - minX) / xDenom) * chartWidth + padding;
+      const x = ((element.x - minX) / xDenom) * chartWidth + leftPadding;
       return (
         <text
           key={index}
@@ -178,8 +205,8 @@ const LineChartBuilder = ({
   const LabelsYAxis = () => {
     const PARTS = numberOfHorizontalGuides;
     return new Array(PARTS + 1).fill(0).map((_, index) => {
-      const x = padding - FONT_SIZE * 0.8;
-      const yCoordinate = chartHeight - chartHeight * (index / PARTS) + padding + FONT_SIZE / 3;
+      const x = leftPadding - FONT_SIZE * 0.8;
+      const yCoordinate = chartHeight - chartHeight * (index / PARTS) + topPadding + FONT_SIZE / 3;
       return (
         <text
           key={index}
@@ -205,10 +232,10 @@ const LineChartBuilder = ({
     const pts = (s.points || [])
       .filter((p) => p && typeof p.y === "number" && isFinite(p.y))
       .map((p) => {
-        const x = ((p.x - minX) / xDenom) * chartWidth + padding;
+        const x = ((p.x - minX) / xDenom) * chartWidth + leftPadding;
         const rawY =
-          chartHeight - ((p.y - minimumYFromData) / yDenom) * chartHeight + padding;
-        const y = clamp(rawY, padding, chartHeight + padding);
+          chartHeight - ((p.y - minimumYFromData) / yDenom) * chartHeight + topPadding;
+        const y = clamp(rawY, topPadding, chartHeight + topPadding);
         return `${x},${y}`;
       })
       .join(" ");
@@ -231,10 +258,10 @@ const LineChartBuilder = ({
     const pts = (series.points || [])
       .filter((point) => point && typeof point.y === "number" && isFinite(point.y))
       .map((point) => {
-        const x = ((point.x - minX) / xDenom) * chartWidth + padding;
+        const x = ((point.x - minX) / xDenom) * chartWidth + leftPadding;
         const rawY =
-          chartHeight - ((point.y - minimumYFromData) / yDenom) * chartHeight + padding;
-        const y = clamp(rawY, padding, chartHeight + padding);
+          chartHeight - ((point.y - minimumYFromData) / yDenom) * chartHeight + topPadding;
+        const y = clamp(rawY, topPadding, chartHeight + topPadding);
         return `${x},${y}`;
       })
       .join(" ");
@@ -253,9 +280,64 @@ const LineChartBuilder = ({
     );
   });
 
+  const renderedReferenceLines = (Array.isArray(referenceLines) ? referenceLines : [])
+    .filter((line) => typeof line?.y === "number" && isFinite(line.y))
+    .map((line, index) => {
+      const rawY =
+        chartHeight - ((line.y - minimumYFromData) / yDenom) * chartHeight + topPadding;
+      const y = clamp(rawY, topPadding, chartHeight + topPadding);
+
+      return (
+        <g key={line.id || `reference-${index}`}>
+          <line
+            x1={leftPadding}
+            y1={y}
+            x2={width - rightPadding}
+            y2={y}
+            stroke={line.stroke || "#FFD54A"}
+            strokeWidth={1.5}
+            strokeDasharray={line.dashed ? "6 5" : undefined}
+            opacity={0.95}
+          />
+        </g>
+      );
+    });
+
+  const renderedReferenceLabels = (Array.isArray(referenceLines) ? referenceLines : [])
+    .filter((line) => typeof line?.y === "number" && isFinite(line.y))
+    .map((line, index) => {
+      const rawY =
+        chartHeight - ((line.y - minimumYFromData) / yDenom) * chartHeight + topPadding;
+      const y = clamp(rawY, topPadding, chartHeight + topPadding);
+      const labelY = Math.max(topPadding + FONT_SIZE, y - 6);
+      const labelX = leftPadding - 8;
+
+      return (
+        <g key={`${line.id || `reference-${index}`}-label`}>
+          <text
+            x={labelX}
+            y={labelY}
+            textAnchor="end"
+            style={{
+              fill: line.stroke || "#FFD54A",
+              fontSize: Math.max(10, FONT_SIZE - 1),
+              fontWeight: 800,
+              fontFamily: "Helvetica",
+            }}
+          >
+            {line.label}
+          </text>
+        </g>
+      );
+    });
+
   return (
-    <div style={{ position: "relative", width: "100%", overflow: "visible" }}>
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: "100%", overflow: "visible" }}>
+    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "visible" }}>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        style={{ width: "100%", height: "100%", overflow: "visible" }}
+      >
         {showAxes && <XAxis />}
         {showAxisLabels && <LabelsXAxis />}
         {showAxes && <YAxis />}
@@ -263,6 +345,7 @@ const LineChartBuilder = ({
 
         {showGuides && numberOfVerticalGuides && <VerticalGuides />}
         {showGuides && <HorizontalGuides />}
+        {renderedReferenceLines}
 
         <polyline
           fill="none"
@@ -274,10 +357,10 @@ const LineChartBuilder = ({
         {comparisonPolylines}
 
         {safeData.map((element, index) => {
-          const x = ((element.x - minX) / xDenom) * chartWidth + padding;
+          const x = ((element.x - minX) / xDenom) * chartWidth + leftPadding;
           const rawY =
-            chartHeight - ((element.y - minimumYFromData) / yDenom) * chartHeight + padding;
-          const y = clamp(rawY, padding, chartHeight + padding);
+            chartHeight - ((element.y - minimumYFromData) / yDenom) * chartHeight + topPadding;
+          const y = clamp(rawY, topPadding, chartHeight + topPadding);
 
           const isSelected =
             element.selectionIndex != null && selectedIndices?.has?.(element.selectionIndex);
@@ -312,10 +395,10 @@ const LineChartBuilder = ({
           (series.points || []).map((element, index) => {
             if (!element || typeof element.y !== "number" || !isFinite(element.y)) return null;
 
-            const x = ((element.x - minX) / xDenom) * chartWidth + padding;
+            const x = ((element.x - minX) / xDenom) * chartWidth + leftPadding;
             const rawY =
-              chartHeight - ((element.y - minimumYFromData) / yDenom) * chartHeight + padding;
-            const y = clamp(rawY, padding, chartHeight + padding);
+              chartHeight - ((element.y - minimumYFromData) / yDenom) * chartHeight + topPadding;
+            const y = clamp(rawY, topPadding, chartHeight + topPadding);
 
             return (
               <circle
@@ -335,6 +418,8 @@ const LineChartBuilder = ({
             );
           })
         )}
+
+        {renderedReferenceLabels}
       </svg>
 
       {tooltip.visible && (
@@ -366,6 +451,7 @@ LineChartBuilder.defaultProps = {
   verticalGuides: null,
   precision: 2,
   extraSeries: [],
+  referenceLines: [],
   comparisonSeries: [],
   primaryStroke: "#00FFFF",
   selectedIndices: new Set(),
@@ -405,6 +491,15 @@ LineChartBuilder.propTypes = {
           y: PropTypes.number,
         })
       ).isRequired,
+    })
+  ),
+  referenceLines: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.string,
+      y: PropTypes.number.isRequired,
+      label: PropTypes.string,
+      stroke: PropTypes.string,
+      dashed: PropTypes.bool,
     })
   ),
   comparisonSeries: PropTypes.arrayOf(

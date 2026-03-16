@@ -62,6 +62,10 @@ td:nth-child(13) {
   box-sizing: border-box;
 }
 
+.statsTopBar--standard {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
 .statsTopLeft{
   display: flex;
   align-items: center;
@@ -89,6 +93,15 @@ td:nth-child(13) {
   min-width: 0;
 }
 
+.statsCompareControls--standard {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.statsCompareControls--standard::-webkit-scrollbar { display: none; }
+
 .statsScopeRow {
   display: flex;
   align-items: center;
@@ -98,6 +111,11 @@ td:nth-child(13) {
   border-radius: 12px;
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.08);
+}
+
+.statsCompareControls--standard .statsScopeRow {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .statsScopeRow.is-loading {
@@ -132,6 +150,12 @@ td:nth-child(13) {
 .statsAddCompareBtn {
   align-self: flex-start;
   padding: 0 14px;
+}
+
+.statsCompareControls--standard .statsAddCompareBtn {
+  align-self: flex-start;
+  flex-basis: 100%;
+  white-space: nowrap;
 }
 
 .statsFilterBtn {
@@ -357,6 +381,12 @@ td:nth-child(13) {
   flex-wrap: wrap;
 }
 
+.statsTopMiddle--standard {
+  justify-content: center;
+  flex-wrap: nowrap;
+  min-width: max-content;
+}
+
 .statsDateControls{
   display: inline-flex;
   align-items: center;
@@ -441,6 +471,8 @@ td:nth-child(13) {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
+  justify-self: end;
 }
 
 .statsTopRight button{
@@ -449,26 +481,55 @@ td:nth-child(13) {
   border-radius: 8px;
 }
 
+.statsTopStepBtn {
+  min-width: 44px;
+  padding: 0 8px;
+}
+
 .lineChart {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   height: 100%;
-  padding-top: 4px;
+  min-height: 0;
+  padding-top: 2px;
+}
+
+.lineChartModeRow {
+  display: flex;
+  align-items: center;
+}
+
+.lineChartBody {
+  --linechart-control-width: 112px;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--linechart-control-width);
+  gap: 0;
+  align-items: stretch;
 }
 
 .lineChartControls {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  align-content: stretch;
+  gap: 6px;
+  min-width: 0;
+  margin-left: -8px;
+  padding-right: 0;
+  box-sizing: border-box;
 }
 
 .lineChartCanvas {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
+  height: 100%;
+  margin-right: -8px;
 }
 
 .lineChartLegend {
@@ -515,22 +576,37 @@ td:nth-child(13) {
 }
 
 .statsSelect--chart {
-  min-width: 120px;
+  min-width: 0;
+  width: 100%;
 }
 
 .statsToggleBtn,
 .statsMiniBtn {
-  height: 34px;
-  border-radius: 8px;
+  height: 30px;
+  border-radius: 7px;
   border: 2px solid rgba(255,255,255,0.18);
   background: rgba(0,0,0,0.22);
   color: white;
   font-weight: 900;
   cursor: pointer;
+  font-size: 11px;
 }
 
 .statsToggleBtn {
-  padding: 0 12px;
+  width: 100%;
+  padding: 0 10px;
+}
+
+.lineChartControls > .statsToggleBtn {
+  width: var(--linechart-control-width);
+  align-self: flex-end;
+  box-sizing: border-box;
+}
+
+.lineChartControls > .chartControlGroup {
+  width: var(--linechart-control-width);
+  align-self: flex-end;
+  box-sizing: border-box;
 }
 
 .statsToggleBtn.is-active {
@@ -544,54 +620,75 @@ td:nth-child(13) {
   cursor: default;
 }
 
-.statsViewToggle {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-  padding: 4px;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.08);
-}
-
-.statsViewToggle .statsToggleBtn {
-  width: 100%;
-}
-
 .statsMiniBtn {
-  min-width: 34px;
-  padding: 0 10px;
+  min-width: 30px;
+  padding: 0 8px;
 }
 
 .chartControlGroup {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 5px 8px;
+  border-radius: 9px;
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.08);
+}
+
+.chartControlGroup--mode {
+  padding: 4px;
+}
+
+.chartModeGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.chartModeGrid .statsToggleBtn {
+  width: 100%;
+  min-width: 0;
+  padding: 0 6px;
+}
+
+.chartControlRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.chartControlHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
 }
 
 .chartControlLabel,
 .chartControlValue,
 .chartControlDivider {
   color: rgba(255,255,255,0.82);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
 }
 
 .chartScaleInput {
-  width: 64px;
-  height: 34px;
-  padding: 0 8px;
-  border-radius: 8px;
+  width: 0;
+  min-width: 0;
+  flex: 1 1 72px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: 7px;
   border: 2px solid rgba(255,255,255,0.18);
   background: rgba(0,0,0,0.22);
   color: white;
   font-weight: 800;
   outline: none;
+  font-size: 11px;
 }
 
 .timePeriodChart {
@@ -1089,12 +1186,26 @@ td:nth-child(13) {
   padding: 6px;
 }
 
+.statFocusCanvas.is-line {
+  width: min(1080px, 100%);
+  aspect-ratio: 2.05 / 1;
+  min-height: 460px;
+  max-height: min(60vh, 700px);
+  margin: 0 auto;
+  padding: 0;
+}
+
 .statFocusCanvas.is-summary {
   height: auto;
   min-height: 0;
 }
 
 .statFocusCanvas > * {
+  width: 100%;
+  height: 100%;
+}
+
+.statFocusCanvas.is-line > * {
   width: 100%;
   height: 100%;
 }
@@ -1137,17 +1248,34 @@ input {
   .statsTopMiddle{
     justify-content: flex-start;
   }
+  .statsTopMiddle--standard {
+    flex-wrap: wrap;
+  }
   .statsTopRight{
     flex-wrap: wrap;
   }
 
   .lineChartControls {
+    flex-direction: row;
     align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .lineChartModeRow {
+    flex-wrap: wrap;
+  }
+
+  .lineChartBody {
+    display: flex;
+    flex-direction: column;
   }
 
   .chartControlGroup {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .chartControlRow {
     flex-wrap: wrap;
   }
 
@@ -1174,6 +1302,16 @@ input {
   .statsCompareControls,
   .statsScopeRow {
     width: 100%;
+  }
+
+  .statsCompareControls--standard {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .statsCompareControls--standard .statsScopeRow {
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   .statsSummaryPanelGrid,

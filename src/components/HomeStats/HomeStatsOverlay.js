@@ -273,7 +273,7 @@ function HomeStatsOverlay({ solves, settings, user }) {
               slotKey === "background" && config.chartType === "line"
                 ? " homeStatsSlot--backgroundLine"
                 : ""
-            }`}
+            }${config.chartType === "pie" ? " homeStatsSlot--pie" : ""}${isHovered ? " is-hovered" : ""}`}
             onMouseEnter={isSideSlot ? () => setHoveredSlot(slotKey) : undefined}
             onMouseLeave={isSideSlot ? () => setHoveredSlot((current) => (current === slotKey ? null : current)) : undefined}
             style={{
@@ -298,12 +298,16 @@ function HomeStatsOverlay({ solves, settings, user }) {
               }${isHovered ? " is-hovered" : ""}`}
               style={slotKey === "background" ? { opacity: config.opacity } : undefined}
             >
-              <div className="homeStatsCardTitle">{slotTitle(config)}</div>
+              <div
+                className={`homeStatsCardTitle${
+                  config.chartType === "bar" ? " homeStatsCardTitle--bar" : ""
+                }`}
+              >
+                {slotTitle(config)}
+              </div>
 
               <div className={`homeStatsCardBody homeStatsCardBody--${config.chartType}`}>
-                {empty ? (
-                  <div className="homeStatsEmpty">Not enough solves yet</div>
-                ) : config.chartType === "line" ? (
+                {empty ? null : config.chartType === "line" ? (
                   <LineChartBuilder
                     width={config.width}
                     height={config.height}

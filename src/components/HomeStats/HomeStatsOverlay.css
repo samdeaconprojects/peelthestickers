@@ -11,6 +11,14 @@
   pointer-events: auto;
 }
 
+.homeStatsSlot--pie {
+  z-index: 6;
+}
+
+.homeStatsSlot--pie.is-hovered {
+  z-index: 8;
+}
+
 .homeStatsSlot--left {
   right: calc(50% + clamp(250px, 26vw, 440px));
   top: 455px;
@@ -91,6 +99,10 @@
   border-radius: 999px;
 }
 
+.homeStatsCardTitle--bar {
+  top: 0;
+}
+
 .homeStatsCardBody {
   width: 100%;
   height: 100%;
@@ -104,15 +116,16 @@
 }
 
 .homeStatsChartFrame--pie {
-  width: 112%;
-  height: 112%;
-  margin-left: -6%;
-  margin-top: -2%;
+  width: 120%;
+  height: 120%;
+  margin-left: -10%;
+  margin-top: -4%;
 }
 
 .homeStatsCard--pie.is-hovered .homeStatsChartFrame--pie {
-  width: 122%;
-  margin-left: -6%;
+  width: 130%;
+  height: 124%;
+  margin-left: -10%;
 }
 
 .homeStatsChartFrame--bar {
@@ -125,17 +138,7 @@
   opacity: 1;
 }
 
-.homeStatsEmpty {
-  width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
-  color: rgba(255, 255, 255, 0.58);
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-@media (max-width: 1040px) {
+@media (max-width: 1180px) {
   .homeStatsSlot--left,
   .homeStatsSlot--right {
     display: none;

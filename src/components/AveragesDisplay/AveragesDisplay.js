@@ -81,8 +81,8 @@ function AveragesDisplay({
     const bpaAvg5 = calculateAverage(bestSet, true).average;
     const wpaAvg5 = calculateAverage(worstSet, true).average;
 
-    bpa5 = bpaAvg5 === "DNF" ? "DNF" : formatTime(bpaAvg5);
-    wpa5 = wpaAvg5 === "DNF" ? "DNF" : formatTime(wpaAvg5);
+    bpa5 = bpaAvg5 === "DNF" ? "DNF" : formatTime(bpaAvg5, true);
+    wpa5 = wpaAvg5 === "DNF" ? "DNF" : formatTime(wpaAvg5, true);
   }
 
   if (currentSolves.length >= 11) {
@@ -99,8 +99,8 @@ function AveragesDisplay({
       const bpaAvg12 = calculateAverage(bestSet12, true).average;
       const wpaAvg12 = calculateAverage(worstSet12, true).average;
 
-      bpa12 = bpaAvg12 === "DNF" ? "DNF" : formatTime(bpaAvg12);
-      wpa12 = wpaAvg12 === "DNF" ? "DNF" : formatTime(wpaAvg12);
+      bpa12 = bpaAvg12 === "DNF" ? "DNF" : formatTime(bpaAvg12, true);
+      wpa12 = wpaAvg12 === "DNF" ? "DNF" : formatTime(wpaAvg12, true);
     }
   }
 
@@ -118,7 +118,7 @@ function AveragesDisplay({
         AO5
       </div>
       <div className="cell current-col ao5" onClick={() => setSelectedAverageSolves(currentSolves.slice(-5))}>
-        {avgOfFive === "DNF" ? "DNF" : formatTime(avgOfFive)}
+        {avgOfFive === "DNF" ? "DNF" : formatTime(avgOfFive, true)}
       </div>
       <div
         className="cell best ao5"
@@ -126,10 +126,10 @@ function AveragesDisplay({
           selectBestWindow(5, bestAvgOfFive, overallSessionStats?.BestAo5StartSolveSK || null)
         }
       >
-        {bestAvgOfFive === "N/A" ? "N/A" : bestAvgOfFive === "DNF" ? "DNF" : formatTime(bestAvgOfFive)}
+        {bestAvgOfFive === "N/A" ? "N/A" : bestAvgOfFive === "DNF" ? "DNF" : formatTime(bestAvgOfFive, true)}
       </div>
       <div className="cell strict ao5" onClick={() => selectStrictWindow(strictAo5)}>
-        {strictAo5?.value == null ? "N/A" : formatTime(strictAo5.value)}
+        {strictAo5?.value == null ? "N/A" : formatTime(strictAo5.value, true)}
       </div>
       <div className="cell less-important">{bpa5}</div>
       <div className="cell less-important">{wpa5}</div>
@@ -139,7 +139,7 @@ function AveragesDisplay({
         AO12
       </div>
       <div className="cell current-col ao12" onClick={() => setSelectedAverageSolves(currentSolves.slice(-12))}>
-        {avgOfTwelve === "DNF" ? "DNF" : formatTime(avgOfTwelve)}
+        {avgOfTwelve === "DNF" ? "DNF" : formatTime(avgOfTwelve, true)}
       </div>
       <div
         className="cell best ao12"
@@ -147,10 +147,10 @@ function AveragesDisplay({
           selectBestWindow(12, bestAvgOfTwelve, overallSessionStats?.BestAo12StartSolveSK || null)
         }
       >
-        {bestAvgOfTwelve === "N/A" ? "N/A" : bestAvgOfTwelve === "DNF" ? "DNF" : formatTime(bestAvgOfTwelve)}
+        {bestAvgOfTwelve === "N/A" ? "N/A" : bestAvgOfTwelve === "DNF" ? "DNF" : formatTime(bestAvgOfTwelve, true)}
       </div>
       <div className="cell strict ao12" onClick={() => selectStrictWindow(strictAo12)}>
-        {strictAo12?.value == null ? "N/A" : formatTime(strictAo12.value)}
+        {strictAo12?.value == null ? "N/A" : formatTime(strictAo12.value, true)}
       </div>
       <div className="cell less-important">{bpa12}</div>
       <div className="cell less-important">{wpa12}</div>

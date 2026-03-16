@@ -11,6 +11,8 @@
   max-width: 600px;
   margin-bottom: 30px;
   position: relative;
+  z-index: 4;
+  pointer-events: auto;
 }
 
 /* Headers */
