@@ -1,3 +1,4 @@
+// src/contexts/SettingsContext.js
 import React, {
   createContext,
   useContext,
@@ -66,22 +67,49 @@ export const defaultSettings = {
   wcaImportSessionByEvent: {},
   wcaImportSolveSource: "WCA",
   wcaImportLastSyncAt: "",
+
+  // Updated provider values:
+  // "gan" | "gan-gen2-compatible" | "moyu-wcu" | "auto"
+  smartCubeProvider: "gan",
 };
+
+function normalizeSmartCubeProvider(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+
+  // Backward compatibility for old saved values
+  if (raw === "moyu-gan") return "moyu-wcu";
+
+  if (
+    raw === "gan" ||
+    raw === "gan-gen2-compatible" ||
+    raw === "moyu-wcu" ||
+    raw === "auto"
+  ) {
+    return raw;
+  }
+
+  return defaultSettings.smartCubeProvider;
+}
 
 function mergeSettings(input) {
   const safe = input && typeof input === "object" ? input : {};
   const normalizedHomeStatsSlots = normalizeHomeStatsSlots(safe.homeStatsSlots);
+
   const legacyLineSolveLimits = Object.values(normalizedHomeStatsSlots)
     .map((slot) => Number(slot?.lineSolveLimit))
     .filter((value) => Number.isFinite(value) && value >= 0);
+
   const fallbackHomeStatsSolveLimit =
     legacyLineSolveLimits.find((value) => value > 0) ??
     legacyLineSolveLimits[0] ??
     defaultSettings.homeStatsSolveLimit;
 
+  const smartCubeProvider = normalizeSmartCubeProvider(safe.smartCubeProvider);
+
   return {
     ...defaultSettings,
     ...safe,
+    smartCubeProvider,
     eventKeyBindings: {
       ...defaultEventBindings,
       ...(safe.eventKeyBindings || {}),
@@ -96,15 +124,19 @@ function mergeSettings(input) {
     ),
     homeStatsSlots: normalizedHomeStatsSlots,
     wcaImportSessionByEvent:
-      safe.wcaImportSessionByEvent && typeof safe.wcaImportSessionByEvent === "object"
+      safe.wcaImportSessionByEvent &&
+      typeof safe.wcaImportSessionByEvent === "object"
         ? safe.wcaImportSessionByEvent
         : {},
     wcaImportSolveSource:
-      typeof safe.wcaImportSolveSource === "string" && safe.wcaImportSolveSource.trim()
+      typeof safe.wcaImportSolveSource === "string" &&
+      safe.wcaImportSolveSource.trim()
         ? safe.wcaImportSolveSource.trim()
         : "WCA",
     wcaImportLastSyncAt:
-      typeof safe.wcaImportLastSyncAt === "string" ? safe.wcaImportLastSyncAt : "",
+      typeof safe.wcaImportLastSyncAt === "string"
+        ? safe.wcaImportLastSyncAt
+        : "",
   };
 }
 
@@ -145,5 +177,9 @@ export const SettingsProvider = ({ children }) => {
     [settings, updateSettings, setAllSettings, resetSettings]
   );
 
-  return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
+  return (
+    <SettingsContext.Provider value={value}>
+      {children}
+    </SettingsContext.Provider>
+  );
 };

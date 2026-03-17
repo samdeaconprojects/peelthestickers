@@ -4,7 +4,8 @@ import './Timer.css';
 import { useSettings } from '../../contexts/SettingsContext';
 
 import { GanTimerClient, GanTimerState } from '../../smart/ganTimerClient';
-import { GanCubeClient } from '../../smart/ganCubeClient';
+import { createSmartCubeClient } from '../../smart/createSmartCubeClient';
+import { getSmartCubeProviderLabel } from '../../smart/smartCubeProviderMeta';
 import { computeBasicCFOPSplits } from '../../smart/solveSplits';
 
 function parseDisplayTimeToMs(displayTime) {
@@ -115,7 +116,7 @@ function tokenizeScramble(scramble) {
 function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
   const { settings } = useSettings();
 
-  // ✅ NEW: keep latest addTime in a ref so Bluetooth callbacks always save
+  // ✅ keep latest addTime in a ref so Bluetooth callbacks always save
   // to the CURRENT session/event (not whatever it was when you connected).
   const addTimeRef = useRef(addTime);
   useEffect(() => {
@@ -145,9 +146,12 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
   const ganReadFallbackLockRef = useRef(false);
 
   // -------------------------
-  // GAN CUBE
+  // SMART CUBE
   // -------------------------
   const isCubeMode = settings?.timerInput === 'GAN Cube';
+  const smartCubeProvider = settings?.smartCubeProvider || 'gan';
+  const smartCubeProviderLabel = getSmartCubeProviderLabel(smartCubeProvider);
+
   const [cubeConnected, setCubeConnected] = useState(false);
   const [cubeConnecting, setCubeConnecting] = useState(false);
   const [cubeDot, setCubeDot] = useState('disconnected');
@@ -155,7 +159,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
   const [cubeArmed, setCubeArmed] = useState(false);
   const [cubeSolving, setCubeSolving] = useState(false);
 
-  // ✅ NEW: catch-and-recover state (prevents whole app crash on rare gan-web-bluetooth internal error)
+  // catch-and-recover state (prevents whole app crash on rare internal errors)
   const [cubeFatalError, setCubeFatalError] = useState(null);
 
   const cubeClientRef = useRef(null);
@@ -169,7 +173,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
   // latest facelets from cube
   const cubeFaceletsRef = useRef(null);
 
-  // ✅ FIFO queue of move indices waiting for facelets
+  // FIFO queue of move indices waiting for facelets
   const pendingFaceletsQueueRef = useRef([]);
   const faceletsRequestInFlightRef = useRef(false);
   const faceletsRequestAgainRef = useRef(false);
@@ -326,7 +330,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
 
     ignoreNextKeyUp.current = true;
 
-    // ✅ use ref (not strictly necessary here, but keeps behavior consistent)
     addTimeRef.current?.(finalWithInspection);
   };
 
@@ -407,7 +410,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
 
     if (!ganSaveLockRef.current) {
       ganSaveLockRef.current = true;
-      // ✅ use ref so save always targets the current session/event
       addTimeRef.current?.(ms);
     }
   };
@@ -610,7 +612,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
   }, [activeScramble, isCubeMode]);
 
   // -------------------------
-  // GAN CUBE helpers
+  // SMART CUBE helpers
   // -------------------------
   const clearCubeIdleTimer = () => {
     if (cubeIdleTimeoutRef.current) {
@@ -625,7 +627,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
     } catch (_) {}
   };
 
-  // ✅ Controlled facelets requests so we can align 1 FACELETS -> 1 MOVE (FIFO)
+  // Controlled facelets requests so we can align 1 FACELETS -> 1 MOVE (FIFO)
   const requestFaceletsControlled = () => {
     if (!cubeClientRef.current) return;
 
@@ -642,9 +644,8 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
     }
   };
 
-  // ✅ NEW: resilience to rare gan-web-bluetooth internal crash (toKociembaFacelets)
   useEffect(() => {
-    const looksLikeGanWebBluetoothCrash = (eventLike) => {
+    const looksLikeLibraryCrash = (eventLike) => {
       const msg = String(
         eventLike?.message ||
           eventLike?.error?.message ||
@@ -667,14 +668,13 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
         eventLike?.message ||
           eventLike?.error?.message ||
           eventLike?.reason?.message ||
-          "GAN cube internal error"
+          "Smart cube internal error"
       );
 
-      console.error(`⚠️ Caught ${label} (GAN cube)`, eventLike);
+      console.error(`⚠️ Caught ${label} (smart cube)`, eventLike);
 
       setCubeFatalError({ label, message });
 
-      // Stop everything and disconnect so it doesn't keep crashing
       clearCubeIdleTimer();
       try { cubeClientRef.current?.disconnect?.(); } catch (_) {}
 
@@ -708,13 +708,13 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
     };
 
     const onError = (e) => {
-      if (!looksLikeGanWebBluetoothCrash(e)) return;
+      if (!looksLikeLibraryCrash(e)) return;
       try { e.preventDefault?.(); } catch (_) {}
       hardResetCube("window.error", e);
     };
 
     const onRejection = (e) => {
-      if (!looksLikeGanWebBluetoothCrash(e)) return;
+      if (!looksLikeLibraryCrash(e)) return;
       try { e.preventDefault?.(); } catch (_) {}
       hardResetCube("unhandledrejection", e);
     };
@@ -743,7 +743,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
 
     const moves = cubeMoveLogRef.current || [];
 
-    // ask for a fresh final facelets snapshot
     try {
       cubeClientRef.current?.requestFacelets?.();
     } catch (_) {}
@@ -764,7 +763,9 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
       const splits = computeBasicCFOPSplits(moves, { totalMs: ms, finalFacelets });
 
       const smartMeta = {
-        source: "GAN_CUBE",
+        source: "SMART_CUBE",
+        provider: smartCubeProvider,
+        providerLabel: smartCubeProviderLabel,
         reason,
         scramble: solveScrambleRef.current || scrambleTextRef.current || "",
         ms,
@@ -782,7 +783,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
       if (!cubeSaveLockRef.current) {
         cubeSaveLockRef.current = true;
 
-        // ✅ use ref so saves follow CURRENT session/event
         Promise.resolve(addTimeRef.current?.(ms, smartMeta)).catch((err) => {
           console.error("addTime failed (unlocking cubeSaveLock):", err);
           cubeSaveLockRef.current = false;
@@ -792,6 +792,8 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
       emitCubeSolveEvent({
         ms: null,
         reason,
+        provider: smartCubeProvider,
+        providerLabel: smartCubeProviderLabel,
         moves,
         finalFacelets,
         scramble: solveScrambleRef.current || scrambleTextRef.current || "",
@@ -827,13 +829,12 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
   const connectCube = async () => {
     if (cubeConnecting) return;
 
-    setCubeFatalError(null); // ✅ NEW: clear any previous fatal error banner
-
+    setCubeFatalError(null);
     setCubeConnecting(true);
     setCubeDot('connecting');
 
     try {
-      if (!cubeClientRef.current) cubeClientRef.current = new GanCubeClient();
+      cubeClientRef.current = createSmartCubeClient(smartCubeProvider);
 
       cubeSamplesRef.current = [];
       cubeMoveLogRef.current = [];
@@ -862,7 +863,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
         onFacelets: ({ facelets }) => {
           cubeFaceletsRef.current = facelets;
 
-          // Attach facelets to the oldest waiting move (FIFO)
           if (cubePhaseRef.current === "solving") {
             const q = pendingFaceletsQueueRef.current || [];
             const idx = q.shift();
@@ -872,10 +872,8 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
             }
           }
 
-          // mark request complete
           faceletsRequestInFlightRef.current = false;
 
-          // if more moves are waiting (or we requested again), request next
           if (cubePhaseRef.current === "solving") {
             if (faceletsRequestAgainRef.current || (pendingFaceletsQueueRef.current?.length > 0)) {
               faceletsRequestAgainRef.current = false;
@@ -883,7 +881,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
             }
           }
 
-          // ignore solve completion while finalizing
           if (cubePhaseRef.current === 'finalizing') return;
 
           const solved = isFaceletsSolved(facelets);
@@ -893,7 +890,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
             return;
           }
 
-          // If cube is solved and we're not solving, track scramble but not armed.
           if (solved && cubePhaseRef.current !== 'solving') {
             cubeArmedRef.current = false;
             setCubeArmed(false);
@@ -914,9 +910,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
 
           if (cubePhaseRef.current === 'finalizing') return;
 
-          // -----------------------------
-          // SCRAMBLE MATCHING
-          // -----------------------------
           if (cubePhaseRef.current === 'scrambling') {
             const tokens = scrambleTokensRef.current || [];
             if (!tokens.length) return;
@@ -941,8 +934,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
                 pendingFaceletsQueueRef.current = [];
                 faceletsRequestInFlightRef.current = false;
                 faceletsRequestAgainRef.current = false;
-
-                // NOTE: don't start timer here; next move starts solve.
               }
               return;
             }
@@ -958,9 +949,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
             return;
           }
 
-          // -----------------------------
-          // ARMED -> first move starts solve
-          // -----------------------------
           if (cubePhaseRef.current === 'armed') {
             if (!settings?.cubeAutoStart) return;
 
@@ -1006,9 +994,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
             return;
           }
 
-          // -----------------------------
-          // SOLVING
-          // -----------------------------
           if (cubePhaseRef.current === 'solving') {
             cubeSamplesRef.current.push({ cubeTs, hostTs });
 
@@ -1027,9 +1012,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
             return;
           }
 
-          // -----------------------------
-          // awaiting_scramble -> enter scrambling if we have tokens
-          // -----------------------------
           if (cubePhaseRef.current === 'awaiting_scramble') {
             const tokens = scrambleTokensRef.current || [];
             if (tokens.length) {
@@ -1073,7 +1055,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
         },
 
         onError: (err) => {
-          console.error('GAN cube error:', err);
+          console.error('Smart cube error:', err);
           clearCubeIdleTimer();
 
           setCubeConnected(false);
@@ -1109,10 +1091,9 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
       setCubeConnected(true);
       setCubeDot('connected');
 
-      // prime facelets once connected
       cubeClientRef.current?.requestFacelets?.();
     } catch (e) {
-      console.error('GAN cube connect failed:', e);
+      console.error('Smart cube connect failed:', e);
       setCubeConnected(false);
       setCubeDot('error');
     } finally {
@@ -1159,6 +1140,12 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
     if (!isCubeMode && cubeConnected) disconnectCube();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCubeMode]);
+
+  useEffect(() => {
+    if (!cubeConnected) return;
+    disconnectCube();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [smartCubeProvider]);
 
   // -------------------------
   // Keyboard handlers
@@ -1380,140 +1367,140 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
     <div className="timer-display">
       {showKeyboardOrGanOrCube ? (
         <div className="timer-center-wrap">
-  <div className="gan-side-controls">
-    {/* GAN Timer controls */}
-    {showGanControls && (
-      <div className="gan-controls">
-        {!ganConnected ? (
-          <button
-            onClick={connectGan}
-            disabled={ganConnecting}
-            style={{ opacity: ganConnecting ? 0.6 : 1 }}
-          >
-            {ganConnecting ? "Connecting…" : "Connect GAN"}
-          </button>
-        ) : (
-          <button onClick={disconnectGan}>Disconnect</button>
-        )}
+          <div className="gan-side-controls">
+            {/* GAN Timer controls */}
+            {showGanControls && (
+              <div className="gan-controls">
+                {!ganConnected ? (
+                  <button
+                    onClick={connectGan}
+                    disabled={ganConnecting}
+                    style={{ opacity: ganConnecting ? 0.6 : 1 }}
+                  >
+                    {ganConnecting ? "Connecting…" : "Connect GAN Timer"}
+                  </button>
+                ) : (
+                  <button onClick={disconnectGan}>Disconnect</button>
+                )}
 
-        <span
-          className={`gan-dot ${ganDot}`}
-          title={
-            ganDot === "connected" ? "GAN connected" :
-            ganDot === "connecting" ? "Connecting…" :
-            ganDot === "error" ? "GAN error" :
-            "GAN disconnected"
-          }
-        />
-      </div>
-    )}
+                <span
+                  className={`gan-dot ${ganDot}`}
+                  title={
+                    ganDot === "connected" ? "GAN timer connected" :
+                    ganDot === "connecting" ? "Connecting…" :
+                    ganDot === "error" ? "GAN timer error" :
+                    "GAN timer disconnected"
+                  }
+                />
+              </div>
+            )}
 
-    {/* GAN Cube controls */}
-    {showCubeControls && (
-      <div className="gan-controls">
-        {!cubeConnected ? (
-          <button
-            onClick={connectCube}
-            disabled={cubeConnecting}
-            style={{ opacity: cubeConnecting ? 0.6 : 1 }}
-          >
-            {cubeConnecting ? "Connecting…" : "Connect Cube"}
-          </button>
-        ) : (
-          <button onClick={disconnectCube}>Disconnect</button>
-        )}
+            {/* Smart Cube controls */}
+            {showCubeControls && (
+              <div className="gan-controls">
+                {!cubeConnected ? (
+                  <button
+                    onClick={connectCube}
+                    disabled={cubeConnecting}
+                    style={{ opacity: cubeConnecting ? 0.6 : 1 }}
+                    title={smartCubeProviderLabel}
+                  >
+                    {cubeConnecting ? "Connecting…" : `Connect ${smartCubeProviderLabel}`}
+                  </button>
+                ) : (
+                  <button onClick={disconnectCube}>Disconnect</button>
+                )}
 
-        <span
-          className={`gan-dot ${cubeDot}`}
-          title={
-            cubeDot === "connected" ? "Cube connected" :
-            cubeDot === "connecting" ? "Connecting…" :
-            cubeDot === "error" ? "Cube error" :
-            "Cube disconnected"
-          }
-        />
+                <span
+                  className={`gan-dot ${cubeDot}`}
+                  title={
+                    cubeDot === "connected" ? `${smartCubeProviderLabel} connected` :
+                    cubeDot === "connecting" ? `Connecting ${smartCubeProviderLabel}…` :
+                    cubeDot === "error" ? `${smartCubeProviderLabel} error` :
+                    `${smartCubeProviderLabel} disconnected`
+                  }
+                />
 
-        {cubeFatalError && (
-          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
-            Cube disconnected after an internal update error.
-            <button
-              style={{ marginLeft: 8 }}
-              onClick={() => {
-                setCubeFatalError(null);
-                connectCube();
+                {cubeFatalError && (
+                  <div style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
+                    {smartCubeProviderLabel} disconnected after an internal update error.
+                    <button
+                      style={{ marginLeft: 8 }}
+                      onClick={() => {
+                        setCubeFatalError(null);
+                        connectCube();
+                      }}
+                    >
+                      Reconnect
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* FULLSCREEN INSPECTION */}
+          {isInspecting && fullscreenInspectionOn && !isGanMode && !isCubeMode ? (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: settings.primaryColor,
+                zIndex: 9999,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "column",
+                userSelect: "none",
               }}
             >
-              Reconnect
-            </button>
-          </div>
-        )}
-      </div>
-    )}
-  </div>
+              <div
+                className="Timer"
+                style={{
+                  color: getInspectionColor(),
+                  transition: "color 120ms linear",
+                  fontSize: "18vw",
+                  lineHeight: 1,
+                }}
+              >
+                {formatTime()}
+              </div>
 
-  {/* FULLSCREEN INSPECTION (unchanged) */}
-  {isInspecting && fullscreenInspectionOn && !isGanMode && !isCubeMode ? (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: settings.primaryColor,
-        zIndex: 9999,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "column",
-        userSelect: "none",
-      }}
-    >
-      <div
-        className="Timer"
-        style={{
-          color: getInspectionColor(),
-          transition: "color 120ms linear",
-          fontSize: "18vw",
-          lineHeight: 1,
-        }}
-      >
-        {formatTime()}
-      </div>
-
-      <div
-        style={{
-          fontSize: "14px",
-          opacity: 0.3,
-          marginTop: "16px",
-          marginRight: "60px"
-        }}
-      >
-        Inspection — press Space to start
-        {inspectionElapsed >= 15000 ? " (+2)" : ""}
-      </div>
-    </div>
-  ) : (
-    <>
-      {/* MAIN TIMER DISPLAY (unchanged) */}
-      <p
-        className="Timer"
-        style={
-          isGanMode
-            ? ganGreenStyle
-            : isCubeMode
-            ? cubeGreenStyle
-            : (settings.timerInput === "Keyboard")
-            ? timerColorStyle
-            : typePlaceholderStyle
-        }
-      >
-        {(isGanMode || isCubeMode)
-          ? formatTime()
-          : settings.timerInput === "Keyboard"
-          ? formatTime()
-          : (manualTime || "Type")}
-      </p>
-    </>
-  )}
-</div>
+              <div
+                style={{
+                  fontSize: "14px",
+                  opacity: 0.3,
+                  marginTop: "16px",
+                  marginRight: "60px"
+                }}
+              >
+                Inspection — press Space to start
+                {inspectionElapsed >= 15000 ? " (+2)" : ""}
+              </div>
+            </div>
+          ) : (
+            <>
+              <p
+                className="Timer"
+                style={
+                  isGanMode
+                    ? ganGreenStyle
+                    : isCubeMode
+                    ? cubeGreenStyle
+                    : (settings.timerInput === "Keyboard")
+                    ? timerColorStyle
+                    : typePlaceholderStyle
+                }
+              >
+                {(isGanMode || isCubeMode)
+                  ? formatTime()
+                  : settings.timerInput === "Keyboard"
+                  ? formatTime()
+                  : (manualTime || "Type")}
+              </p>
+            </>
+          )}
+        </div>
       ) : (
         <div className="manual-entry-container">
           <div className="manual-display" style={typePlaceholderStyle}>

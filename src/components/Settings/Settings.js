@@ -1,3 +1,4 @@
+// src/components/Settings/Settings.js
 import React, { useEffect, useMemo, useState } from "react";
 import "./Settings.css";
 import { useSettings } from "../../contexts/SettingsContext";
@@ -36,6 +37,13 @@ const WCA_IMPORT_EVENT_OPTIONS = [
   { code: "SQ1", label: "Square-1" },
 ];
 
+const SMART_CUBE_PROVIDER_OPTIONS = [
+  { value: "gan", label: "GAN / GAN-Protocol" },
+  { value: "gan-gen2-compatible", label: "GAN Gen2 Compatible" },
+  { value: "moyu-wcu", label: "MoYu WCU" },
+  { value: "auto", label: "Auto (future)" },
+];
+
 const DEFAULT_TAG_CONFIG = {
   Fixed: {
     CubeModel: { label: "Cube Model", options: [] },
@@ -45,7 +53,7 @@ const DEFAULT_TAG_CONFIG = {
     },
     TimerInput: {
       label: "Timer Input",
-      options: ["Keyboard", "Type", "Stackmat", "GAN Bluetooth", "GAN Cube"],
+      options: ["Keyboard", "Type", "Stackmat", "GAN Timer", "Smart Cube"],
     },
     SolveSource: {
       label: "Solve Source",
@@ -107,7 +115,7 @@ function normalizeTagConfig(input) {
         label: fixed?.TimerInput?.label || "Timer Input",
         options: Array.isArray(fixed?.TimerInput?.options)
           ? fixed.TimerInput.options
-          : ["Keyboard", "Type", "Stackmat", "GAN Bluetooth", "GAN Cube"],
+          : ["Keyboard", "Type", "Stackmat", "GAN Timer", "Smart Cube"],
       },
       SolveSource: {
         label: fixed?.SolveSource?.label || "Solve Source",
@@ -125,6 +133,23 @@ function normalizeTagConfig(input) {
       };
     }),
   };
+}
+
+function normalizeSmartCubeProviderForUi(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+
+  if (raw === "moyu-gan") return "moyu-wcu";
+
+  if (
+    raw === "gan" ||
+    raw === "gan-gen2-compatible" ||
+    raw === "moyu-wcu" ||
+    raw === "auto"
+  ) {
+    return raw;
+  }
+
+  return "gan";
 }
 
 function Settings({
@@ -175,7 +200,13 @@ function Settings({
         if (cancelled || !user) return;
 
         if (user?.Settings && typeof user.Settings === "object") {
-          setAllSettings(user.Settings);
+          const normalizedSettings = {
+            ...user.Settings,
+            smartCubeProvider: normalizeSmartCubeProviderForUi(
+              user.Settings.smartCubeProvider
+            ),
+          };
+          setAllSettings(normalizedSettings);
         }
 
         const sessions = await getSessions(userID);
@@ -269,11 +300,17 @@ function Settings({
 
   const persistCurrentSettings = async () => {
     const normalizedTagConfig = normalizeTagConfig(tagConfig);
+    const normalizedSettingsToSave = {
+      ...settings,
+      smartCubeProvider: normalizeSmartCubeProviderForUi(settings.smartCubeProvider),
+    };
+
     const updates = {
       ...profileData,
-      Settings: { ...settings },
+      Settings: normalizedSettingsToSave,
       TagConfig: normalizedTagConfig,
     };
+
     const fresh = await updateUser(userID, updates);
 
     setProfileData({
@@ -288,7 +325,13 @@ function Settings({
     });
 
     if (fresh?.Settings && typeof fresh.Settings === "object") {
-      setAllSettings(fresh.Settings);
+      const normalizedFreshSettings = {
+        ...fresh.Settings,
+        smartCubeProvider: normalizeSmartCubeProviderForUi(
+          fresh.Settings.smartCubeProvider
+        ),
+      };
+      setAllSettings(normalizedFreshSettings);
     }
 
     setTagConfig(normalizeTagConfig(fresh?.TagConfig));
@@ -316,16 +359,22 @@ function Settings({
   };
 
   const isGanTimer = settings.timerInput === "GAN Bluetooth";
-  const isGanCube = settings.timerInput === "GAN Cube";
+  const isSmartCube = settings.timerInput === "GAN Cube";
+  const smartCubeProvider = normalizeSmartCubeProviderForUi(
+    settings.smartCubeProvider || "gan"
+  );
+  const isGanCube = isSmartCube;
 
   const customSlots = useMemo(
     () => (Array.isArray(tagConfig?.CustomSlots) ? tagConfig.CustomSlots : []),
     [tagConfig]
   );
+
   const homeStatSlots = useMemo(
     () => normalizeHomeStatsSlots(settings?.homeStatsSlots),
     [settings?.homeStatsSlots]
   );
+
   const homeStatsSolveLimit = Number(settings?.homeStatsSolveLimit ?? 50);
   const canShowStatsSection = !!statsContext?.isStatsRouteActive;
   const wcaLastSyncText = settings?.wcaImportLastSyncAt
@@ -492,6 +541,7 @@ function Settings({
 
     const selectedSessionLabel =
       recomputeSessionOptions.find((option) => option.value === recomputeSessionID)?.label || recomputeSessionID;
+
     const scopeDescription =
       recomputeScope === "session"
         ? `${recomputeEvent} · ${selectedSessionLabel}`
@@ -576,10 +626,37 @@ function Settings({
               <option value="Keyboard">Keyboard</option>
               <option value="Type">Type</option>
               <option value="Stackmat">Stackmat</option>
-              <option value="GAN Bluetooth">GAN Bluetooth</option>
-              <option value="GAN Cube">GAN Cube</option>
+              <option value="GAN Bluetooth">GAN Timer</option>
+              <option value="GAN Cube">Smart Cube</option>
             </select>
           </div>
+
+          {isSmartCube && (
+            <div className="setting-item">
+              <label>Smart Cube Provider:</label>
+              <select
+                value={smartCubeProvider}
+                onChange={(e) =>
+                  updateSettings({
+                    smartCubeProvider: normalizeSmartCubeProviderForUi(e.target.value),
+                  })
+                }
+              >
+                {SMART_CUBE_PROVIDER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {isSmartCube && smartCubeProvider === "moyu-wcu" ? (
+            <div className="settingsHintText">
+              MoYu WCU uses the non-GAN Bluetooth path. If your cube still does not appear,
+              save settings first, then reconnect from the timer so PTS uses the MoYu backend.
+            </div>
+          ) : null}
 
           {isGanCube && (
             <>

@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@astronautlabs/bitstream": "^4.2.2",
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",
+    "aes-js": "^3.1.2",
     "aws-sdk": "^2.1692.0",
+    "btcube-web": "^1.1.5",
     "cubing": "^0.43.8",
     "dotenv": "^16.3.1",
     "gan-web-bluetooth": "^3.0.2",
@@ -21,7 +24,8 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "postinstall": "patch-package"
   },
   "eslintConfig": {
     "extends": [
@@ -41,5 +45,9 @@
       "last 1 safari version"
     ]
   },
-  "proxy": "http://localhost:5050"
+  "proxy": "http://localhost:5050",
+  "devDependencies": {
+    "patch-package": "^8.0.1",
+    "postinstall-postinstall": "^2.1.0"
+  }
 }
