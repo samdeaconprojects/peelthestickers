@@ -198,16 +198,51 @@ function resolvePaletteColor(style, ratio, fallback = "#2EC4B6") {
 
 function resolveStandardHeatColor(ratio) {
   const safeRatio = Math.min(1, Math.max(0, Number(ratio) || 0));
-  if (safeRatio <= 0.2) {
-    return interpolateHexColor("#00ff00", "#00e676", safeRatio / 0.2);
+  if (safeRatio <= 0.25) {
+    return interpolateHexColor("#00ff00", "#00e676", safeRatio / 0.25);
   }
-  if (safeRatio <= 0.6) {
-    return interpolateHexColor("#00e676", "#ffff00", (safeRatio - 0.2) / 0.4);
+  if (safeRatio <= 0.7) {
+    return interpolateHexColor("#00e676", "#ffff00", (safeRatio - 0.25) / 0.45);
   }
-  if (safeRatio <= 0.8) {
-    return interpolateHexColor("#ffff00", "#ffa500", (safeRatio - 0.6) / 0.2);
+  if (safeRatio <= 0.95) {
+    return interpolateHexColor("#ffff00", "#ffa500", (safeRatio - 0.7) / 0.25);
   }
-  return interpolateHexColor("#ffa500", "#ff0000", (safeRatio - 0.8) / 0.2);
+  return interpolateHexColor("#ffa500", "#ff0000", (safeRatio - 0.95) / 0.05);
+}
+
+function getPercentile(sortedValues, percentile) {
+  const values = Array.isArray(sortedValues) ? sortedValues : [];
+  if (!values.length) return null;
+  const safePercentile = Math.min(1, Math.max(0, Number(percentile) || 0));
+  const index = (values.length - 1) * safePercentile;
+  const lowerIndex = Math.floor(index);
+  const upperIndex = Math.ceil(index);
+  const lower = values[lowerIndex];
+  const upper = values[upperIndex];
+  if (lowerIndex === upperIndex) return lower;
+  const weight = index - lowerIndex;
+  return lower + (upper - lower) * weight;
+}
+
+function normalizeHexColor(value, fallback = "#2EC4B6") {
+  let hex = String(value || "").trim().replace("#", "");
+  if (hex.length === 3) {
+    hex = hex
+      .split("")
+      .map((char) => `${char}${char}`)
+      .join("");
+  }
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return fallback;
+  return `#${hex}`;
+}
+
+function hexToRgba(hex, alpha) {
+  const normalized = normalizeHexColor(hex).replace("#", "");
+  const safeAlpha = Math.max(0, Math.min(1, Number(alpha) || 0));
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${safeAlpha})`;
 }
 
 function formatXAxisLabel(groupMode, timestamp, fallbackLabel) {
@@ -254,6 +289,51 @@ function formatPointTime(baseTimeMs, solve, groupMode) {
   return `${timeText} • ${dateText}`;
 }
 
+function getTightAutoScale(values) {
+  const safeValues = (Array.isArray(values) ? values : []).filter(
+    (value) => typeof value === "number" && isFinite(value)
+  );
+
+  if (!safeValues.length) {
+    return { min: 0, max: 2 };
+  }
+
+  const minValue = Math.min(...safeValues);
+  const maxValue = Math.max(...safeValues);
+  const min = Math.max(0, Math.floor(minValue / 2) * 2);
+  const max = Math.max(min + 2, Math.ceil(maxValue / 2) * 2);
+
+  return { min, max };
+}
+
+function getBaselineScale(values) {
+  const safeValues = (Array.isArray(values) ? values : []).filter(
+    (value) => typeof value === "number" && isFinite(value)
+  );
+
+  if (!safeValues.length) {
+    return { min: 0, max: 1 };
+  }
+
+  return {
+    min: 0,
+    max: Math.max(1, Math.ceil(Math.max(...safeValues))),
+  };
+}
+
+function getDefaultDotSizeForSolveCount(count) {
+  const safeCount = Math.max(1, Number(count) || 0);
+  if (safeCount <= 5) return 10;
+  if (safeCount <= 12) return 9;
+  if (safeCount <= 25) return 8;
+  if (safeCount <= 50) return 7;
+  if (safeCount <= 149) return 6;
+  if (safeCount <= 249) return 5;
+  if (safeCount <= 349) return 4;
+  if (safeCount <= 749) return 3;
+  return 2;
+}
+
 function buildProcessedChartData(
   solves,
   groupMode,
@@ -281,9 +361,13 @@ function buildProcessedChartData(
     .map((item) => (item.isBucket ? item.time : getSolveBaseMs(item)))
     .filter((v) => typeof v === "number" && isFinite(v));
 
+  const sortedTimesMs = [...timesMs].sort((a, b) => a - b);
   const minTime = Math.min(...timesMs);
   const maxTime = Math.max(...timesMs);
+  const robustMinTime = getPercentile(sortedTimesMs, 0.1) ?? minTime;
+  const robustMaxTime = getPercentile(sortedTimesMs, 0.9) ?? maxTime;
   const denom = maxTime - minTime || 1;
+  const robustDenom = robustMaxTime - robustMinTime || denom;
 
   const getColor = (timeMs) => {
     if (style) {
@@ -293,7 +377,7 @@ function buildProcessedChartData(
 
     if (!useHeatmap) return "#2EC4B6";
 
-    const ratio = (timeMs - minTime) / denom;
+    const ratio = (timeMs - robustMinTime) / robustDenom;
     return resolveStandardHeatColor(ratio);
   };
 
@@ -356,12 +440,14 @@ function LineChart({
 
   const [selectedSolve, setSelectedSolve] = useState(null);
 
-  const [showAo5, setShowAo5] = useState(false);
-  const [showAo12, setShowAo12] = useState(false);
+  const [showAo5, setShowAo5] = useState(true);
+  const [showAo12, setShowAo12] = useState(true);
   const [showMean, setShowMean] = useState(true);
+  const [showGrid, setShowGrid] = useState(true);
   const [groupMode, setGroupMode] = useState("solve");
   const [xScaleMode, setXScaleMode] = useState("ordinal");
-  const [dotSize, setDotSize] = useState(DEFAULT_DOT_SIZE);
+  const [dotSize, setDotSize] = useState(() => getDefaultDotSizeForSolveCount(solves?.length || DEFAULT_DOT_SIZE));
+  const [useTightAutoScale, setUseTightAutoScale] = useState(true);
   const [yMinInput, setYMinInput] = useState("");
   const [yMaxInput, setYMaxInput] = useState("");
 
@@ -470,6 +556,7 @@ function LineChart({
   const solveLevel = groupMode === "solve";
   const bulkEnabled = solveLevel && !hasComparison;
   const isTimeView = viewMode === "time";
+  const profileColor = normalizeHexColor(user?.Color || user?.color || "#2EC4B6");
 
   useEffect(() => {
     if (!isTimeView) return;
@@ -478,23 +565,23 @@ function LineChart({
     }
   }, [groupMode, isTimeView]);
 
-  const autoScale = useMemo(() => {
-    const values = [
+  useEffect(() => {
+    if (groupMode !== "solve") return;
+    setDotSize(getDefaultDotSizeForSolveCount(baseValid.length || solves?.length || DEFAULT_DOT_SIZE));
+  }, [baseValid.length, groupMode, solves]);
+
+  const scaleValues = useMemo(
+    () =>
+      [
       ...computed.data.map((point) => point?.y),
       ...computed.compareData.flatMap((series) => (series.points || []).map((point) => point?.y)),
     ]
-      .filter((value) => typeof value === "number" && isFinite(value));
+      .filter((value) => typeof value === "number" && isFinite(value)),
+    [computed.compareData, computed.data]
+  );
 
-    if (values.length === 0) {
-      return { min: 0, max: 1 };
-    }
-
-    const maxValue = Math.max(...values);
-    return {
-      min: 0,
-      max: Math.max(1, Math.ceil(maxValue)),
-    };
-  }, [computed.compareData, computed.data]);
+  const tightAutoScale = useMemo(() => getTightAutoScale(scaleValues), [scaleValues]);
+  const baselineScale = useMemo(() => getBaselineScale(scaleValues), [scaleValues]);
 
   const meanValue = useMemo(() => {
     const values = computed.data
@@ -508,11 +595,15 @@ function LineChart({
 
   const parsedYMin = Number(yMinInput);
   const parsedYMax = Number(yMaxInput);
-  const resolvedYMin =
-    yMinInput !== "" && Number.isFinite(parsedYMin) ? parsedYMin : autoScale.min;
-  const resolvedYMax =
-    yMaxInput !== "" && Number.isFinite(parsedYMax) ? parsedYMax : autoScale.max;
-  const hasCustomYRange = resolvedYMax > resolvedYMin;
+  const hasCustomYRange =
+    yMinInput !== "" &&
+    yMaxInput !== "" &&
+    Number.isFinite(parsedYMin) &&
+    Number.isFinite(parsedYMax) &&
+    parsedYMax > parsedYMin;
+  const activeScale = useTightAutoScale ? tightAutoScale : baselineScale;
+  const resolvedYMin = hasCustomYRange ? parsedYMin : activeScale.min;
+  const resolvedYMax = hasCustomYRange ? parsedYMax : activeScale.max;
 
   const openSolveDetail = (solve) => {
     if (typeof onSolveOpen === "function") {
@@ -570,7 +661,14 @@ function LineChart({
   }, []);
 
   return (
-    <div className="lineChart">
+    <div
+      className="lineChart"
+      style={{
+        "--line-chart-accent": profileColor,
+        "--line-chart-accent-soft": hexToRgba(profileColor, 0.18),
+        "--line-chart-accent-strong": hexToRgba(profileColor, 0.55),
+      }}
+    >
       {isTimeView ? (
         <TimePeriodChart
           user={user}
@@ -618,6 +716,195 @@ function LineChart({
         />
       )}
 
+      {allowViewPicker && (
+        <div className="lineChartControls">
+          <div className="chartControlGroup chartControlGroup--mode">
+            <div className="chartModeGrid">
+              {!isTimeView && (
+                <button
+                  type="button"
+                  className={`statsToggleBtn ${groupMode === "solve" ? "is-active" : ""}`}
+                  onClick={() => {
+                    selection.clearSelection();
+                    setGroupMode("solve");
+                  }}
+                >
+                  Idx
+                </button>
+              )}
+              <button
+                type="button"
+                className={`statsToggleBtn ${groupMode === "day" ? "is-active" : ""}`}
+                onClick={() => {
+                  selection.clearSelection();
+                  setGroupMode("day");
+                }}
+              >
+                D
+              </button>
+              <button
+                type="button"
+                className={`statsToggleBtn ${groupMode === "week" ? "is-active" : ""}`}
+                onClick={() => {
+                  selection.clearSelection();
+                  setGroupMode("week");
+                }}
+              >
+                W
+              </button>
+              <button
+                type="button"
+                className={`statsToggleBtn ${groupMode === "month" ? "is-active" : ""}`}
+                onClick={() => {
+                  selection.clearSelection();
+                  setGroupMode("month");
+                }}
+              >
+                M
+              </button>
+              <button
+                type="button"
+                className={`statsToggleBtn ${groupMode === "year" ? "is-active" : ""}`}
+                onClick={() => {
+                  selection.clearSelection();
+                  setGroupMode("year");
+                }}
+              >
+                Y
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className={`statsToggleBtn ${showAo5 ? "is-active" : ""}`}
+            disabled={!solveLevel || isTimeView || hasComparison}
+            onClick={() => setShowAo5((value) => !value)}
+          >
+            Ao5
+          </button>
+
+          <button
+            type="button"
+            className={`statsToggleBtn ${showAo12 ? "is-active" : ""}`}
+            disabled={!solveLevel || isTimeView || hasComparison}
+            onClick={() => setShowAo12((value) => !value)}
+          >
+            Ao12
+          </button>
+
+          <button
+            type="button"
+            className={`statsToggleBtn ${xScaleMode === "datetime" ? "is-active" : ""}`}
+            onClick={() =>
+              setXScaleMode((value) => (value === "datetime" ? "ordinal" : "datetime"))
+            }
+          >
+            Date Gaps
+          </button>
+
+          <button
+            type="button"
+            className={`statsToggleBtn ${showMean ? "is-active" : ""}`}
+            onClick={() => setShowMean((value) => !value)}
+          >
+            Mean
+          </button>
+
+          <button
+            type="button"
+            className={`statsToggleBtn ${showGrid ? "is-active" : ""}`}
+            onClick={() => setShowGrid((value) => !value)}
+          >
+            Grid
+          </button>
+
+          <div className="chartControlGroup chartControlGroup--inline">
+            <span className="chartControlLabel">Dots</span>
+            <div className="chartControlRow">
+              <button
+                type="button"
+                className="statsMiniBtn"
+                onClick={() => setDotSize((value) => Math.max(MIN_DOT_SIZE, value - 1))}
+              >
+                -
+              </button>
+              <span className="chartControlValue">{dotSize}</span>
+              <button
+                type="button"
+                className="statsMiniBtn"
+                onClick={() => setDotSize((value) => Math.min(MAX_DOT_SIZE, value + 1))}
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          <div className="chartControlGroup chartControlGroup--inline chartControlGroup--scale">
+            <span className="chartControlLabel">Scale</span>
+            <div className="chartControlRow chartControlRow--scale">
+              <button
+                type="button"
+                className={`statsMiniBtn chartScaleAutoBtn ${useTightAutoScale ? "is-active" : ""}`}
+                onClick={() => {
+                  setUseTightAutoScale((value) => {
+                    const nextValue = !value;
+                    if (nextValue) {
+                      setYMinInput("");
+                      setYMaxInput("");
+                    }
+                    return nextValue;
+                  });
+                }}
+              >
+                Auto
+              </button>
+              <input
+                className="chartScaleInput"
+                type="number"
+                step="0.1"
+                inputMode="decimal"
+                placeholder={String(activeScale.min)}
+                value={yMinInput}
+                onChange={(e) => {
+                  setUseTightAutoScale(false);
+                  setYMinInput(e.target.value);
+                }}
+                aria-label="Minimum seconds"
+              />
+              <span className="chartControlDivider">to</span>
+              <input
+                className="chartScaleInput"
+                type="number"
+                step="0.1"
+                inputMode="decimal"
+                placeholder={String(activeScale.max)}
+                value={yMaxInput}
+                onChange={(e) => {
+                  setUseTightAutoScale(false);
+                  setYMaxInput(e.target.value);
+                }}
+                aria-label="Maximum seconds"
+              />
+            </div>
+          </div>
+
+          {hasComparison && legendItems.length > 0 && (
+            <div className="lineChartLegend">
+              {legendItems.map((item) => (
+                <div key={item.id || item.label} className="lineChartLegendItem">
+                  <span
+                    className="lineChartLegendSwatch"
+                    style={{ backgroundColor: item.color || "#2EC4B6" }}
+                  />
+                  <span className="lineChartLegendLabel">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="lineChartBody">
         <div className="lineChartCanvas">
           <LineChartBuilder
@@ -642,192 +929,24 @@ function LineChart({
             horizontalGuides={5}
             precision={2}
             verticalGuides={7}
+            showGuides={showGrid}
             selectedIndices={selection.selectedIndices}
             dotRadius={dotSize}
             selectedDotRadius={dotSize + 3}
-            yMin={hasCustomYRange ? resolvedYMin : null}
-            yMax={hasCustomYRange ? resolvedYMax : null}
+            yMin={resolvedYMin}
+            yMax={resolvedYMax}
             onDotClick={(event, solve, fullIndex, point) => {
               handleDotClick(event, solve, fullIndex, point);
             }}
           />
         </div>
-
-        {allowViewPicker && (
-          <div className="lineChartControls">
-            <div className="chartControlGroup chartControlGroup--mode">
-              <div className="chartModeGrid">
-                {!isTimeView && (
-                  <button
-                    type="button"
-                    className={`statsToggleBtn ${groupMode === "solve" ? "is-active" : ""}`}
-                    onClick={() => {
-                      selection.clearSelection();
-                      setGroupMode("solve");
-                    }}
-                  >
-                    Idx
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className={`statsToggleBtn ${groupMode === "day" ? "is-active" : ""}`}
-                  onClick={() => {
-                    selection.clearSelection();
-                    setGroupMode("day");
-                  }}
-                >
-                  D
-                </button>
-                <button
-                  type="button"
-                  className={`statsToggleBtn ${groupMode === "week" ? "is-active" : ""}`}
-                  onClick={() => {
-                    selection.clearSelection();
-                    setGroupMode("week");
-                  }}
-                >
-                  W
-                </button>
-                <button
-                  type="button"
-                  className={`statsToggleBtn ${groupMode === "month" ? "is-active" : ""}`}
-                  onClick={() => {
-                    selection.clearSelection();
-                    setGroupMode("month");
-                  }}
-                >
-                  M
-                </button>
-                <button
-                  type="button"
-                  className={`statsToggleBtn ${groupMode === "year" ? "is-active" : ""}`}
-                  onClick={() => {
-                    selection.clearSelection();
-                    setGroupMode("year");
-                  }}
-                >
-                  Y
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              className={`statsToggleBtn ${showAo5 ? "is-active" : ""}`}
-              disabled={!solveLevel || isTimeView || hasComparison}
-              onClick={() => setShowAo5((value) => !value)}
-            >
-              Ao5
-            </button>
-
-            <button
-              type="button"
-              className={`statsToggleBtn ${showAo12 ? "is-active" : ""}`}
-              disabled={!solveLevel || isTimeView || hasComparison}
-              onClick={() => setShowAo12((value) => !value)}
-            >
-              Ao12
-            </button>
-
-            <button
-              type="button"
-              className={`statsToggleBtn ${xScaleMode === "datetime" ? "is-active" : ""}`}
-              onClick={() =>
-                setXScaleMode((value) => (value === "datetime" ? "ordinal" : "datetime"))
-              }
-            >
-              Date Gaps
-            </button>
-
-            <button
-              type="button"
-              className={`statsToggleBtn ${showMean ? "is-active" : ""}`}
-              onClick={() => setShowMean((value) => !value)}
-            >
-              Mean
-            </button>
-
-            <div className="chartControlGroup">
-              <span className="chartControlLabel">Dots</span>
-              <div className="chartControlRow">
-                <button
-                  type="button"
-                  className="statsMiniBtn"
-                  onClick={() => setDotSize((value) => Math.max(MIN_DOT_SIZE, value - 1))}
-                >
-                  -
-                </button>
-                <span className="chartControlValue">{dotSize}</span>
-                <button
-                  type="button"
-                  className="statsMiniBtn"
-                  onClick={() => setDotSize((value) => Math.min(MAX_DOT_SIZE, value + 1))}
-                >
-                  +
-                </button>
-              </div>
-            </div>
-
-            <div className="chartControlGroup">
-              <div className="chartControlHeader">
-                <span className="chartControlLabel">Scale</span>
-                <button
-                  type="button"
-                  className="statsMiniBtn"
-                  onClick={() => {
-                    setYMinInput("");
-                    setYMaxInput("");
-                  }}
-                >
-                  Auto
-                </button>
-              </div>
-              <div className="chartControlRow">
-                <input
-                  className="chartScaleInput"
-                  type="number"
-                  step="0.1"
-                  inputMode="decimal"
-                  placeholder={String(autoScale.min)}
-                  value={yMinInput}
-                  onChange={(e) => setYMinInput(e.target.value)}
-                  aria-label="Minimum seconds"
-                />
-                <span className="chartControlDivider">to</span>
-                <input
-                  className="chartScaleInput"
-                  type="number"
-                  step="0.1"
-                  inputMode="decimal"
-                  placeholder={String(autoScale.max)}
-                  value={yMaxInput}
-                  onChange={(e) => setYMaxInput(e.target.value)}
-                  aria-label="Maximum seconds"
-                />
-              </div>
-            </div>
-            {hasComparison && legendItems.length > 0 && (
-              <div className="lineChartLegend">
-                {legendItems.map((item) => (
-                  <div key={item.id || item.label} className="lineChartLegendItem">
-                    <span
-                      className="lineChartLegendSwatch"
-                      style={{ backgroundColor: item.color || "#2EC4B6" }}
-                    />
-                    <span className="lineChartLegendLabel">{item.label}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {!onSolveOpen && selectedSolve && (
         <Detail
           solve={selectedSolve}
           userID={user?.UserID}
+          profileColor={user?.Color || user?.color || "#2EC4B6"}
           onClose={() => setSelectedSolve(null)}
           deleteTime={() => {
             const solveRef = selectedSolve?.solveRef || null;

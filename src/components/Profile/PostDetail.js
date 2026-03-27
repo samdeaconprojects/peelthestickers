@@ -1,8 +1,7 @@
 // src/components/Profile/PostDetail.js
 import React, { useState } from 'react';
 import '../Detail/Detail.css';            // reuse your popup styles
-import RubiksCubeSVG from '../PuzzleSVGs/RubiksCubeSVG';
-import { getScrambledFaces } from '../cubeStructure';
+import PuzzleSVG from '../PuzzleSVGs/PuzzleSVG';
 import { calculateAverage, formatTime } from '../TimeList/TimeUtils';
 import { currentEventToString } from "../../components/scrambleUtils";
 import StatSharePost from './StatSharePost';
@@ -66,13 +65,14 @@ function PostDetail({
             <div className="solvesList" style={{ marginBottom:'1em' }}>
               {solveList.map((s, i) => (
                 <div key={i} style={{ display:'flex', alignItems:'center', marginBottom:'0.5em', border: '2px solid #fff', borderRadius: '8px' }}>
-                  <RubiksCubeSVG
-                    n={s.event}
-                    faces={getScrambledFaces(s.scramble, s.event)}
-                    isMusicPlayer={true}
-                    isTimerCube={false}
-                    style={{ width: '40px', height: '40px', marginRight: '0.5em' }}
-                  />
+                  <div style={{ width: '40px', height: '40px', marginRight: '0.5em', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <PuzzleSVG
+                      event={s.event}
+                      scramble={s.scramble}
+                      isMusicPlayer={true}
+                      isTimerCube={false}
+                    />
+                  </div>
                   <div style={{ width: '4em' }}> <strong>{formatTime(s.time)}</strong> </div>
 
                   <code style={{ fontSize: '0.8em', wordBreak:'break-all' }}>

@@ -16,6 +16,7 @@
   color: white;
 
   --blend: 30px;
+  --borderAlpha: 0.75;
 
   background:
     linear-gradient(
@@ -24,14 +25,67 @@
     ) padding-box,
     linear-gradient(
       90deg,
-      var(--theirColor) 0,
-      var(--theirColor) calc(var(--split) - var(--blend)),
-      var(--youColor) calc(var(--split) + var(--blend)),
-      var(--youColor) 100%
+      rgba(var(--theirRgb), var(--borderAlpha)) 0,
+      rgba(var(--theirRgb), var(--borderAlpha)) calc(var(--split) - var(--blend)),
+      rgba(var(--youRgb), var(--borderAlpha)) calc(var(--split) + var(--blend)),
+      rgba(var(--youRgb), var(--borderAlpha)) 100%
     ) border-box;
 
   border: 2px solid transparent;
   overflow: hidden;
+}
+
+.sharedAverageCard--homeCompact {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.sharedAverageCard--homeCompact .sharedAverageTop {
+  flex: 0 0 auto;
+  padding: 4px 2px 8px 2px;
+  gap: 10px;
+}
+
+.home-screen--shared .sharedAverageCard--homeCompact {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-bottom: 0;
+}
+
+.sharedAverageCard--homeCompact .sharedAverageSide {
+  padding: 10px 10px;
+}
+
+.sharedAverageCard--homeCompact .sharedAverageSideBigCenter {
+  min-width: 92px;
+}
+
+.sharedAverageCard--homeCompact .sharedAverageBig {
+  font-size: 32px;
+}
+
+.sharedAverageCard--homeCompact .sharedAverageName,
+.sharedAverageCard--homeCompact .sharedAverageSideStatus,
+.sharedAverageCard--homeCompact .sharedAverageCenterTitle,
+.sharedAverageCard--homeCompact .sharedAverageMeanRow,
+.sharedAverageCard--homeCompact .sharedAverageSmallLabel {
+  font-size: 10px;
+}
+
+.sharedAverageCard--homeCompact .sharedAverageScore {
+  font-size: 15px;
+}
+
+.sharedAverageCard--homeCompact .sharedAverageCurrentSolveBadge {
+  min-height: 20px;
+  padding: 0 8px;
+  font-size: 10px;
 }
 
 /* --- TOP LAYOUT --- */
@@ -41,6 +95,80 @@
   align-items: center;
   gap: 14px;
   padding: 8px 6px 12px 6px;
+}
+
+.sharedAverageTop--group {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.sharedAverageGroupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sharedAverageGroupRoster {
+  display: grid;
+  grid-template-columns: repeat(var(--shared-group-cols, 3), minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sharedAverageGroupMember {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: white;
+  min-width: 0;
+  padding: 10px 12px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sharedAverageGroupMember.isYou {
+  border-color: rgba(var(--youRgb), 0.45);
+  background: rgba(var(--youRgb), 0.10);
+}
+
+.sharedAverageGroupMemberName,
+.sharedAverageGroupHeaderName {
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sharedAverageGroupMemberStatLabel,
+.sharedAverageGroupHeaderLabel {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+}
+
+.sharedAverageGroupMemberAvg,
+.sharedAverageGroupHeaderAvg {
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.sharedAverageGroupMemberMeta,
+.sharedAverageGroupHeaderMeta {
+  font-size: 10px;
+  font-weight: 800;
+  opacity: 0.72;
+}
+
+.sharedAverageGroupHeaderMeta {
+  line-height: 1.3;
 }
 
 .sharedAverageSide {
@@ -66,7 +194,6 @@
   border-color: rgba(255, 255, 255, 0.18);
 }
 
-/* LEFT = THEM, RIGHT = YOU */
 .sharedAverageSideThem {
   justify-content: flex-start;
   text-align: left;
@@ -82,12 +209,18 @@
 .sharedAverageSideIcon {
   width: 40px;
   height: 40px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
   transform-origin: center;
-  margin-right: 0; /* was 50px */
+  margin-right: 0;
 }
 
+.sharedAverageSideIconCube {
+  position: relative;
+  z-index: 1;
+}
 
 .sharedAverageSideMeta {
   display: flex;
@@ -106,11 +239,58 @@
   margin-right: 20px;
 }
 
+.sharedAverageEventLabelRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
 .sharedAverageEventLabel {
   font-size: 28px;
   font-weight: 900;
   opacity: 0.95;
   letter-spacing: 0.4px;
+  line-height: 1;
+}
+
+.sharedAverageEventCountBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  opacity: 0.92;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.sharedAveragePlanSummary {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0.72;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+  letter-spacing: 0.2px;
+}
+
+.sharedAveragePlanSummaryLeft {
+  text-align: left;
+}
+
+.sharedAveragePlanSummaryRight {
+  text-align: right;
 }
 
 .sharedAverageName {
@@ -122,6 +302,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 160px;
+}
+
+.sharedAverageSideStatus {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0.75;
 }
 
 .sharedAverageSideBig {
@@ -205,6 +392,20 @@
   font-weight: 700;
 }
 
+.sharedAverageCurrentSolveBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.25px;
+}
+
 /* --- TABLE --- */
 .sharedAverageTableWrap {
   background: rgba(255, 255, 255, 0.03);
@@ -214,15 +415,74 @@
   overflow: visible;
 }
 
+.sharedAverageBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.sharedAverageControls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sharedAverageCard--homeCompact .sharedAverageBody {
+  flex: 1 1 auto;
+}
+
+.sharedAverageScrollable {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.sharedAverageCard--homeCompact .sharedAverageScrollable {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+
+.sharedAverageViewToggle {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.sharedAverageViewToggle button {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  opacity: 1;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.sharedAverageViewToggle button.isActive {
+  background: rgba(255, 255, 255, 0.14);
+  color: white;
+}
+
 .sharedAverageTable {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
-/* IMPORTANT: row glow goes on the TR, not pseudo elements */
 .sharedAverageTable tr.sharedRowWinYou {
-  /* YOU are on RIGHT */
   background: linear-gradient(
     90deg,
     rgba(0,0,0,0) 0%,
@@ -233,7 +493,6 @@
 }
 
 .sharedAverageTable tr.sharedRowWinThem {
-  /* THEM are on LEFT */
   background: linear-gradient(
     90deg,
     rgba(var(--theirRgb), 0.18) 0%,
@@ -252,7 +511,31 @@
   );
 }
 
-/* keep cells transparent so TR background shows as one continuous band */
+.sharedAverageTable tr.sharedAverageCurrentRow {
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.18),
+    inset 0 0 0 999px rgba(255,255,255,0.05);
+}
+
+.sharedAverageInteractiveRow {
+  cursor: pointer;
+}
+
+.sharedAverageInteractiveRow:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sharedAverageTable tr.sharedAverageCurrentRow td {
+  border-top-color: rgba(255, 255, 255, 0.16);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.sharedAverageTable tr.sharedAverageCurrentRow .sharedAverageIdxBadge {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
+}
+
 .sharedAverageTable td {
   padding: 8px 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
@@ -264,12 +547,65 @@
   border-top: none;
 }
 
+.sharedAverageTable--group thead th {
+  padding: 0 8px 10px;
+  border: none;
+}
+
+.sharedAverageTable--group tbody td {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.sharedAverageGroupTableIndex {
+  width: 52px;
+}
+
+.sharedAverageGroupHeaderCell,
+.sharedAverageGroupTimeCell {
+  text-align: center;
+}
+
+.sharedAverageGroupHeaderBtn {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: white;
+  min-width: 0;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+}
+
 .sharedAverageIdx {
   width: 44px;
   text-align: center;
   font-weight: 900;
   opacity: 0.65;
   letter-spacing: 0.2px;
+}
+
+.sharedAverageIdxWrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.sharedAverageIdxBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.12);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
 }
 
 .sharedAverageTimeCell {
@@ -312,7 +648,14 @@
   color: rgba(var(--youRgb), 0.95);
 }
 
-/* Winner outline wrapper */
+.sharedAverageCurrentRowNote {
+  margin-top: 4px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 800;
+  opacity: 0.72;
+}
+
 .sharedAveragePillWrap {
   display: inline-flex;
   align-items: center;
@@ -334,7 +677,6 @@
   padding: 0;
 }
 
-/* This is the "TimeList cell" look */
 .sharedAverageTimeItem {
   display: inline-flex;
   align-items: center;
@@ -346,7 +688,28 @@
   padding: 4px 10px;
 
   border: 1px solid #50B6FF;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.12);
+  opacity: 1 !important;
+}
+
+.sharedAverageTimeItem--group {
+  min-width: 0;
+  width: 100%;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.sharedAverageTimeItemWinner {
+  background-clip: padding-box;
+}
+
+.sharedAverageTimeItemCurrent {
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.10);
+}
+
+.sharedAverageTimeItemPending {
+  opacity: 0.68;
+  border-style: dashed;
 }
 
 .sharedAveragePillWrap > .TimeItem {
@@ -357,20 +720,18 @@
 .sharedAverageTimeItem li {
   display: inline-block;
   width: auto;
+  opacity: 1 !important;
 }
 
-/* Use your existing TimeItem.css classes for borders */
 .sharedAverageTimeItem.overall-border-min { border: 2px solid #00FF00 !important; }
 .sharedAverageTimeItem.overall-border-max { border: 2px solid #FF0000 !important; }
 .sharedAverageTimeItem.faster { border: 2px solid #9ACD32 !important; }
 .sharedAverageTimeItem.middle-fast { border: 2px solid #FFFF00 !important; }
 .sharedAverageTimeItem.slower { border: 2px solid #FFA500 !important; }
 
-/* dashed extremes in binary mode */
-.sharedAverageTimeItem.dashed-border-min { border: 2px dashed #00FF00 !important; }
-.sharedAverageTimeItem.dashed-border-max { border: 2px dashed #FF0000 !important; }
+.sharedAverageTimeItem.dashed-border-min { border: 2px dotted #00FF00 !important; }
+.sharedAverageTimeItem.dashed-border-max { border: 2px dotted #FF0000 !important; }
 
-/* expand + actions */
 .sharedAverageExpandBtn {
   margin-top: 10px;
   width: 100%;
@@ -389,28 +750,227 @@
   border-color: rgba(255, 255, 255, 0.26);
 }
 
-.sharedAverageActions {
+.sharedAverageItemsView {
   display: flex;
-  gap: 10px;
-  margin-top: 10px;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.sharedAverageBtn {
-  flex: 1;
-  border: none;
-  border-radius: 10px;
-  padding: 10px 12px;
-  cursor: pointer;
+.sharedAverageItemsSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.sharedAverageItemsSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sharedAverageItemsIdentity,
+.sharedAverageItemsOverall {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.sharedAverageItemsOverall {
+  align-items: flex-end;
+}
+
+.sharedAverageItemsName {
+  font-size: 13px;
   font-weight: 900;
 }
 
+.sharedAverageItemsLabel,
+.sharedAverageItemsOverallLabel,
+.sharedAverageItemsIndex {
+  font-size: 10px;
+  font-weight: 800;
+  opacity: 0.7;
+}
+
+.sharedAverageItemsOverallValue {
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.sharedAverageItemsOverallValue--interactive,
+.sharedAverageBig--interactive {
+  cursor: pointer;
+}
+
+.sharedAverageItemsOverallValue--interactive:hover,
+.sharedAverageBig--interactive:hover {
+  text-decoration: underline;
+}
+
+.sharedAverageItemsIndex {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sharedAverageItemsNowBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  opacity: 1;
+}
+
+.sharedAverageItemsRows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sharedAverageItemsRow {
+  display: grid;
+  grid-template-columns: repeat(var(--shared-average-cols, 8), minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sharedAverageItemsCellWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sharedAverageItemsCell {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.sharedAverageItemsCell--interactive {
+  cursor: pointer;
+}
+
+.sharedAverageItemsCell--interactive:hover .sharedAverageTimeItem {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.sharedAverageItemsCell .sharedAverageTimeItem {
+  width: 100%;
+  min-width: 0;
+}
+
+.sharedAverageActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 0;
+}
+
+.sharedAverageBtn {
+  min-height: 38px;
+  border-radius: 999px;
+  padding: 0 14px;
+  cursor: pointer;
+  font-weight: 900;
+  min-width: 0;
+  opacity: 1;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.sharedAverageBtn:hover {
+  transform: translateY(-1px);
+}
+
 .sharedAverageBtnPrimary {
-  background: var(--youColor);
-  color: black;
+  background: rgba(var(--youRgb), 0.18);
+  color: white;
+  border: 1px solid rgba(var(--youRgb), 0.52);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
 }
 
 .sharedAverageBtnGhost {
-  background: transparent;
+  background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.18);
   color: white;
+}
+
+.sharedAverageFooterNote {
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.6;
+  text-align: center;
+}
+
+@media (max-width: 980px) {
+  .sharedAverageTop {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .sharedAverageCenter {
+    order: -1;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+
+  .sharedAveragePlanSummary {
+    max-width: 100%;
+  }
+
+  .sharedAverageItemsSectionHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .sharedAverageItemsOverall {
+    align-items: flex-start;
+  }
+
+  .sharedAverageGroupRoster {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sharedAverageControls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 780px) {
+  .sharedAverageItemsRow {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .sharedAverageTableWrap {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .sharedAverageViewToggle {
+    width: 100%;
+  }
+
+  .sharedAverageViewToggle button {
+    flex: 1 1 0;
+  }
+
+  .sharedAverageGroupRoster {
+    grid-template-columns: 1fr;
+  }
 }

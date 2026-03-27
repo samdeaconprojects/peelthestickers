@@ -66,24 +66,87 @@
 }
 
 .tagEditorOption {
+  --tag-chip-color: #2ec4b6;
+  --tag-chip-border: var(--tag-chip-color);
+  --tag-chip-bg: rgba(46, 196, 182, 0.18);
   min-height: 32px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.16);
-  background: rgba(255,255,255,0.04);
+  min-width: 0;
+  border-radius: 10px;
+  border: 2px solid var(--tag-chip-border);
+  background: var(--tag-chip-bg);
   color: white;
-  padding: 0 12px;
+  box-shadow:
+    inset 0 0 0 1px rgba(7, 57, 60, 0.18),
+    0 4px 10px rgba(0, 0, 0, 0.18);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
   cursor: pointer;
   font-size: 13px;
+  text-align: left;
+  opacity: 0.62;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    filter 140ms ease;
 }
 
 .tagEditorOption.is-active {
-  border-color: rgba(255,255,255,0.38);
-  background: rgba(255,255,255,0.14);
+  opacity: 1;
+  filter: saturate(1.05);
+  box-shadow:
+    inset 0 0 0 1px rgba(7, 57, 60, 0.22),
+    0 6px 14px rgba(0, 0, 0, 0.22);
+}
+
+.tagEditorOption:hover {
+  opacity: 1;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 0 0 1px rgba(7, 57, 60, 0.22),
+    0 6px 14px rgba(0, 0, 0, 0.22);
+}
+
+.tagEditorOption--any {
+  --tag-chip-border: rgba(171, 177, 186, 0.55);
+  --tag-chip-bg: rgba(140, 148, 159, 0.08);
+}
+
+.tagEditorOption .tagHomeChipValue {
+  font-size: 12px;
 }
 
 .tagEditorInputRow {
   display: flex;
   gap: 8px;
+}
+
+.tagEditorColorRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 0;
+}
+
+.tagEditorColorLabel {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.tagEditorColorInput {
+  width: 40px;
+  height: 28px;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.06);
+  cursor: pointer;
+  padding: 2px;
 }
 
 .tagEditorInput {
@@ -119,16 +182,45 @@
   display: flex;
   flex-direction: column;
   flex-wrap: nowrap;
-  gap: 8px;
+  gap: 4px;
   align-items: stretch;
 }
 
+.tagHomeItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.tagHomeItemLabel {
+  padding: 0 2px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0);
+  transition: color 140ms ease;
+}
+
+.tagHomeItem.is-automatic .tagHomeItemLabel,
+.tagHomeItem--add .tagHomeItemLabel {
+  color: rgba(255, 255, 255, 0);
+}
+
+.tagHomeItem:hover .tagHomeItemLabel {
+  color: rgba(255, 255, 255, 1);
+}
+
 .tagHomeChip {
+  --tag-chip-color: #2ec4b6;
+  --tag-chip-border: var(--tag-chip-color);
+  --tag-chip-bg: rgba(46, 196, 182, 0.18);
   min-height: 22px;
-  min-width: 120px;
+  min-width: 104px;
   border-radius: 10px;
-  border: 2px solid #2ec4b6;
-  background: rgba(46, 196, 182, 0.18);
+  border: 2px solid var(--tag-chip-border);
+  background: var(--tag-chip-bg);
   color: white;
   box-shadow:
     inset 0 0 0 1px rgba(7, 57, 60, 0.18),
@@ -139,9 +231,10 @@
   padding: 5px 8px;
   cursor: pointer;
   text-align: left;
-  opacity: 1;
+  opacity: 0.62;
   width: 100%;
   transition:
+    opacity 140ms ease,
     transform 140ms ease,
     box-shadow 140ms ease,
     filter 140ms ease;
@@ -152,11 +245,12 @@
 }
 
 .tagHomeChip--add {
-  border-color: #2ec4b6;
+  border-color: rgba(171, 177, 186, 0.55);
   background: transparent;
 }
 
 .tagHomeChip:hover {
+  opacity: 1;
   transform: translateY(-1px);
   box-shadow:
     inset 0 0 0 1px rgba(7, 57, 60, 0.22),
@@ -177,6 +271,7 @@
   width: 14px;
   height: 14px;
   display: block;
+  opacity: 0.42;
 }
 
 .tagHomeChipPlus {
@@ -193,14 +288,6 @@
   flex-direction: column;
   gap: 1px;
   min-width: 0;
-}
-
-.tagHomeChipLabel {
-  font-size: 7px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.74;
 }
 
 .tagHomeChipValue {
@@ -254,6 +341,98 @@
   padding-right: 2px;
 }
 
+.home-tag-dock--shared .tagHomeSummary {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.home-tag-dock--shared .tagHomeItem {
+  min-width: 104px;
+  flex: 0 1 calc(50% - 4px);
+}
+
+.home-tag-dock--shared .tagHomeChip {
+  min-width: 104px;
+  min-height: 22px;
+  padding: 5px 8px;
+  gap: 6px;
+  border-radius: 10px;
+  width: auto;
+}
+
+.home-tag-dock--shared .tagHomeChipIconWrap,
+.home-tag-dock--shared .tagHomeChipPlus,
+.home-tag-dock--shared .tagHomeChipIcon {
+  width: 14px;
+  height: 14px;
+  flex-basis: 14px;
+}
+
+.home-tag-dock--shared .tagHomeChipValue {
+  font-size: clamp(9px, 1.1vw, 12px);
+  line-height: 1.05;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tagHomeItem.is-automatic .tagHomeChip,
+.tagHomeItem--add .tagHomeChip {
+  opacity: 0.58;
+  border-color: rgba(171, 177, 186, 0.55);
+  background: rgba(140, 148, 159, 0.08);
+  box-shadow:
+    inset 0 0 0 1px rgba(40, 44, 52, 0.18),
+    0 4px 10px rgba(0, 0, 0, 0.14);
+}
+
+.tagHomeItem.is-automatic .tagHomeChip.is-set,
+.tagHomeItem--add .tagHomeChip {
+  filter: saturate(0.7);
+}
+
+.tagHomeAddButton {
+  width: 28px;
+  height: 28px;
+  align-self: flex-end;
+  border-radius: 999px;
+  border: 1.5px solid rgba(171, 177, 186, 0.55);
+  background: rgba(140, 148, 159, 0.08);
+  color: rgba(255, 255, 255, 0.74);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    background 140ms ease;
+}
+
+.tagHomeSummary:hover .tagHomeAddButton,
+.tagHomeSummary:focus-within .tagHomeAddButton {
+  opacity: 0.58;
+}
+
+.tagHomeAddButton:hover {
+  opacity: 1;
+  transform: translateY(-1px);
+  background: rgba(140, 148, 159, 0.12);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18);
+}
+
+.tagHomeAddButtonPlus {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 @media (max-width: 720px) {
   .tagHomePopover {
     top: calc(100% + 10px);
@@ -279,5 +458,9 @@
 
   .tagHomeChipValue {
     font-size: clamp(9px, 3vw, 11px);
+  }
+
+  .tagHomeItemLabel {
+    font-size: 8px;
   }
 }

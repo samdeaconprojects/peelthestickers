@@ -1,15 +1,17 @@
-// src/components/Social/SharedAverageMessage.js
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import { useSettings } from "../../contexts/SettingsContext";
 import { hexToRgbString } from "../../utils/colorUtils";
 
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
+import Detail from "../Detail/Detail";
+import AverageDetailModal from "../Detail/AverageDetailModal";
 import "./SharedAverageMessage.css";
 
 // keep importing so nothing else breaks if you rely on it elsewhere
 import TimeItem from "../TimeList/TimeItem";
 import "../TimeList/TimeItem.css";
+import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
 
 function clamp01(x) {
   if (!isFinite(x)) return 0;
@@ -72,14 +74,8 @@ const puzzleSvgEventKey = (eventKey) => {
   return eventKey;
 };
 
-
 /* -------------------------------------------
    TWO UI MAPS (LEFT/THEM and RIGHT/YOU)
-   - label: what to display in header (333 -> 3x3)
-   - labelSize: font size for event label
-   - labelTrack: letter spacing (px)
-   - iconScale: scale applied to the icon container
-   - iconDx/iconDy: translate in px
 -------------------------------------------- */
 const LEFT_UI = {
   "222": { label: "2x2", labelSize: 26, labelTrack: 0.4, iconScale: 0.52, iconDx: -2, iconDy: 0 },
@@ -99,7 +95,6 @@ const LEFT_UI = {
 };
 
 const RIGHT_UI = {
-  // for most puzzles, same scaling, but iconDx is typically mirrored (positive)
   "222": { label: "2x2", labelSize: 26, labelTrack: 0.4, iconScale: 0.52, iconDx: 2, iconDy: 0 },
   "333": { label: "3x3", labelSize: 28, labelTrack: 0.4, iconScale: 0.44, iconDx: -32, iconDy: -4 },
   "444": { label: "4x4", labelSize: 26, labelTrack: 0.4, iconScale: 0.40, iconDx: -34, iconDy: -4 },
@@ -129,11 +124,156 @@ const getUiForSide = (side, eventKey) => {
   return map[eventKey] || fallback;
 };
 
+function buildPlanSummary(events = []) {
+  const normalized = (events || []).map(normalizeEventKey).filter(Boolean);
+  const counts = new Map();
+
+  normalized.forEach((event) => {
+    counts.set(event, (counts.get(event) || 0) + 1);
+  });
+
+  const entries = Array.from(counts.entries());
+  const total = normalized.length;
+
+  return {
+    total,
+    distinctCount: entries.length,
+    entries,
+    isSingleEvent: entries.length === 1,
+    primaryEvent: entries[0]?.[0] || "333",
+    primaryCount: entries[0]?.[1] || 0,
+    compactLabel: entries
+      .map(([event, count]) =>
+        count > 1 ? `${count}× ${eventDisplayLabel(event)}` : eventDisplayLabel(event)
+      )
+      .join(" + "),
+  };
+}
+
+function findFirstMissingIndex(timesMap, count) {
+  for (let i = 0; i < count; i++) {
+    if (typeof timesMap?.[i] !== "number" || !isFinite(timesMap?.[i])) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function getStatusLabel(currentIndex, count, sideName) {
+  if (count <= 0) return "No solves";
+  if (currentIndex === -1) return "Complete";
+  if (currentIndex === 0) return `Ready for solve 1`;
+  return `Waiting on ${sideName} solve ${currentIndex + 1}`;
+}
+
+function parseSharedExtendPayload(text) {
+  if (!String(text || "").startsWith("[sharedExtend]")) return null;
+  try {
+    const parsed = JSON.parse(String(text).slice("[sharedExtend]".length));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function chunkArray(items, size) {
+  const safeSize = Math.max(1, Number(size) || 1);
+  const chunks = [];
+  for (let i = 0; i < items.length; i += safeSize) {
+    chunks.push(items.slice(i, i + safeSize));
+  }
+  return chunks;
+}
+
+function computeHeadlineAverage(times = []) {
+  const vals = (Array.isArray(times) ? times : []).filter(
+    (value) => typeof value === "number" && isFinite(value)
+  );
+
+  if (vals.length >= 12) {
+    return {
+      label: "AO12",
+      value: calculateAverage(vals.slice(-12), true)?.average ?? null,
+    };
+  }
+
+  if (vals.length >= 5) {
+    return {
+      label: "AO5",
+      value: calculateAverage(vals.slice(-5), true)?.average ?? null,
+    };
+  }
+
+  if (vals.length >= 3) {
+    return {
+      label: "MO3",
+      value: calculateAverage(vals.slice(-3), false)?.average ?? null,
+    };
+  }
+
+  return {
+    label: "AVG",
+    value: vals.length ? vals.reduce((sum, value) => sum + value, 0) / vals.length : null,
+  };
+}
+
+function buildGroupBorderGradient(members = []) {
+  const safeMembers = (Array.isArray(members) ? members : []).filter(Boolean);
+  if (!safeMembers.length) return null;
+
+  const minWeight = 0.08;
+  const alpha = 0.75;
+  const blendPct = 4;
+  const weights = safeMembers.map((member) => {
+    const wins = Number(member?.wins || 0);
+    return Math.max(minWeight, wins + 1);
+  });
+  const total = weights.reduce((sum, value) => sum + value, 0) || 1;
+
+  let cursor = 0;
+  const segments = safeMembers.map((member, index) => {
+    const start = cursor;
+    cursor += (weights[index] / total) * 100;
+    return {
+      color: member.color || "#888888",
+      rgb: hexToRgbString(member.color || "#888888"),
+      start,
+      end: cursor,
+    };
+  });
+
+  const stops = [];
+  segments.forEach((segment, index) => {
+    const prev = segments[index - 1] || null;
+    const next = segments[index + 1] || null;
+    const width = Math.max(0, segment.end - segment.start);
+    const localBlend = Math.min(blendPct, width / 2);
+    const start = prev ? segment.start + localBlend : segment.start;
+    const end = next ? segment.end - localBlend : segment.end;
+    const color = `rgba(${segment.rgb}, ${alpha})`;
+
+    if (!prev) {
+      stops.push(`${color} ${segment.start.toFixed(2)}%`);
+    } else {
+      stops.push(`${color} ${start.toFixed(2)}%`);
+    }
+
+    if (!next) {
+      stops.push(`${color} ${segment.end.toFixed(2)}%`);
+    } else {
+      stops.push(`${color} ${end.toFixed(2)}%`);
+    }
+  });
+
+  return `linear-gradient(90deg, ${stops.join(", ")}) border-box`;
+}
+
 function SharedAverageMessage({
   msg,
   user,
   messages = [],
   onLoadSession,
+  onLeaveSharedSession,
   onDismiss,
 
   yourColor,
@@ -143,8 +283,21 @@ function SharedAverageMessage({
   theirUsername,
 
   onOpenSideDetail,
+
+  onRequestRefresh,
+  compactHome = false,
+  showStartAction = true,
+  showRefreshAction = true,
+  activeSharedID = null,
+  sessionData = null,
+  conversationType = "DM",
+  memberProfiles = [],
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [lastRefreshTick, setLastRefreshTick] = useState(0);
+  const [viewMode, setViewMode] = useState("summary");
+  const [selectedSharedSolve, setSelectedSharedSolve] = useState(null);
+  const [selectedSharedAverage, setSelectedSharedAverage] = useState(null);
 
   const safeYourColor = yourColor || user?.Color || user?.color || "#2EC4B6";
   const safeTheirColor = theirColor || "#888888";
@@ -155,18 +308,15 @@ function SharedAverageMessage({
   // match TimeList modes:
   // "binary" | "continuous" | "bucket" | "index"
   // also accept old "spectrum" as "bucket"
-  const timeColorModeRaw = settings?.timeColorMode || "binary";
+  const timeColorModeRaw = settings?.sharedTimeColorMode || "profile";
   const timeColorMode =
     timeColorModeRaw === "spectrum" ? "bucket" : timeColorModeRaw;
 
-  // YOU should appear on the RIGHT
   const nameYou =
     yourUsername || user?.Username || user?.Name || user?.UserID || "You";
   const nameThem = theirUsername || msg?.sender || "Them";
+  const isGroupConversation = String(conversationType || "").toUpperCase() === "GROUP";
 
-  // -----------------------------
-  // Parse ORIGINAL shared message
-  // -----------------------------
   const parsed = useMemo(() => {
     try {
       if (!msg?.text || !msg.text.includes("]")) return null;
@@ -196,8 +346,11 @@ function SharedAverageMessage({
           opponentScrambles.length
         );
 
-        return {
+        let parsedBase = {
           sharedID: parsedPayload?.sharedID,
+          mode: String(parsedPayload?.mode || parsedPayload?.type || "average"),
+          targetWins: Number(parsedPayload?.targetWins || 0) || null,
+          batchSize: Number(parsedPayload?.batchSize || 0) || null,
           count: Number.isFinite(count) ? count : 0,
           creatorID: parsedPayload?.creatorID || msg?.sender || null,
           creatorEvent,
@@ -209,6 +362,29 @@ function SharedAverageMessage({
           event: creatorEvent,
           scrambles: creatorScrambles,
         };
+
+        const extensions = (messages || [])
+          .filter((m) => m?.text?.startsWith("[sharedExtend]"))
+          .map((m) => parseSharedExtendPayload(m.text))
+          .filter((payload) => payload?.sharedID === parsedBase.sharedID);
+
+        extensions.forEach((payload) => {
+          parsedBase = {
+            ...parsedBase,
+            creatorEvents: [...(parsedBase.creatorEvents || []), ...(payload.creatorEvents || [])],
+            opponentEvents: [...(parsedBase.opponentEvents || []), ...(payload.opponentEvents || [])],
+            creatorScrambles: [...(parsedBase.creatorScrambles || []), ...(payload.creatorScrambles || [])],
+            opponentScrambles: [...(parsedBase.opponentScrambles || []), ...(payload.opponentScrambles || [])],
+            scrambles: [...(parsedBase.scrambles || []), ...(payload.creatorScrambles || payload.scrambles || [])],
+            count: Math.max(
+              Number(parsedBase.count || 0),
+              Number(payload.count || 0),
+              [...(parsedBase.scrambles || []), ...(payload.creatorScrambles || payload.scrambles || [])].length
+            ),
+          };
+        });
+
+        return parsedBase;
       }
 
       const first = payload.indexOf("|");
@@ -243,11 +419,8 @@ function SharedAverageMessage({
       console.error("Failed to parse shared message:", msg?.text, err);
       return null;
     }
-  }, [msg?.sender, msg?.text]);
+  }, [msg?.sender, msg?.text, messages]);
 
-  // -----------------------------
-  // Parse [sharedUpdate] messages
-  // -----------------------------
   const updates = useMemo(() => {
     if (!parsed) return [];
     return (messages || [])
@@ -261,10 +434,17 @@ function SharedAverageMessage({
           const index = parseInt(indexStr, 10);
           const time = parseInt(timeStr, 10);
 
-          if (!Number.isFinite(index) || !Number.isFinite(time) || !uid)
+          if (!Number.isFinite(index) || !Number.isFinite(time) || !uid) {
             return null;
+          }
 
-          return { index, time, userID: uid };
+          return {
+            index,
+            time,
+            userID: uid,
+            messageID: m?.id || m?.messageID || `${sid}-${index}-${uid}-${time}`,
+            createdAt: m?.createdAt || m?.datetime || m?.DateTime || null,
+          };
         } catch {
           return null;
         }
@@ -272,16 +452,65 @@ function SharedAverageMessage({
       .filter(Boolean);
   }, [messages, parsed]);
 
-  // -----------------------------
-  // Build maps + compute stats
-  // -----------------------------
+  const sharedMemberProfiles = useMemo(() => {
+    const byID = new Map();
+
+    (Array.isArray(memberProfiles) ? memberProfiles : []).forEach((member) => {
+      const id = String(member?.id || member?.userID || "").trim();
+      if (!id) return;
+      byID.set(id, {
+        id,
+        name: member?.name || member?.username || id,
+        username: member?.username || member?.name || id,
+        color:
+          member?.color ||
+          (id === user?.UserID ? safeYourColor : safeTheirColor),
+        isYou: !!member?.isYou || id === user?.UserID,
+      });
+    });
+
+    (updates || []).forEach((entry) => {
+      const id = String(entry?.userID || "").trim();
+      if (!id || byID.has(id)) return;
+      byID.set(id, {
+        id,
+        name: id === user?.UserID ? nameYou : id,
+        username: id === user?.UserID ? nameYou : id,
+        color: id === user?.UserID ? safeYourColor : safeTheirColor,
+        isYou: id === user?.UserID,
+      });
+    });
+
+    if (user?.UserID && !byID.has(user.UserID)) {
+      byID.set(user.UserID, {
+        id: user.UserID,
+        name: nameYou,
+        username: nameYou,
+        color: safeYourColor,
+        isYou: true,
+      });
+    }
+
+    return Array.from(byID.values()).sort((a, b) => {
+      if (a.isYou && !b.isYou) return -1;
+      if (!a.isYou && b.isYou) return 1;
+      return String(a.name || a.id).localeCompare(String(b.name || b.id));
+    });
+  }, [memberProfiles, updates, user?.UserID, nameYou, safeYourColor, safeTheirColor]);
+
   const computed = useMemo(() => {
     const yt = {};
     const tt = {};
 
+    const opponentUserID =
+      parsed?.creatorID === user?.UserID ? nameThem : parsed?.creatorID || nameThem;
+
     (updates || []).forEach((u) => {
-      if (u.userID === user?.UserID) yt[u.index] = u.time;
-      else tt[u.index] = u.time;
+      if (u.userID === user?.UserID) {
+        yt[u.index] = u.time;
+      } else if (!opponentUserID || u.userID === opponentUserID || u.userID !== user?.UserID) {
+        tt[u.index] = u.time;
+      }
     });
 
     const count = parsed?.count || 0;
@@ -321,6 +550,28 @@ function SharedAverageMessage({
       p = Math.max(20, Math.min(80, p));
     }
 
+    const yourCurrentIndex = findFirstMissingIndex(yt, count);
+    const theirCurrentIndex = findFirstMissingIndex(tt, count);
+
+    let activeIndex = -1;
+    if (count > 0) {
+      for (let i = 0; i < count; i++) {
+        const hasYou = typeof yt[i] === "number" && isFinite(yt[i]);
+        const hasThem = typeof tt[i] === "number" && isFinite(tt[i]);
+        if (!hasYou || !hasThem) {
+          activeIndex = i;
+          break;
+        }
+      }
+    }
+
+    const yourDoneCount = Object.keys(yt).filter(
+      (k) => typeof yt[k] === "number" && isFinite(yt[k])
+    ).length;
+    const theirDoneCount = Object.keys(tt).filter(
+      (k) => typeof tt[k] === "number" && isFinite(tt[k])
+    ).length;
+
     return {
       yourTimes: yt,
       theirTimes: tt,
@@ -333,10 +584,137 @@ function SharedAverageMessage({
       splitPercent: p,
       yourVals,
       theirVals,
+      yourCurrentIndex,
+      theirCurrentIndex,
+      activeIndex,
+      yourDoneCount,
+      theirDoneCount,
+      isComplete: count > 0 && activeIndex === -1,
     };
-  }, [updates, user?.UserID, parsed]);
+  }, [updates, user?.UserID, parsed, nameThem]);
 
-  // ---- derived values (NO hooks below this line) ----
+  const groupComputed = useMemo(() => {
+    if (!parsed || !isGroupConversation) return null;
+
+    const count = Number(parsed?.count || 0);
+    const memberOrder = sharedMemberProfiles.length
+      ? sharedMemberProfiles
+      : [{ id: user?.UserID || "you", name: nameYou, color: safeYourColor, isYou: true }];
+
+    const timesByUser = {};
+    memberOrder.forEach((member) => {
+      timesByUser[member.id] = {};
+    });
+
+    (updates || []).forEach((entry) => {
+      const id = String(entry?.userID || "").trim();
+      if (!id) return;
+      if (!timesByUser[id]) timesByUser[id] = {};
+      timesByUser[id][entry.index] = entry.time;
+    });
+
+    let activeIndex = -1;
+    for (let i = 0; i < count; i += 1) {
+      const everyoneDone = memberOrder.every((member) => {
+        const value = timesByUser?.[member.id]?.[i];
+        return typeof value === "number" && isFinite(value);
+      });
+      if (!everyoneDone) {
+        activeIndex = i;
+        break;
+      }
+    }
+
+    const rowWinners = {};
+    const memberStats = memberOrder.map((member) => {
+      const times = timesByUser[member.id] || {};
+      const vals = [];
+      for (let i = 0; i < count; i += 1) {
+        const value = times[i];
+        if (typeof value === "number" && isFinite(value)) vals.push(value);
+      }
+      const mean = vals.length ? vals.reduce((sum, value) => sum + value, 0) / vals.length : null;
+      const currentIndex = findFirstMissingIndex(times, count);
+      const doneCount = Object.keys(times).filter(
+        (key) => typeof times[key] === "number" && isFinite(times[key])
+      ).length;
+      return {
+        ...member,
+        times,
+        vals,
+        mean,
+        ao: mean,
+        wins: 0,
+        currentIndex,
+        doneCount,
+      };
+    });
+
+    for (let i = 0; i < count; i += 1) {
+      const entrants = memberStats
+        .map((member) => ({
+          id: member.id,
+          time: member.times?.[i],
+        }))
+        .filter((entry) => typeof entry.time === "number" && isFinite(entry.time));
+
+      if (entrants.length < 2) continue;
+      const bestTime = Math.min(...entrants.map((entry) => entry.time));
+      const winners = entrants.filter((entry) => entry.time === bestTime);
+      if (winners.length === 1) {
+        rowWinners[i] = winners[0].id;
+        const target = memberStats.find((member) => member.id === winners[0].id);
+        if (target) target.wins += 1;
+      } else {
+        rowWinners[i] = "tie";
+      }
+    }
+
+    const members = memberStats.map((member) => {
+      const vals = member.vals || [];
+      const sortedVals = vals.slice().sort((a, b) => a - b);
+      const rankMap = new Map();
+      sortedVals.forEach((value, index) => {
+        if (!rankMap.has(value)) rankMap.set(value, index);
+      });
+      return {
+        ...member,
+        min: vals.length ? Math.min(...vals) : null,
+        max: vals.length ? Math.max(...vals) : null,
+        best: vals.length ? Math.min(...vals) : null,
+        headline: computeHeadlineAverage(vals),
+        rankPack: {
+          map: rankMap,
+          size: sortedVals.length,
+        },
+      };
+    });
+
+    return {
+      count,
+      activeIndex,
+      isComplete: count > 0 && activeIndex === -1,
+      rowWinners,
+      members,
+      byId: Object.fromEntries(members.map((member) => [member.id, member])),
+    };
+  }, [
+    parsed,
+    isGroupConversation,
+    sharedMemberProfiles,
+    updates,
+    user?.UserID,
+    nameYou,
+    safeYourColor,
+  ]);
+
+  useEffect(() => {
+    setExpanded(false);
+    setViewMode("summary");
+    setSelectedSharedSolve(null);
+    setSelectedSharedAverage(null);
+  }, [parsed?.sharedID]);
+
   const youRgb = hexToRgbString(safeYourColor);
   const theirRgb = hexToRgbString(safeTheirColor);
 
@@ -353,7 +731,6 @@ function SharedAverageMessage({
     ? Math.max(...computed.theirVals)
     : null;
 
-  // rank maps for INDEX mode (computed WITHOUT useMemo to avoid hook-order issues)
   const buildRankPack = (arr) => {
     const vals = (arr || [])
       .filter((v) => typeof v === "number" && isFinite(v))
@@ -368,7 +745,6 @@ function SharedAverageMessage({
   const yourRankPack = buildRankPack(computed?.yourVals);
   const theirRankPack = buildRankPack(computed?.theirVals);
 
-  // NOW it's safe to early-return (no hooks below)
   if (!parsed) return null;
 
   const isCreator = (parsed.creatorID || msg?.sender) === user?.UserID;
@@ -395,12 +771,29 @@ function SharedAverageMessage({
       ? (isCreator ? parsed.opponentScrambles : parsed.creatorScrambles)
       : parsed.scrambles;
 
-  const uiThem = getUiForSide("them", normalizeEventKey(theirEvent));
-  const uiYou = getUiForSide("you", normalizeEventKey(yourEvent));
+  const yourPlan = buildPlanSummary(yourEvents);
+  const theirPlan = buildPlanSummary(theirEvents);
+  const mode = String(parsed.mode || "average").toLowerCase();
+  const targetWins = Number(parsed.targetWins || 0) || 3;
 
-  const formatMs = (ms) => (ms || ms === 0 ? (ms / 1000).toFixed(2) : "–");
+  const uiThem = getUiForSide("them", normalizeEventKey(theirPlan.primaryEvent || theirEvent));
+  const uiYou = getUiForSide("you", normalizeEventKey(yourPlan.primaryEvent || yourEvent));
 
-  const getPerfClassAndStyle = (value, min, max, rank01) => {
+  const formatSolveMs = (ms) =>
+    typeof ms === "number" && isFinite(ms) ? formatTime(ms, false) : "–";
+  const formatAverageMs = (ms) =>
+    typeof ms === "number" && isFinite(ms) ? formatTime(ms, true) : "–";
+
+  const getPerfClassAndStyle = (value, min, max, rank01, side) => {
+    if (timeColorMode === "profile") {
+      return {
+        perfClass: "",
+        perfStyle: {
+          border: `2px solid ${side === "you" ? safeYourColor : safeTheirColor}`,
+        },
+      };
+    }
+
     if (timeColorMode === "binary") return { perfClass: "", perfStyle: null };
 
     if (timeColorMode === "index") {
@@ -427,14 +820,13 @@ function SharedAverageMessage({
       return { perfClass: "overall-border-max", perfStyle: null };
     }
 
-    // continuous
     const h = hueGreenToRed(t);
     const c = hslColor(h, 100, 55);
     return { perfClass: "", perfStyle: { border: `2px solid ${c}` } };
   };
 
   const getBinaryExtremesClass = (value, min, max, dashed = true) => {
-    if (timeColorMode !== "binary") return "";
+    if (timeColorMode !== "binary" && timeColorMode !== "profile") return "";
     if (typeof value !== "number" || !isFinite(value)) return "";
     if (typeof min !== "number" || !isFinite(min)) return "";
     if (typeof max !== "number" || !isFinite(max)) return "";
@@ -455,13 +847,13 @@ function SharedAverageMessage({
   };
 
   const rowWinClass = (w) => {
-    if (w === "you") return "sharedRowWinYou"; // YOU on RIGHT
-    if (w === "them") return "sharedRowWinThem"; // THEM on LEFT
+    if (w === "you") return "sharedRowWinYou";
+    if (w === "them") return "sharedRowWinThem";
     if (w === "tie") return "sharedRowTie";
     return "";
   };
 
-  const renderTimeCell = (side, ms) => {
+  const renderTimeCell = (side, ms, isCurrentRow = false, winner = "none") => {
     const value = typeof ms === "number" && isFinite(ms) ? ms : null;
 
     const min = side === "you" ? yourMin : theirMin;
@@ -478,34 +870,52 @@ function SharedAverageMessage({
     const { perfClass, perfStyle } =
       timeColorMode === "binary"
         ? { perfClass: "", perfStyle: null }
-        : getPerfClassAndStyle(value, min, max, rank01);
+        : getPerfClassAndStyle(value, min, max, rank01, side);
 
     const binaryClass = getBinaryExtremesClass(value, min, max, true);
+    const isWinner = winner === side;
+    const winnerRgb = side === "you" ? youRgb : theirRgb;
+    const mergedStyle = {
+      ...(perfStyle || {}),
+      ...(isWinner && value != null
+        ? {
+            background: `rgba(${winnerRgb}, 0.46)`,
+            boxShadow: `inset 0 0 0 1px rgba(${winnerRgb}, 0.34)`,
+          }
+        : {}),
+    };
 
     return (
       <div
-        className={["TimeItem", "sharedAverageTimeItem", perfClass, binaryClass].join(
-          " "
-        )}
-        style={perfStyle || undefined}
+        className={[
+          "TimeItem",
+          "sharedAverageTimeItem",
+          perfClass,
+          binaryClass,
+          isWinner ? "sharedAverageTimeItemWinner" : "",
+          isCurrentRow ? "sharedAverageTimeItemCurrent" : "",
+          value == null ? "sharedAverageTimeItemPending" : "",
+        ].join(" ")}
+        style={Object.keys(mergedStyle).length ? mergedStyle : undefined}
       >
-        <TimeItem time={formatMs(value)} />
+        <TimeItem time={formatSolveMs(value)} />
       </div>
     );
   };
 
   const MAX_VISIBLE = 12;
   const visibleCount = expanded || parsed.count <= MAX_VISIBLE ? parsed.count : MAX_VISIBLE;
-  const rowsToShow =
-    Array.from({ length: visibleCount }, (_, i) => ({
-          yourEvent: yourEvents?.[i] || normalizeEventKey(yourEvent),
-          theirEvent: theirEvents?.[i] || normalizeEventKey(theirEvent),
-          yourScramble: yourScrambles?.[i] || "",
-          theirScramble: theirScrambles?.[i] || "",
-        }));
+  const rowsToShow = Array.from({ length: visibleCount }, (_, i) => ({
+    index: i,
+    yourEvent: yourEvents?.[i] || normalizeEventKey(yourEvent),
+    theirEvent: theirEvents?.[i] || normalizeEventKey(theirEvent),
+    yourScramble: yourScrambles?.[i] || "",
+    theirScramble: theirScrambles?.[i] || "",
+  }));
 
   const yourSolveCount = yourScrambles?.length || 0;
   const theirSolveCount = theirScrambles?.length || 0;
+
   const samePlan =
     yourSolveCount === theirSolveCount &&
     rowsToShow.every(
@@ -516,237 +926,923 @@ function SharedAverageMessage({
     yourEvents.every(
       (event, index) => normalizeEventKey(event) === normalizeEventKey(theirEvents?.[index])
     );
+
   const useMixedLayout = !samePlan;
+
+  const renderSideHeaderLabel = (side, plan, otherPlan, ui) => {
+    const showCountBadge =
+      plan.isSingleEvent &&
+      otherPlan?.isSingleEvent &&
+      normalizeEventKey(plan.primaryEvent) === normalizeEventKey(otherPlan.primaryEvent) &&
+      Number(plan.primaryCount) > Number(otherPlan.primaryCount);
+    const mainLabel = plan.isSingleEvent ? eventDisplayLabel(plan.primaryEvent) : "Mixed";
+
+    return (
+      <>
+        <div
+          className="sharedAverageEventLabelRow"
+          style={{
+            justifyContent: side === "you" ? "flex-end" : "flex-start",
+          }}
+        >
+          <div
+            className="sharedAverageEventLabel"
+            style={{
+              fontSize: ui.labelSize,
+              letterSpacing: `${ui.labelTrack ?? 0.4}px`,
+            }}
+          >
+            {mainLabel}
+          </div>
+
+          {showCountBadge && (
+            <span className="sharedAverageEventCountBadge">
+              ×{plan.primaryCount}
+            </span>
+          )}
+        </div>
+
+        {!plan.isSingleEvent && (
+          <div
+            className={`sharedAveragePlanSummary sharedAveragePlanSummary${
+              side === "you" ? "Right" : "Left"
+            }`}
+          >
+            {plan.compactLabel}
+          </div>
+        )}
+      </>
+    );
+  };
+
+  const renderSideIcon = (eventKey, scramble, ui) => {
+    return (
+      <div
+        className="sharedAverageSideIcon"
+        style={{
+          transform: `translate(${ui.iconDx}px, ${ui.iconDy}px) scale(${ui.iconScale})`,
+          marginRight: 0,
+          marginLeft: 0,
+        }}
+      >
+        <div className="sharedAverageSideIconCube">
+          <PuzzleSVG
+            event={puzzleSvgEventKey(normalizeEventKey(eventKey))}
+            scramble={scramble}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  const activeIndex = computed.activeIndex;
+
+  const youStatus = getStatusLabel(computed.yourCurrentIndex, parsed.count, "you");
+  const themStatus = getStatusLabel(computed.theirCurrentIndex, parsed.count, nameThem);
+  const centerTitle =
+    mode === "head_to_head"
+      ? samePlan
+        ? `${eventDisplayLabel(yourEvent)} head to head`
+        : "Mixed head to head"
+      : mode === "casual"
+      ? samePlan
+        ? `${eventDisplayLabel(yourEvent)} casual session`
+        : "Mixed casual session"
+      : samePlan
+      ? `${eventDisplayLabel(yourEvent)} average`
+      : "Mixed average";
+  const scoreLabel = mode === "head_to_head" ? "MATCH" : "WINS";
+  const meanLabel = mode === "head_to_head" ? "MEAN" : mode === "casual" ? "AVG" : "MEAN";
+  const currentSolveBadge =
+    mode === "head_to_head"
+      ? computed.activeIndex === -1
+        ? "Match complete"
+        : `First to ${targetWins}`
+      : mode === "casual"
+      ? computed.activeIndex === -1
+        ? "Keep going"
+        : `Current solve: ${activeIndex + 1}`
+      : activeIndex === -1
+      ? "Average complete"
+      : `Current solve: ${activeIndex + 1}`;
+  const itemChunkSize = compactHome ? 5 : 8;
+  const visibleRows = rowsToShow.map((row) => row.index);
+
+  const buildItemRows = (side) =>
+    chunkArray(
+      visibleRows.map((index) => ({
+        index,
+        time: side === "you" ? computed.yourTimes[index] : computed.theirTimes[index],
+        event: side === "you" ? yourEvents?.[index] : theirEvents?.[index],
+        scramble: side === "you" ? yourScrambles?.[index] : theirScrambles?.[index],
+        isCurrent: index === activeIndex,
+      })),
+      itemChunkSize
+    );
+
+  const itemSections = [
+    {
+      key: "them",
+      side: "them",
+      name: nameThem,
+      label: theirPlan.isSingleEvent ? eventDisplayLabel(theirPlan.primaryEvent) : "Mixed",
+      overall: computed.theirAo,
+      countLabel: `Ao${theirSolveCount || parsed.count}`,
+      rows: buildItemRows("them"),
+    },
+    {
+      key: "you",
+      side: "you",
+      name: nameYou,
+      label: yourPlan.isSingleEvent ? eventDisplayLabel(yourPlan.primaryEvent) : "Mixed",
+      overall: computed.yourAo,
+      countLabel: `Ao${yourSolveCount || parsed.count}`,
+      rows: buildItemRows("you"),
+    },
+  ];
+  const isActiveSession = String(activeSharedID || "") === String(parsed.sharedID || "");
+  const nextSolveIndex = activeIndex === -1 ? Math.max(parsed.count - 1, 0) : activeIndex;
+  const openSharedSession = (options = {}) =>
+    onLoadSession?.(
+      sessionData && String(sessionData?.sharedID || "") === String(parsed.sharedID || "")
+        ? sessionData
+        : {
+            sharedID: parsed.sharedID,
+            mode: parsed.mode,
+            targetWins: parsed.targetWins,
+            batchSize: parsed.batchSize,
+            event: yourEvent,
+            events: yourEvents,
+            scrambles: yourScrambles,
+            creatorID: parsed.creatorID || msg?.sender || null,
+            creatorEvent: parsed.creatorEvent,
+            opponentEvent: parsed.opponentEvent,
+            creatorEvents: parsed.creatorEvents,
+            opponentEvents: parsed.opponentEvents,
+            creatorScrambles: parsed.creatorScrambles,
+            opponentScrambles: parsed.opponentScrambles,
+            sourceMessage: msg,
+          },
+      options
+    );
+  const jumpToSolve = (index) => {
+    if (!Number.isFinite(Number(index))) return;
+    openSharedSession({ targetIndex: Number(index) });
+  };
+
+  const buildSharedSolve = (side, index) => {
+    if (!Number.isFinite(Number(index))) return null;
+    const solveIndex = Number(index);
+    const isYouSide = side === "you";
+    const time = isYouSide ? computed.yourTimes[solveIndex] : computed.theirTimes[solveIndex];
+    if (!(typeof time === "number" && isFinite(time))) return null;
+
+    const matchingUpdate = (updates || []).find((entry) => {
+      if (entry.index !== solveIndex) return false;
+      if (entry.time !== time) return false;
+      return isYouSide ? entry.userID === user?.UserID : entry.userID !== user?.UserID;
+    });
+
+    return {
+      __readOnly: true,
+      __profileColor: isYouSide ? safeYourColor : safeTheirColor,
+      time,
+      event: isYouSide ? yourEvents?.[solveIndex] || yourEvent : theirEvents?.[solveIndex] || theirEvent,
+      scramble: isYouSide
+        ? yourScrambles?.[solveIndex] || ""
+        : theirScrambles?.[solveIndex] || "",
+      datetime: matchingUpdate?.createdAt || null,
+      createdAt: matchingUpdate?.createdAt || null,
+      note: "",
+      penalty: null,
+      tags: {
+        SolveSource: "Shared",
+      },
+    };
+  };
+
+  const openSharedSolveDetail = (side, index) => {
+    const solve = buildSharedSolve(side, index);
+    if (!solve) return;
+    setSelectedSharedSolve(solve);
+  };
+
+  const buildAverageSolvesForSide = (side) => {
+    const isYouSide = side === "you";
+    const count = parsed?.count || 0;
+    const rows = [];
+
+    for (let i = 0; i < count; i += 1) {
+      const solve = buildSharedSolve(isYouSide ? "you" : "them", i);
+      if (solve) rows.push(solve);
+    }
+
+    return rows;
+  };
+
+  const openSharedAverageDetail = (side) => {
+    const solves = buildAverageSolvesForSide(side);
+    if (!solves.length) return;
+
+    setSelectedSharedAverage({
+      side,
+      title: `${side === "you" ? nameYou : nameThem} Average Detail (${solves.length})`,
+      solves,
+    });
+  };
+
+  const buildSharedSolveForParticipant = (participantID, index) => {
+    if (!Number.isFinite(Number(index))) return null;
+    const solveIndex = Number(index);
+
+    if (isGroupConversation && groupComputed?.byId?.[participantID]) {
+      const member = groupComputed.byId[participantID];
+      const time = member?.times?.[solveIndex];
+      if (!(typeof time === "number" && isFinite(time))) return null;
+      const matchingUpdate = (updates || []).find(
+        (entry) => entry.index === solveIndex && entry.time === time && entry.userID === participantID
+      );
+      const eventForSolve =
+        participantID === parsed?.creatorID
+          ? parsed?.creatorEvents?.[solveIndex] || parsed?.creatorEvent || yourEvent
+          : parsed?.opponentEvents?.[solveIndex] || parsed?.opponentEvent || theirEvent;
+      const scrambleForSolve =
+        participantID === parsed?.creatorID
+          ? parsed?.creatorScrambles?.[solveIndex] || ""
+          : parsed?.opponentScrambles?.[solveIndex] || "";
+
+      return {
+        __readOnly: true,
+        __profileColor: member.color || safeTheirColor,
+        time,
+        event: eventForSolve,
+        scramble: scrambleForSolve,
+        datetime: matchingUpdate?.createdAt || null,
+        createdAt: matchingUpdate?.createdAt || null,
+        note: "",
+        penalty: null,
+        tags: {
+          SolveSource: "Shared",
+        },
+      };
+    }
+
+    return buildSharedSolve(
+      String(participantID || "") === String(user?.UserID || "") ? "you" : "them",
+      solveIndex
+    );
+  };
+
+  const openGroupAverageDetail = (participantID) => {
+    const member = groupComputed?.byId?.[participantID];
+    if (!member) return;
+    const solves = [];
+    for (let i = 0; i < (groupComputed?.count || 0); i += 1) {
+      const solve = buildSharedSolveForParticipant(participantID, i);
+      if (solve) solves.push(solve);
+    }
+    if (!solves.length) return;
+    setSelectedSharedAverage({
+      side: participantID,
+      title: `${member.name} Average Detail (${solves.length})`,
+      solves,
+    });
+  };
+
+  const openGroupSolveDetail = (participantID, index) => {
+    const solve = buildSharedSolveForParticipant(participantID, index);
+    if (!solve) return;
+    setSelectedSharedSolve(solve);
+  };
+
+  const renderGroupTimeCell = (member, ms, isCurrentRow = false, isWinner = false) => {
+    const value = typeof ms === "number" && isFinite(ms) ? ms : null;
+    const memberRgb = hexToRgbString(member?.color || safeTheirColor);
+
+    let perfClass = "";
+    let perfStyle = null;
+    if (timeColorMode === "profile") {
+      perfStyle = {
+        border: `2px solid ${member?.color || safeTheirColor}`,
+      };
+    } else if (timeColorMode !== "binary") {
+      let rank01 = 0;
+      if (timeColorMode === "index" && value != null) {
+        const idx = member?.rankPack?.map?.get(value);
+        const denom = Math.max(1, Number(member?.rankPack?.size || 1) - 1);
+        rank01 = typeof idx === "number" ? idx / denom : 0;
+      }
+      const next = getPerfClassAndStyle(value, member?.min, member?.max, rank01, "them");
+      perfClass = next.perfClass;
+      perfStyle = next.perfStyle;
+    }
+
+    const binaryClass = getBinaryExtremesClass(value, member?.min, member?.max, true);
+    const mergedStyle = {
+      ...(perfStyle || {}),
+      ...(isWinner && value != null
+        ? {
+            background: `rgba(${memberRgb}, 0.42)`,
+            boxShadow: `inset 0 0 0 1px rgba(${memberRgb}, 0.34)`,
+          }
+        : {}),
+    };
+
+    return (
+      <div
+        className={[
+          "TimeItem",
+          "sharedAverageTimeItem",
+          "sharedAverageTimeItem--group",
+          perfClass,
+          binaryClass,
+          isWinner ? "sharedAverageTimeItemWinner" : "",
+          isCurrentRow ? "sharedAverageTimeItemCurrent" : "",
+          value == null ? "sharedAverageTimeItemPending" : "",
+        ].join(" ")}
+        style={Object.keys(mergedStyle).length ? mergedStyle : undefined}
+      >
+        <TimeItem time={formatSolveMs(value)} />
+      </div>
+    );
+  };
+
+  const groupCurrentSolveBadge = groupComputed
+    ? mode === "head_to_head"
+      ? groupComputed.isComplete
+        ? "Match complete"
+        : `First to ${targetWins}`
+      : groupComputed.activeIndex === -1
+      ? "Average complete"
+      : `Current solve: ${groupComputed.activeIndex + 1}`
+    : "";
+
+  const groupItemSections = (groupComputed?.members || []).map((member) => ({
+    key: member.id,
+    side: member.id,
+    name: member.name,
+    overall: member.ao,
+    countLabel: `Avg ${member.doneCount || 0}/${groupComputed?.count || 0}`,
+    rows: chunkArray(
+      visibleRows.map((index) => ({
+        index,
+        time: member.times?.[index],
+        isCurrent: index === groupComputed?.activeIndex,
+        isWinner: groupComputed?.rowWinners?.[index] === member.id,
+      })),
+      itemChunkSize
+    ),
+  }));
+
+  const cardStyle = {
+    "--primaryRgb": primaryRgb,
+    "--youColor": safeYourColor,
+    "--theirColor": safeTheirColor,
+    "--youRgb": youRgb,
+    "--theirRgb": theirRgb,
+    "--split": `${computed.splitPercent}%`,
+    "--borderAlpha": 0.75,
+  };
+
+  const groupBorderGradient = buildGroupBorderGradient(groupComputed?.members || []);
+  if (isGroupConversation && groupBorderGradient) {
+    cardStyle.background = `
+      linear-gradient(rgba(${primaryRgb}, 0.97), rgba(${primaryRgb}, 0.97)) padding-box,
+      ${groupBorderGradient}
+    `;
+  }
 
   return (
     <div
-      className="sharedAverageCard"
-      style={{
-        "--primaryRgb": primaryRgb,
-        "--youColor": safeYourColor,
-        "--theirColor": safeTheirColor,
-        "--youRgb": youRgb,
-        "--theirRgb": theirRgb,
-        "--split": `${computed.splitPercent}%`,
-      }}
+      className={`sharedAverageCard ${compactHome ? "sharedAverageCard--homeCompact" : ""}`}
+      style={cardStyle}
     >
-      {/* TOP */}
-      <div className="sharedAverageTop">
-        {/* LEFT (THEM) */}
-        <button
-          className="sharedAverageSide sharedAverageSideThem"
-          type="button"
-          onClick={() =>
-            onOpenSideDetail?.({
-              side: "them",
-              sharedID: parsed.sharedID,
-              event: theirEvent,
-              scrambles: theirScrambles,
-              yourTimes: computed.yourTimes,
-              theirTimes: computed.theirTimes,
-              sourceMessage: msg,
-            })
-          }
-        >
+      {isGroupConversation ? (
+        <div className="sharedAverageTop sharedAverageTop--group">
+          <div className="sharedAverageGroupHeader">
+            <div className="sharedAverageCenterTitle">{centerTitle}</div>
+            <div className="sharedAverageCurrentSolveBadge">{groupCurrentSolveBadge}</div>
+          </div>
+
           <div
-            className="sharedAverageSideIcon"
+            className="sharedAverageGroupRoster"
             style={{
-              transform: `translate(${uiThem.iconDx}px, ${uiThem.iconDy}px) scale(${uiThem.iconScale})`,
-              marginRight: 0,
-              marginLeft: 0,
+              "--shared-group-cols": Math.max(2, groupComputed?.members?.length || 2),
             }}
           >
-            <PuzzleSVG event={puzzleSvgEventKey(normalizeEventKey(theirEvent))} scramble={theirScrambles?.[0] || ""} />
-          </div>
-
-          <div className="sharedAverageSideMeta sharedAverageSideMetaThem">
-            <div
-              className="sharedAverageEventLabel"
-              style={{
-                fontSize: uiThem.labelSize,
-                letterSpacing: `${uiThem.labelTrack ?? 0.4}px`,
-              }}
-            >
-              {uiThem.label}
-            </div>
-            <div className="sharedAverageName">{nameThem}</div>
-          </div>
-
-          <div className="sharedAverageSideBig sharedAverageSideBigCenter">
-            <div className="sharedAverageBig">
-              {computed.theirAo != null ? formatMs(computed.theirAo) : "–"}
-            </div>
-            <div className="sharedAverageSmallLabel">Ao{theirSolveCount || parsed.count}</div>
-          </div>
-        </button>
-
-        {/* CENTER */}
-        <div className="sharedAverageCenter">
-          <div className="sharedAverageCenterTitle">
-            {samePlan
-              ? `${eventDisplayLabel(yourEvent)} average`
-              : `Mixed average — ${theirSolveCount} vs ${yourSolveCount}`}
-          </div>
-
-          <div className="sharedAverageScoreRow">
-            <span className="sharedAverageScore">{computed.theirWins}</span>
-            <span className="sharedAverageScoreLabel">WINS</span>
-            <span className="sharedAverageScore">{computed.yourWins}</span>
-          </div>
-
-          <div className="sharedAverageMeanRow">
-            <span className="sharedAverageMeanLabel">MEAN</span>
-            <span className="sharedAverageMean">
-              {computed.theirMean != null ? formatMs(computed.theirMean) : "–"}
-            </span>
-            <span className="sharedAverageMeanMid">vs</span>
-            <span className="sharedAverageMean">
-              {computed.yourMean != null ? formatMs(computed.yourMean) : "–"}
-            </span>
+            {(groupComputed?.members || []).map((member) => (
+              <button
+                key={member.id}
+                type="button"
+                className={`sharedAverageGroupMember ${member.isYou ? "isYou" : ""}`}
+                onClick={() => openGroupAverageDetail(member.id)}
+              >
+                <span className="sharedAverageGroupMemberName">{member.name}</span>
+                <span className="sharedAverageGroupMemberStatLabel">
+                  {member.headline?.label || "AVG"}
+                </span>
+                <span className="sharedAverageGroupMemberAvg">
+                  {member.headline?.value != null ? formatAverageMs(member.headline.value) : "–"}
+                </span>
+                <span className="sharedAverageGroupMemberMeta">
+                  Mean {member.mean != null ? formatAverageMs(member.mean) : "–"}
+                </span>
+                <span className="sharedAverageGroupMemberMeta">
+                  Best {member.best != null ? formatSolveMs(member.best) : "–"}
+                </span>
+                <span className="sharedAverageGroupMemberMeta">
+                  {member.wins} {scoreLabel.toLowerCase()} • {member.doneCount}/{groupComputed?.count || 0}
+                </span>
+              </button>
+            ))}
           </div>
         </div>
-
-        {/* RIGHT (YOU) */}
-        <button
-          className="sharedAverageSide sharedAverageSideYou"
-          type="button"
-          onClick={() =>
-            onOpenSideDetail?.({
-              side: "you",
-              sharedID: parsed.sharedID,
-              event: yourEvent,
-              scrambles: yourScrambles,
-              yourTimes: computed.yourTimes,
-              theirTimes: computed.theirTimes,
-              sourceMessage: msg,
-            })
-          }
-        >
-          <div className="sharedAverageSideBig sharedAverageSideBigCenter">
-            <div className="sharedAverageBig">
-              {computed.yourAo != null ? formatMs(computed.yourAo) : "–"}
-            </div>
-            <div className="sharedAverageSmallLabel">Ao{yourSolveCount || parsed.count}</div>
-          </div>
-
-          <div className="sharedAverageSideMeta sharedAverageSideMetaRight">
-            <div
-              className="sharedAverageEventLabel"
-              style={{
-                fontSize: uiYou.labelSize,
-                letterSpacing: `${uiYou.labelTrack ?? 0.4}px`,
-              }}
-            >
-              {uiYou.label}
-            </div>
-            <div className="sharedAverageName">{nameYou}</div>
-          </div>
-
-          <div
-            className="sharedAverageSideIcon"
-            style={{
-              transform: `translate(${uiYou.iconDx}px, ${uiYou.iconDy}px) scale(${uiYou.iconScale})`,
-              marginRight: 0,
-              marginLeft: 0,
-            }}
-          >
-            <PuzzleSVG event={puzzleSvgEventKey(normalizeEventKey(yourEvent))} scramble={yourScrambles?.[0] || ""} />
-          </div>
-        </button>
-      </div>
-
-      {/* TABLE */}
-      <div className="sharedAverageTableWrap">
-        <table className="sharedAverageTable">
-          <tbody>
-            {rowsToShow.map((row, i) => {
-              const w = winnerForIndex(i);
-              const yourTime = computed.yourTimes[i]; // YOU on RIGHT
-              const theirTime = computed.theirTimes[i]; // THEM on LEFT
-
-              return (
-                <tr key={i} className={rowWinClass(w)}>
-                  <td className="sharedAverageIdx sharedAverageIdxLeft">{i + 1}</td>
-
-                  <td className="sharedAverageTimeCell sharedAverageTimeCellLeft">
-                    <div
-                      className={[
-                        "sharedAveragePillWrap",
-                        w === "them" ? "isWin" : "",
-                        w === "you" ? "isLose" : "",
-                        w === "tie" ? "isTie" : "",
-                      ].join(" ")}
-                    >
-                      {renderTimeCell("them", theirTime)}
-                    </div>
-                  </td>
-
-                  <td className="sharedAverageScramble">
-                    {useMixedLayout ? (
-                      <div className="sharedAverageScrambleSplit">
-                        <span className="sharedAverageScrambleText sharedAverageScrambleTextThem">
-                          {eventDisplayLabel(row.theirEvent)}: {row.theirScramble || "—"}
-                        </span>
-                        <span className="sharedAverageScrambleText sharedAverageScrambleTextYou">
-                          {eventDisplayLabel(row.yourEvent)}: {row.yourScramble || "—"}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="sharedAverageScrambleText">
-                        {row.yourScramble || row.theirScramble}
-                      </span>
-                    )}
-                  </td>
-
-                  <td className="sharedAverageTimeCell sharedAverageTimeCellRight">
-                    <div
-                      className={[
-                        "sharedAveragePillWrap",
-                        w === "you" ? "isWin" : "",
-                        w === "them" ? "isLose" : "",
-                        w === "tie" ? "isTie" : "",
-                      ].join(" ")}
-                    >
-                      {renderTimeCell("you", yourTime)}
-                    </div>
-                  </td>
-
-                  <td className="sharedAverageIdx sharedAverageIdxRight">{i + 1}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        {parsed.count > MAX_VISIBLE && !expanded && (
-          <button className="sharedAverageExpandBtn" onClick={() => setExpanded(true)}>
-            Show all {parsed.count}
-          </button>
-        )}
-
-        <div className="sharedAverageActions">
+      ) : (
+        <div className="sharedAverageTop">
           <button
-            className="sharedAverageBtn sharedAverageBtnPrimary"
+            className="sharedAverageSide sharedAverageSideThem"
+            type="button"
             onClick={() =>
-              onLoadSession?.({
+              onOpenSideDetail?.({
+                side: "them",
                 sharedID: parsed.sharedID,
-                event: yourEvent,
-                events: yourEvents,
-                scrambles: yourScrambles,
+                event: theirEvent,
+                scrambles: theirScrambles,
+                yourTimes: computed.yourTimes,
+                theirTimes: computed.theirTimes,
                 sourceMessage: msg,
               })
             }
           >
-            Load Into Timer
+            {renderSideIcon(
+              theirPlan.primaryEvent || theirEvent,
+              theirScrambles?.[Math.max(0, activeIndex)] || theirScrambles?.[0] || "",
+              uiThem
+            )}
+
+            <div className="sharedAverageSideMeta sharedAverageSideMetaThem">
+              {renderSideHeaderLabel("them", theirPlan, yourPlan, uiThem)}
+              <div className="sharedAverageName">{nameThem}</div>
+              <div className="sharedAverageSideStatus">{themStatus}</div>
+            </div>
+
+            <div className="sharedAverageSideBig sharedAverageSideBigCenter">
+              <div
+                className="sharedAverageBig sharedAverageBig--interactive"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  openSharedAverageDetail("them");
+                }}
+              >
+                {computed.theirAo != null ? formatAverageMs(computed.theirAo) : "–"}
+              </div>
+              <div className="sharedAverageSmallLabel">Ao{theirSolveCount || parsed.count}</div>
+            </div>
           </button>
 
-          {onDismiss && (
-            <button className="sharedAverageBtn sharedAverageBtnGhost" onClick={onDismiss}>
-              Dismiss
+          <div className="sharedAverageCenter">
+            <div className="sharedAverageCenterTitle">{centerTitle}</div>
+
+            <div className="sharedAverageScoreRow">
+              <span className="sharedAverageScore">{computed.theirWins}</span>
+              <span className="sharedAverageScoreLabel">{scoreLabel}</span>
+              <span className="sharedAverageScore">{computed.yourWins}</span>
+            </div>
+
+            <div className="sharedAverageMeanRow">
+              <span className="sharedAverageMeanLabel">{meanLabel}</span>
+              <span className="sharedAverageMean">
+                {computed.theirMean != null ? formatAverageMs(computed.theirMean) : "–"}
+              </span>
+              <span className="sharedAverageMeanMid">vs</span>
+              <span className="sharedAverageMean">
+                {computed.yourMean != null ? formatAverageMs(computed.yourMean) : "–"}
+              </span>
+            </div>
+
+            <div className="sharedAverageCurrentSolveBadge">{currentSolveBadge}</div>
+          </div>
+
+          <button
+            className="sharedAverageSide sharedAverageSideYou"
+            type="button"
+            onClick={() =>
+              onOpenSideDetail?.({
+                side: "you",
+                sharedID: parsed.sharedID,
+                event: yourEvent,
+                scrambles: yourScrambles,
+                yourTimes: computed.yourTimes,
+                theirTimes: computed.theirTimes,
+                sourceMessage: msg,
+              })
+            }
+          >
+            <div className="sharedAverageSideBig sharedAverageSideBigCenter">
+              <div
+                className="sharedAverageBig sharedAverageBig--interactive"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  openSharedAverageDetail("you");
+                }}
+              >
+                {computed.yourAo != null ? formatAverageMs(computed.yourAo) : "–"}
+              </div>
+              <div className="sharedAverageSmallLabel">Ao{yourSolveCount || parsed.count}</div>
+            </div>
+
+            <div className="sharedAverageSideMeta sharedAverageSideMetaRight">
+              {renderSideHeaderLabel("you", yourPlan, theirPlan, uiYou)}
+              <div className="sharedAverageName">{nameYou}</div>
+              <div className="sharedAverageSideStatus">{youStatus}</div>
+            </div>
+
+            {renderSideIcon(
+              yourPlan.primaryEvent || yourEvent,
+              yourScrambles?.[Math.max(0, activeIndex)] || yourScrambles?.[0] || "",
+              uiYou
+            )}
+          </button>
+        </div>
+      )}
+
+      <div className="sharedAverageBody">
+        <div className="sharedAverageControls">
+          <div className="sharedAverageViewToggle" role="tablist" aria-label="Shared average view">
+            <button
+              type="button"
+              className={viewMode === "summary" ? "isActive" : ""}
+              onClick={() => setViewMode("summary")}
+            >
+              Table
+            </button>
+            <button
+              type="button"
+              className={viewMode === "items" ? "isActive" : ""}
+              onClick={() => setViewMode("items")}
+            >
+              Time Items
+            </button>
+          </div>
+
+          {(showStartAction ||
+            (showRefreshAction && typeof onRequestRefresh === "function") ||
+            (isActiveSession && typeof onLeaveSharedSession === "function") ||
+            isActiveSession ||
+            onDismiss) && (
+            <div className="sharedAverageActions">
+              {showStartAction && typeof onLoadSession === "function" && (
+                <button
+                  className="sharedAverageBtn sharedAverageBtnPrimary"
+                  onClick={() =>
+                    openSharedSession({ mode: isActiveSession ? "resume" : "next" })
+                  }
+                >
+                  {isActiveSession ? "Resume" : "Start Session"}
+                </button>
+              )}
+
+              {isActiveSession && typeof onLoadSession === "function" && (
+                <button
+                  className="sharedAverageBtn sharedAverageBtnGhost"
+                  onClick={() => openSharedSession({ targetIndex: nextSolveIndex })}
+                >
+                  Go To Next
+                </button>
+              )}
+
+              {isActiveSession && typeof onLeaveSharedSession === "function" && (
+                <button
+                  className="sharedAverageBtn sharedAverageBtnGhost"
+                  onClick={() => onLeaveSharedSession()}
+                >
+                  Exit
+                </button>
+              )}
+
+              {showRefreshAction && typeof onRequestRefresh === "function" && (
+                <button
+                  className="sharedAverageBtn sharedAverageBtnGhost"
+                  onClick={() => {
+                    onRequestRefresh();
+                    setLastRefreshTick(Date.now());
+                  }}
+                >
+                  Refresh
+                </button>
+              )}
+
+              {onDismiss && (
+                <button className="sharedAverageBtn sharedAverageBtnGhost" onClick={onDismiss}>
+                  Dismiss
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="sharedAverageScrollable">
+          {viewMode === "summary" ? (
+            <div className="sharedAverageTableWrap">
+              {isGroupConversation ? (
+                <table className="sharedAverageTable sharedAverageTable--group">
+                  <thead>
+                    <tr>
+                      <th className="sharedAverageIdx sharedAverageGroupTableIndex">#</th>
+                      {(groupComputed?.members || []).map((member) => (
+                        <th key={member.id} className="sharedAverageGroupHeaderCell">
+                          <button
+                            type="button"
+                            className="sharedAverageGroupHeaderBtn"
+                            onClick={() => openGroupAverageDetail(member.id)}
+                          >
+                            <span className="sharedAverageGroupHeaderName">{member.name}</span>
+                            <span className="sharedAverageGroupHeaderLabel">
+                              {member.headline?.label || "AVG"}
+                            </span>
+                            <span className="sharedAverageGroupHeaderAvg">
+                              {member.headline?.value != null
+                                ? formatAverageMs(member.headline.value)
+                                : "–"}
+                            </span>
+                            <span className="sharedAverageGroupHeaderMeta">
+                              Best {member.best != null ? formatSolveMs(member.best) : "–"} • Mean{" "}
+                              {member.mean != null ? formatAverageMs(member.mean) : "–"} • {member.wins}{" "}
+                              {scoreLabel.toLowerCase()}
+                            </span>
+                          </button>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rowsToShow.map((row) => {
+                      const i = row.index;
+                      const isActiveRow = i === groupComputed?.activeIndex;
+                      return (
+                        <tr
+                          key={i}
+                          className={[
+                            "sharedAverageInteractiveRow",
+                            isActiveRow ? "sharedAverageCurrentRow" : "",
+                          ].join(" ")}
+                          onClick={() => jumpToSolve(i)}
+                        >
+                          <td className="sharedAverageIdx sharedAverageGroupTableIndex">
+                            <div className="sharedAverageIdxWrap">
+                              <span>{i + 1}</span>
+                              {isActiveRow && <span className="sharedAverageIdxBadge">NOW</span>}
+                            </div>
+                          </td>
+                          {(groupComputed?.members || []).map((member) => {
+                            const time = member.times?.[i];
+                            const isWinner = groupComputed?.rowWinners?.[i] === member.id;
+                            return (
+                              <td key={`${member.id}-${i}`} className="sharedAverageGroupTimeCell">
+                                <div
+                                  className="sharedAveragePillWrap"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openGroupSolveDetail(member.id, i);
+                                  }}
+                                >
+                                  {renderGroupTimeCell(member, time, isActiveRow, isWinner)}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="sharedAverageTable">
+                  <tbody>
+                    {rowsToShow.map((row) => {
+                    const i = row.index;
+                    const w = winnerForIndex(i);
+                    const yourTime = computed.yourTimes[i];
+                    const theirTime = computed.theirTimes[i];
+
+                    const isActiveRow = i === activeIndex;
+                    const isYouPending =
+                      isActiveRow && !(typeof yourTime === "number" && isFinite(yourTime));
+                    const isThemPending =
+                      isActiveRow && !(typeof theirTime === "number" && isFinite(theirTime));
+                    const isRowDone =
+                      typeof yourTime === "number" &&
+                      isFinite(yourTime) &&
+                      typeof theirTime === "number" &&
+                      isFinite(theirTime);
+
+                      return (
+                        <tr
+                          key={i}
+                          className={[
+                            "sharedAverageInteractiveRow",
+                            rowWinClass(w),
+                            isActiveRow ? "sharedAverageCurrentRow" : "",
+                            isRowDone ? "sharedAverageDoneRow" : "",
+                          ].join(" ")}
+                          onClick={() => jumpToSolve(i)}
+                        >
+                        <td className="sharedAverageIdx sharedAverageIdxLeft">
+                          <div className="sharedAverageIdxWrap">
+                            <span>{i + 1}</span>
+                            {isActiveRow && <span className="sharedAverageIdxBadge">NOW</span>}
+                          </div>
+                        </td>
+
+                        <td className="sharedAverageTimeCell sharedAverageTimeCellLeft">
+                          <div
+                            className={[
+                              "sharedAveragePillWrap",
+                              w === "them" ? "isWin" : "",
+                              w === "you" ? "isLose" : "",
+                              w === "tie" ? "isTie" : "",
+                              isThemPending ? "isPending" : "",
+                            ].join(" ")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openSharedSolveDetail("them", i);
+                            }}
+                          >
+                            {renderTimeCell("them", theirTime, isActiveRow, w)}
+                          </div>
+                        </td>
+
+                        <td className="sharedAverageScramble">
+                          {useMixedLayout ? (
+                            <div className="sharedAverageScrambleSplit">
+                              <span className="sharedAverageScrambleText sharedAverageScrambleTextThem">
+                                {eventDisplayLabel(row.theirEvent)}: {row.theirScramble || "—"}
+                              </span>
+                              <span className="sharedAverageScrambleText sharedAverageScrambleTextYou">
+                                {eventDisplayLabel(row.yourEvent)}: {row.yourScramble || "—"}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="sharedAverageScrambleText">
+                              {row.yourScramble || row.theirScramble}
+                            </span>
+                          )}
+
+                          {isActiveRow && (
+                            <div className="sharedAverageCurrentRowNote">
+                              {isYouPending && isThemPending
+                                ? "Both pending"
+                                : isYouPending
+                                ? `${nameYou} pending`
+                                : isThemPending
+                                ? `${nameThem} pending`
+                                : "Completed"}
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="sharedAverageTimeCell sharedAverageTimeCellRight">
+                          <div
+                            className={[
+                              "sharedAveragePillWrap",
+                              w === "you" ? "isWin" : "",
+                              w === "them" ? "isLose" : "",
+                              w === "tie" ? "isTie" : "",
+                              isYouPending ? "isPending" : "",
+                            ].join(" ")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openSharedSolveDetail("you", i);
+                            }}
+                          >
+                            {renderTimeCell("you", yourTime, isActiveRow, w)}
+                          </div>
+                        </td>
+
+                        <td className="sharedAverageIdx sharedAverageIdxRight">{i + 1}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ) : (
+            <div className="sharedAverageItemsView">
+              {(isGroupConversation ? groupItemSections : itemSections).map((section) => (
+                <div key={section.key} className="sharedAverageItemsSection">
+                  <div className="sharedAverageItemsSectionHeader">
+                    <div className="sharedAverageItemsIdentity">
+                      <span className="sharedAverageItemsName">{section.name}</span>
+                    </div>
+                    <div className="sharedAverageItemsOverall">
+                      <span
+                        className="sharedAverageItemsOverallValue sharedAverageItemsOverallValue--interactive"
+                        onClick={() =>
+                          isGroupConversation
+                            ? openGroupAverageDetail(section.side)
+                            : openSharedAverageDetail(section.side)
+                        }
+                      >
+                        {section.overall != null ? formatAverageMs(section.overall) : "–"}
+                      </span>
+                      <span className="sharedAverageItemsOverallLabel">{section.countLabel}</span>
+                    </div>
+                  </div>
+
+                  <div className="sharedAverageItemsRows">
+                    {section.rows.map((itemRow, rowIndex) => (
+                      <div
+                        key={`${section.key}-${rowIndex}`}
+                        className="sharedAverageItemsRow"
+                        style={{ "--shared-average-cols": itemChunkSize }}
+                      >
+                        {itemRow.map((item) => (
+                          <div key={`${section.key}-${item.index}`} className="sharedAverageItemsCellWrap">
+                            <div
+                              className="sharedAverageItemsCell sharedAverageItemsCell--interactive"
+                              onClick={() =>
+                                isGroupConversation
+                                  ? openGroupSolveDetail(section.side, item.index)
+                                  : openSharedSolveDetail(section.side, item.index)
+                              }
+                            >
+                              {isGroupConversation
+                                ? renderGroupTimeCell(
+                                    groupComputed?.byId?.[section.side],
+                                    item.time,
+                                    item.isCurrent,
+                                    !!item.isWinner
+                                  )
+                                : renderTimeCell(
+                                    section.side,
+                                    item.time,
+                                    item.isCurrent,
+                                    winnerForIndex(item.index)
+                                  )}
+                            </div>
+                            <div
+                              className="sharedAverageItemsIndex"
+                              title={
+                                isGroupConversation
+                                  ? `Solve ${item.index + 1}`
+                                  : `${eventDisplayLabel(item.event)}${
+                                      item.scramble ? ` • ${item.scramble}` : ""
+                                    }`
+                              }
+                            >
+                              <span>#{item.index + 1}</span>
+                              {item.isCurrent && (
+                                <span className="sharedAverageItemsNowBadge">NOW</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {parsed.count > MAX_VISIBLE && !expanded && (
+            <button className="sharedAverageExpandBtn" onClick={() => setExpanded(true)}>
+              Show all {parsed.count}
             </button>
           )}
         </div>
+
+        {!!lastRefreshTick && (
+          <div className="sharedAverageFooterNote">
+            Live sync active
+          </div>
+        )}
       </div>
+
+      {selectedSharedAverage?.solves?.length ? (
+        <AverageDetailModal
+          isOpen={true}
+          title={selectedSharedAverage.title}
+          solves={selectedSharedAverage.solves}
+          onClose={() => setSelectedSharedAverage(null)}
+          onSolveOpen={(solve) => {
+            setSelectedSharedAverage(null);
+            setSelectedSharedSolve(solve);
+          }}
+        />
+      ) : null}
+
+      {selectedSharedSolve ? (
+        <Detail
+          solve={selectedSharedSolve}
+          userID={user?.UserID}
+          profileColor={selectedSharedSolve?.__profileColor || safeYourColor}
+          onClose={() => setSelectedSharedSolve(null)}
+        />
+      ) : null}
     </div>
   );
 }

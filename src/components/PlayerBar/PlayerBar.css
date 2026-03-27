@@ -1,5 +1,3 @@
-/* src/components/PlayerBar/PlayerBar.css */
-
 .player-bar {
   display: grid;
   grid-template-columns: minmax(140px, 240px) minmax(420px, 1fr) minmax(170px, 230px);
@@ -10,7 +8,7 @@
   bottom: 0;
   left: 0;
   right: 0;
-  height: 150px;
+  height: var(--player-bar-height);
   z-index: 1000;
 
   background-color: #181F23;
@@ -20,172 +18,348 @@
   transition: transform 0.4s ease-in-out;
 }
 
-.player-bar.hidden { transform: translateY(100%); }
+.player-bar.hidden {
+  transform: translateY(100%);
+}
 
 /* LEFT: timer */
 .playerbar-left {
   display: flex;
+  justify-content: center;
   align-items: center;
   height: 100%;
+  min-height: 0;
 }
 
-.playerbar-timer { display: flex; align-items: center; }
-
-.playerbar-timer .Timer {
-  font-size: 72px;           /* a little bigger */
-  margin: 0;
-  line-height: 1;
+.playerbar-timer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
-/* MIDDLE: scramble + timelist centered and stable */
+.player-bar .playerbar-timer .timer-display--playerbar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none !important;
+}
+
+.player-bar .playerbar-timer .timer-center-wrap--playerbar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: visible;
+}
+
+.player-bar .playerbar-timer .Timer--playerbar {
+  display: block !important;
+  font-size: 84px !important;
+  line-height: 1 !important;
+  letter-spacing: 5px;
+  margin: 0 !important;
+  padding: 0 !important;
+  position: static;
+  transform: translateY(-4px) !important;
+}
+
+/* MIDDLE */
 .playerbar-center {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   height: 100%;
-  gap: 6px;
+  min-height: 0;
+  gap: 10px;
 }
-
-.playerbar-sharedBanner {
-  width: min(100%, 720px);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(80, 182, 255, 0.35);
-  background: rgba(80, 182, 255, 0.08);
-}
-
-.playerbar-sharedMeta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.playerbar-sharedPill,
-.playerbar-sharedLabel {
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.2px;
-}
-
-.playerbar-sharedPill {
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(80, 182, 255, 0.18);
-  color: #8bd4ff;
-}
-
-.playerbar-sharedLabel {
-  color: rgba(255, 255, 255, 0.82);
-}
-
-.playerbar-sharedExit {
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(14, 23, 29, 0.8);
-  color: white;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-/* just a wrapper to keep future additions easy */
-.event-and-scramble { display: flex; align-items: center; justify-content: center; }
 
 /* fixed-height scramble box so TimeList never moves */
 .scramble-box {
   max-width: 700px;
+  width: 100%;
+  min-height: 42px;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;          /* contain long content */
+  overflow: hidden;
   text-align: center;
+  margin-top: -4px;
 }
 
-/* clamp to two lines if Scramble component ever wraps;
-   otherwise we rely on auto font-shrink from JS */
 .scramble-box .scramble-text {
   white-space: normal;
-  line-height: 1.1;
-  /*display: -webkit-box;*/
-  /*-webkit-line-clamp: 2;     /* show up to 2 lines */
+  max-width: 100%;
+  font-size: 0.84rem;
+  line-height: 1.02;
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin: 0 auto;
 }
 
-/* TimeList: same spot, no jumping */
+/* TimeList */
 .playerbar-timelist {
   width: 100%;
   max-width: 700px;
-  overflow: hidden;          /* hide extra rows/overflow */
+  min-height: 0;
+  overflow: visible;
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
 }
 
-.playerbar-timelist .TimeList {
+.playerbar-shared-strip {
   width: 100%;
+  max-width: 700px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.playerbar-shared-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 20px;
+}
+
+.playerbar-shared-name {
+  font-size: 11px;
+  font-weight: 900;
+  color: rgba(255,255,255,0.85);
+}
+
+.playerbar-shared-meta {
+  font-size: 10px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.58);
+}
+
+.playerbar-shared-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.playerbar-shared-refresh {
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.05);
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+  opacity: 1;
+}
+
+.playerbar-shared-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.playerbar-shared-item {
+  min-height: 54px;
+  border-radius: 12px;
+  border: 1px solid rgba(80, 182, 255, 0.35);
+  background: rgba(255,255,255,0.03);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px;
+}
+
+.playerbar-shared-item.is-current {
+  border-color: rgba(46, 196, 182, 0.9);
+  box-shadow: 0 0 0 1px rgba(46, 196, 182, 0.24) inset;
+}
+
+.playerbar-shared-index {
+  font-size: 9px;
+  font-weight: 800;
+  opacity: 0.62;
+}
+
+.playerbar-shared-time {
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.playerbar-shared-peer {
+  font-size: 10px;
+  font-weight: 800;
+  opacity: 0.72;
+}
+
+.playerbar-timelist .time-list-container {
+  flex-direction: column;
+  align-items: stretch;
+  padding-bottom: 0;
+  width: fit-content;
+  max-width: 100%;
   margin: 0 auto;
+}
+
+.playerbar-timelist .pagination-buttons {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(100% + 108px);
+  max-width: 808px;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 15;
+  pointer-events: none;
+}
+
+.playerbar-timelist .pagination-buttons button:last-child {
+  transform: translateX(18px);
+}
+
+.playerbar-timelist .pagination-buttons button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(80, 182, 255, 0.28);
+  background: rgba(14, 23, 29, 0.9);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.24);
+  pointer-events: auto;
+}
+
+.playerbar-timelist .pagination-buttons button:disabled {
+  opacity: 0.2;
+}
+
+.playerbar-timelist .timelist-nav-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.playerbar-timelist .timelist-nav-glyph {
+  font-size: 12px;
 }
 
 /* RIGHT: selector + cube stack */
 .playerbar-right {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
   position: relative;
-  padding-right: 2px;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
 }
 
 .playerbar-toggle-inbar {
   position: absolute;
-  top: -4px;
-  right: 0;
-  width: 28px;
-  height: 28px;
+  bottom: 10px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.34);
-  background: rgba(14, 23, 29, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(14, 23, 29, 0.98);
   color: #fff;
   display: grid;
   place-items: center;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1;
   padding: 0;
   opacity: 1;
+  z-index: 2005;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.32);
+}
+
+.playerbar-toggle-glyph {
+  font-size: 14px;
+}
+
+.playerbar-right-top {
+  position: relative;
+  min-height: 68px;
+  padding-right: 92px;
+  flex: 0 0 auto;
 }
 
 .playerbar-selector-wrap {
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   width: 100%;
-  margin-top: 14px;
-}
-
-.playerbar-selector-wrap .event-selector-box {
-  min-width: 96px;
-  padding: 6px 10px;
 }
 
 .playerbar-cube {
+  position: absolute;
+  top: 0;
+  right: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 84px;
+  height: 84px;
+}
+
+.playerbar-cube-shell {
+  position: relative;
   width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
 }
 
 .playerbar-cube svg {
-  width: 90px;
-  height: 90px;
+  width: 74px;
+  height: 74px;
+}
+
+.playerbar-cube .puzzle-svg-wrap {
+  position: relative;
+  width: 74px;
+  height: 74px;
+  display: grid;
+  place-items: center;
+}
+
+.playerbar-cube .puzzle-flip-btn {
+  top: -8px;
+  right: -8px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px !important;
+  background: rgba(10, 16, 20, 0.88) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.24) !important;
+  opacity: 0.72;
+}
+
+.playerbar-cube .puzzle-flip-btn:hover {
+  opacity: 1;
+}
+
+.playerbar-cube .puzzle-flip-icon {
+  width: 11px;
+  height: 11px;
 }
 
 /* In player bar, force cube wrapper to ignore global music-player offsets */
@@ -194,6 +368,79 @@
   top: auto !important;
   right: auto !important;
   margin-top: 0 !important;
+}
+
+.playerbar-tagstrip {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+  padding-top: 0;
+  padding-right: 38px;
+  margin-top: -12px;
+  position: relative;
+  z-index: 20;
+  opacity: 0.78;
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  overflow: visible;
+}
+
+.playerbar-tagstrip .tagHomeSummary {
+  gap: 4px;
+}
+
+.playerbar-tagstrip .tagHomeItem {
+  min-width: 0;
+  width: auto;
+  max-width: 104px;
+}
+
+.playerbar-tagstrip .tagHomeItemLabel {
+  font-size: 7px;
+  letter-spacing: 0.06em;
+  opacity: 0.42;
+  line-height: 1;
+}
+
+.playerbar-tagstrip .tagHomeChip {
+  min-width: 0;
+  width: auto;
+  min-height: 14px;
+  padding: 1px 4px;
+  border-width: 1px;
+  border-color: color-mix(in srgb, var(--tag-chip-border) 58%, transparent);
+  background: color-mix(in srgb, var(--tag-chip-bg) 68%, transparent);
+  box-shadow:
+    inset 0 0 0 1px rgba(7, 57, 60, 0.1),
+    0 3px 8px rgba(0, 0, 0, 0.12);
+  opacity: 0.46;
+  border-radius: 8px;
+}
+
+.playerbar-tagstrip .tagHomeChipValue {
+  font-size: clamp(7px, 0.78vw, 10px);
+  line-height: 1;
+}
+
+.playerbar-tagstrip .tagHomeChipIconWrap,
+.playerbar-tagstrip .tagHomeChipPlus,
+.playerbar-tagstrip .tagHomeChipIcon {
+  width: 9px;
+  height: 9px;
+  flex-basis: 9px;
+}
+
+.playerbar-tagstrip .tagHomeChip:hover,
+.playerbar-tagstrip .tagHomeChip.is-set {
+  opacity: 0.72;
+}
+
+.playerbar-tagstrip .tagHomePopover {
+  top: auto;
+  bottom: calc(100% + 10px);
+  right: 0;
+  width: min(360px, calc(100vw - 32px));
 }
 
 /* Lock fixed chip sizes in player bar TimeList */
@@ -211,7 +458,7 @@
   width: 54px;
   min-width: 54px;
   max-width: 54px;
-  height: 34px;
+  height: 32px;
   padding: 0 2px;
 }
 
@@ -222,4 +469,6 @@
 }
 
 /* make sure any global .Timer margin doesn't leak here */
-.player-bar .Timer { margin: 0 !important; }
+.player-bar .Timer {
+  margin: 0 !important;
+}

@@ -17,6 +17,23 @@ import {
 } from "./homeStatsConfig";
 import "./HomeStatsOverlay.css";
 
+const HOME_SUMMARY_METRICS = [
+  { key: "single", label: "Best Single", kind: "single", solveField: "BestSingleSolveSK" },
+  { key: "mo3", label: "MO3", size: 3, kind: "mo3", startField: "BestMo3StartSolveSK" },
+  { key: "ao5", label: "AO5", size: 5, kind: "ao", startField: "BestAo5StartSolveSK" },
+  { key: "ao12", label: "AO12", size: 12, kind: "ao", startField: "BestAo12StartSolveSK" },
+  { key: "ao25", label: "AO25", size: 25, kind: "ao", startField: "BestAo25StartSolveSK" },
+  { key: "ao50", label: "AO50", size: 50, kind: "ao", startField: "BestAo50StartSolveSK" },
+  { key: "ao100", label: "AO100", size: 100, kind: "ao", startField: "BestAo100StartSolveSK" },
+  { key: "ao1000", label: "AO1000", size: 1000, kind: "ao", startField: "BestAo1000StartSolveSK" },
+];
+
+const HOME_SUMMARY_LAYOUT = [
+  ["single", "ao5"],
+  ["mo3", "ao12", "ao25"],
+  ["ao50", "ao100", "ao1000"],
+];
+
 function getSolvePenalty(solve) {
   return String(solve?.penalty ?? solve?.Penalty ?? "").toUpperCase();
 }
@@ -42,6 +59,90 @@ function getSolveValueForAverage(solve) {
   if (getSolvePenalty(solve) === "DNF") return "DNF";
   const ms = getSolveTimeMs(solve);
   return Number.isFinite(ms) ? ms : "DNF";
+}
+
+function getAdjustedSolveTimeMs(solve) {
+  if (!solve) return null;
+  const penalty = getSolvePenalty(solve);
+  if (penalty === "DNF") return null;
+  const ms = getSolveTimeMs(solve);
+  if (!Number.isFinite(ms)) return null;
+  return penalty === "+2" ? ms + 2000 : ms;
+}
+
+function computeBestWindowValue(solves, spec) {
+  const source = Array.isArray(solves) ? solves : [];
+  if (!source.length) return null;
+
+  if (spec.kind === "single") {
+    const numeric = source
+      .map(getAdjustedSolveTimeMs)
+      .filter((value) => Number.isFinite(value));
+    return numeric.length ? Math.min(...numeric) : null;
+  }
+
+  if (source.length < spec.size) return null;
+
+  let best = null;
+
+  for (let index = 0; index <= source.length - spec.size; index += 1) {
+    const window = source.slice(index, index + spec.size);
+    let value = null;
+
+    if (spec.kind === "mo3") {
+      const numeric = window
+        .map(getAdjustedSolveTimeMs)
+        .filter((item) => Number.isFinite(item));
+      if (numeric.length === spec.size) {
+        value = numeric.reduce((sum, item) => sum + item, 0) / numeric.length;
+      }
+    } else if (spec.kind === "ao") {
+      const result = calculateAverage(window.map(getSolveValueForAverage), true)?.average;
+      value = Number.isFinite(result) ? result : null;
+    }
+
+    if (Number.isFinite(value) && (best == null || value < best)) {
+      best = value;
+    }
+  }
+
+  return best;
+}
+
+function buildCompactSummary(solves) {
+  return HOME_SUMMARY_METRICS.map((metric) => ({
+    ...metric,
+    value: computeBestWindowValue(solves, metric),
+  }));
+}
+
+function buildCompactSummaryFromCache(overallStats) {
+  if (!overallStats || typeof overallStats !== "object") return [];
+  const source = {
+    single: overallStats?.BestSingleMs,
+    mo3: overallStats?.BestMo3Ms,
+    ao5: overallStats?.BestAo5Ms,
+    ao12: overallStats?.BestAo12Ms,
+    ao25: overallStats?.BestAo25Ms,
+    ao50: overallStats?.BestAo50Ms,
+    ao100: overallStats?.BestAo100Ms,
+    ao1000: overallStats?.BestAo1000Ms,
+  };
+
+  return HOME_SUMMARY_METRICS.map((metric) => {
+    const raw = Number(source[metric.key]);
+    return {
+      ...metric,
+      value: Number.isFinite(raw) ? raw : null,
+    };
+  });
+}
+
+function groupSummaryRows(rows) {
+  const rowsByKey = new Map((Array.isArray(rows) ? rows : []).map((row) => [row.key, row]));
+  return HOME_SUMMARY_LAYOUT.map((group) =>
+    group.map((key) => rowsByKey.get(key)).filter(Boolean)
+  ).filter((group) => group.length);
 }
 
 function getWeekNumber(date) {
@@ -205,6 +306,32 @@ function getDefaultHomeChartPalette() {
   return ["#2EC4B6", "#FFB044", "#50B6FF", "#FB596D", "#FFE863", "#FDFFFC"];
 }
 
+function getDefaultHomeSummaryStyle() {
+  return {
+    label: "Summary Default",
+    mode: "solid",
+    primary: "#2EC4B6",
+    accent: "#BFF7F0",
+  };
+}
+
+function hexToRgb(hex, fallback = { r: 80, g: 182, b: 255 }) {
+  const raw = String(hex || "").trim().replace("#", "");
+  const normalized =
+    raw.length === 3 ? raw.split("").map((char) => `${char}${char}`).join("") : raw;
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return fallback;
+  return {
+    r: parseInt(normalized.slice(0, 2), 16),
+    g: parseInt(normalized.slice(2, 4), 16),
+    b: parseInt(normalized.slice(4, 6), 16),
+  };
+}
+
+function rgbaString(hex, alpha, fallbackHex = "#50B6FF") {
+  const { r, g, b } = hexToRgb(hex, hexToRgb(fallbackHex));
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function slotTitle(config) {
   if (config.chartType === "line") {
     if (config.lineMetric === "ao5") return "Ao5 Trend";
@@ -213,6 +340,7 @@ function slotTitle(config) {
   }
   if (config.chartType === "bar") return "Time Histogram";
   if (config.chartType === "percent") return `Sub ${config.percentThresholdSeconds}s`;
+  if (config.chartType === "summary") return "Stats Summary";
   if (config.chartType === "pie") {
     if (config.pieBreakdown === "solveSource") return "Solve Source";
     if (config.pieBreakdown === "cubeModel") return "Cube Model";
@@ -223,7 +351,7 @@ function slotTitle(config) {
   return "Stats";
 }
 
-function HomeStatsOverlay({ solves, settings, user }) {
+function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelect }) {
   const slots = useMemo(() => normalizeHomeStatsSlots(settings?.homeStatsSlots), [settings?.homeStatsSlots]);
   const solveLimit = useMemo(
     () => normalizeHomeStatsSolveLimit(settings?.homeStatsSolveLimit, 50),
@@ -232,6 +360,7 @@ function HomeStatsOverlay({ solves, settings, user }) {
   const profileChartStyle = useMemo(() => getProfileChartStyle(user), [user]);
   const profileChartPalette = useMemo(() => getProfileChartPalette(user, 8), [user]);
   const defaultChartStyle = useMemo(() => getDefaultHomeChartStyle(), []);
+  const defaultSummaryStyle = useMemo(() => getDefaultHomeSummaryStyle(), []);
   const defaultChartPalette = useMemo(() => getDefaultHomeChartPalette(), []);
   const [hoveredSlot, setHoveredSlot] = useState(null);
 
@@ -244,9 +373,25 @@ function HomeStatsOverlay({ solves, settings, user }) {
         const isHovered = hoveredSlot === slotKey;
 
         const slotChartStyle =
-          config.colorScheme === "profile" ? profileChartStyle : defaultChartStyle;
+          config.colorScheme === "profile"
+            ? profileChartStyle
+            : config.chartType === "summary"
+              ? defaultSummaryStyle
+              : defaultChartStyle;
         const slotPiePalette =
           config.colorScheme === "profile" ? profileChartPalette : defaultChartPalette;
+        const summaryCardStyle =
+          config.chartType === "summary"
+            ? {
+                "--home-summary-border": rgbaString("#2EC4B6", 0.72),
+                "--home-summary-border-hover": rgbaString("#2EC4B6", 0.96),
+                "--home-summary-panel": rgbaString("#2EC4B6", 0.28),
+                "--home-summary-panel-strong": rgbaString("#2EC4B6", 0.72),
+                "--home-summary-glow": rgbaString("#2EC4B6", 0.22),
+                "--home-summary-label": "rgba(243, 255, 252, 0.84)",
+                "--home-summary-text": "rgba(255, 255, 255, 0.99)",
+              }
+            : undefined;
 
         const lineData =
           config.chartType === "line"
@@ -259,10 +404,22 @@ function HomeStatsOverlay({ solves, settings, user }) {
             : [];
         const pieData =
           config.chartType === "pie" ? buildPieData(solves, config.pieBreakdown) : [];
+        const summaryRows =
+          config.chartType === "summary"
+            ? (() => {
+                const cachedRows = buildCompactSummaryFromCache(overallStats);
+                return cachedRows.some((row) => row.value != null)
+                  ? cachedRows
+                  : buildCompactSummary(getSolveWindow(solves, solveLimit));
+              })()
+            : [];
+        const summaryGroups =
+          config.chartType === "summary" ? groupSummaryRows(summaryRows) : [];
 
         const empty =
           (config.chartType === "line" && !lineData.length) ||
           (config.chartType === "pie" && !pieData.length) ||
+          (config.chartType === "summary" && !summaryRows.some((row) => row.value != null)) ||
           ((config.chartType === "bar" || config.chartType === "percent") &&
             !(Array.isArray(solves) && solves.length));
 
@@ -273,7 +430,9 @@ function HomeStatsOverlay({ solves, settings, user }) {
               slotKey === "background" && config.chartType === "line"
                 ? " homeStatsSlot--backgroundLine"
                 : ""
-            }${config.chartType === "pie" ? " homeStatsSlot--pie" : ""}${isHovered ? " is-hovered" : ""}`}
+            }${config.chartType === "pie" ? " homeStatsSlot--pie" : ""}${
+              config.chartType === "summary" ? " homeStatsSlot--summary" : ""
+            }${isHovered ? " is-hovered" : ""}`}
             onMouseEnter={isSideSlot ? () => setHoveredSlot(slotKey) : undefined}
             onMouseLeave={isSideSlot ? () => setHoveredSlot((current) => (current === slotKey ? null : current)) : undefined}
             style={{
@@ -287,8 +446,14 @@ function HomeStatsOverlay({ solves, settings, user }) {
                 : {
                     width: `${config.width}px`,
                     height: `${config.height}px`,
-                    "--home-stat-rest-opacity": `${Math.max(0.16, Math.min(config.opacity * 0.55, 0.55))}`,
-                    "--home-stat-hover-opacity": `${config.opacity}`,
+                    "--home-stat-rest-opacity": `${
+                      config.chartType === "summary"
+                        ? Math.max(0.48, Math.min(config.opacity * 0.68, 0.68))
+                        : Math.max(0.16, Math.min(config.opacity * 0.55, 0.55))
+                    }`,
+                    "--home-stat-hover-opacity": `${
+                      config.chartType === "summary" ? Math.max(0.94, config.opacity) : config.opacity
+                    }`,
                   }),
             }}
           >
@@ -296,7 +461,19 @@ function HomeStatsOverlay({ solves, settings, user }) {
               className={`homeStatsCard homeStatsCard--${config.chartType} ${slotKey === "background" ? "is-background" : ""}${
                 isSideSlot ? " is-side-slot" : ""
               }${isHovered ? " is-hovered" : ""}`}
-              style={slotKey === "background" ? { opacity: config.opacity } : undefined}
+              style={
+                slotKey === "background"
+                  ? { opacity: config.opacity }
+                  : config.chartType === "summary"
+                    ? {
+                        ...summaryCardStyle,
+                        "--home-summary-surface":
+                          config.summarySurface === "gradient"
+                            ? `radial-gradient(circle at top, var(--home-summary-glow, rgba(80, 182, 255, 0.18)), transparent 58%), linear-gradient(180deg, var(--home-summary-panel-strong, rgba(255, 255, 255, 0.12)), var(--home-summary-panel, rgba(255, 255, 255, 0.08)))`
+                            : "var(--home-summary-panel, rgba(255, 255, 255, 0.08))",
+                      }
+                    : undefined
+              }
             >
               <div
                 className={`homeStatsCardTitle${
@@ -342,13 +519,39 @@ function HomeStatsOverlay({ solves, settings, user }) {
                     initialThresholdSeconds={config.percentThresholdSeconds}
                     compact={!isHovered}
                   />
+                ) : config.chartType === "summary" ? (
+                  <div className="homeStatsSummary">
+                    {summaryGroups.map((group, groupIndex) => (
+                      <div
+                        className={`homeStatsSummaryGroup homeStatsSummaryGroup--${group.length}`}
+                        key={`${slotKey}-group-${groupIndex}`}
+                      >
+                        {group.map((row) => (
+                          <button
+                            type="button"
+                            className="homeStatsSummaryRow"
+                            key={`${slotKey}-${row.key}`}
+                            onClick={() => onSummarySelect?.(row)}
+                            disabled={row.value == null}
+                          >
+                            <span className="homeStatsSummaryLabel">{row.label}</span>
+                            <span className="homeStatsSummaryValue">
+                              {row.value == null
+                                ? "—"
+                                : formatTime(row.value, row.kind !== "single")}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <div className="homeStatsChartFrame homeStatsChartFrame--pie">
                     <PieChartBuilder
                       width="100%"
                       height="100%"
                       data={pieData}
-                      legendValueMode="count"
+                      legendValueMode="count-percent"
                       interactive={false}
                       colorPalette={slotPiePalette}
                       showLegend={isHovered}
@@ -371,12 +574,16 @@ HomeStatsOverlay.propTypes = {
     homeStatsSlots: PropTypes.object,
   }),
   user: PropTypes.object,
+  overallStats: PropTypes.object,
+  onSummarySelect: PropTypes.func,
 };
 
 HomeStatsOverlay.defaultProps = {
   solves: [],
   settings: {},
   user: null,
+  overallStats: null,
+  onSummarySelect: null,
 };
 
 export default React.memo(HomeStatsOverlay);

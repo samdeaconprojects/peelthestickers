@@ -12,8 +12,12 @@ import Detail from "../Detail/Detail";
 import AverageDetailModal from "../Detail/AverageDetailModal";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
 import TagBar from "../TagBar/TagBar";
+import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
+import NameTag from "../Profile/NameTag";
+import PtsLinkStatsIcon from "../../assets/ptsLinkStats.svg";
 
 import { getSolvesBySession, getSolvesBySessionPage } from "../../services/getSolvesBySession";
+import { getSolvesByTag } from "../../services/getSolvesByTag";
 import { getSessionStats } from "../../services/getSessionStats";
 import { getEventStats } from "../../services/getEventStats";
 import { recomputeSessionStats } from "../../services/recomputeSessionStats";
@@ -24,12 +28,14 @@ import { getSolveWindowFromStart } from "../../services/getSolveWindow";
 import ImportSolvesModal from "./ImportSolvesModal";
 import { importSolvesBatch } from "../../services/importSolvesBatch";
 import { createSession } from "../../services/createSession";
-import DbStatusIndicator from "../Navigation/DbStatusIndicator";
+import { useDbStatus } from "../../contexts/DbStatusContext";
 import { findBestStrictWindow } from "../../utils/strictAverageUtils";
 import { getProfileChartStyle } from "../../utils/profileChartStyle";
 import {
   collectTagSelectionOptions,
   DEFAULT_TAG_CONFIG,
+  getTagColorMapForEvent,
+  getTagCatalogOptionsForEvent,
   hasActiveTagSelection,
   makeEmptyTagSelection,
   normalizeTagConfig,
@@ -127,12 +133,12 @@ function clampNumber(value, min, max) {
 function getNextSmallerSolveWindow(value) {
   const current = Math.max(1, Number(value) || 0);
   if (current > 100) return Math.max(100, current - 50);
-  return SOLVE_WINDOW_PRESETS.find((preset) => preset < current) ?? current;
+  return [...SOLVE_WINDOW_PRESETS].reverse().find((preset) => preset < current) ?? current;
 }
 
 function getNextLargerSolveWindow(value) {
   const current = Math.max(1, Number(value) || 0);
-  const largerPreset = [...SOLVE_WINDOW_PRESETS].reverse().find((preset) => preset > current);
+  const largerPreset = SOLVE_WINDOW_PRESETS.find((preset) => preset > current);
   if (largerPreset != null) return largerPreset;
   return current + 50;
 }
@@ -146,6 +152,39 @@ function getPaletteOptions() {
       label: meta.label,
     })),
   ];
+}
+
+function mergeTagOptionMaps(...maps) {
+  const mergedFields = new Set();
+  maps.forEach((map) => {
+    Object.keys(map || {}).forEach((field) => mergedFields.add(field));
+  });
+
+  return Object.fromEntries(
+    Array.from(mergedFields).map((field) => [
+      field,
+      Array.from(
+        new Set(
+          maps.flatMap((map) => (Array.isArray(map?.[field]) ? map[field] : []))
+        )
+      ).sort((a, b) => a.localeCompare(b)),
+    ])
+  );
+}
+
+function getTagCatalogOptionsForStatsEvent(tagCatalog, eventKey) {
+  if (eventKey !== ALL_EVENTS) {
+    return getTagCatalogOptionsForEvent(tagCatalog, eventKey);
+  }
+
+  const byEvent = tagCatalog?.ByEvent && typeof tagCatalog.ByEvent === "object"
+    ? tagCatalog.ByEvent
+    : {};
+
+  return mergeTagOptionMaps(
+    getTagCatalogOptionsForEvent(tagCatalog, ""),
+    ...Object.keys(byEvent).map((key) => getTagCatalogOptionsForEvent(tagCatalog, key))
+  );
 }
 
 function getSeriesStyle(paletteKey, fallbackKey = DEFAULT_PRIMARY_PALETTE, profileStyle = null) {
@@ -202,6 +241,351 @@ function buildStatCardTitle(eventLabel, sessionLabel) {
   const eventText = String(eventLabel || "Stats").trim();
   const sessionText = String(sessionLabel || "").trim();
   return sessionText ? `${eventText} · ${sessionText}` : eventText;
+}
+
+function getEventDisplayMeta(eventValue) {
+  const eventKey = String(eventValue || "").toUpperCase();
+  if (eventKey === ALL_EVENTS) return { label: "All Events", puzzleEvent: "" };
+
+  const labelMap = {
+    "222": "2x2",
+    "333": "3x3",
+    "444": "4x4",
+    "555": "5x5",
+    "666": "6x6",
+    "777": "7x7",
+    "333OH": "3x3 OH",
+    "333BLD": "3x3 BLD",
+    "444BLD": "4x4 BLD",
+    "555BLD": "5x5 BLD",
+    "333MULTIBLD": "3x3 Multi-BLD",
+    "333FEW": "3x3 FMC",
+    "PYRAMINX": "Pyraminx",
+    "SKEWB": "Skewb",
+    "SQ1": "Square-1",
+    "MEGAMINX": "Megaminx",
+    "CLOCK": "Clock",
+  };
+
+  return {
+    label: labelMap[eventKey] || eventKey,
+    puzzleEvent: eventKey,
+  };
+}
+
+function formatShortDateRangeLabel(startDay, endDay, fallback = "All Dates") {
+  const formatDay = (dayKey) => {
+    if (!dayKey) return "";
+    const date = new Date(`${dayKey}T12:00:00`);
+    if (!isFiniteDate(date)) return dayKey;
+    return date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "2-digit",
+    });
+  };
+
+  if (!startDay && !endDay) return fallback;
+  if (startDay && endDay) return `${formatDay(startDay)} → ${formatDay(endDay)}`;
+  if (startDay) return `${formatDay(startDay)} →`;
+  return `→ ${formatDay(endDay)}`;
+}
+
+function parseIsoDayKey(dayKey) {
+  if (!dayKey) return null;
+  const date = new Date(`${dayKey}T12:00:00`);
+  return isFiniteDate(date) ? date : null;
+}
+
+function toIsoDayKey(date) {
+  if (!isFiniteDate(date)) return "";
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function startOfMonth(date) {
+  if (!isFiniteDate(date)) return null;
+  return new Date(date.getFullYear(), date.getMonth(), 1, 12);
+}
+
+function addMonths(date, delta) {
+  if (!isFiniteDate(date)) return null;
+  return new Date(date.getFullYear(), date.getMonth() + delta, 1, 12);
+}
+
+function buildCalendarDays(monthDate) {
+  if (!isFiniteDate(monthDate)) return [];
+  const firstDay = startOfMonth(monthDate);
+  const gridStart = new Date(firstDay);
+  gridStart.setDate(firstDay.getDate() - firstDay.getDay());
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(gridStart);
+    date.setDate(gridStart.getDate() + index);
+    return date;
+  });
+}
+
+function getPresetRange(presetKey) {
+  const today = new Date();
+  const current = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12);
+
+  if (presetKey === "today") {
+    const day = toIsoDayKey(current);
+    return { start: day, end: day };
+  }
+
+  if (presetKey === "last7") {
+    const start = new Date(current);
+    start.setDate(current.getDate() - 6);
+    return { start: toIsoDayKey(start), end: toIsoDayKey(current) };
+  }
+
+  if (presetKey === "last30") {
+    const start = new Date(current);
+    start.setDate(current.getDate() - 29);
+    return { start: toIsoDayKey(start), end: toIsoDayKey(current) };
+  }
+
+  if (presetKey === "month") {
+    const start = new Date(current.getFullYear(), current.getMonth(), 1, 12);
+    return { start: toIsoDayKey(start), end: toIsoDayKey(current) };
+  }
+
+  if (presetKey === "year") {
+    const start = new Date(current.getFullYear(), 0, 1, 12);
+    return { start: toIsoDayKey(start), end: toIsoDayKey(current) };
+  }
+
+  return { start: "", end: "" };
+}
+
+function StatsDateRangePicker({ startDay, endDay, accentColor = "#2EC4B6", onApply }) {
+  const [draftStart, setDraftStart] = useState(startDay || "");
+  const [draftEnd, setDraftEnd] = useState(endDay || "");
+  const latestDraftRef = useRef({
+    draftStart: startDay || "",
+    draftEnd: endDay || "",
+    appliedStart: startDay || "",
+    appliedEnd: endDay || "",
+    onApply,
+  });
+  const [anchorMonth, setAnchorMonth] = useState(() => {
+    const seed = parseIsoDayKey(endDay || startDay || toIsoDayKey(new Date()));
+    return startOfMonth(seed || new Date());
+  });
+
+  latestDraftRef.current = {
+    draftStart,
+    draftEnd,
+    appliedStart: startDay || "",
+    appliedEnd: endDay || "",
+    onApply,
+  };
+
+  useEffect(() => {
+    setDraftStart(startDay || "");
+    setDraftEnd(endDay || "");
+    const seed = parseIsoDayKey(endDay || startDay || toIsoDayKey(new Date()));
+    setAnchorMonth(startOfMonth(seed || new Date()));
+  }, [endDay, startDay]);
+
+  useEffect(() => () => {
+    const { draftStart: nextStart, draftEnd: nextEnd, appliedStart, appliedEnd, onApply: apply } = latestDraftRef.current;
+    if (nextStart === appliedStart && nextEnd === appliedEnd) return;
+    apply?.(nextStart, nextEnd);
+  }, []);
+
+  const hasDraftChanges = draftStart !== (startDay || "") || draftEnd !== (endDay || "");
+  const accentSoft = `${accentColor}22`;
+  const accentStrong = `${accentColor}88`;
+  const todayKey = toIsoDayKey(new Date());
+  const monthCards = [anchorMonth, addMonths(anchorMonth, 1)].filter(Boolean);
+
+  const applyPreset = useCallback((presetKey) => {
+    const range = getPresetRange(presetKey);
+    setDraftStart(range.start);
+    setDraftEnd(range.end);
+    const seed = parseIsoDayKey(range.end || range.start || todayKey);
+    if (seed) setAnchorMonth(startOfMonth(seed));
+  }, [todayKey]);
+
+  const handleDayPick = useCallback((dayKey) => {
+    if (!dayKey) return;
+
+    if (!draftStart) {
+      setDraftStart(dayKey);
+      setDraftEnd("");
+      return;
+    }
+
+    if (!draftEnd) {
+      if (dayKey < draftStart) {
+        setDraftStart(dayKey);
+        setDraftEnd(draftStart);
+      } else {
+        setDraftEnd(dayKey);
+      }
+      return;
+    }
+
+    setDraftStart(dayKey);
+    setDraftEnd("");
+  }, [draftEnd, draftStart]);
+
+  return (
+    <div className="statsScopeDatePicker">
+      <div className="statsScopeDatePresetRow">
+        {[
+          { key: "today", label: "Today" },
+          { key: "last7", label: "Last 7" },
+          { key: "last30", label: "Last 30" },
+          { key: "month", label: "This Month" },
+          { key: "year", label: "This Year" },
+        ].map((preset) => (
+          <button
+            key={preset.key}
+            type="button"
+            className="statsScopeDatePreset"
+            onClick={() => applyPreset(preset.key)}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="statsScopeCalendarShell">
+        <div className="statsScopeCalendarHeader">
+          <button
+            type="button"
+            className="statsScopeCalendarNav"
+            onClick={() => setAnchorMonth((current) => addMonths(current, -1))}
+            aria-label="Previous month"
+          >
+            ‹
+          </button>
+          <div className="statsScopeCalendarHeaderMeta">
+            <span>{!draftStart ? "Choose a start date" : !draftEnd ? "Choose an end date" : "Range selected"}</span>
+            <strong>
+              {draftStart || draftEnd
+                ? formatShortDateRangeLabel(draftStart, draftEnd, "All Dates")
+                : "All Dates"}
+            </strong>
+          </div>
+          <button
+            type="button"
+            className="statsScopeCalendarNav"
+            onClick={() => setAnchorMonth((current) => addMonths(current, 1))}
+            aria-label="Next month"
+          >
+            ›
+          </button>
+        </div>
+
+        <div className="statsScopeCalendarGrid">
+          {monthCards.map((monthDate) => {
+            const monthKey = `${monthDate.getFullYear()}-${monthDate.getMonth()}`;
+            const days = buildCalendarDays(monthDate);
+
+            return (
+              <div key={monthKey} className="statsScopeCalendarCard">
+                <div className="statsScopeCalendarMonth">
+                  {monthDate.toLocaleDateString(undefined, {
+                    month: "long",
+                    year: "numeric",
+                  })}
+                </div>
+                <div className="statsScopeCalendarWeekdays">
+                  {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
+                    <span key={`${monthKey}-${label}`}>{label}</span>
+                  ))}
+                </div>
+                <div className="statsScopeCalendarDays">
+                  {days.map((date) => {
+                    const dayKey = toIsoDayKey(date);
+                    const isOutsideMonth = date.getMonth() !== monthDate.getMonth();
+                    const isStart = !!draftStart && dayKey === draftStart;
+                    const isEnd = !!draftEnd && dayKey === draftEnd;
+                    const isBetween =
+                      !!draftStart && !!draftEnd && dayKey > draftStart && dayKey < draftEnd;
+                    const isToday = dayKey === todayKey;
+
+                    return (
+                      <button
+                        key={dayKey}
+                        type="button"
+                        className={[
+                          "statsScopeCalendarDay",
+                          isOutsideMonth ? "is-outside" : "",
+                          isStart ? "is-start" : "",
+                          isEnd ? "is-end" : "",
+                          isBetween ? "is-between" : "",
+                          isToday ? "is-today" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        style={
+                          isStart || isEnd
+                            ? {
+                                borderColor: accentStrong,
+                                background: accentColor,
+                                color: "#041311",
+                              }
+                            : isBetween
+                              ? {
+                                  borderColor: `${accentColor}33`,
+                                  background: accentSoft,
+                                }
+                              : undefined
+                        }
+                        onClick={() => handleDayPick(dayKey)}
+                      >
+                        {date.getDate()}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="statsScopeDateActions">
+        <button
+          type="button"
+          className="statsMiniBtn"
+          onClick={() => {
+            setDraftStart(startDay || "");
+            setDraftEnd(endDay || "");
+          }}
+          disabled={!hasDraftChanges}
+        >
+          Reset
+        </button>
+        <button
+          type="button"
+          className="statsMiniBtn"
+          onClick={() => {
+            setDraftStart("");
+            setDraftEnd("");
+          }}
+        >
+          Clear
+        </button>
+        <button
+          type="button"
+          className="statsToggleBtn is-active"
+          onClick={() => onApply?.(draftStart, draftEnd)}
+          disabled={!hasDraftChanges}
+        >
+          Apply Dates
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function getSolveDisplayMs(solve) {
@@ -587,6 +971,50 @@ function getTodayLocalDayKey() {
   return getLocalDayKey(new Date());
 }
 
+function getDayKeyDate(dayKey) {
+  if (!dayKey) return null;
+  const date = new Date(`${dayKey}T12:00:00`);
+  return isFiniteDate(date) ? date : null;
+}
+
+function shiftLocalDayKey(dayKey, offsetDays) {
+  const base = getDayKeyDate(dayKey);
+  if (!base) return "";
+  const next = new Date(base);
+  next.setDate(next.getDate() + Number(offsetDays || 0));
+  return getLocalDayKey(next);
+}
+
+function getWeekRangeFromDayKey(dayKey) {
+  const base = getDayKeyDate(dayKey);
+  if (!base) return { start: "", end: "" };
+
+  const start = new Date(base);
+  const day = start.getDay();
+  start.setDate(start.getDate() + (day === 0 ? -6 : 1 - day));
+
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+
+  return {
+    start: getLocalDayKey(start),
+    end: getLocalDayKey(end),
+  };
+}
+
+function getMonthRangeFromDayKey(dayKey) {
+  const base = getDayKeyDate(dayKey);
+  if (!base) return { start: "", end: "" };
+
+  const start = new Date(base.getFullYear(), base.getMonth(), 1, 12);
+  const end = new Date(base.getFullYear(), base.getMonth() + 1, 0, 12);
+
+  return {
+    start: getLocalDayKey(start),
+    end: getLocalDayKey(end),
+  };
+}
+
 function filterSolvesByDateRange(input, startDay, endDay) {
   const items = Array.isArray(input) ? input : [];
   if (!startDay && !endDay) return items;
@@ -605,6 +1033,9 @@ function Stats({
   sessions,
   sessionsList = [],
   tagConfig = DEFAULT_TAG_CONFIG,
+  tagCatalog = { Global: {}, ByEvent: {} },
+  tagColorCatalog = { Global: {}, ByEvent: {} },
+  cubeModelOptions = [],
   sessionStats,
   statsMutationTick = 0,
   setSessions,
@@ -614,10 +1045,12 @@ function Stats({
   user,
   deleteTime,
   addPost,
+  onTagColorsChange = null,
   onSettingsContextChange,
   recomputeRequest = 0,
   importRequest = 0,
 }) {
+  const { runDb } = useDbStatus();
   const DEFAULT_IN_VIEW = 100;
   const DEFAULT_PAGE_FETCH = 500;
 
@@ -635,9 +1068,11 @@ function Stats({
   const [compareSelection, setCompareSelection] = useState(null);
   const [compareSessionMenuOpen, setCompareSessionMenuOpen] = useState(false);
   const [compareSessionSolves, setCompareSessionSolves] = useState([]);
+  const [compareTagScopeSolves, setCompareTagScopeSolves] = useState([]);
+  const [compareTagScopeCacheKey, setCompareTagScopeCacheKey] = useState("");
   const [compareLoading, setCompareLoading] = useState(false);
-  const [scopeModalState, setScopeModalState] = useState(null);
-  const compareRequestTokenRef = useRef(0);
+const [scopeModalState, setScopeModalState] = useState(null);
+const [scopeModalSection, setScopeModalSection] = useState("event");  const compareRequestTokenRef = useRef(0);
   const compareSessionMenuWrapRef = useRef(null);
 
   const sessionId = useMemo(() => statsSession || "main", [statsSession]);
@@ -651,6 +1086,9 @@ function Stats({
 
   const [solvesPerPage, setSolvesPerPage] = useState(DEFAULT_IN_VIEW);
   const [currentPage, setCurrentPage] = useState(0);
+  const [linkStatsControls, setLinkStatsControls] = useState(true);
+  const [compareSolvesPerPage, setCompareSolvesPerPage] = useState(DEFAULT_IN_VIEW);
+  const [compareCurrentPage, setCompareCurrentPage] = useState(0);
 
   const [overallStatsForEvent, setOverallStatsForEvent] = useState(null);
   const [loadingOverallStats, setLoadingOverallStats] = useState(false);
@@ -660,9 +1098,13 @@ function Stats({
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingAllSolves, setLoadingAllSolves] = useState(false);
   const [loadingTimeScope, setLoadingTimeScope] = useState(false);
+  const [loadingTagScope, setLoadingTagScope] = useState(false);
   const [showAllActive, setShowAllActive] = useState(false);
+  const [compareShowAllActive, setCompareShowAllActive] = useState(false);
   const [timeScopeSolves, setTimeScopeSolves] = useState([]);
   const [timeScopeCacheKey, setTimeScopeCacheKey] = useState("");
+  const [tagScopeSolves, setTagScopeSolves] = useState([]);
+  const [tagScopeCacheKey, setTagScopeCacheKey] = useState("");
 
   const [pageCursor, setPageCursor] = useState(null);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
@@ -683,7 +1125,6 @@ function Stats({
   const [selectedTimeDay, setSelectedTimeDay] = useState("");
   const [dateFilterStart, setDateFilterStart] = useState("");
   const [dateFilterEnd, setDateFilterEnd] = useState("");
-  const [dateEditorOpen, setDateEditorOpen] = useState(false);
   const [focusedCardId, setFocusedCardId] = useState("");
   const [focusActionMessage, setFocusActionMessage] = useState("");
   const [focusActionBusy, setFocusActionBusy] = useState("");
@@ -795,13 +1236,45 @@ function Stats({
     return statsViewMode === "time" ? [ALL_EVENTS, ...baseEventOptions] : baseEventOptions;
   }, [baseEventOptions, statsViewMode]);
 
-  const timeScopeSessionKey = useMemo(() => {
-    return (sessionsList || [])
-      .map((s) => `${String(s?.Event || "").toUpperCase()}|${String(s?.SessionID || "main")}`)
+  const solveScopeSessions = useMemo(() => {
+    const allSessions = Array.isArray(sessionsList) ? sessionsList : [];
+
+    if (statsViewMode === "time" || isAllEventsMode) {
+      return allSessions
+        .map((s) => ({
+          Event: String(s?.Event || "").toUpperCase(),
+          SessionID: String(s?.SessionID || "main"),
+        }))
+        .filter((s) => s.Event);
+    }
+
+    if (isAllSessionsMode) {
+      return allSessions
+        .filter((s) => String(s?.Event || "").toUpperCase() === String(statsEvent || "").toUpperCase())
+        .map((s) => ({
+          Event: String(s?.Event || "").toUpperCase(),
+          SessionID: String(s?.SessionID || "main"),
+        }))
+        .filter((s) => s.Event);
+    }
+
+    if (!statsEvent) return [];
+
+    return [
+      {
+        Event: String(statsEvent || "").toUpperCase(),
+        SessionID: String(sessionId || "main"),
+      },
+    ];
+  }, [isAllEventsMode, isAllSessionsMode, sessionId, sessionsList, statsEvent, statsViewMode]);
+
+  const solveScopeSessionKey = useMemo(() => {
+    return solveScopeSessions
+      .map((s) => `${s.Event}|${s.SessionID}`)
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b))
       .join(",");
-  }, [sessionsList]);
+  }, [solveScopeSessions]);
 
   const sessionCachedSolves = useMemo(() => {
     const out = [];
@@ -837,8 +1310,55 @@ function Stats({
       }));
   }, [sessions, statsEvent, sessionId, statsViewMode]);
 
+  const hasScopedSolveCache = useMemo(() => {
+    if (!user?.UserID) return false;
+    if (!solveScopeSessionKey) return false;
+    return timeScopeCacheKey === `${user.UserID}::${solveScopeSessionKey}`;
+  }, [solveScopeSessionKey, timeScopeCacheKey, user?.UserID]);
+
+  const activeTagEntries = useMemo(() => {
+    return Object.entries(sanitizeTagSelection(tagFilterSelection))
+      .map(([field, value]) => [field, String(value || "").trim()])
+      .filter(([, value]) => value);
+  }, [tagFilterSelection]);
+
+  const singleActiveTagFilter = useMemo(() => {
+    if (activeTagEntries.length !== 1) return null;
+    const [field, value] = activeTagEntries[0];
+    return { field, value };
+  }, [activeTagEntries]);
+
+  const indexedTagScope = useMemo(() => {
+    if (!singleActiveTagFilter) return null;
+
+    return {
+      tagKey: singleActiveTagFilter.field,
+      tagValue: singleActiveTagFilter.value,
+      event: isAllEventsMode ? "" : String(statsEvent || "").toUpperCase(),
+      sessionID:
+        isAllEventsMode || isAllSessionsMode ? "" : String(sessionId || "main"),
+    };
+  }, [isAllEventsMode, isAllSessionsMode, sessionId, singleActiveTagFilter, statsEvent]);
+
+  const indexedTagScopeKey = useMemo(() => {
+    if (!user?.UserID || !indexedTagScope) return "";
+    return [
+      user.UserID,
+      indexedTagScope.tagKey,
+      indexedTagScope.tagValue,
+      indexedTagScope.event || "*",
+      indexedTagScope.sessionID || "*",
+    ].join("::");
+  }, [indexedTagScope, user?.UserID]);
+
+  const canUseIndexedTagScope = !!indexedTagScope;
+
+  const hasIndexedTagScopeCache = useMemo(() => {
+    return !!indexedTagScopeKey && tagScopeCacheKey === indexedTagScopeKey;
+  }, [indexedTagScopeKey, tagScopeCacheKey]);
+
   const scopeSolvesForSelection = useMemo(() => {
-    const base = timeScopeSolves.length > 0 ? timeScopeSolves : sessionCachedSolves;
+    const base = hasScopedSolveCache ? timeScopeSolves : sessionCachedSolves;
     return (base || []).filter((solve) => {
       const eventMatches =
         isAllEventsMode ||
@@ -848,19 +1368,41 @@ function Stats({
       if (isAllEventsMode || isAllSessionsMode) return true;
       return String(solve?.sessionID || solve?.SessionID || "main") === String(sessionId || "main");
     });
-  }, [isAllEventsMode, isAllSessionsMode, sessionCachedSolves, sessionId, statsEvent, timeScopeSolves]);
+  }, [
+    hasScopedSolveCache,
+    isAllEventsMode,
+    isAllSessionsMode,
+    sessionCachedSolves,
+    sessionId,
+    statsEvent,
+    timeScopeSolves,
+  ]);
 
   const activeStandardSolves = useMemo(() => {
-    const base = hasActiveTagFilter ? scopeSolvesForSelection : selectedSessionSolves;
+    const base = hasActiveTagFilter
+      ? canUseIndexedTagScope && hasIndexedTagScopeCache
+        ? tagScopeSolves
+        : scopeSolvesForSelection
+      : selectedSessionSolves;
     const filtered = hasActiveTagFilter
-      ? base.filter((solve) => solveMatchesTagSelection(solve, tagFilterSelection))
+      ? canUseIndexedTagScope && hasIndexedTagScopeCache
+        ? base
+        : base.filter((solve) => solveMatchesTagSelection(solve, tagFilterSelection))
       : base;
 
     return filtered.map((solve, index) => ({
       ...solve,
       fullIndex: index,
     }));
-  }, [hasActiveTagFilter, scopeSolvesForSelection, selectedSessionSolves, tagFilterSelection]);
+  }, [
+    canUseIndexedTagScope,
+    hasActiveTagFilter,
+    hasIndexedTagScopeCache,
+    scopeSolvesForSelection,
+    selectedSessionSolves,
+    tagFilterSelection,
+    tagScopeSolves,
+  ]);
 
   const sessionsForEvent = useMemo(() => {
     if (isAllEventsMode) return [];
@@ -910,6 +1452,42 @@ function Stats({
     () => sanitizeTagSelection(compareSelection?.tags || makeEmptyTagSelection()),
     [compareSelection?.tags]
   );
+  const compareActiveTagEntries = useMemo(() => {
+    return Object.entries(compareTagSelection)
+      .map(([field, value]) => [field, String(value || "").trim()])
+      .filter(([, value]) => value);
+  }, [compareTagSelection]);
+  const compareSingleActiveTagFilter = useMemo(() => {
+    if (compareActiveTagEntries.length !== 1) return null;
+    const [field, value] = compareActiveTagEntries[0];
+    return { field, value };
+  }, [compareActiveTagEntries]);
+  const compareIndexedTagScope = useMemo(() => {
+    if (!compareSingleActiveTagFilter) return null;
+    return {
+      tagKey: compareSingleActiveTagFilter.field,
+      tagValue: compareSingleActiveTagFilter.value,
+      event: compareEvent === ALL_EVENTS ? "" : String(compareEvent || "").toUpperCase(),
+      sessionID:
+        compareEvent === ALL_EVENTS || compareSessionId === ALL_SESSIONS
+          ? ""
+          : String(compareSessionId || "main"),
+    };
+  }, [compareEvent, compareSessionId, compareSingleActiveTagFilter]);
+  const compareIndexedTagScopeKey = useMemo(() => {
+    if (!user?.UserID || !compareIndexedTagScope) return "";
+    return [
+      user.UserID,
+      compareIndexedTagScope.tagKey,
+      compareIndexedTagScope.tagValue,
+      compareIndexedTagScope.event || "*",
+      compareIndexedTagScope.sessionID || "*",
+    ].join("::");
+  }, [compareIndexedTagScope, user?.UserID]);
+  const canUseCompareIndexedTagScope = !!compareIndexedTagScope;
+  const hasCompareIndexedTagScopeCache = useMemo(() => {
+    return !!compareIndexedTagScopeKey && compareTagScopeCacheKey === compareIndexedTagScopeKey;
+  }, [compareIndexedTagScopeKey, compareTagScopeCacheKey]);
   const compareStyle = useMemo(
     () =>
       getSeriesStyle(
@@ -1192,20 +1770,20 @@ function Stats({
   const loadTimeScopeSolves = useCallback(async () => {
     const userID = user?.UserID;
     if (!userID) return false;
-    if (!timeScopeSessionKey) {
+    if (!solveScopeSessionKey) {
       setTimeScopeSolves([]);
       setTimeScopeCacheKey("");
       return false;
     }
 
-    const cacheKey = `${userID}::${timeScopeSessionKey}`;
+    const cacheKey = `${userID}::${solveScopeSessionKey}`;
     if (timeScopeCacheKey === cacheKey && timeScopeSolves.length > 0) return true;
 
     setLoadingTimeScope(true);
 
     try {
       const results = await Promise.all(
-        (sessionsList || []).map(async (session) => {
+        solveScopeSessions.map(async (session) => {
           const ev = String(session?.Event || "").toUpperCase();
           const sid = String(session?.SessionID || "main");
           if (!ev) return [];
@@ -1240,12 +1818,83 @@ function Stats({
     }
   }, [
     normalizeSolve,
-    sessionsList,
+    solveScopeSessionKey,
+    solveScopeSessions,
     timeScopeCacheKey,
-    timeScopeSessionKey,
     timeScopeSolves.length,
     user?.UserID,
   ]);
+
+  const loadIndexedTagScopeSolves = useCallback(async () => {
+    const userID = user?.UserID;
+    if (!userID || !indexedTagScope || !indexedTagScopeKey) {
+      setTagScopeSolves([]);
+      setTagScopeCacheKey("");
+      return false;
+    }
+
+    if (tagScopeCacheKey === indexedTagScopeKey && tagScopeSolves.length > 0) return true;
+
+    setLoadingTagScope(true);
+
+    try {
+      let cursor = null;
+      const items = [];
+
+      do {
+        const out = await getSolvesByTag(userID, {
+          ...indexedTagScope,
+          limit: 500,
+          hydrate: true,
+          cursor,
+        });
+        if (Array.isArray(out?.items) && out.items.length) items.push(...out.items);
+        cursor = out?.lastKey || null;
+      } while (cursor);
+
+      const normalized = items
+        .map(normalizeSolve)
+        .filter(Boolean)
+        .sort((a, b) => {
+          const ta = new Date(a?.datetime || "").getTime();
+          const tb = new Date(b?.datetime || "").getTime();
+          return ta - tb;
+        });
+
+      setTagScopeSolves(normalized);
+      setTagScopeCacheKey(indexedTagScopeKey);
+      return true;
+    } catch (error) {
+      console.error("Failed to load indexed tag scope:", error);
+      setTagScopeSolves([]);
+      setTagScopeCacheKey("");
+      return false;
+    } finally {
+      setLoadingTagScope(false);
+    }
+  }, [
+    indexedTagScope,
+    indexedTagScopeKey,
+    normalizeSolve,
+    tagScopeCacheKey,
+    tagScopeSolves.length,
+    user?.UserID,
+  ]);
+
+  useEffect(() => {
+    if (statsViewMode !== "time") return;
+    loadTimeScopeSolves();
+  }, [loadTimeScopeSolves, statsViewMode]);
+
+  useEffect(() => {
+    if (!hasActiveTagFilter || !canUseIndexedTagScope) {
+      setTagScopeSolves([]);
+      setTagScopeCacheKey("");
+      setLoadingTagScope(false);
+      return;
+    }
+    loadIndexedTagScopeSolves();
+  }, [canUseIndexedTagScope, hasActiveTagFilter, loadIndexedTagScopeSolves]);
 
   const totalPages = useMemo(() => {
     const per = Math.max(1, solvesPerPage);
@@ -1273,19 +1922,46 @@ function Stats({
     return activeStandardSolves.slice(startIndex, endIndex);
   }, [activeStandardSolves, startIndex, endIndex]);
 
+  const baseTagOptions = useMemo(
+    () => collectTagSelectionOptions([], safeTagConfig, cubeModelOptions),
+    [cubeModelOptions, safeTagConfig]
+  );
+
+  const statsCatalogTagOptions = useMemo(
+    () => getTagCatalogOptionsForStatsEvent(tagCatalog, statsEvent),
+    [statsEvent, tagCatalog]
+  );
+
+  const compareCatalogTagOptions = useMemo(
+    () => getTagCatalogOptionsForStatsEvent(tagCatalog, compareEvent),
+    [compareEvent, tagCatalog]
+  );
+
   const discoveredTagOptions = useMemo(
-    () => collectTagSelectionOptions(scopeSolvesForSelection, safeTagConfig),
-    [scopeSolvesForSelection, safeTagConfig]
+    () =>
+      mergeTagOptionMaps(
+        baseTagOptions,
+        statsCatalogTagOptions,
+        collectTagSelectionOptions(scopeSolvesForSelection, safeTagConfig, cubeModelOptions)
+      ),
+    [baseTagOptions, cubeModelOptions, safeTagConfig, scopeSolvesForSelection, statsCatalogTagOptions]
   );
 
   const compareDiscoveredTagOptions = useMemo(
-    () => collectTagSelectionOptions(compareSessionSolves, safeTagConfig),
-    [compareSessionSolves, safeTagConfig]
+    () =>
+      mergeTagOptionMaps(
+        baseTagOptions,
+        compareCatalogTagOptions,
+        collectTagSelectionOptions(compareSessionSolves, safeTagConfig, cubeModelOptions)
+      ),
+    [baseTagOptions, compareCatalogTagOptions, compareSessionSolves, cubeModelOptions, safeTagConfig]
   );
 
   useEffect(() => {
     if (!compareEnabled || statsViewMode !== "standard" || !showSolveCharts || !user?.UserID) {
       setCompareSessionSolves([]);
+      setCompareTagScopeSolves([]);
+      setCompareTagScopeCacheKey("");
       setCompareLoading(false);
       return;
     }
@@ -1302,7 +1978,23 @@ function Stats({
       setCompareLoading(true);
 
       try {
-        const items = await getSolvesBySession(user.UserID, compareEvent, compareSessionId);
+        let items = [];
+
+        if (canUseCompareIndexedTagScope) {
+          let cursor = null;
+          do {
+            const out = await getSolvesByTag(user.UserID, {
+              ...compareIndexedTagScope,
+              limit: 500,
+              hydrate: true,
+              cursor,
+            });
+            if (Array.isArray(out?.items) && out.items.length) items.push(...out.items);
+            cursor = out?.lastKey || null;
+          } while (cursor);
+        } else {
+          items = await getSolvesBySession(user.UserID, compareEvent, compareSessionId);
+        }
         if (!active || compareRequestTokenRef.current !== requestId) return;
 
         const normalized = (items || [])
@@ -1314,10 +2006,16 @@ function Stats({
             return ta - tb;
           });
 
+        if (canUseCompareIndexedTagScope) {
+          setCompareTagScopeSolves(normalized);
+          setCompareTagScopeCacheKey(compareIndexedTagScopeKey);
+        }
         setCompareSessionSolves(normalized);
       } catch (error) {
         if (!active || compareRequestTokenRef.current !== requestId) return;
         console.error("Failed to load compare solves:", error);
+        setCompareTagScopeSolves([]);
+        setCompareTagScopeCacheKey("");
         setCompareSessionSolves([]);
       } finally {
         if (active && compareRequestTokenRef.current === requestId) {
@@ -1334,7 +2032,10 @@ function Stats({
   }, [
     compareEnabled,
     compareEvent,
+    compareIndexedTagScope,
+    compareIndexedTagScopeKey,
     compareSessionId,
+    canUseCompareIndexedTagScope,
     normalizeSolve,
     showSolveCharts,
     statsViewMode,
@@ -1344,7 +2045,10 @@ function Stats({
   useEffect(() => {
     if (statsViewMode !== "time") return;
     setSolvesPerPage(DEFAULT_IN_VIEW);
+    setCompareSolvesPerPage(DEFAULT_IN_VIEW);
+    setCompareCurrentPage(0);
     setShowAllActive(false);
+    setCompareShowAllActive(false);
   }, [DEFAULT_IN_VIEW, statsViewMode, dateFilterStart, dateFilterEnd, statsEvent, statsSession]);
 
   const filterRawSolveList = useCallback(
@@ -1396,31 +2100,63 @@ function Stats({
   const compareFilteredRawSolves = useMemo(() => {
     if (!compareEnabled) return [];
 
-    const dateScoped = filterSolvesByDateRange(compareSessionSolves, dateFilterStart, dateFilterEnd);
+    const compareBaseSolves =
+      canUseCompareIndexedTagScope && hasCompareIndexedTagScopeCache
+        ? compareTagScopeSolves
+        : compareSessionSolves;
+    const dateScoped = filterSolvesByDateRange(compareBaseSolves, dateFilterStart, dateFilterEnd);
     if (!hasActiveTagSelection(compareTagSelection)) return dateScoped;
+    if (canUseCompareIndexedTagScope && hasCompareIndexedTagScopeCache) return dateScoped;
     return dateScoped.filter((solve) => solveMatchesTagSelection(solve, compareTagSelection));
   }, [
+    canUseCompareIndexedTagScope,
     compareEnabled,
+    compareTagScopeSolves,
     compareSessionSolves,
     compareTagSelection,
     dateFilterEnd,
     dateFilterStart,
+    hasCompareIndexedTagScopeCache,
   ]);
 
   const compareStartIndex = useMemo(() => {
-    return Math.max(0, compareFilteredRawSolves.length - solvesPerPage * (currentPage + 1));
-  }, [compareFilteredRawSolves.length, currentPage, solvesPerPage]);
+    const effectivePerPage = linkStatsControls ? solvesPerPage : compareSolvesPerPage;
+    const effectivePage = linkStatsControls ? currentPage : compareCurrentPage;
+    return Math.max(0, compareFilteredRawSolves.length - effectivePerPage * (effectivePage + 1));
+  }, [
+    compareCurrentPage,
+    compareFilteredRawSolves.length,
+    compareSolvesPerPage,
+    currentPage,
+    linkStatsControls,
+    solvesPerPage,
+  ]);
 
   const compareEndIndex = useMemo(() => {
+    const effectivePerPage = linkStatsControls ? solvesPerPage : compareSolvesPerPage;
+    const effectivePage = linkStatsControls ? currentPage : compareCurrentPage;
     return Math.max(
       0,
-      Math.min(compareFilteredRawSolves.length, compareFilteredRawSolves.length - solvesPerPage * currentPage)
+      Math.min(
+        compareFilteredRawSolves.length,
+        compareFilteredRawSolves.length - effectivePerPage * effectivePage
+      )
     );
-  }, [compareFilteredRawSolves.length, currentPage, solvesPerPage]);
+  }, [
+    compareCurrentPage,
+    compareFilteredRawSolves.length,
+    compareSolvesPerPage,
+    currentPage,
+    linkStatsControls,
+    solvesPerPage,
+  ]);
+
+  const effectiveCompareShowAllActive = linkStatsControls ? showAllActive : compareShowAllActive;
 
   const compareVisiblePageFilteredRawSolves = useMemo(() => {
+    if (effectiveCompareShowAllActive) return compareFilteredRawSolves;
     return compareFilteredRawSolves.slice(compareStartIndex, compareEndIndex);
-  }, [compareEndIndex, compareFilteredRawSolves, compareStartIndex]);
+  }, [compareEndIndex, compareFilteredRawSolves, compareStartIndex, effectiveCompareShowAllActive]);
 
   const visiblePageFilteredRawSolves = useMemo(() => {
     if (statsViewMode === "time") return allLoadedFilteredRawSolves;
@@ -1445,23 +2181,17 @@ function Stats({
   }, [allLoadedFilteredRawSolves]);
 
   const chartVisibleSolves = useMemo(() => {
-    if (statsViewMode !== "time") return visiblePageFilteredRawSolves;
-    if (showAllActive) return allLoadedFilteredRawSolves;
-    const total = allLoadedFilteredRawSolves.length;
-    const limit = Math.max(DEFAULT_IN_VIEW, solvesPerPage);
-    return allLoadedFilteredRawSolves.slice(Math.max(0, total - limit));
-  }, [
-    DEFAULT_IN_VIEW,
-    allLoadedFilteredRawSolves,
-    showAllActive,
-    solvesPerPage,
-    statsViewMode,
-    visiblePageFilteredRawSolves,
-  ]);
+    if (statsViewMode === "time") return allLoadedFilteredRawSolves;
+    return visiblePageFilteredRawSolves;
+  }, [allLoadedFilteredRawSolves, statsViewMode, visiblePageFilteredRawSolves]);
 
   const timeViewLineSolves = useMemo(() => {
     return statsViewMode === "time" ? allLoadedFilteredRawSolves : chartVisibleSolves;
   }, [allLoadedFilteredRawSolves, chartVisibleSolves, statsViewMode]);
+
+  const summaryCurrentSolves = useMemo(() => {
+    return statsViewMode === "time" ? chartVisibleSolves : visiblePageFilteredRawSolves;
+  }, [chartVisibleSolves, statsViewMode, visiblePageFilteredRawSolves]);
 
   const comparisonPrimarySolves = useMemo(() => {
     return compareEnabled ? visiblePageFilteredRawSolves : [];
@@ -1472,6 +2202,15 @@ function Stats({
       setTableCompareView("primary");
     }
   }, [compareEnabled, tableCompareView]);
+
+  useEffect(() => {
+    if (!compareEnabled) {
+      setLinkStatsControls(true);
+      setCompareSolvesPerPage(DEFAULT_IN_VIEW);
+      setCompareCurrentPage(0);
+      setCompareShowAllActive(false);
+    }
+  }, [DEFAULT_IN_VIEW, compareEnabled]);
 
   const fetchNextOlderPage = useCallback(async () => {
     const userID = user?.UserID;
@@ -1621,11 +2360,12 @@ function Stats({
 
   useEffect(() => {
     if (!hasActiveTagFilter) return;
+    if (canUseIndexedTagScope) return;
     loadTimeScopeSolves();
-  }, [hasActiveTagFilter, loadTimeScopeSolves]);
+  }, [canUseIndexedTagScope, hasActiveTagFilter, loadTimeScopeSolves]);
 
   const loadedSolveCountForSummary =
-    statsViewMode === "time" ? allLoadedFilteredRawSolves.length : activeStandardSolves.length;
+    statsViewMode === "time" ? summaryCurrentSolves.length : activeStandardSolves.length;
 
   const overallCount = useMemo(() => {
     if (statsViewMode === "time") return allLoadedFilteredRawSolves.length;
@@ -1773,6 +2513,8 @@ function Stats({
     setCompareSelection(null);
     setCompareSessionMenuOpen(false);
     setCompareSessionSolves([]);
+    setCompareTagScopeSolves([]);
+    setCompareTagScopeCacheKey("");
     setCompareLoading(false);
   }, []);
 
@@ -1788,16 +2530,21 @@ function Stats({
     setSessionMenuOpen(false);
 
     if (nextMode === "time") {
-      const today = getTodayLocalDayKey();
-      setDateFilterStart((prev) => prev || today);
-      setDateFilterEnd((prev) => prev || today);
-      setTimeSelection((prev) => ({
-        event: prev?.event && prev.event !== ALL_EVENTS ? prev.event : (standardSelection.event || currentEvent || "333"),
-        session:
-          prev?.session && prev.session !== ALL_SESSIONS
-            ? prev.session
-            : (standardSelection.session || currentSession || "main"),
-      }));
+      const latestSolve = [...(sessionCachedSolves || [])]
+        .filter(Boolean)
+        .sort((a, b) => {
+          const ta = new Date(a?.datetime || "").getTime();
+          const tb = new Date(b?.datetime || "").getTime();
+          return tb - ta;
+        })[0];
+      const defaultDay = getLocalDayKey(getSolveDate(latestSolve) || new Date()) || getTodayLocalDayKey();
+
+      setDateFilterStart(defaultDay);
+      setDateFilterEnd(defaultDay);
+      setTimeSelection({
+        event: ALL_EVENTS,
+        session: ALL_SESSIONS,
+      });
       return;
     }
 
@@ -1805,7 +2552,7 @@ function Stats({
       event: prev?.event || currentEvent || "333",
       session: prev?.session || currentSession || "main",
     }));
-  }, [currentEvent, currentSession, standardSelection.event, standardSelection.session]);
+  }, [currentEvent, currentSession, sessionCachedSolves]);
 
   const handleDeleteSolve = useCallback(
     async (solveRefOrIndex) => {
@@ -1981,6 +2728,109 @@ function Stats({
     statsViewMode,
   ]);
 
+  const compareTotalPages = useMemo(() => {
+    const per = Math.max(1, compareSolvesPerPage);
+    return Math.max(1, Math.ceil((compareFilteredRawSolves.length || 0) / per));
+  }, [compareFilteredRawSolves.length, compareSolvesPerPage]);
+
+  const compareMaxPage = compareTotalPages - 1;
+
+  useEffect(() => {
+    if (compareCurrentPage > compareMaxPage) {
+      setCompareCurrentPage(compareMaxPage);
+    }
+  }, [compareCurrentPage, compareMaxPage]);
+
+  const handleComparePreviousPage = useCallback(() => {
+    if (!isSolveLevelMode) return;
+    setCompareCurrentPage((page) => Math.min(compareMaxPage, page + 1));
+  }, [compareMaxPage, isSolveLevelMode]);
+
+  const handleCompareNextPage = useCallback(() => {
+    if (!isSolveLevelMode) return;
+    setCompareCurrentPage((page) => Math.max(0, page - 1));
+  }, [isSolveLevelMode]);
+
+  const handleCompareZoomIn = useCallback(() => {
+    if (!isSolveLevelMode) return;
+    setCompareSolvesPerPage((prev) => getNextSmallerSolveWindow(prev));
+    setCompareCurrentPage(0);
+  }, [isSolveLevelMode]);
+
+  const handleCompareZoomOut = useCallback(() => {
+    if (!isSolveLevelMode) return;
+    setCompareSolvesPerPage((prev) => Math.min(getNextLargerSolveWindow(prev), compareFilteredRawSolves.length));
+    setCompareCurrentPage(0);
+  }, [compareFilteredRawSolves.length, isSolveLevelMode]);
+
+  const handleCompareDecreaseSolveCount = useCallback(() => {
+    if (!isSolveLevelMode) return;
+    setCompareSolvesPerPage((prev) => Math.max(1, prev - 1));
+    setCompareCurrentPage(0);
+  }, [isSolveLevelMode]);
+
+  const handleCompareIncreaseSolveCount = useCallback(() => {
+    if (!isSolveLevelMode) return;
+    setCompareSolvesPerPage((prev) => Math.min(prev + 1, compareFilteredRawSolves.length));
+    setCompareCurrentPage(0);
+  }, [compareFilteredRawSolves.length, isSolveLevelMode]);
+
+  const handleCompareShowAll = useCallback(() => {
+    if (!isSolveLevelMode) return;
+    setCompareShowAllActive(true);
+    setCompareCurrentPage(0);
+    setCompareSolvesPerPage(Math.max(DEFAULT_IN_VIEW, compareFilteredRawSolves.length));
+  }, [DEFAULT_IN_VIEW, compareFilteredRawSolves.length, isSolveLevelMode]);
+
+  const timeNavAnchorDay = useMemo(() => {
+    if (dateFilterEnd) return dateFilterEnd;
+    if (dateFilterStart) return dateFilterStart;
+
+    const latestSolve = [...(allLoadedSolves || [])]
+      .filter(Boolean)
+      .sort((a, b) => {
+        const ta = new Date(a?.datetime || "").getTime();
+        const tb = new Date(b?.datetime || "").getTime();
+        return tb - ta;
+      })[0];
+
+    return getLocalDayKey(getSolveDate(latestSolve) || new Date()) || getTodayLocalDayKey();
+  }, [allLoadedSolves, dateFilterEnd, dateFilterStart]);
+
+  const applyTimeRangePreset = useCallback((preset) => {
+    if (preset === "all") {
+      setDateFilterStart("");
+      setDateFilterEnd("");
+      return;
+    }
+
+    if (preset === "day") {
+      setDateFilterStart(timeNavAnchorDay);
+      setDateFilterEnd(timeNavAnchorDay);
+      return;
+    }
+
+    if (preset === "week") {
+      const range = getWeekRangeFromDayKey(timeNavAnchorDay);
+      setDateFilterStart(range.start);
+      setDateFilterEnd(range.end);
+      return;
+    }
+
+    if (preset === "month") {
+      const range = getMonthRangeFromDayKey(timeNavAnchorDay);
+      setDateFilterStart(range.start);
+      setDateFilterEnd(range.end);
+    }
+  }, [timeNavAnchorDay]);
+
+  const shiftTimeRangeByDay = useCallback((direction) => {
+    const baseDay = timeNavAnchorDay || getTodayLocalDayKey();
+    const nextDay = shiftLocalDayKey(baseDay, direction);
+    setDateFilterStart(nextDay);
+    setDateFilterEnd(nextDay);
+  }, [timeNavAnchorDay]);
+
   const handleRecomputeOverall = useCallback(async () => {
     if (!user?.UserID) return;
     if (isAllEventsMode) return;
@@ -1992,11 +2842,11 @@ function Stats({
 
       let updated = null;
 
-      if (isAllSessionsMode) {
-        updated = await recomputeEventStats(user.UserID, statsEvent);
-      } else {
-        updated = await recomputeSessionStats(user.UserID, statsEvent, sessionId);
-      }
+      updated = await runDb("Recomputing stats", () =>
+        isAllSessionsMode
+          ? recomputeEventStats(user.UserID, statsEvent)
+          : recomputeSessionStats(user.UserID, statsEvent, sessionId)
+      );
 
       if (updated) {
         setOverallStatsForEvent(updated);
@@ -2031,6 +2881,7 @@ function Stats({
     sessionId,
     isAllEventsMode,
     isAllSessionsMode,
+    runDb,
   ]);
 
   const slugify = (s) =>
@@ -2050,10 +2901,16 @@ function Stats({
       const sid = `import_${slugify(baseName)}_${Date.now()}`;
 
       try {
-        await createSession(userID, cleanEvent, sid, baseName);
+        await runDb("Creating import session", () =>
+          createSession(userID, cleanEvent, sid, baseName)
+        );
       } catch (e) {
         try {
-          await createSession(userID, cleanEvent, baseName);
+          await runDb(
+            "Creating import session",
+            () => createSession(userID, cleanEvent, baseName),
+            { minLoadingMs: 400 }
+          );
         } catch (e2) {
           console.error("createImportSession failed:", e, e2);
           throw e2;
@@ -2062,7 +2919,7 @@ function Stats({
 
       return sid;
     },
-    [user?.UserID]
+    [runDb, user?.UserID]
   );
 
   const handleImportSolves = useCallback(
@@ -2114,6 +2971,7 @@ function Stats({
         label: `Preparing import (0/${normalized.length})`,
       });
       try {
+        await runDb("Importing solves", async () => {
         const results = [];
         let overallCompleted = 0;
         const overallTotal = normalized.length;
@@ -2180,17 +3038,22 @@ function Stats({
           return next;
         });
 
-        try {
-          if (!isAllSessionsMode) {
-            const item = await getSessionStats(userID, String(statsEvent || "").toUpperCase(), String(sessionId || "main"));
-            setOverallStatsForEvent(item || null);
-          } else {
-            const aggregated = getEventAggregateFromSessionsList(sessionsList, statsEvent);
-            setOverallStatsForEvent(aggregated || null);
-          }
-        } catch (_) {}
+          try {
+            if (!isAllSessionsMode) {
+              const item = await getSessionStats(
+                userID,
+                String(statsEvent || "").toUpperCase(),
+                String(sessionId || "main")
+              );
+              setOverallStatsForEvent(item || null);
+            } else {
+              const aggregated = getEventAggregateFromSessionsList(sessionsList, statsEvent);
+              setOverallStatsForEvent(aggregated || null);
+            }
+          } catch (_) {}
 
-        setShowImport(false);
+          setShowImport(false);
+        });
       } catch (e) {
         console.error("Import failed:", e);
         alert("Import failed. Check console for details.");
@@ -2199,7 +3062,17 @@ function Stats({
         setImportProgress(null);
       }
     },
-    [user?.UserID, statsEvent, sessionId, setSessions, createImportSession, isAllEventsMode, isAllSessionsMode, sessionsList]
+    [
+      user?.UserID,
+      statsEvent,
+      sessionId,
+      setSessions,
+      createImportSession,
+      isAllEventsMode,
+      isAllSessionsMode,
+      sessionsList,
+      runDb,
+    ]
   );
 
   const canOlder =
@@ -2226,11 +3099,40 @@ function Stats({
       (hasMoreOlder && !loadingMore && !isAllLoaded));
   const canShowAll =
     statsViewMode === "time"
-      ? !!user?.UserID &&
-        !loadingTimeScope &&
-        !showAllActive &&
-        (timeScopeSolves.length === 0 || chartVisibleSolves.length < allLoadedFilteredRawSolves.length)
+      ? false
       : isSolveLevelMode && !!user?.UserID && !loadingAllSolves && !showAllActive;
+
+  const compareCanOlder =
+    statsViewMode === "standard" &&
+    isSolveLevelMode &&
+    !hasActiveDateFilter &&
+    compareCurrentPage < compareMaxPage;
+  const compareCanNewer =
+    statsViewMode === "standard" && isSolveLevelMode && !hasActiveDateFilter && compareCurrentPage > 0;
+  const compareCanZoomIn =
+    statsViewMode === "standard" && isSolveLevelMode && !hasActiveDateFilter && compareSolvesPerPage > 5;
+  const compareCanZoomOut =
+    statsViewMode === "standard" &&
+    isSolveLevelMode &&
+    !hasActiveDateFilter &&
+    compareFilteredRawSolves.length > 0 &&
+    compareSolvesPerPage < compareFilteredRawSolves.length;
+  const compareCanDecreaseSolveCount =
+    statsViewMode === "standard" && isSolveLevelMode && !hasActiveDateFilter && compareSolvesPerPage > 1;
+  const compareCanIncreaseSolveCount =
+    statsViewMode === "standard" &&
+    isSolveLevelMode &&
+    !hasActiveDateFilter &&
+    compareFilteredRawSolves.length > 0 &&
+    compareSolvesPerPage < compareFilteredRawSolves.length;
+  const compareCanShowAll =
+    statsViewMode === "time"
+      ? false
+      : isSolveLevelMode &&
+        !!user?.UserID &&
+        !compareLoading &&
+        !compareShowAllActive &&
+        compareFilteredRawSolves.length > 0;
 
   const canRecomputeOverall =
     statsViewMode === "standard" &&
@@ -2240,20 +3142,24 @@ function Stats({
     !hasActiveDateFilter &&
     !hasActiveTagFilter;
 
+  const primaryStatsLoading = loadingInitial || loadingTimeScope || loadingTagScope;
+  const primarySummaryLoading = primaryStatsLoading;
+  const primaryOverallSummaryLoading = primaryStatsLoading || loadingOverallStats;
+  const compareSummaryLoading = compareEnabled && compareLoading;
+  const chartCardsLoading = primaryStatsLoading || compareSummaryLoading;
+
   const headerStatusText = useMemo(() => {
     if (compareEnabled && statsViewMode === "standard") {
       if (compareLoading) return "Loading compare solves…";
-      return "Comparing two filtered stat groups across the active date range";
+      return "";
     }
     if (statsViewMode === "time") {
       if (loadingTimeScope) return "Loading solves for time view…";
-      if (chartVisibleSolves.length < allLoadedFilteredRawSolves.length) {
-        return `Showing latest ${chartVisibleSolves.length} solves in the selected range`;
-      }
       return hasActiveDateFilter
-        ? "Time view across the selected date range"
-        : "Time view across all loaded solves";
+        ? `Showing all ${allLoadedFilteredRawSolves.length} solves in the selected date range`
+        : `Showing all ${allLoadedFilteredRawSolves.length} solves across all dates`;
     }
+    if (loadingTagScope) return "Loading solves for selected tag…";
     if (loadingInitial) return "Loading solves…";
     if (loadingAllSolves) return "Loading ALL solves…";
     if (hasActiveTagFilter) return "Showing solves for the selected shared tag filters";
@@ -2265,7 +3171,7 @@ function Stats({
     if (isAllLoaded) return "Loaded solves currently in memory for this session";
     if (hasMoreOlder) return "";
     return "";
-  }, [compareEnabled, compareLoading, statsViewMode, loadingTimeScope, chartVisibleSolves.length, allLoadedFilteredRawSolves.length, hasActiveTagFilter, hasActiveDateFilter, loadingInitial, loadingAllSolves, loadingMore, isAllEventsMode, isAllSessionsMode, statsEvent, showAllActive, isAllLoaded, hasMoreOlder]);
+  }, [compareEnabled, compareLoading, statsViewMode, loadingTimeScope, loadingTagScope, allLoadedFilteredRawSolves.length, hasActiveTagFilter, hasActiveDateFilter, loadingInitial, loadingAllSolves, loadingMore, isAllEventsMode, isAllSessionsMode, statsEvent, showAllActive, isAllLoaded, hasMoreOlder]);
 
   const eventSelectLabel = useMemo(() => {
     if (statsEvent === ALL_EVENTS) return "All Events";
@@ -2866,7 +3772,7 @@ function Stats({
 
       if (selection.kind === "single") {
         const sourceSolves =
-          selection.scope === "overall" ? allLoadedFilteredRawSolves : visiblePageFilteredRawSolves;
+          selection.scope === "overall" ? allLoadedFilteredRawSolves : summaryCurrentSolves;
         let solve = null;
 
         if (selection.scope === "overall" && selection.variant === "best") {
@@ -2910,7 +3816,7 @@ function Stats({
       if (!spec) return;
 
       const sourceSolves =
-        selection.scope === "overall" ? allLoadedFilteredRawSolves : visiblePageFilteredRawSolves;
+        selection.scope === "overall" ? allLoadedFilteredRawSolves : summaryCurrentSolves;
 
       let solvesForWindow = null;
       const startSolveRef =
@@ -2978,17 +3884,19 @@ function Stats({
       sessionId,
       statsEvent,
       user?.UserID,
-      visiblePageFilteredRawSolves,
+      summaryCurrentSolves,
     ]
   );
 
   const persistUserCollection = useCallback(
     async (field, nextValue) => {
       if (!user?.UserID) throw new Error("Missing user");
-      await updateUser(user.UserID, { [field]: nextValue });
+      await runDb("Saving stats preferences", () =>
+        updateUser(user.UserID, { [field]: nextValue })
+      );
       setUser?.((prev) => ({ ...(prev || {}), [field]: nextValue }));
     },
-    [setUser, user?.UserID]
+    [runDb, setUser, user?.UserID]
   );
 
   const handleShareFocusedCard = useCallback(async () => {
@@ -3082,6 +3990,7 @@ function Stats({
             viewMode={statsViewMode}
             selectedDay={selectedTimeDay}
             onStatSelect={handleSummaryStatSelect}
+            loading={primarySummaryLoading}
           />
         );
       }
@@ -3100,6 +4009,7 @@ function Stats({
             loadedSolveCount={loadedSolveCountForSummary}
             onStatSelect={handleSummaryStatSelect}
             profileColor={user?.Color || user?.color || "#50B6FF"}
+            loading={primaryOverallSummaryLoading}
           />
         );
       }
@@ -3116,6 +4026,7 @@ function Stats({
             viewMode="standard"
             selectedDay=""
             onStatSelect={null}
+            loading={compareSummaryLoading}
           />
         );
       }
@@ -3134,6 +4045,7 @@ function Stats({
             loadedSolveCount={compareFilteredRawSolves.length}
             onStatSelect={null}
             profileColor={compareStyle?.primary || "#7c8cff"}
+            loading={compareSummaryLoading}
           />
         );
       }
@@ -3268,6 +4180,8 @@ function Stats({
       handleSummaryStatSelect,
       pieChartSolves,
       primaryCompareStyle,
+      primaryOverallSummaryLoading,
+      primarySummaryLoading,
       showEventBreakdownCard,
       selectedSessionDisplay,
       selectedTagLabel,
@@ -3283,6 +4197,7 @@ function Stats({
       openSolveDetail,
       user,
       visiblePageFilteredRawSolves,
+      compareSummaryLoading,
     ]
   );
 
@@ -3356,6 +4271,19 @@ function Stats({
     setScopeModalState(null);
   }, []);
 
+    const openScopeModal = useCallback((scopeKey, section = "event") => {
+    setScopeModalState(scopeKey);
+    setScopeModalSection(section);
+  }, []);
+
+  const getTagFieldForSection = useCallback((section) => {
+    if (section === "tag-cube-model") return "CubeModel";
+    if (section === "tag-cross-color") return "CrossColor";
+    if (section === "tag-solve-source") return "SolveSource";
+    if (section === "tag-time-input") return "TimeInput";
+    return "CubeModel";
+  }, []);
+
   useEffect(() => {
     if (!scopeModalState) return undefined;
     const onKeyDown = (event) => {
@@ -3365,10 +4293,17 @@ function Stats({
     return () => document.removeEventListener("keydown", onKeyDown, { capture: true });
   }, [closeScopeModal, scopeModalState]);
 
-  const renderTagScopeModal = ({
+    const renderTagScopeModal = ({
     isOpen,
     title,
     subtitle,
+    scopeKey,
+    eventValue,
+    onEventChange,
+    eventItems,
+    sessionValue,
+    sessionItems,
+    onPickSession,
     tagSelection,
     onTagSelectionChange,
     discoveredOptions,
@@ -3376,8 +4311,26 @@ function Stats({
     paletteLabel,
     onPaletteChange,
     accentColor,
+    dateLabel,
   }) => {
     if (!isOpen) return null;
+
+    const sectionButtons = [
+      { key: "event", label: "Event" },
+      { key: "session", label: "Session" },
+      { key: "tags", label: "Tags" },
+      ...(typeof onPaletteChange === "function" ? [{ key: "color", label: "Color" }] : []),
+      { key: "date", label: "Date" },
+    ];
+
+    const activeTagField = getTagFieldForSection(scopeModalSection);
+    const resolvedTagEvent =
+      eventValue && eventValue !== ALL_EVENTS ? String(eventValue || "").toUpperCase() : "";
+    const scopeTagColors = getTagColorMapForEvent(tagColorCatalog, resolvedTagEvent);
+    const handleScopeTagColorsChange =
+      typeof onTagColorsChange === "function" && resolvedTagEvent
+        ? (next) => onTagColorsChange(resolvedTagEvent, next)
+        : null;
 
     return (
       <div
@@ -3389,51 +4342,364 @@ function Stats({
         }}
       >
         <div className="detailPopupContent statsScopeModal">
-          <button type="button" className="closePopup statsScopeModalClose" onClick={closeScopeModal}>
+          <button
+            type="button"
+            className="closePopup statsScopeModalClose"
+            onClick={closeScopeModal}
+          >
             x
           </button>
 
           <div className="statsScopeModalHeader">
-            <p className="statsScopeModalEyebrow">Current Stats</p>
-            <h3>{title}</h3>
-            <p>{subtitle}</p>
+            <p className="statsScopeModalEyebrow">{title}</p>
+            <h3>{subtitle}</h3>
+            <p>Adjust event, session, shared tags, color style, and date range for this stats scope.</p>
+          </div>
+
+          <div className="statsScopeModalNav">
+            {sectionButtons.map((item) => (
+              <button
+                key={`${scopeKey}-${item.key}`}
+                type="button"
+                className={`statsScopeNavBtn ${scopeModalSection === item.key ? "active" : ""}`}
+                onClick={() => setScopeModalSection(item.key)}
+              >
+                {item.label}
+              </button>
+            ))}
           </div>
 
           <div className="statsScopeModalSection">
-            <div className="statsScopeModalSectionTitle">Shared tags</div>
-            <TagBar
-              tags={tagSelection}
-              onChange={onTagSelectionChange}
-              tagConfig={safeTagConfig}
-              discoveredOptions={discoveredOptions}
-              variant="stats"
-              allowAdditions
-            />
-          </div>
+            <button
+              type="button"
+              className={`statsScopeSectionHeader ${scopeModalSection === "event" ? "active" : ""}`}
+              onClick={() => setScopeModalSection("event")}
+            >
+              <span>Event</span>
+              <span>{eventValue === ALL_EVENTS ? "All Events" : eventValue === "333" ? "3x3" : eventValue}</span>
+            </button>
 
-          {typeof onPaletteChange === "function" && (
-            <div className="statsScopeModalSection">
-              <div className="statsScopeModalSectionTitle">Color style</div>
+            {scopeModalSection === "event" && (
               <div className="statsScopeChipGrid">
-                {paletteOptions.map((option) => {
-                  const active = option.value === paletteValue;
+                {eventItems.map((eventKey) => {
+                  const label =
+                    eventKey === ALL_EVENTS ? "All Events" : eventKey === "333" ? "3x3" : eventKey;
+                  const active = eventValue === eventKey;
                   return (
                     <button
-                      key={`palette-${title}-${option.value}`}
+                      key={`${scopeKey}-event-${eventKey}`}
                       type="button"
                       className={`statsScopeChip ${active ? "active" : ""}`}
-                      style={active ? { borderColor: accentColor, background: `${accentColor}22` } : undefined}
-                      onClick={() => onPaletteChange(option.value)}
+                      style={
+                        active
+                          ? { borderColor: accentColor, background: `${accentColor}22` }
+                          : undefined
+                      }
+                      onClick={() => onEventChange(eventKey)}
                     >
-                      {option.label}
+                      {label}
                     </button>
                   );
                 })}
               </div>
-              <div className="statsScopeModalMeta">Selected style: {paletteLabel}</div>
+            )}
+          </div>
+
+          <div className="statsScopeModalSection">
+            <button
+              type="button"
+              className={`statsScopeSectionHeader ${scopeModalSection === "session" ? "active" : ""}`}
+              onClick={() => setScopeModalSection("session")}
+            >
+              <span>Session</span>
+              <span>
+                {sessionValue === ALL_SESSIONS
+                  ? "All Sessions"
+                  : sessionItems.find((s) => s.SessionID === sessionValue)?.SessionName || sessionValue}
+              </span>
+            </button>
+
+            {scopeModalSection === "session" && (
+              <div className="statsScopeChipGrid">
+                {sessionItems.map((s) => {
+                  const sid = s.SessionID || "main";
+                  const label = s.SessionName || sid;
+                  const active = sid === sessionValue;
+
+                  return (
+                    <button
+                      key={`${scopeKey}-session-${sid}`}
+                      type="button"
+                      className={`statsScopeChip ${active ? "active" : ""}`}
+                      style={
+                        active
+                          ? { borderColor: accentColor, background: `${accentColor}22` }
+                          : undefined
+                      }
+                      onClick={() => onPickSession(sid)}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="statsScopeModalSection">
+            <button
+              type="button"
+              className={`statsScopeSectionHeader ${scopeModalSection === "tags" ? "active" : ""}`}
+              onClick={() => setScopeModalSection("tags")}
+            >
+              <span>Shared Tags</span>
+              <span>{summarizeTagSelection(tagSelection, safeTagConfig)}</span>
+            </button>
+
+            {scopeModalSection === "tags" && (
+              <>
+                <div className="statsScopeTagQuickNav">
+                  {[
+                    { key: "tag-cube-model", label: "Cube Model" },
+                    { key: "tag-cross-color", label: "Cross Color" },
+                    { key: "tag-solve-source", label: "Solve Source" },
+                    { key: "tag-time-input", label: "Time Input" },
+                  ].map((item) => (
+                    <button
+                      key={`${scopeKey}-${item.key}`}
+                      type="button"
+                      className={`statsScopeMiniPill ${scopeModalSection === item.key ? "active" : ""}`}
+                      onClick={() => setScopeModalSection(item.key)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
+                <TagBar
+                  tags={tagSelection}
+                  tagColors={scopeTagColors}
+                  onChange={onTagSelectionChange}
+                  onTagColorsChange={handleScopeTagColorsChange}
+                  tagConfig={safeTagConfig}
+                  cubeModelOptions={cubeModelOptions}
+                  discoveredOptions={discoveredOptions}
+                  profileColor={user?.Color || user?.color || "#2EC4B6"}
+                  variant="stats"
+                  allowAdditions
+                />
+              </>
+            )}
+
+            {String(scopeModalSection || "").startsWith("tag-") && (
+              <>
+                <div className="statsScopeTagQuickNav">
+                  {[
+                    { key: "tag-cube-model", label: "Cube Model" },
+                    { key: "tag-cross-color", label: "Cross Color" },
+                    { key: "tag-solve-source", label: "Solve Source" },
+                    { key: "tag-time-input", label: "Time Input" },
+                  ].map((item) => (
+                    <button
+                      key={`${scopeKey}-nav-${item.key}`}
+                      type="button"
+                      className={`statsScopeMiniPill ${scopeModalSection === item.key ? "active" : ""}`}
+                      onClick={() => setScopeModalSection(item.key)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
+                <TagBar
+                  tags={tagSelection}
+                  tagColors={scopeTagColors}
+                  onChange={onTagSelectionChange}
+                  onTagColorsChange={handleScopeTagColorsChange}
+                  tagConfig={safeTagConfig}
+                  cubeModelOptions={cubeModelOptions}
+                  discoveredOptions={discoveredOptions}
+                  profileColor={user?.Color || user?.color || "#2EC4B6"}
+                  variant="stats"
+                  allowAdditions
+                  activeField={activeTagField}
+                />
+              </>
+            )}
+          </div>
+
+          {typeof onPaletteChange === "function" && (
+            <div className="statsScopeModalSection">
+              <button
+                type="button"
+                className={`statsScopeSectionHeader ${scopeModalSection === "color" ? "active" : ""}`}
+                onClick={() => setScopeModalSection("color")}
+              >
+                <span>Color</span>
+                <span>{paletteLabel}</span>
+              </button>
+
+              {scopeModalSection === "color" && (
+                <>
+                  <div className="statsScopeChipGrid">
+                    {paletteOptions.map((option) => {
+                      const active = option.value === paletteValue;
+                      return (
+                        <button
+                          key={`${scopeKey}-palette-${option.value}`}
+                          type="button"
+                          className={`statsScopeChip ${active ? "active" : ""}`}
+                          style={
+                            active
+                              ? { borderColor: accentColor, background: `${accentColor}22` }
+                              : undefined
+                          }
+                          onClick={() => onPaletteChange(option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="statsScopeModalMeta">Selected style: {paletteLabel}</div>
+                </>
+              )}
             </div>
           )}
+
+          <div className="statsScopeModalSection">
+            <button
+              type="button"
+              className={`statsScopeSectionHeader ${scopeModalSection === "date" ? "active" : ""}`}
+              onClick={() => setScopeModalSection("date")}
+            >
+              <span>Date</span>
+              <span>{dateLabel}</span>
+            </button>
+
+            {scopeModalSection === "date" && (
+              <StatsDateRangePicker
+                startDay={dateFilterStart}
+                endDay={dateFilterEnd}
+                accentColor={accentColor}
+                onApply={(nextStart, nextEnd) => {
+                  setDateFilterStart(nextStart);
+                  setDateFilterEnd(nextEnd);
+                }}
+              />
+            )}
+          </div>
         </div>
+      </div>
+    );
+  };
+
+  const renderViewportControls = (scopeKey = "primary") => {
+    const useCompareControls =
+      scopeKey === "compare" && compareEnabled && statsViewMode === "standard" && !linkStatsControls;
+    const controls = useCompareControls
+      ? {
+          previous: handleComparePreviousPage,
+          next: handleCompareNextPage,
+          zoomIn: handleCompareZoomIn,
+          zoomOut: handleCompareZoomOut,
+          decrease: handleCompareDecreaseSolveCount,
+          increase: handleCompareIncreaseSolveCount,
+          showAll: handleCompareShowAll,
+          canOlder: compareCanOlder,
+          canNewer: compareCanNewer,
+          canZoomIn: compareCanZoomIn,
+          canZoomOut: compareCanZoomOut,
+          canDecreaseSolveCount: compareCanDecreaseSolveCount,
+          canIncreaseSolveCount: compareCanIncreaseSolveCount,
+          canShowAll: compareCanShowAll,
+          loadingShowAll: compareLoading,
+          showAllActive: compareShowAllActive,
+        }
+      : {
+          previous: handlePreviousPage,
+          next: handleNextPage,
+          zoomIn: handleZoomIn,
+          zoomOut: handleZoomOut,
+          decrease: handleDecreaseSolveCount,
+          increase: handleIncreaseSolveCount,
+          showAll: handleShowAll,
+          canOlder,
+          canNewer,
+          canZoomIn,
+          canZoomOut,
+          canDecreaseSolveCount,
+          canIncreaseSolveCount,
+          canShowAll,
+          loadingShowAll: loadingAllSolves,
+          showAllActive,
+        };
+
+    return (
+      <div className="statsScopeControls" onClick={(e) => e.stopPropagation()}>
+      {statsViewMode === "time" ? (
+        <>
+          <button type="button" onClick={() => shiftTimeRangeByDay(-1)} title="Previous day">
+            Day -
+          </button>
+
+          <button type="button" onClick={() => shiftTimeRangeByDay(1)} title="Next day">
+            Day +
+          </button>
+
+          <button type="button" onClick={() => applyTimeRangePreset("week")} title="Show week range">
+            Week
+          </button>
+
+          <button type="button" onClick={() => applyTimeRangePreset("month")} title="Show month range">
+            Month
+          </button>
+
+          <button type="button" onClick={() => applyTimeRangePreset("all")} title="Show all dates">
+            All
+          </button>
+        </>
+      ) : (
+        <>
+      <button onClick={controls.previous} disabled={!controls.canOlder} title="Older page">
+        {loadingMore && !useCompareControls ? "Loading…" : "▲"}
+      </button>
+
+      <button onClick={controls.next} disabled={!controls.canNewer} title="Newer page">
+        ▼
+      </button>
+
+      <button onClick={controls.zoomIn} disabled={!controls.canZoomIn} title="Zoom in">
+        +
+      </button>
+
+      <button onClick={controls.zoomOut} disabled={!controls.canZoomOut} title="Zoom out">
+        -
+      </button>
+
+      <button
+        onClick={controls.decrease}
+        disabled={!controls.canDecreaseSolveCount}
+        className="statsTopStepBtn"
+        title="Show fewer solves"
+      >
+        -1
+      </button>
+
+      <button
+        onClick={controls.increase}
+        disabled={!controls.canIncreaseSolveCount}
+        className="statsTopStepBtn"
+        title="Show more solves"
+      >
+        +1
+      </button>
+
+      <button onClick={controls.showAll} disabled={!controls.canShowAll} title="Load all solves">
+        {controls.loadingShowAll ? "Loading…" : controls.showAllActive ? "All Loaded" : "Show All"}
+      </button>
+        </>
+      )}
       </div>
     );
   };
@@ -3442,313 +4708,240 @@ function Stats({
     rowLabel,
     rowAccentColor = "rgba(255,255,255,0.22)",
     eventValue,
-    onEventChange,
     sessionValue,
     sessionDisplay,
-    sessionItems,
-    sessionMenuRef,
-    sessionMenuOpenValue,
-    onToggleSessionMenu,
-    onPickSession,
     tagSummary,
-    showPalette = true,
-    paletteValue,
-    onPaletteChange,
-    paletteLabel,
-    allowRemove = false,
-    onRemove = null,
     loading = false,
     scopeModalKey,
-  }) => (
-    <div className={`statsScopeRow ${loading ? "is-loading" : ""}`}>
-      <span
-        className="statsScopeLabel"
-        style={{
-          borderColor: rowAccentColor,
-          boxShadow: `inset 0 0 0 1px ${rowAccentColor}33`,
+  }) => {
+    const { label: eventLabel, puzzleEvent } = getEventDisplayMeta(eventValue);
+
+    return (
+      <div
+        className={`statsScopeRow statsScopeRow--clickable ${loading ? "is-loading" : ""}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => openScopeModal(scopeModalKey, "event")}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openScopeModal(scopeModalKey, "event");
+          }
         }}
       >
-        {rowLabel}
-      </span>
-
-      <select className="statsSelect" onChange={(e) => onEventChange(e.target.value)} value={eventValue}>
-        {eventOptions.map((eventKey) => (
-          <option key={`${rowLabel}-${eventKey}`} value={eventKey}>
-            {eventKey === ALL_EVENTS ? "All Events" : eventKey === "333" ? "3x3" : eventKey}
-          </option>
-        ))}
-      </select>
-
-      {!isAllEventsMode && (
-        <div className="statsSessionWrap" ref={sessionMenuRef}>
-          <button type="button" className="statsSessionBtn" onClick={onToggleSessionMenu}>
-            {sessionDisplay} <span className="statsCaret">▼</span>
-          </button>
-
-          {sessionMenuOpenValue && (
-            <div className="statsSessionMenu">
-              {sessionItems.length === 0 && <div className="statsSessionEmpty">No sessions</div>}
-
-              {sessionItems.map((s) => {
-                const sid = s.SessionID || "main";
-                const name = s.SessionName || sid;
-                const active = sid === sessionValue;
-
-                return (
-                  <button
-                    key={`${rowLabel}-sess-${sid}`}
-                    type="button"
-                    className={`statsSessionItem ${active ? "active" : ""}`}
-                    onClick={() => onPickSession(sid)}
-                  >
-                    <span className="check">{active ? "✓" : ""}</span>
-                    <span className="label">{name}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      <button
-        type="button"
-        className="statsFilterBtn"
-        onClick={() => setScopeModalState(scopeModalKey)}
-      >
-        <span className="statsFilterBtnLabel">Shared Tags</span>
-        <span className="statsFilterBtnValue">{tagSummary}</span>
-        {showPalette && <span className="statsFilterBtnMeta">Style: {paletteLabel}</span>}
-      </button>
-
-      {showPalette && (
-        <select
-          className="statsSelect statsPaletteSelect"
-          value={paletteValue}
-          onChange={(e) => onPaletteChange(e.target.value)}
-          title="Series color style"
+        <button
+          type="button"
+          className="statsScopeLabel statsScopeLabelBtn"
+          style={{
+            borderColor: rowAccentColor,
+            boxShadow: `inset 0 0 0 1px ${rowAccentColor}33`,
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            openScopeModal(scopeModalKey, "color");
+          }}
         >
-          {paletteOptions.map((option) => (
-            <option key={`${rowLabel}-palette-${option.value}`} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      )}
-
-      {allowRemove && (
-        <button type="button" className="statsMiniBtn statsCompareRemoveBtn" onClick={onRemove}>
-          Remove
+          {rowLabel}
         </button>
-      )}
-    </div>
-  );
 
-  return (
-    <div className="Page statsPageRoot">
-      <div className={`statsTopBar ${statsViewMode === "standard" ? "statsTopBar--standard" : ""}`}>
-        <div className={`statsTopLeft ${statsViewMode === "standard" ? "statsTopLeft--standard" : ""}`}>
-          <div className="statsViewToggle" role="group" aria-label="Stats view">
+        <div className="statsScopeSummary">
+          {puzzleEvent ? (
             <button
               type="button"
-              className={`statsToggleBtn ${statsViewMode === "standard" ? "is-active" : ""}`}
-              onClick={() => handleSetViewMode("standard")}
+              className="statsScopeSummaryChip statsScopeSummaryChip--eventIcon"
+              onClick={(e) => {
+                e.stopPropagation();
+                openScopeModal(scopeModalKey, "event");
+              }}
+              aria-label={`${eventLabel} icon`}
             >
-              Standard
+              <span className="statsScopeEventIcon" aria-hidden="true">
+                <PuzzleSVG event={puzzleEvent} scramble="" isStatsHeaderIcon />
+              </span>
             </button>
-            <button
-              type="button"
-              className={`statsToggleBtn ${statsViewMode === "time" ? "is-active" : ""}`}
-              onClick={() => handleSetViewMode("time")}
-            >
-              Time View
-            </button>
-          </div>
+          ) : null}
 
-          <div
-            className={`statsCompareControls ${statsViewMode === "standard" ? "statsCompareControls--standard" : ""}`}
-            aria-label="Stats settings"
+          <button
+            type="button"
+            className="statsScopeSummaryChip statsScopeSummaryChip--event"
+            onClick={(e) => {
+              e.stopPropagation();
+              openScopeModal(scopeModalKey, "event");
+            }}
           >
-            {renderScopeRow({
-              rowLabel: compareEnabled ? "A" : "Scope",
-              rowAccentColor: primaryAccentColor,
-              eventValue: statsEvent,
-              onEventChange: (next) =>
-                handleEventChange({
-                  target: { value: next },
-                }),
-              sessionValue: statsSession,
-              sessionDisplay: selectedSessionDisplay,
-              sessionItems: sessionsForEvent,
-              sessionMenuRef: sessionMenuWrapRef,
-              sessionMenuOpenValue: sessionMenuOpen,
-              onToggleSessionMenu: () => setSessionMenuOpen((v) => !v),
-              onPickSession: handlePickSession,
-              tagSummary: summarizeTagSelection(tagFilterSelection, safeTagConfig),
-              showPalette: showSolveCharts,
-              paletteValue: compareSelection?.primaryPaletteKey ?? primaryPaletteKey,
-              paletteLabel: primaryPaletteLabel,
-              onPaletteChange: (value) => {
-                setPrimaryPaletteKey(value);
-                setCompareSelection((prev) => (prev ? { ...prev, primaryPaletteKey: value } : prev));
-              },
-              scopeModalKey: "primary",
-            })}
-
-            {compareEnabled &&
-              renderScopeRow({
-                rowLabel: "B",
-                rowAccentColor: compareAccentColor,
-                eventValue: compareEvent,
-                onEventChange: (next) => {
-                  setCompareSessionMenuOpen(false);
-                  updateCompareSelection({
-                    event: next,
-                    session: "main",
-                    tags: makeEmptyTagSelection(),
-                  });
-                },
-                sessionValue: compareSessionId,
-                sessionDisplay: compareSessionDisplay,
-                sessionItems: compareSessionsForEvent,
-                sessionMenuRef: compareSessionMenuWrapRef,
-                sessionMenuOpenValue: compareSessionMenuOpen,
-                onToggleSessionMenu: () => setCompareSessionMenuOpen((v) => !v),
-                onPickSession: (sid) => {
-                  setCompareSessionMenuOpen(false);
-                  updateCompareSelection({ session: sid });
-                },
-                tagSummary: summarizeTagSelection(compareTagSelection, safeTagConfig),
-                paletteValue: compareSelection?.paletteKey || DEFAULT_COMPARE_PALETTE,
-                paletteLabel: comparePaletteLabel,
-                onPaletteChange: (value) => updateCompareSelection({ paletteKey: value }),
-                allowRemove: true,
-                onRemove: handleRemoveCompareRow,
-                loading: compareLoading,
-                scopeModalKey: "compare",
-              })}
-
-            {canCompare && !compareEnabled && (
-              <button type="button" className="statsAddCompareBtn" onClick={handleAddCompareRow}>
-                + Compare another stat group
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className={`statsTopMiddle ${statsViewMode === "standard" ? "statsTopMiddle--standard" : ""}`}>
-          <div className="statsTopMeta">
-            <span className="statsTopCount">
-              {showingCount}
-              {overallCount != null && showSolveCharts ? `/${overallCount}` : ""}
+            <span className="statsScopeSummaryChipValue statsScopeSummaryChipValue--event">
+              {eventLabel}
             </span>
-            <span className="statsTopCountLabel">
-              {statsViewMode === "time"
-                ? "in range"
-                : isAllEventsMode
-                  ? "cached solves"
-                  : isAllSessionsMode
-                    ? "event total"
-                    : "visible/raw"}
-            </span>
-          </div>
-
-          <div className={`statsDateControls ${dateEditorOpen ? "is-editing" : ""}`}>
-            {!dateEditorOpen ? (
-              <button
-                type="button"
-                className="statsDateDisplay"
-                onClick={() => setDateEditorOpen(true)}
-                title="Edit date range"
-              >
-                <span className="statsDateDisplayText">{dateFilterLabel}</span>
-                <span className="statsDateDisplayHint">Edit</span>
-              </button>
-            ) : (
-              <>
-                <input
-                  className="statsDateInput"
-                  type="date"
-                  value={dateFilterStart}
-                  max={dateFilterEnd || undefined}
-                  onChange={(e) => setDateFilterStart(e.target.value)}
-                  aria-label="Start date"
-                />
-                <span className="statsDateDash">to</span>
-                <input
-                  className="statsDateInput"
-                  type="date"
-                  value={dateFilterEnd}
-                  min={dateFilterStart || undefined}
-                  onChange={(e) => setDateFilterEnd(e.target.value)}
-                  aria-label="End date"
-                />
-                {(dateFilterStart || dateFilterEnd) && (
-                  <button
-                    type="button"
-                    className="statsMiniBtn"
-                    onClick={() => {
-                      setDateFilterStart("");
-                      setDateFilterEnd("");
-                    }}
-                  >
-                    Clear
-                  </button>
-                )}
-                <button type="button" className="statsMiniBtn" onClick={() => setDateEditorOpen(false)}>
-                  Done
-                </button>
-              </>
-            )}
-          </div>
-
-        </div>
-
-        <div className="statsTopRight">
-          <button onClick={handlePreviousPage} disabled={!canOlder}>
-            {loadingMore ? "Loading…" : "Older ▲"}
-          </button>
-
-          <button onClick={handleNextPage} disabled={!canNewer}>
-            Newer ▼
-          </button>
-
-          <button onClick={handleZoomIn} disabled={!canZoomIn}>
-            Zoom +
-          </button>
-
-          <button onClick={handleZoomOut} disabled={!canZoomOut}>
-            Zoom -
           </button>
 
           <button
-            onClick={handleDecreaseSolveCount}
-            disabled={!canDecreaseSolveCount}
-            className="statsTopStepBtn"
+            type="button"
+            className="statsScopeSummaryChip"
+            onClick={(e) => {
+              e.stopPropagation();
+              openScopeModal(scopeModalKey, "session");
+            }}
           >
-            -1
+            <span className="statsScopeSummaryChipValue">
+              {sessionValue === ALL_SESSIONS ? "All Sessions" : sessionDisplay}
+            </span>
           </button>
 
           <button
-            onClick={handleIncreaseSolveCount}
-            disabled={!canIncreaseSolveCount}
-            className="statsTopStepBtn"
+            type="button"
+            className="statsScopeSummaryChip"
+            onClick={(e) => {
+              e.stopPropagation();
+              openScopeModal(scopeModalKey, "tags");
+            }}
           >
-            +1
+            <span className="statsScopeSummaryChipValue">{tagSummary}</span>
           </button>
 
-          <button onClick={handleShowAll} disabled={!canShowAll}>
-            {loadingAllSolves ? "Loading…" : showAllActive ? "All Loaded" : "Show All"}
+          <button
+            type="button"
+            className="statsScopeSummaryChip"
+            onClick={(e) => {
+              e.stopPropagation();
+              openScopeModal(scopeModalKey, "date");
+            }}
+          >
+            <span className="statsScopeSummaryChipValue">{dateFilterLabel}</span>
           </button>
+        </div>
+
+        <div className="statsScopeRowActions">
+          {renderViewportControls(scopeModalKey)}
         </div>
       </div>
+    );
+  };
 
-      {headerStatusText ? <div className="statsStatusLine">{headerStatusText}</div> : null}
+  const useSharedCompareRail = compareEnabled && statsViewMode === "standard";
 
-      {renderTagScopeModal({
+  return (
+    <div
+      className="Page statsPageRoot"
+      style={{
+        "--stats-profile-accent": profileChartStyle?.primary || "#2EC4B6",
+        "--stats-profile-accent-soft": `${profileChartStyle?.primary || "#2EC4B6"}22`,
+        "--stats-profile-accent-strong": `${profileChartStyle?.primary || "#2EC4B6"}7a`,
+      }}
+    >
+      <div className={`statsTopBar ${statsViewMode === "standard" ? "statsTopBar--standard" : ""}`}>
+        <div className={`statsTopLeft ${statsViewMode === "standard" ? "statsTopLeft--standard" : ""}`}>
+          <div className="statsTopIdentity">
+            <NameTag
+              isSignedIn={!!user}
+              user={user}
+              to="/profile"
+            />
+
+            <div className="statsViewToggle" role="group" aria-label="Stats view">
+              <button
+                type="button"
+                className={`statsToggleBtn ${statsViewMode === "standard" ? "is-active" : ""}`}
+                onClick={() => handleSetViewMode("standard")}
+              >
+                Index
+              </button>
+              <span className="statsViewToggleDivider" aria-hidden="true">|</span>
+              <button
+                type="button"
+                className={`statsToggleBtn ${statsViewMode === "time" ? "is-active" : ""}`}
+                onClick={() => handleSetViewMode("time")}
+              >
+                Time
+              </button>
+            </div>
+          </div>
+
+          <div className={`statsCompareShell ${useSharedCompareRail ? "statsCompareShell--linked" : ""}`}>
+            <div
+              className={`statsCompareControls ${statsViewMode === "standard" ? "statsCompareControls--standard" : ""}`}
+              aria-label="Stats settings"
+            >
+              {renderScopeRow({
+                rowLabel: compareEnabled ? "A" : "Scope",
+                rowAccentColor: primaryAccentColor,
+                eventValue: statsEvent,
+                sessionValue: statsSession,
+                sessionDisplay: selectedSessionDisplay,
+                tagSummary: summarizeTagSelection(tagFilterSelection, safeTagConfig),
+                scopeModalKey: "primary",
+              })}
+
+              {compareEnabled &&
+                renderScopeRow({
+                  rowLabel: "B",
+                  rowAccentColor: compareAccentColor,
+                  eventValue: compareEvent,
+                  sessionValue: compareSessionId,
+                  sessionDisplay: compareSessionDisplay,
+                  tagSummary: summarizeTagSelection(compareTagSelection, safeTagConfig),
+                  loading: compareLoading,
+                  scopeModalKey: "compare",
+                })}
+
+              {canCompare && !compareEnabled && (
+                <div className="statsAddCompareRow">
+                  <button
+                    type="button"
+                    className="statsAddCompareBtn"
+                    onClick={handleAddCompareRow}
+                    aria-label="Add another stat group"
+                    title="Add another stat group"
+                  >
+                    +
+                  </button>
+                  <span className="statsAddCompareHint">Add stat group</span>
+                </div>
+              )}
+            </div>
+
+            {useSharedCompareRail ? (
+              <div className="statsCompareSharedRail" aria-label="Shared comparison controls">
+                <button
+                  type="button"
+                  className={`statsCompareLinkBtn ${linkStatsControls ? "is-active" : ""}`}
+                  onClick={() => setLinkStatsControls((prev) => !prev)}
+                  aria-pressed={linkStatsControls}
+                  title={linkStatsControls ? "Unlink stat row controls" : "Link stat row controls"}
+                >
+                  <img src={PtsLinkStatsIcon} alt="" className="statsCompareLinkIcon" />
+                </button>
+                <div className="statsCompareSharedRemove">
+                  <button
+                    type="button"
+                    className="statsMiniBtn statsCompareRemoveBtn statsCompareRemoveBtn--outside"
+                    onClick={handleRemoveCompareRow}
+                    aria-label="Remove stat group B"
+                    title="Remove stat group B"
+                  >
+                    x
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+      </div>
+
+            {renderTagScopeModal({
         isOpen: scopeModalState === "primary",
-        title: "Scope A",
+        title: compareEnabled ? "Scope A" : "Scope",
         subtitle: `${eventSelectLabel} · ${selectedSessionDisplay}`,
+        scopeKey: "primary",
+        eventValue: statsEvent,
+        onEventChange: (next) =>
+          handleEventChange({
+            target: { value: next },
+          }),
+        eventItems: eventOptions,
+        sessionValue: statsSession,
+        sessionItems: sessionsForEvent,
+        onPickSession: handlePickSession,
         tagSelection: tagFilterSelection,
         onTagSelectionChange: (next) => setTagFilterSelection(sanitizeTagSelection(next)),
         discoveredOptions: discoveredTagOptions,
@@ -3757,18 +4950,35 @@ function Stats({
         onPaletteChange: showSolveCharts
           ? (value) => {
               setPrimaryPaletteKey(value);
-              setCompareSelection((prev) => (prev ? { ...prev, primaryPaletteKey: value } : prev));
+              setCompareSelection((prev) =>
+                prev ? { ...prev, primaryPaletteKey: value } : prev
+              );
             }
           : null,
         accentColor: primaryAccentColor,
+        dateLabel: formatShortDateRangeLabel(dateFilterStart, dateFilterEnd, dateFilterLabel),
       })}
 
-      {renderTagScopeModal({
+            {renderTagScopeModal({
         isOpen: scopeModalState === "compare" && compareEnabled,
         title: "Scope B",
         subtitle: `${compareEventLabel} · ${compareSessionDisplay}`,
+        scopeKey: "compare",
+        eventValue: compareEvent,
+        onEventChange: (next) => {
+          updateCompareSelection({
+            event: next,
+            session: "main",
+            tags: makeEmptyTagSelection(),
+          });
+        },
+        eventItems: eventOptions.filter((item) => item !== ALL_EVENTS),
+        sessionValue: compareSessionId,
+        sessionItems: compareSessionsForEvent,
+        onPickSession: (sid) => updateCompareSelection({ session: sid }),
         tagSelection: compareTagSelection,
-        onTagSelectionChange: (next) => updateCompareSelection({ tags: sanitizeTagSelection(next) }),
+        onTagSelectionChange: (next) =>
+          updateCompareSelection({ tags: sanitizeTagSelection(next) }),
         discoveredOptions: compareDiscoveredTagOptions,
         paletteValue: compareSelection?.paletteKey || DEFAULT_COMPARE_PALETTE,
         paletteLabel: comparePaletteLabel,
@@ -3776,16 +4986,11 @@ function Stats({
           ? (value) => updateCompareSelection({ paletteKey: value })
           : null,
         accentColor: compareAccentColor,
+        dateLabel: formatShortDateRangeLabel(dateFilterStart, dateFilterEnd, dateFilterLabel),
       })}
 
       <div className="stats-page">
-        <div className={`stats-grid stats-grid--figma ${(loadingInitial || loadingTimeScope) ? "stats-grid--loading" : ""}`}>
-          {(loadingInitial || loadingTimeScope) && (
-            <div className="statsLoadingOverlay" aria-label="Loading stats">
-              <DbStatusIndicator status={{ phase: "loading", tick: Number(loadingInitial) + Number(loadingTimeScope) }} />
-            </div>
-          )}
-
+        <div className="stats-grid stats-grid--figma">
           <div
             className={`stats-item stats-item--header stats-item--minh stats-item--headerSplit${
               isAllEventsMode ? " stats-item--headerSplitSingle" : ""
@@ -3793,9 +4998,13 @@ function Stats({
           >
             {!compareEnabled ? (
               isAllEventsMode ? (
-                <div className="statsSummaryPanel statsCardShell" {...bindCardFocus(cardDefinitions[0]?.id)}>
+                <div
+                  className={`statsSummaryPanel statsCardShell ${primaryOverallSummaryLoading ? "is-loading" : ""}`}
+                  aria-busy={primaryOverallSummaryLoading}
+                  {...bindCardFocus(cardDefinitions[0]?.id)}
+                >
                   <StatsSummary
-                    solves={visiblePageFilteredRawSolves}
+                    solves={summaryCurrentSolves}
                     overallSolves={allLoadedFilteredRawSolves}
                     overallStats={effectiveOverallStats}
                     allEventsBreakdown={statsViewMode === "time" ? null : isAllEventsMode ? allEventsBreakdown : null}
@@ -3809,16 +5018,18 @@ function Stats({
                     viewMode={statsViewMode}
                     selectedDay={selectedTimeDay}
                     onStatSelect={handleSummaryStatSelect}
+                    loading={primaryOverallSummaryLoading}
                   />
                 </div>
               ) : (
                 <>
                   <div
-                    className="statsSummaryPanel statsCardShell"
+                    className={`statsSummaryPanel statsCardShell ${primarySummaryLoading ? "is-loading" : ""}`}
+                    aria-busy={primarySummaryLoading}
                     {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-current")?.id)}
                   >
                     <StatsSummaryCurrent
-                      solves={visiblePageFilteredRawSolves}
+                      solves={summaryCurrentSolves}
                       overallStats={effectiveOverallStats}
                       allEventsBreakdown={null}
                       mode={summaryMode}
@@ -3827,14 +5038,16 @@ function Stats({
                       viewMode={statsViewMode}
                       selectedDay={selectedTimeDay}
                       onStatSelect={handleSummaryStatSelect}
+                      loading={primarySummaryLoading}
                     />
                   </div>
                   <div
-                    className="statsSummaryPanel statsCardShell"
+                    className={`statsSummaryPanel statsCardShell ${primaryOverallSummaryLoading ? "is-loading" : ""}`}
+                    aria-busy={primaryOverallSummaryLoading}
                     {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-overall")?.id)}
                   >
                     <StatsSummaryOverall
-                      solves={visiblePageFilteredRawSolves}
+                      solves={summaryCurrentSolves}
                       overallSolves={allLoadedFilteredRawSolves}
                       overallStats={effectiveOverallStats}
                       allowOverallDerived={allowOverallDerivedMetrics}
@@ -3845,6 +5058,7 @@ function Stats({
                       loadedSolveCount={loadedSolveCountForSummary}
                       onStatSelect={handleSummaryStatSelect}
                       profileColor={user?.Color || user?.color || "#50B6FF"}
+                      loading={primaryOverallSummaryLoading}
                     />
                   </div>
                 </>
@@ -3863,11 +5077,12 @@ function Stats({
                   </div>
                   <div className="statsSummaryRowPanels">
                     <div
-                      className="statsSummaryPanel statsCardShell"
+                      className={`statsSummaryPanel statsCardShell ${primarySummaryLoading ? "is-loading" : ""}`}
+                      aria-busy={primarySummaryLoading}
                       {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-compare-primary-current")?.id)}
                     >
                       <StatsSummaryCurrent
-                        solves={visiblePageFilteredRawSolves}
+                        solves={summaryCurrentSolves}
                         overallStats={effectiveOverallStats}
                         allEventsBreakdown={null}
                         mode={summaryMode}
@@ -3876,14 +5091,16 @@ function Stats({
                         viewMode={statsViewMode}
                         selectedDay={selectedTimeDay}
                         onStatSelect={handleSummaryStatSelect}
+                        loading={primarySummaryLoading}
                       />
                     </div>
                     <div
-                      className="statsSummaryPanel statsCardShell"
+                      className={`statsSummaryPanel statsCardShell ${primaryOverallSummaryLoading ? "is-loading" : ""}`}
+                      aria-busy={primaryOverallSummaryLoading}
                       {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-compare-primary-overall")?.id)}
                     >
                       <StatsSummaryOverall
-                        solves={visiblePageFilteredRawSolves}
+                        solves={summaryCurrentSolves}
                         overallSolves={allLoadedFilteredRawSolves}
                         overallStats={effectiveOverallStats}
                         allowOverallDerived={allowOverallDerivedMetrics}
@@ -3894,6 +5111,7 @@ function Stats({
                         loadedSolveCount={loadedSolveCountForSummary}
                         onStatSelect={handleSummaryStatSelect}
                         profileColor={user?.Color || user?.color || "#50B6FF"}
+                        loading={primaryOverallSummaryLoading}
                       />
                     </div>
                   </div>
@@ -3912,7 +5130,8 @@ function Stats({
                     </div>
                     <div className="statsSummaryRowPanels">
                       <div
-                        className="statsSummaryPanel statsCardShell"
+                        className={`statsSummaryPanel statsCardShell ${compareSummaryLoading ? "is-loading" : ""}`}
+                        aria-busy={compareSummaryLoading}
                         {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-compare-secondary-current")?.id)}
                       >
                         <StatsSummaryCurrent
@@ -3925,25 +5144,28 @@ function Stats({
                           viewMode="standard"
                           selectedDay=""
                           onStatSelect={null}
+                          loading={compareSummaryLoading}
                         />
                       </div>
                       <div
-                        className="statsSummaryPanel statsCardShell"
+                        className={`statsSummaryPanel statsCardShell ${compareSummaryLoading ? "is-loading" : ""}`}
+                        aria-busy={compareSummaryLoading}
                         {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-compare-secondary-overall")?.id)}
                       >
-                      <StatsSummaryOverall
-                        solves={compareVisiblePageFilteredRawSolves}
-                        overallSolves={compareFilteredRawSolves}
-                        overallStats={null}
+                        <StatsSummaryOverall
+                          solves={compareVisiblePageFilteredRawSolves}
+                          overallSolves={compareFilteredRawSolves}
+                          overallStats={null}
                           allowOverallDerived={true}
                           mode="session"
                           selectedEvent={compareEventLabel}
                           selectedSession={compareSessionDisplay}
-                        selectedTagLabel={compareSelectedTagSummaryLabel}
-                        loadedSolveCount={compareFilteredRawSolves.length}
-                        onStatSelect={null}
-                        profileColor={compareStyle?.primary || "#7c8cff"}
-                      />
+                          selectedTagLabel={compareSelectedTagSummaryLabel}
+                          loadedSolveCount={compareFilteredRawSolves.length}
+                          onStatSelect={null}
+                          profileColor={compareStyle?.primary || "#7c8cff"}
+                          loading={compareSummaryLoading}
+                        />
                       </div>
                     </div>
                   </div>
@@ -3955,7 +5177,8 @@ function Stats({
           {showSolveCharts && (
             <>
               <div
-                className="stats-item stats-item--line stats-item--minh statsCardShell"
+                className={`stats-item stats-item--line stats-item--minh statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
+                aria-busy={chartCardsLoading}
                 {...bindCardFocus(cardDefinitions.find((item) => item.key === "line")?.id)}
               >
                 <LineChart
@@ -3992,7 +5215,8 @@ function Stats({
               </div>
 
               <div
-                className="stats-item stats-item--percent stats-item--minh statsCardShell"
+                className={`stats-item stats-item--percent stats-item--minh statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
+                aria-busy={chartCardsLoading}
                 {...bindCardFocus(cardDefinitions.find((item) => item.key === "percent")?.id)}
               >
                 {showEventBreakdownCard ? (
@@ -4020,7 +5244,8 @@ function Stats({
               </div>
 
               <div
-                className="stats-item stats-item--bar stats-item--minh statsCardShell"
+                className={`stats-item stats-item--bar stats-item--minh statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
+                aria-busy={chartCardsLoading}
                 {...bindCardFocus(cardDefinitions.find((item) => item.key === "bar")?.id)}
               >
                 <BarChart
@@ -4043,7 +5268,8 @@ function Stats({
               </div>
 
               <div
-                className="stats-item stats-item--table statsCardShell"
+                className={`stats-item stats-item--table statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
+                aria-busy={chartCardsLoading}
                 {...bindCardFocus(cardDefinitions.find((item) => item.key === "table")?.id)}
               >
                 {compareEnabled && (
@@ -4095,6 +5321,7 @@ function Stats({
         <Detail
           solve={selectedSolve}
           userID={user?.UserID}
+          profileColor={user?.Color || user?.color || "#2EC4B6"}
           onClose={() => setSelectedSolve(null)}
           deleteTime={() => {
             const solveRef = selectedSolve?.solveRef || null;
@@ -4102,6 +5329,7 @@ function Stats({
           }}
           addPost={addPost}
           setSessions={setSessions}
+          sessionsList={sessionsList}
         />
       )}
 

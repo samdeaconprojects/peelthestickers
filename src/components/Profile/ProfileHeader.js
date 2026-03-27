@@ -1,81 +1,26 @@
 import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import "./Profile.css";
-import EventSelectorDetail from "../Detail/EventSelectorDetail";
-import { formatTime } from "../TimeList/TimeUtils";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 
-function getEventOverallStats(sessionStats, event) {
-  const map = sessionStats?.[event];
-  if (!map || typeof map !== "object") return null;
+function getFavoriteEvent(sessionStats) {
+  if (!sessionStats || typeof sessionStats !== "object") return null;
 
-  let solveCountTotal = 0;
-  let solveCountIncluded = 0;
-  let dnfCount = 0;
-  let plus2Count = 0;
-  let bestSingleMs = null;
-  let bestAo5Ms = null;
-  let bestAo12Ms = null;
-  let sumFinalTimeMs = 0;
-  let lastSolveAt = null;
+  let best = null;
 
-  for (const stats of Object.values(map)) {
-    if (!stats || typeof stats !== "object") continue;
+  Object.entries(sessionStats).forEach(([event, eventMap]) => {
+    if (!eventMap || typeof eventMap !== "object") return;
+    let total = 0;
+    Object.values(eventMap).forEach((stats) => {
+      total += Number(stats?.SolveCountTotal || 0);
+    });
 
-    solveCountTotal += Number(stats.SolveCountTotal || 0);
-    solveCountIncluded += Number(stats.SolveCountIncluded || 0);
-    dnfCount += Number(stats.DNFCount || 0);
-    plus2Count += Number(stats.Plus2Count || 0);
-    sumFinalTimeMs += Number(stats.SumFinalTimeMs || 0);
-
-    const single = stats.BestSingleMs;
-    if (typeof single === "number" && isFinite(single)) {
-      if (bestSingleMs == null || single < bestSingleMs) bestSingleMs = single;
+    if (!best || total > best.total || (total === best.total && String(event).localeCompare(String(best.event)) < 0)) {
+      best = { event, total };
     }
+  });
 
-    const ao5 = stats.BestAo5Ms;
-    if (typeof ao5 === "number" && isFinite(ao5)) {
-      if (bestAo5Ms == null || ao5 < bestAo5Ms) bestAo5Ms = ao5;
-    }
-
-    const ao12 = stats.BestAo12Ms;
-    if (typeof ao12 === "number" && isFinite(ao12)) {
-      if (bestAo12Ms == null || ao12 < bestAo12Ms) bestAo12Ms = ao12;
-    }
-
-    const last = stats.LastSolveAt;
-    if (last && (!lastSolveAt || String(last) > String(lastSolveAt))) {
-      lastSolveAt = last;
-    }
-  }
-
-  const meanMs =
-    solveCountIncluded > 0 ? Math.round(sumFinalTimeMs / solveCountIncluded) : null;
-
-  return {
-    SolveCountTotal: solveCountTotal,
-    SolveCountIncluded: solveCountIncluded,
-    DNFCount: dnfCount,
-    Plus2Count: plus2Count,
-    BestSingleMs: bestSingleMs,
-    BestAo5Ms: bestAo5Ms,
-    BestAo12Ms: bestAo12Ms,
-    MeanMs: meanMs,
-    LastSolveAt: lastSolveAt,
-  };
-}
-
-function displayTime(value) {
-  if (value == null || value === "N/A") return "—";
-  if (typeof value === "number" && isFinite(value)) return formatTime(value);
-  return String(value);
-}
-
-function formatDateText(value) {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (!Number.isFinite(d.getTime())) return "—";
-  return d.toLocaleDateString();
+  return best;
 }
 
 export default function ProfileHeader({ user, sessionStats, isOwn = false, onEditStats }) {
@@ -90,15 +35,7 @@ export default function ProfileHeader({ user, sessionStats, isOwn = false, onEdi
     Friends = [],
   } = user;
 
-  const [selectedEvents, setSelectedEvents] = useState([ProfileEvent || "333"]);
-  const [showEventSelector, setShowEventSelector] = useState(false);
   const [openWidget, setOpenWidget] = useState(null);
-
-  const handleCloseSelector = () => setShowEventSelector(false);
-  const handleSaveSelectedEvents = (ev) => {
-    setSelectedEvents(ev);
-    setShowEventSelector(false);
-  };
 
   const cubeTransforms = {
     "222": "translate(15px, 18px) scale(0.7)",
@@ -115,19 +52,6 @@ export default function ProfileHeader({ user, sessionStats, isOwn = false, onEdi
 
   const joinedDate = DateFounded ? new Date(DateFounded).toLocaleDateString() : "—";
 
-  const selectedEventStats = useMemo(() => {
-    return selectedEvents.map((event) => {
-      return {
-        event,
-        stats: getEventOverallStats(sessionStats, event),
-      };
-    });
-  }, [selectedEvents, sessionStats]);
-
-  const profileEventOverall = useMemo(() => {
-    return getEventOverallStats(sessionStats, ProfileEvent);
-  }, [sessionStats, ProfileEvent]);
-
   const totalSolveCountAcrossEvents = useMemo(() => {
     if (sessionStats && typeof sessionStats === "object") {
       let total = 0;
@@ -143,7 +67,41 @@ export default function ProfileHeader({ user, sessionStats, isOwn = false, onEdi
     return 0;
   }, [sessionStats]);
 
+  const favoriteEvent = useMemo(() => getFavoriteEvent(sessionStats), [sessionStats]);
   const widgets = [
+    {
+      key: "solves",
+      title: "Total Solves",
+      value: totalSolveCountAcrossEvents,
+      detail: (
+        <div>
+          <h4>Total Solves</h4>
+          <p>{totalSolveCountAcrossEvents}</p>
+        </div>
+      ),
+    },
+    {
+      key: "favorite-event",
+      title: "Most Solved",
+      value: favoriteEvent ? `${favoriteEvent.event} · ${favoriteEvent.total}` : "—",
+      detail: (
+        <div>
+          <h4>Most Solved Event</h4>
+          <p>{favoriteEvent?.event || "—"}</p>
+          <p>Solves: {favoriteEvent?.total ?? "—"}</p>
+        </div>
+      ),
+    },
+    {
+      key: "wca",
+      title: "WCA ID",
+      value: WCAID || "—",
+      detail: (
+        <div>
+          <strong>{WCAID || "No WCA ID yet"}</strong>
+        </div>
+      ),
+    },
     {
       key: "friends",
       title: "Friends",
@@ -160,76 +118,6 @@ export default function ProfileHeader({ user, sessionStats, isOwn = false, onEdi
         <div>No friends yet.</div>
       ),
     },
-
-    {
-      key: "solves",
-      title: "Total Solves",
-      value: totalSolveCountAcrossEvents,
-      detail: (
-        <div>
-          <h4>Total Solves</h4>
-          <p>{totalSolveCountAcrossEvents}</p>
-        </div>
-      ),
-    },
-
-    ...selectedEventStats.flatMap(({ event, stats }) => [
-      {
-        key: `${event}-single`,
-        title: `${event} PB`,
-        value: displayTime(stats?.BestSingleMs),
-        detail: (
-          <div>
-            <h4>{event} Best Single</h4>
-            <p>{displayTime(stats?.BestSingleMs)}</p>
-            <p>Solves: {stats?.SolveCountTotal ?? "—"}</p>
-            <p>Mean: {displayTime(stats?.MeanMs)}</p>
-          </div>
-        ),
-      },
-      {
-        key: `${event}-ao5`,
-        title: `${event} Ao5`,
-        value: displayTime(stats?.BestAo5Ms),
-        detail: (
-          <div>
-            <h4>{event} Best Ao5</h4>
-            <p>{displayTime(stats?.BestAo5Ms)}</p>
-            <p>Best Ao12: {displayTime(stats?.BestAo12Ms)}</p>
-            <p>DNFs: {stats?.DNFCount ?? "—"}</p>
-          </div>
-        ),
-      },
-    ]),
-
-    {
-      key: "profile-event",
-      title: `${ProfileEvent} Count`,
-      value: profileEventOverall?.SolveCountTotal ?? "—",
-      detail: (
-        <div>
-          <h4>{ProfileEvent} Overall</h4>
-          <p>Solves: {profileEventOverall?.SolveCountTotal ?? "—"}</p>
-          <p>Counted: {profileEventOverall?.SolveCountIncluded ?? "—"}</p>
-          <p>DNFs: {profileEventOverall?.DNFCount ?? "—"}</p>
-          <p>+2s: {profileEventOverall?.Plus2Count ?? "—"}</p>
-          <p>Mean: {displayTime(profileEventOverall?.MeanMs)}</p>
-          <p>Last solve: {formatDateText(profileEventOverall?.LastSolveAt)}</p>
-        </div>
-      ),
-    },
-
-    {
-      key: "wca",
-      title: "WCA ID",
-      value: WCAID || "—",
-      detail: (
-        <div>
-          Your WCA ID is <strong>{WCAID || "—"}</strong>
-        </div>
-      ),
-    },
-
     {
       key: "joined",
       title: "Joined",
@@ -264,30 +152,22 @@ export default function ProfileHeader({ user, sessionStats, isOwn = false, onEdi
         </div>
 
         <div className="profileNameAndUsername">
-          <div className="profileName">{Name || "Guest"}</div>
-          <div className="profileUsername">@{UserID || "guest"}</div>
-
-          <div className="profileHeaderActions">
-            <button
-              type="button"
-              className="profileHeaderButton"
-              onClick={() => setShowEventSelector(true)}
-              style={{ borderColor: Color || "#2EC4B6" }}
-            >
-              Select Events
-            </button>
-
+          <div className="profileIdentityRow">
+            <div className="profileName">{Name || "Guest"}</div>
             {isOwn && typeof onEditStats === "function" && (
-              <button
-                type="button"
-                className="profileHeaderButton"
-                onClick={onEditStats}
-                style={{ borderColor: Color || "#2EC4B6" }}
-              >
-                Edit Visible Stats
-              </button>
+              <div className="profileHeaderActions">
+                <button
+                  type="button"
+                  className="profileHeaderButton"
+                  onClick={onEditStats}
+                  style={{ borderColor: Color || "#2EC4B6" }}
+                >
+                  Customize Stats
+                </button>
+              </div>
             )}
           </div>
+          <div className="profileUsername">@{UserID || "guest"}</div>
         </div>
       </div>
 
@@ -312,15 +192,6 @@ export default function ProfileHeader({ user, sessionStats, isOwn = false, onEdi
             {widgets.find((w) => w.key === openWidget)?.detail}
           </div>
         </>
-      )}
-
-      {showEventSelector && (
-        <EventSelectorDetail
-          events={["222", "333", "444", "555", "666", "777", "333OH", "333BLD", "SKEWB", "PYRAMINX", "MEGAMINX", "CLOCK"]}
-          selectedEvents={selectedEvents}
-          onClose={handleCloseSelector}
-          onSave={handleSaveSelectedEvents}
-        />
       )}
     </div>
   );

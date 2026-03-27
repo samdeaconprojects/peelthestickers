@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { formatTime } from "../TimeList/TimeUtils";
 
 function getSolveMs(solve) {
   if (!solve) return null;
@@ -49,6 +50,16 @@ function resolveStandardHeatColor(ratio) {
   return interpolateHexColor("#ffa500", "#ff0000", (safeRatio - 0.8) / 0.2);
 }
 
+function formatBucketAxisLabel(value) {
+  if (value === "DNF") return "DNF";
+
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds)) return String(value);
+  if (seconds >= 60) return formatTime(seconds * 1000).replace(/\.00$/, "");
+
+  return String(seconds);
+}
+
 function buildHistogramSeries(solves, style = null, fallbackColor = "#2EC4B6") {
   const times = (Array.isArray(solves) ? solves : []).map(getSolveMs);
   const numericTimes = times.filter((value) => typeof value === "number" && isFinite(value));
@@ -85,7 +96,7 @@ function buildHistogramSeries(solves, style = null, fallbackColor = "#2EC4B6") {
           : (Number(key) - minTimeSec) / span;
     return {
       key,
-      label: key === "DNF" ? "DNF" : String(key),
+      label: formatBucketAxisLabel(key),
       count: counts.get(key) || 0,
       color:
         key === "DNF"
@@ -181,7 +192,7 @@ function BarChart({
 
     const groups = orderedKeys.map((key) => ({
       key,
-      label: key === "DNF" ? "DNF" : String(key),
+      label: formatBucketAxisLabel(key),
       bars: seriesList.map((series, index) => {
         const bucket = series.buckets.find((item) => item.key === key);
         return {

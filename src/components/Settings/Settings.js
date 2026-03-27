@@ -1,7 +1,7 @@
-// src/components/Settings/Settings.js
 import React, { useEffect, useMemo, useState } from "react";
 import "./Settings.css";
 import { useSettings } from "../../contexts/SettingsContext";
+import { useDbStatus } from "../../contexts/DbStatusContext";
 import { getUser } from "../../services/getUser";
 import { updateUser } from "../../services/updateUser";
 import { getSessions } from "../../services/getSessions";
@@ -16,8 +16,13 @@ import {
   HOME_STAT_LINE_GROUP_OPTIONS,
   HOME_STAT_SLOT_META,
   HOME_STAT_SLOT_ORDER,
+  HOME_STAT_SUMMARY_SURFACE_OPTIONS,
   normalizeHomeStatsSlots,
 } from "../HomeStats/homeStatsConfig";
+import {
+  getTagColorMapForEvent,
+  normalizeTagColorCatalog,
+} from "../TagBar/tagUtils";
 
 const WCA_IMPORT_EVENT_OPTIONS = [
   { code: "222", label: "2x2" },
@@ -42,6 +47,16 @@ const SMART_CUBE_PROVIDER_OPTIONS = [
   { value: "gan-gen2-compatible", label: "GAN Gen2 Compatible" },
   { value: "moyu-wcu", label: "MoYu WCU" },
   { value: "auto", label: "Auto (future)" },
+];
+
+const SCRAMBLE_MODE_OPTIONS = [
+  { value: "random-state", label: "Random State (default)" },
+  { value: "legacy", label: "Legacy" },
+];
+
+const NAVIGATION_ARROW_STYLE_OPTIONS = [
+  { value: "scramble", label: "Scramble arrows" },
+  { value: "classic", label: "Classic triangles" },
 ];
 
 const DEFAULT_TAG_CONFIG = {
@@ -87,11 +102,117 @@ const TAG_KEY_OPTIONS = [
   { value: "Custom5", label: "Custom 5" },
 ];
 
+const CUBE_MODEL_GROUPS = [
+  { key: "222", label: "2x2", aliases: ["222"], color: "#ff8c69" },
+  {
+    key: "333",
+    label: "3x3 Family",
+    aliases: ["333", "333OH", "333BLD", "333FM", "333FT", "MBLD", "333MBLD"],
+    color: "#2EC4B6",
+  },
+  { key: "444", label: "4x4 Family", aliases: ["444", "444BLD"], color: "#50B6FF" },
+  { key: "555", label: "5x5 Family", aliases: ["555", "555BLD"], color: "#f2c94c" },
+  { key: "666", label: "6x6", aliases: ["666"], color: "#f2994a" },
+  { key: "777", label: "7x7", aliases: ["777"], color: "#c084fc" },
+  { key: "CLOCK", label: "Clock", aliases: ["CLOCK"], color: "#7c8cff" },
+  { key: "MEGAMINX", label: "Megaminx", aliases: ["MEGAMINX"], color: "#6ee7b7" },
+  { key: "PYRAMINX", label: "Pyraminx", aliases: ["PYRAMINX"], color: "#fb7185" },
+  { key: "SKEWB", label: "Skewb", aliases: ["SKEWB"], color: "#22d3ee" },
+  { key: "SQ1", label: "Square-1", aliases: ["SQ1"], color: "#a3e635" },
+  { key: "FMC", label: "Fewest Moves", aliases: ["FMC"], color: "#ffd166" },
+  { key: "OTHER", label: "Other / Shared", aliases: [], color: "#9ca3af" },
+];
+
 function cleanArrayInput(value) {
   return String(value || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function getCubeModelGroupOptions(tagConfig, groupKey) {
+  const byEvent = tagConfig?.Fixed?.CubeModel?.optionsByEvent || {};
+  return Array.isArray(byEvent?.[groupKey]) ? byEvent[groupKey] : [];
+}
+
+function CubeCollectionCardEditor({
+  title,
+  meta,
+  options = [],
+  tagColors = {},
+  onAddOption,
+  onRemoveOption,
+}) {
+  const [draft, setDraft] = useState("");
+
+  const handleAdd = () => {
+    const values = cleanArrayInput(draft);
+    if (!values.length) return;
+    values.forEach((value) => onAddOption?.(value));
+    setDraft("");
+  };
+
+  return (
+    <div className="settingsCubeCollectionCard">
+      <div className="settingsCubeCollectionTitleRow">
+        <div className="settingsCubeCollectionTitleBlock">
+          <div className="settingsCubeCollectionTitle">{title}</div>
+          <div className="settingsCubeCollectionMeta">{meta}</div>
+        </div>
+      </div>
+
+      <div className="settingsCubeCollectionPills">
+        {options.length ? (
+          options.map((option) => (
+            <button
+              key={`${title}-${option}`}
+              type="button"
+              className="settingsCubeCollectionPill"
+              style={
+                tagColors?.[option]
+                  ? {
+                      "--cube-model-pill-color": tagColors[option],
+                      "--cube-model-pill-bg": `${tagColors[option]}22`,
+                    }
+                  : undefined
+              }
+              onClick={() => onRemoveOption?.(option)}
+              title={`Remove ${option}`}
+            >
+              <span className="settingsCubeCollectionPillText">{option}</span>
+              <span className="settingsCubeCollectionPillRemove" aria-hidden="true">
+                x
+              </span>
+            </button>
+          ))
+        ) : (
+          <div className="settingsCubeCollectionEmpty">No models added yet</div>
+        )}
+      </div>
+
+      <div className="settingsCubeCollectionInputRow">
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleAdd();
+            }
+          }}
+          placeholder="Add model names"
+        />
+        <button
+          type="button"
+          className="settingsCubeCollectionAddBtn"
+          onClick={handleAdd}
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function normalizeTagConfig(input) {
@@ -104,6 +225,17 @@ function normalizeTagConfig(input) {
       CubeModel: {
         label: fixed?.CubeModel?.label || "Cube Model",
         options: Array.isArray(fixed?.CubeModel?.options) ? fixed.CubeModel.options : [],
+        optionsByEvent:
+          fixed?.CubeModel?.optionsByEvent && typeof fixed.CubeModel.optionsByEvent === "object"
+            ? Object.fromEntries(
+                CUBE_MODEL_GROUPS.map((group) => [
+                  group.key,
+                  Array.isArray(fixed.CubeModel.optionsByEvent?.[group.key])
+                    ? fixed.CubeModel.optionsByEvent[group.key]
+                    : [],
+                ])
+              )
+            : Object.fromEntries(CUBE_MODEL_GROUPS.map((group) => [group.key, []])),
       },
       CrossColor: {
         label: fixed?.CrossColor?.label || "Cross Color",
@@ -135,6 +267,50 @@ function normalizeTagConfig(input) {
   };
 }
 
+function mergeCubeModelCatalogIntoTagConfig(tagConfig, tagCatalog) {
+  const normalized = normalizeTagConfig(tagConfig);
+  const safeCatalog = tagCatalog && typeof tagCatalog === "object" ? tagCatalog : {};
+  const byEvent = safeCatalog.ByEvent && typeof safeCatalog.ByEvent === "object" ? safeCatalog.ByEvent : {};
+  const globalCubeModels = Array.isArray(safeCatalog?.Global?.CubeModel)
+    ? safeCatalog.Global.CubeModel.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+
+  const nextOptionsByEvent = Object.fromEntries(
+    CUBE_MODEL_GROUPS.map((group) => {
+      const scopedKeys = Array.from(new Set([group.key, ...(group.aliases || [])]));
+      const merged = Array.from(
+        new Set(
+          [
+            ...(normalized?.Fixed?.CubeModel?.optionsByEvent?.[group.key] || []),
+            ...(group.key === "OTHER" ? globalCubeModels : []),
+            ...scopedKeys.flatMap((eventKey) =>
+              Array.isArray(byEvent?.[eventKey]?.CubeModel)
+                ? byEvent[eventKey].CubeModel.map((value) => String(value || "").trim()).filter(Boolean)
+                : []
+            ),
+          ].filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b));
+
+      return [group.key, merged];
+    })
+  );
+
+  return {
+    ...normalized,
+    Fixed: {
+      ...normalized.Fixed,
+      CubeModel: {
+        ...normalized.Fixed.CubeModel,
+        options: Array.from(
+          new Set(CUBE_MODEL_GROUPS.flatMap((group) => nextOptionsByEvent[group.key] || []))
+        ).sort((a, b) => a.localeCompare(b)),
+        optionsByEvent: nextOptionsByEvent,
+      },
+    },
+  };
+}
+
 function normalizeSmartCubeProviderForUi(rawValue) {
   const raw = String(rawValue || "").trim().toLowerCase();
 
@@ -152,6 +328,16 @@ function normalizeSmartCubeProviderForUi(rawValue) {
   return "gan";
 }
 
+function normalizeScrambleModeForUi(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+  return raw === "legacy" ? "legacy" : "random-state";
+}
+
+function normalizeNavigationArrowStyleForUi(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+  return raw === "classic" ? "classic" : "scramble";
+}
+
 function Settings({
   userID,
   onClose,
@@ -163,6 +349,7 @@ function Settings({
   onSessionsRefresh,
 }) {
   const { settings, updateSettings, setAllSettings } = useSettings();
+  const { runDb } = useDbStatus();
   const [statusMessage, setStatusMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncingWca, setIsSyncingWca] = useState(false);
@@ -188,6 +375,7 @@ function Settings({
   });
 
   const [tagConfig, setTagConfig] = useState(DEFAULT_TAG_CONFIG);
+  const [tagColorCatalog, setTagColorCatalog] = useState({ Global: {}, ByEvent: {} });
 
   useEffect(() => {
     let cancelled = false;
@@ -204,6 +392,10 @@ function Settings({
             ...user.Settings,
             smartCubeProvider: normalizeSmartCubeProviderForUi(
               user.Settings.smartCubeProvider
+            ),
+            scrambleMode: normalizeScrambleModeForUi(user.Settings.scrambleMode),
+            navigationArrowStyle: normalizeNavigationArrowStyleForUi(
+              user.Settings.navigationArrowStyle
             ),
           };
           setAllSettings(normalizedSettings);
@@ -223,7 +415,8 @@ function Settings({
           WCAID: user?.WCAID || "",
         });
 
-        setTagConfig(normalizeTagConfig(user?.TagConfig));
+        setTagConfig(mergeCubeModelCatalogIntoTagConfig(user?.TagConfig, user?.TagCatalog));
+        setTagColorCatalog(normalizeTagColorCatalog(user?.TagColorCatalog));
       } catch (err) {
         console.error("Failed to fetch user profile:", err);
       }
@@ -267,6 +460,86 @@ function Settings({
     }));
   };
 
+  const addCubeModelToGroup = (groupKey, value) => {
+    const nextValue = String(value || "").trim();
+    if (!nextValue) return;
+
+    setTagConfig((prev) => {
+      const currentByGroup = Object.fromEntries(
+        CUBE_MODEL_GROUPS.map((group) => [
+          group.key,
+          Array.isArray(prev?.Fixed?.CubeModel?.optionsByEvent?.[group.key])
+            ? prev.Fixed.CubeModel.optionsByEvent[group.key]
+            : [],
+        ])
+      );
+
+      const nextGroupValues = Array.from(
+        new Set([...(currentByGroup[groupKey] || []), nextValue])
+      ).sort((a, b) => a.localeCompare(b));
+
+      return {
+        ...prev,
+        Fixed: {
+          ...prev.Fixed,
+          CubeModel: {
+            ...(prev.Fixed?.CubeModel || {}),
+            options: Array.from(
+              new Set(
+                CUBE_MODEL_GROUPS.flatMap((group) =>
+                  group.key === groupKey ? nextGroupValues : currentByGroup[group.key] || []
+                )
+              )
+            ).sort((a, b) => a.localeCompare(b)),
+            optionsByEvent: {
+              ...(prev.Fixed?.CubeModel?.optionsByEvent || {}),
+              [groupKey]: nextGroupValues,
+            },
+          },
+        },
+      };
+    });
+  };
+
+  const removeCubeModelFromGroup = (groupKey, value) => {
+    const target = String(value || "").trim();
+    if (!target) return;
+
+    setTagConfig((prev) => {
+      const currentByGroup = Object.fromEntries(
+        CUBE_MODEL_GROUPS.map((group) => [
+          group.key,
+          Array.isArray(prev?.Fixed?.CubeModel?.optionsByEvent?.[group.key])
+            ? prev.Fixed.CubeModel.optionsByEvent[group.key]
+            : [],
+        ])
+      );
+
+      const nextGroupValues = (currentByGroup[groupKey] || []).filter((item) => item !== target);
+
+      return {
+        ...prev,
+        Fixed: {
+          ...prev.Fixed,
+          CubeModel: {
+            ...(prev.Fixed?.CubeModel || {}),
+            options: Array.from(
+              new Set(
+                CUBE_MODEL_GROUPS.flatMap((group) =>
+                  group.key === groupKey ? nextGroupValues : currentByGroup[group.key] || []
+                )
+              )
+            ).sort((a, b) => a.localeCompare(b)),
+            optionsByEvent: {
+              ...(prev.Fixed?.CubeModel?.optionsByEvent || {}),
+              [groupKey]: nextGroupValues,
+            },
+          },
+        },
+      };
+    });
+  };
+
   const handleCustomSlotChange = (index, patch) => {
     setTagConfig((prev) => {
       const nextSlots = Array.isArray(prev.CustomSlots) ? [...prev.CustomSlots] : [];
@@ -298,11 +571,15 @@ function Settings({
     });
   };
 
-  const persistCurrentSettings = async () => {
+  const persistCurrentSettings = async (options = {}) => {
     const normalizedTagConfig = normalizeTagConfig(tagConfig);
     const normalizedSettingsToSave = {
       ...settings,
       smartCubeProvider: normalizeSmartCubeProviderForUi(settings.smartCubeProvider),
+      scrambleMode: normalizeScrambleModeForUi(settings.scrambleMode),
+      navigationArrowStyle: normalizeNavigationArrowStyleForUi(
+        settings.navigationArrowStyle
+      ),
     };
 
     const updates = {
@@ -311,7 +588,7 @@ function Settings({
       TagConfig: normalizedTagConfig,
     };
 
-    const fresh = await updateUser(userID, updates);
+    const fresh = await runDb("Saving settings", () => updateUser(userID, updates), options);
 
     setProfileData({
       Name: fresh?.Name || "",
@@ -330,11 +607,16 @@ function Settings({
         smartCubeProvider: normalizeSmartCubeProviderForUi(
           fresh.Settings.smartCubeProvider
         ),
+        scrambleMode: normalizeScrambleModeForUi(fresh.Settings.scrambleMode),
+        navigationArrowStyle: normalizeNavigationArrowStyleForUi(
+          fresh.Settings.navigationArrowStyle
+        ),
       };
       setAllSettings(normalizedFreshSettings);
     }
 
-    setTagConfig(normalizeTagConfig(fresh?.TagConfig));
+    setTagConfig(mergeCubeModelCatalogIntoTagConfig(fresh?.TagConfig, fresh?.TagCatalog));
+    setTagColorCatalog(normalizeTagColorCatalog(fresh?.TagColorCatalog));
     onProfileUpdate?.(fresh);
 
     return fresh;
@@ -364,6 +646,10 @@ function Settings({
     settings.smartCubeProvider || "gan"
   );
   const isGanCube = isSmartCube;
+  const scrambleMode = normalizeScrambleModeForUi(settings.scrambleMode);
+  const navigationArrowStyle = normalizeNavigationArrowStyleForUi(
+    settings.navigationArrowStyle
+  );
 
   const customSlots = useMemo(
     () => (Array.isArray(tagConfig?.CustomSlots) ? tagConfig.CustomSlots : []),
@@ -481,16 +767,18 @@ function Settings({
       setIsSyncingWca(true);
       setWcaSyncSummary("");
 
-      await persistCurrentSettings();
+      await persistCurrentSettings({ showStatus: false });
 
-      const result = await syncWcaImport(userID, {
-        wcaID: profileData.WCAID,
-        settings: {
-          ...settings,
-          wcaImportSolveSource: defaultWcaSolveSource,
-          wcaImportSessionByEvent: settings?.wcaImportSessionByEvent || {},
-        },
-      });
+      const result = await runDb("Syncing WCA import", () =>
+        syncWcaImport(userID, {
+          wcaID: profileData.WCAID,
+          settings: {
+            ...settings,
+            wcaImportSolveSource: defaultWcaSolveSource,
+            wcaImportSessionByEvent: settings?.wcaImportSessionByEvent || {},
+          },
+        })
+      );
 
       if (result?.user) {
         onProfileUpdate?.(result.user);
@@ -554,16 +842,22 @@ function Settings({
       setRecomputeMessage(`Recomputing ${scopeDescription}...`);
 
       if (recomputeScope === "session") {
-        await recomputeSessionStats(userID, recomputeEvent, recomputeSessionID);
+        await runDb("Recomputing stats", () =>
+          recomputeSessionStats(userID, recomputeEvent, recomputeSessionID)
+        );
       } else if (recomputeScope === "event") {
-        await recomputeEventStats(userID, recomputeEvent);
+        await runDb("Recomputing stats", () =>
+          recomputeEventStats(userID, recomputeEvent)
+        );
       } else {
-        await recomputeTagStats(userID, {
-          event: recomputeEvent,
-          sessionID: recomputeSessionID,
-          tagKey: recomputeTagKey,
-          tagValue: recomputeTagValue,
-        });
+        await runDb("Recomputing stats", () =>
+          recomputeTagStats(userID, {
+            event: recomputeEvent,
+            sessionID: recomputeSessionID,
+            tagKey: recomputeTagKey,
+            tagValue: recomputeTagValue,
+          })
+        );
       }
 
       setRecomputeMessage(`Recomputed ${scopeDescription}.`);
@@ -629,6 +923,49 @@ function Settings({
               <option value="GAN Bluetooth">GAN Timer</option>
               <option value="GAN Cube">Smart Cube</option>
             </select>
+          </div>
+
+          <div className="setting-item">
+            <label>Scramble Type:</label>
+            <select
+              value={scrambleMode}
+              onChange={(e) =>
+                updateSettings({
+                  scrambleMode: normalizeScrambleModeForUi(e.target.value),
+                })
+              }
+            >
+              {SCRAMBLE_MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="setting-item">
+            <label>Navigation Arrows:</label>
+            <select
+              value={navigationArrowStyle}
+              onChange={(e) =>
+                updateSettings({
+                  navigationArrowStyle: normalizeNavigationArrowStyleForUi(
+                    e.target.value
+                  ),
+                })
+              }
+            >
+              {NAVIGATION_ARROW_STYLE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="settingsHintText settingsHintText--tight">
+            Random State uses cubing.js for supported WCA events. Legacy uses your
+            previous scramble generator behavior.
           </div>
 
           {isSmartCube && (
@@ -705,6 +1042,20 @@ function Settings({
               value={settings.timeColorMode || "binary"}
               onChange={(e) => updateSettings({ timeColorMode: e.target.value })}
             >
+              <option value="binary">Binary (only best/worst)</option>
+              <option value="continuous">True spectrum (by time)</option>
+              <option value="bucket">Bucket spectrum (5 bands)</option>
+              <option value="index">Index spectrum (evenly distributed)</option>
+            </select>
+          </div>
+
+          <div className="setting-item">
+            <label>Shared Time Color Mode</label>
+            <select
+              value={settings.sharedTimeColorMode || "profile"}
+              onChange={(e) => updateSettings({ sharedTimeColorMode: e.target.value })}
+            >
+              <option value="profile">Profile color (default)</option>
               <option value="binary">Binary (only best/worst)</option>
               <option value="continuous">True spectrum (by time)</option>
               <option value="bucket">Bucket spectrum (5 bands)</option>
@@ -845,7 +1196,12 @@ function Settings({
                   <label>Chart Type</label>
                   <select
                     value={slot.chartType}
-                    onChange={(e) => updateHomeStatSlot(slotKey, { chartType: e.target.value })}
+                    onChange={(e) =>
+                      updateHomeStatSlot(slotKey, {
+                        chartType: e.target.value,
+                        ...(e.target.value === "summary" ? { summaryColorCustomized: false } : {}),
+                      })
+                    }
                   >
                     {HOME_STAT_CHART_TYPE_OPTIONS.map((option) => (
                       <option key={`${slotKey}-${option.value}`} value={option.value}>
@@ -859,7 +1215,12 @@ function Settings({
                   <label>Color Scheme</label>
                   <select
                     value={slot.colorScheme || "default"}
-                    onChange={(e) => updateHomeStatSlot(slotKey, { colorScheme: e.target.value })}
+                    onChange={(e) =>
+                      updateHomeStatSlot(slotKey, {
+                        colorScheme: e.target.value,
+                        ...(slot.chartType === "summary" ? { summaryColorCustomized: true } : {}),
+                      })
+                    }
                   >
                     {HOME_STAT_COLOR_SCHEME_OPTIONS.map((option) => (
                       <option key={`${slotKey}-color-${option.value}`} value={option.value}>
@@ -923,6 +1284,24 @@ function Settings({
                         })
                       }
                     />
+                  </div>
+                )}
+
+                {slot.chartType === "summary" && (
+                  <div className="setting-item">
+                    <label>Surface Style</label>
+                    <select
+                      value={slot.summarySurface || "flat"}
+                      onChange={(e) =>
+                        updateHomeStatSlot(slotKey, { summarySurface: e.target.value })
+                      }
+                    >
+                      {HOME_STAT_SUMMARY_SURFACE_OPTIONS.map((option) => (
+                        <option key={`${slotKey}-summary-surface-${option.value}`} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 )}
 
@@ -1117,16 +1496,31 @@ function Settings({
           {wcaSyncSummary ? <div className="settingsHintText">{wcaSyncSummary}</div> : null}
         </div>
 
+        <h2>Cube Collection</h2>
+        <div className="settings-container">
+          <div className="settingsHintText settingsHintText--sectionStart">
+            Add cube models by puzzle type. Families like `3x3`, `3x3 OH`, and `3x3 BLD` share the same model list.
+          </div>
+
+          <div className="settingsCubeCollectionGrid">
+            {CUBE_MODEL_GROUPS.map((group) => (
+              <CubeCollectionCardEditor
+                key={group.key}
+                title={group.label}
+                meta={
+                  group.aliases.length > 0 ? `Used by: ${group.aliases.join(", ")}` : "Shared list"
+                }
+                options={getCubeModelGroupOptions(tagConfig, group.key)}
+                tagColors={getTagColorMapForEvent(tagColorCatalog, group.key)?.CubeModel || {}}
+                onAddOption={(value) => addCubeModelToGroup(group.key, value)}
+                onRemoveOption={(value) => removeCubeModelFromGroup(group.key, value)}
+              />
+            ))}
+          </div>
+        </div>
+
         <h2>Tag Configuration</h2>
         <div className="settings-container">
-          <div className="setting-item">
-            <label>{tagConfig?.Fixed?.CubeModel?.label || "Cube Model"} Options:</label>
-            <input
-              value={(tagConfig?.Fixed?.CubeModel?.options || []).join(", ")}
-              onChange={(e) => handleFixedOptionsChange("CubeModel", e.target.value)}
-              placeholder="GAN 12, RS3M V5, WRM V9"
-            />
-          </div>
 
           <div className="setting-item">
             <label>{tagConfig?.Fixed?.CrossColor?.label || "Cross Color"} Options:</label>

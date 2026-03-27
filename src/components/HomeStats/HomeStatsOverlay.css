@@ -2,7 +2,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 0;
+  z-index: 4;
   overflow: hidden;
 }
 
@@ -19,6 +19,14 @@
   z-index: 8;
 }
 
+.homeStatsSlot--summary {
+  z-index: 7;
+}
+
+.homeStatsSlot--summary.is-hovered {
+  z-index: 9;
+}
+
 .homeStatsSlot--left {
   right: calc(50% + clamp(250px, 26vw, 440px));
   top: 455px;
@@ -29,10 +37,14 @@
   top: 455px;
 }
 
+.homeStatsSlot--summary.homeStatsSlot--left,
+.homeStatsSlot--summary.homeStatsSlot--right {
+}
+
 .homeStatsSlot--background {
   left: 50%;
   top: clamp(310px, 34vw, 380px);
-  transform: translate(calc(-50% - 36px), -50%);
+  transform: translate(calc(-50% - 86px), -50%);
   pointer-events: none;
   z-index: 0;
   width: min(var(--home-stat-max-width, 860px), calc(100vw - 120px));
@@ -65,12 +77,12 @@
 }
 
 .homeStatsCard.is-side-slot {
-  opacity: var(--home-stat-rest-opacity, 0.4);
+  opacity: var(--home-stat-rest-opacity, 0.58);
   transition: opacity 160ms ease;
 }
 
 .homeStatsCard.is-side-slot.is-hovered {
-  opacity: var(--home-stat-hover-opacity, 0.92);
+  opacity: var(--home-stat-hover-opacity, 1);
 }
 
 .homeStatsCard.is-background {
@@ -80,6 +92,29 @@
 
 .homeStatsCard--pie {
   overflow: visible;
+}
+
+.homeStatsCard--summary {
+  overflow: hidden;
+  border-radius: 10px;
+  border: 2px solid var(--home-summary-border, rgba(200, 200, 200, 0.3));
+  background: var(--home-summary-surface, var(--home-summary-panel, rgba(255, 255, 255, 0.08)));
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
+  width: 84%;
+  height: 72%;
+  margin: 8px auto 0;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.homeStatsCard--summary.is-hovered {
+  border-color: var(--home-summary-border-hover, rgba(255, 255, 255, 0.82));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--home-summary-border-hover, rgba(255, 255, 255, 0.82)) 45%, transparent),
+    0 6px 18px rgba(0, 0, 0, 0.16);
+}
+
+.homeStatsCard--summary .homeStatsCardTitle {
+  display: none;
 }
 
 .homeStatsCardTitle {
@@ -132,6 +167,104 @@
   width: 90%;
   height: 90%;
   margin: 5% auto;
+}
+
+.homeStatsCardBody--summary {
+  display: flex;
+  align-items: stretch;
+}
+
+.homeStatsSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  height: 100%;
+  padding: 6px 12px 4px;
+  justify-content: flex-start;
+}
+
+.homeStatsSummaryGroup {
+  display: grid;
+  gap: 3px 14px;
+}
+
+.homeStatsSummaryGroup + .homeStatsSummaryGroup {
+  margin-top: 6px;
+}
+
+.homeStatsSummaryGroup--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 16px;
+}
+
+.homeStatsSummaryGroup--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.homeStatsSummaryGroup--2 .homeStatsSummaryLabel {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.homeStatsSummaryGroup--2 .homeStatsSummaryValue {
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1.05;
+}
+
+.homeStatsSummaryRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  opacity: 1;
+  height: auto;
+}
+
+.homeStatsSummaryRow:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.homeStatsSummaryRow:hover {
+  opacity: 1;
+}
+
+.homeStatsSummaryLabel {
+  color: var(--home-summary-label, rgba(255, 255, 255, 0.66));
+  font-size: 0.54rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: color 140ms ease;
+}
+
+.homeStatsSummaryValue {
+  color: var(--home-summary-text, rgba(255, 255, 255, 0.94));
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 140ms ease;
+}
+
+.homeStatsCard--summary.is-hovered .homeStatsSummaryLabel,
+.homeStatsCard--summary.is-hovered .homeStatsSummaryValue {
+  color: #ffffff;
+}
+
+.homeStatsCard--summary.is-hovered .homeStatsSummaryRow:hover .homeStatsSummaryLabel,
+.homeStatsCard--summary.is-hovered .homeStatsSummaryRow:hover .homeStatsSummaryValue {
+  color: #2EC4B6;
 }
 
 .homeStatsCard:hover .homeStatsCardTitle {

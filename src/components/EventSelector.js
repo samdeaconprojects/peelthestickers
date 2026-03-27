@@ -1,6 +1,15 @@
 // src/components/EventSelector.js
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, {
+  forwardRef,
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+  useImperativeHandle,
+} from "react";
 import "./EventSelector.css";
+import { useDbStatus } from "../contexts/DbStatusContext";
 import { createSession } from "../services/createSession";
 import { createCustomEvent } from "../services/createCustomEvent";
 import { getSessions } from "../services/getSessions";
@@ -15,15 +24,20 @@ const slugify = (s) =>
 
 const normalizeEventId = (id) => String(id || "").toUpperCase();
 
-function EventSelector({
-  currentEvent,
-  handleEventChange,
-  currentSession,
-  setCurrentSession,
-  userID,
-  onSessionChange,
-  onSelectSessionObj, // lets App start relay mode using full session data
-}) {
+const EventSelector = forwardRef(function EventSelector(
+  {
+    currentEvent,
+    handleEventChange,
+    currentSession,
+    setCurrentSession,
+    userID,
+    onSessionChange,
+    onSelectSessionObj, // lets App start relay mode using full session data
+    compact = false,
+  },
+  ref
+) {
+  const { runDb } = useDbStatus();
   const [isOpen, setIsOpen] = useState(false);
 
   // fetched data
@@ -41,6 +55,9 @@ function EventSelector({
   const [relayLegsText, setRelayLegsText] = useState("222,333,444,555,666,777");
 
   const modalRef = useRef(null);
+  const open = useCallback(() => {
+    setIsOpen(true);
+  }, []);
 
   // -----------------------------
   // Event definitions
@@ -237,6 +254,15 @@ function EventSelector({
     setTargetEvent(null);
   }, []);
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      open,
+      close,
+    }),
+    [open, close]
+  );
+
   useEffect(() => {
     const onDocClick = (e) => {
       if (!isOpen) return;
@@ -283,7 +309,7 @@ function EventSelector({
     if (!name) return;
 
     try {
-      await createSession(userID, ev, name); // old signature supported
+      await runDb("Creating session", () => createSession(userID, ev, name)); // old signature supported
       await refreshData();
       setShowAddSession(false);
       setNewSessionName("");
@@ -303,10 +329,12 @@ function EventSelector({
     const relayLegs = Array.isArray(legs) ? legs : [];
 
     try {
-      await createSession(userID, ev, sessionID, cleanName, {
-        sessionType: "RELAY",
-        relayLegs,
-      });
+      await runDb("Creating relay session", () =>
+        createSession(userID, ev, sessionID, cleanName, {
+          sessionType: "RELAY",
+          relayLegs,
+        })
+      );
       await refreshData();
       setShowAddSession(false);
       setNewSessionName("");
@@ -333,7 +361,7 @@ function EventSelector({
     if (!name) return;
 
     try {
-      await createCustomEvent(userID, name);
+      await runDb("Creating custom event", () => createCustomEvent(userID, name));
       await refreshData();
       setShowAddEvent(false);
       setNewEventName("");
@@ -349,7 +377,10 @@ function EventSelector({
   return (
     <>
       {/* Trigger */}
-      <div className="event-selector-trigger" onClick={() => setIsOpen(true)}>
+      <div
+        className={`event-selector-trigger ${compact ? "event-selector-trigger--compact" : ""}`}
+        onClick={open}
+      >
         <div className="event-selector-box">
           <div className="event-selector-text">
             <div className="event-selector-event">{eventName}</div>
@@ -629,6 +660,6 @@ function EventSelector({
       )}
     </>
   );
-}
+});
 
 export default EventSelector;

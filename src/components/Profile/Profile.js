@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import "./Profile.css";
+import { useDbStatus } from "../../contexts/DbStatusContext";
 import Post from "./Post";
 import PostDetail from "./PostDetail";
 import StatSharePost from "./StatSharePost";
@@ -110,10 +111,98 @@ function buildAllEventsBreakdown(statsByEvent = {}) {
     });
 }
 
+function getPostTimestamp(post) {
+  const raw =
+    post?.DateTime ||
+    post?.date ||
+    post?.CreatedAt ||
+    (typeof post?.SK === "string" && post.SK.startsWith("POST#") ? post.SK.slice(5) : null) ||
+    null;
+  const ts = raw ? new Date(raw).getTime() : NaN;
+  return Number.isFinite(ts) ? ts : 0;
+}
+
 const DEFAULT_VISIBLE_STATS = [
+  { chart: "statsSummary", scope: "all-events", viewMode: "standard" },
   { chart: "lineChart", event: "333", session: "all" },
   { chart: "pieChart" },
 ];
+
+const DEFAULT_STAT_EVENT = "333";
+
+function chartNeedsEventSession(item) {
+  return item && item.chart !== "pieChart" && item.chart !== "statsSummary" && item.scope !== "all-events";
+}
+
+function chartNeedsSummaryEvent(item) {
+  return item && item.chart === "statsSummary";
+}
+
+function createStatConfig(type, fallbackEvent = DEFAULT_STAT_EVENT) {
+  switch (type) {
+    case "statsSummary":
+      return { chart: "statsSummary", scope: "all-events", event: fallbackEvent, session: "all", viewMode: "standard" };
+    case "lineChart":
+      return { chart: "lineChart", event: fallbackEvent, session: "all", viewMode: "standard" };
+    case "percentBar":
+      return { chart: "percentBar", event: fallbackEvent, session: "all" };
+    case "pieChart":
+      return { chart: "pieChart" };
+    case "barChart":
+      return { chart: "barChart", event: fallbackEvent, session: "all" };
+    case "timeTable":
+      return { chart: "timeTable", event: fallbackEvent, session: "all" };
+    default:
+      return { chart: "lineChart", event: fallbackEvent, session: "all", viewMode: "standard" };
+  }
+}
+
+const STAT_LIBRARY = [
+  {
+    type: "statsSummary",
+    title: "Overview Summary",
+  },
+  {
+    type: "lineChart",
+    title: "Progress Chart",
+  },
+  {
+    type: "percentBar",
+    title: "Distribution",
+  },
+  {
+    type: "pieChart",
+    title: "Event Breakdown",
+  },
+  {
+    type: "barChart",
+    title: "Bar Chart",
+  },
+  {
+    type: "timeTable",
+    title: "Time Table",
+  },
+];
+
+function getStatCardTitle(item) {
+  if (!item) return "Stat Card";
+  switch (item.chart) {
+    case "statsSummary":
+      return item.scope === "all-events" ? "Overview Summary" : `${item.event || DEFAULT_STAT_EVENT} Summary`;
+    case "lineChart":
+      return `${item.event || DEFAULT_STAT_EVENT} Progress`;
+    case "percentBar":
+      return `${item.event || DEFAULT_STAT_EVENT} Distribution`;
+    case "pieChart":
+      return "Event Breakdown";
+    case "barChart":
+      return `${item.event || DEFAULT_STAT_EVENT} Bar Chart`;
+    case "timeTable":
+      return `${item.event || DEFAULT_STAT_EVENT} Time Table`;
+    default:
+      return "Stat Card";
+  }
+}
 
 function getProfileStatItemClass(chart) {
   switch (chart) {
@@ -135,6 +224,7 @@ function getProfileStatItemClass(chart) {
 }
 
 function Profile({ user, setUser, deletePost: deletePostProp }) {
+  const { runDb } = useDbStatus();
   const { userID: paramID } = useParams();
   const isOwn = !paramID || paramID === user?.UserID;
   const viewID = isOwn ? user?.UserID : paramID;
@@ -150,6 +240,7 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
   const [activeTab, setActiveTab] = useState(0);
 
   const [visibleStats, setVisibleStats] = useState(DEFAULT_VISIBLE_STATS);
+  const [draftVisibleStats, setDraftVisibleStats] = useState(DEFAULT_VISIBLE_STATS);
   const [editingStats, setEditingStats] = useState(false);
   const pendingSolveRequestsRef = useRef(new Set());
 
@@ -163,20 +254,22 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
     const loadProfile = async () => {
       if (isOwn) {
         setViewedProfile(user);
-        setVisibleStats(
+        const nextVisibleStats =
           Array.isArray(user?.VisibleStats) && user.VisibleStats.length > 0
             ? user.VisibleStats
-            : DEFAULT_VISIBLE_STATS
-        );
+            : DEFAULT_VISIBLE_STATS;
+        setVisibleStats(nextVisibleStats);
+        setDraftVisibleStats(nextVisibleStats);
       } else {
         try {
           const prof = await getUser(viewID);
           setViewedProfile({ ...prof, UserID: viewID });
-          setVisibleStats(
+          const nextVisibleStats =
             Array.isArray(prof?.VisibleStats) && prof.VisibleStats.length > 0
               ? prof.VisibleStats
-              : DEFAULT_VISIBLE_STATS
-          );
+              : DEFAULT_VISIBLE_STATS;
+          setVisibleStats(nextVisibleStats);
+          setDraftVisibleStats(nextVisibleStats);
         } catch (err) {
           console.error("Error loading profile:", err);
         }
@@ -309,7 +402,9 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
 
     const ownerID = viewID;
     try {
-      await updatePostComments(ownerID, ts, updatedComments);
+      await runDb("Updating comments", () =>
+        updatePostComments(ownerID, ts, updatedComments)
+      );
     } catch (err) {
       console.error("Failed to save comment:", err);
     }
@@ -321,7 +416,7 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
     if (!current.includes(viewID)) {
       const updatedList = [...current, viewID];
       try {
-        await updateUser(user.UserID, { Friends: updatedList });
+        await runDb("Adding friend", () => updateUser(user.UserID, { Friends: updatedList }));
         setUser((prev) => ({ ...prev, Friends: updatedList }));
       } catch (err) {
         console.error("Failed to add friend:", err);
@@ -331,12 +426,25 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
 
   const handleSaveStats = async () => {
     try {
-      await updateUser(user.UserID, { VisibleStats: visibleStats });
-      setUser((prev) => ({ ...prev, VisibleStats: visibleStats }));
+      await runDb("Saving profile stats", () =>
+        updateUser(user.UserID, { VisibleStats: draftVisibleStats })
+      );
+      setVisibleStats(draftVisibleStats);
+      setUser((prev) => ({ ...prev, VisibleStats: draftVisibleStats }));
       setEditingStats(false);
     } catch (err) {
       console.error("Failed to update visible stats:", err);
     }
+  };
+
+  const openStatsEditor = () => {
+    setDraftVisibleStats(visibleStats);
+    setEditingStats(true);
+  };
+
+  const closeStatsEditor = () => {
+    setDraftVisibleStats(visibleStats);
+    setEditingStats(false);
   };
 
   const solvesForConfig = useMemo(() => {
@@ -356,18 +464,47 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
     () => Object.keys(viewedSessionCatalog).sort((a, b) => String(a).localeCompare(String(b))),
     [viewedSessionCatalog]
   );
+  const defaultStatEvent = availableEvents[0] || DEFAULT_STAT_EVENT;
+
+  const updateDraftStat = (index, updater) => {
+    setDraftVisibleStats((prev) =>
+      prev.map((item, idx) => (idx === index ? updater(item) : item))
+    );
+  };
+
+  const addDraftStat = (type) => {
+    setDraftVisibleStats((prev) => [...prev, createStatConfig(type, defaultStatEvent)]);
+  };
+
+  const removeDraftStat = (index) => {
+    setDraftVisibleStats((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const moveDraftStat = (index, direction) => {
+    setDraftVisibleStats((prev) => {
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(index, 1);
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+  };
+
+  const recentPosts = useMemo(
+    () => [...posts].sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a)),
+    [posts]
+  );
 
   if (!viewedProfile) return null;
   if (!viewedProfile.UserID) return <div>Loading profile…</div>;
-
-  const recentPosts = [...posts].reverse();
   return (
     <div className="Page profilePage">
       <ProfileHeader
         user={viewedProfile}
         sessionStats={viewedSessionStats}
         isOwn={isOwn}
-        onEditStats={() => setEditingStats(true)}
+        onEditStats={openStatsEditor}
       />
 
       {!isOwn && (
@@ -381,78 +518,175 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
       )}
 
       {editingStats && (
-        <div className="statsEditor">
-          <h3>Select visible stats</h3>
-
-          {visibleStats.map((item, idx) => (
-            <div key={idx} className="statSelector">
-              <select
-                value={item.chart}
-                onChange={(e) => {
-                  const newStats = [...visibleStats];
-                  newStats[idx] = { ...item, chart: e.target.value };
-                  setVisibleStats(newStats);
-                }}
-              >
-                <option value="lineChart">Line Chart</option>
-                <option value="statsSummary">Stats Summary</option>
-                <option value="percentBar">Distribution</option>
-                <option value="pieChart">Event Breakdown</option>
-                <option value="barChart">Bar Chart</option>
-                <option value="timeTable">Time Table</option>
-              </select>
-
-              {item.chart !== "pieChart" && item.scope !== "all-events" && (
-                <>
-                  <select
-                    value={item.event || "333"}
-                    onChange={(e) => {
-                      const newStats = [...visibleStats];
-                      newStats[idx] = { ...item, event: e.target.value };
-                      setVisibleStats(newStats);
-                    }}
-                  >
-                    {availableEvents.map((ev) => (
-                      <option key={ev} value={ev}>
-                        {ev}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={item.session || "all"}
-                    onChange={(e) => {
-                      const newStats = [...visibleStats];
-                      newStats[idx] = { ...item, session: e.target.value };
-                      setVisibleStats(newStats);
-                    }}
-                  >
-                    <option value="all">All Sessions</option>
-                    {(viewedSessionCatalog[item.event] || []).map((sid) => (
-                      <option key={sid} value={sid}>
-                        {sid}
-                      </option>
-                    ))}
-                  </select>
-                </>
-              )}
+        <div className="statsEditorOverlay" onClick={closeStatsEditor}>
+          <div className="statsEditor" onClick={(e) => e.stopPropagation()}>
+            <div className="statsEditorHeader">
+              <div>
+                <h3>Customize stats</h3>
+                <p>Add stat cards, then reorder and tune the ones already on the page.</p>
+              </div>
+              <button type="button" className="statsEditorClose" onClick={closeStatsEditor}>
+                Close
+              </button>
             </div>
-          ))}
 
-          <button
-            onClick={() =>
-              setVisibleStats([
-                ...visibleStats,
-                { chart: "lineChart", event: "333", session: "all" },
-              ])
-            }
-          >
-            + Add Chart
-          </button>
+            <div className="statsEditorToolbar">
+              <div className="statsEditorToolbarTitle">Add stat</div>
+              <div className="statsEditorLibrary">
+                {STAT_LIBRARY.map((entry) => (
+                  <button
+                    key={entry.type}
+                    type="button"
+                    className="statsLibraryCard"
+                    onClick={() => addDraftStat(entry.type)}
+                  >
+                    + {entry.title}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-          <div>
-            <button onClick={handleSaveStats}>Save</button>
-            <button onClick={() => setEditingStats(false)}>Cancel</button>
+            <div className="statsEditorList">
+              {draftVisibleStats.map((item, idx) => (
+                <div key={`${item.chart}-${idx}`} className="statsEditorItem">
+                  <div className="statsEditorItemHeader">
+                    <div>
+                      <div className="statsEditorItemTitle">{getStatCardTitle(item)}</div>
+                      <div className="statsEditorItemMeta">Card {idx + 1}</div>
+                    </div>
+                    <div className="statsEditorItemActions">
+                      <button
+                        type="button"
+                        className="statsEditorSecondary"
+                        onClick={() => moveDraftStat(idx, -1)}
+                        disabled={idx === 0}
+                      >
+                        Up
+                      </button>
+                      <button
+                        type="button"
+                        className="statsEditorSecondary"
+                        onClick={() => moveDraftStat(idx, 1)}
+                        disabled={idx === draftVisibleStats.length - 1}
+                      >
+                        Down
+                      </button>
+                      <button
+                        type="button"
+                        className="statsEditorRemove"
+                        onClick={() => removeDraftStat(idx)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="statsEditorControls">
+                    <label className="statsEditorField">
+                      <span>Chart type</span>
+                      <select
+                        value={item.chart}
+                        onChange={(e) =>
+                          updateDraftStat(idx, () => createStatConfig(e.target.value, item.event || defaultStatEvent))
+                        }
+                      >
+                        <option value="lineChart">Line Chart</option>
+                        <option value="statsSummary">Stats Summary</option>
+                        <option value="percentBar">Distribution</option>
+                        <option value="pieChart">Event Breakdown</option>
+                        <option value="barChart">Bar Chart</option>
+                        <option value="timeTable">Time Table</option>
+                      </select>
+                    </label>
+
+                    {chartNeedsSummaryEvent(item) && (
+                      <label className="statsEditorField">
+                        <span>Event</span>
+                        <select
+                          value={item.scope === "all-events" ? "__all_events__" : item.event || defaultStatEvent}
+                          onChange={(e) =>
+                            updateDraftStat(idx, (current) => ({
+                              ...current,
+                              scope: e.target.value === "__all_events__" ? "all-events" : undefined,
+                              event: e.target.value === "__all_events__" ? current.event || defaultStatEvent : e.target.value,
+                              session: "all",
+                            }))
+                          }
+                        >
+                          <option value="__all_events__">All Events</option>
+                          {availableEvents.length > 0 ? (
+                            availableEvents.map((ev) => (
+                              <option key={ev} value={ev}>
+                                {ev}
+                              </option>
+                            ))
+                          ) : (
+                            <option value={defaultStatEvent}>{defaultStatEvent}</option>
+                          )}
+                        </select>
+                      </label>
+                    )}
+
+                    {chartNeedsEventSession(item) && (
+                      <>
+                        <label className="statsEditorField">
+                          <span>Event</span>
+                          <select
+                            value={item.event || defaultStatEvent}
+                            onChange={(e) =>
+                              updateDraftStat(idx, (current) => ({
+                                ...current,
+                                event: e.target.value,
+                                session: "all",
+                              }))
+                            }
+                          >
+                            {availableEvents.length > 0 ? (
+                              availableEvents.map((ev) => (
+                                <option key={ev} value={ev}>
+                                  {ev}
+                                </option>
+                              ))
+                            ) : (
+                              <option value={defaultStatEvent}>{defaultStatEvent}</option>
+                            )}
+                          </select>
+                        </label>
+
+                        <label className="statsEditorField">
+                          <span>Session</span>
+                          <select
+                            value={item.session || "all"}
+                            onChange={(e) =>
+                              updateDraftStat(idx, (current) => ({
+                                ...current,
+                                session: e.target.value,
+                              }))
+                            }
+                          >
+                            <option value="all">All Sessions</option>
+                            {(viewedSessionCatalog[item.event || defaultStatEvent] || []).map((sid) => (
+                              <option key={sid} value={sid}>
+                                {sid}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="statsEditorActions">
+              <button type="button" className="statsEditorPrimary" onClick={handleSaveStats}>
+                Save layout
+              </button>
+              <button type="button" className="statsEditorSecondary" onClick={closeStatsEditor}>
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,8 +1,15 @@
 import React, { useMemo } from "react";
 import "./Scramble.css";
+import { useSettings } from "../../contexts/SettingsContext";
 
 import ForwardSVG from "../../assets/ForwardSVG.svg";
 import BackwardSVG from "../../assets/BackwardSVG.svg";
+
+function normalizeNavigationArrowStyle(style) {
+  return String(style || "").trim().toLowerCase() === "classic"
+    ? "classic"
+    : "scramble";
+}
 
 function stepsInToken(tok) {
   const t = String(tok || "").trim();
@@ -19,6 +26,11 @@ function Scramble({
   isMusicPlayer,
   scrambleProgress = 0, // ✅ now treated as STEP progress
 }) {
+  const { settings } = useSettings();
+  const navigationArrowStyle = normalizeNavigationArrowStyle(
+    settings?.navigationArrowStyle
+  );
+  const isSingleLineEvent = currentEvent === "SKEWB" || currentEvent === "PYRAMINX";
   let fontSize, maxWidth;
 
   switch (currentEvent) {
@@ -52,17 +64,26 @@ function Scramble({
       fontSize = isMusicPlayer ? 12 : 15;
       maxWidth = 90;
       break;
+    case "SKEWB":
+    case "PYRAMINX":
+      fontSize = 20;
+      maxWidth = 100;
+      break;
     default:
       fontSize = 20;
       maxWidth = 80;
   }
 
   const tokens = useMemo(() => {
-    return String(scramble || "")
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
-  }, [scramble]);
+    const text = String(scramble || "").trim();
+    if (!text) return [];
+
+    if (currentEvent === "SQ1") {
+      return text.match(/\([^)]*\)|\//g) || [];
+    }
+
+    return text.split(/\s+/).filter(Boolean);
+  }, [scramble, currentEvent]);
 
   return (
     <div className="scramble-container">
@@ -72,11 +93,17 @@ function Scramble({
         onClick={onBackwardScramble}
         aria-label="Previous scramble"
       >
-        <img src={BackwardSVG} alt="" className="scramble-nav-icon" />
+        {navigationArrowStyle === "classic" ? (
+          <span className="scramble-nav-glyph" aria-hidden="true">
+            ◀
+          </span>
+        ) : (
+          <img src={BackwardSVG} alt="" className="scramble-nav-icon" />
+        )}
       </button>
 
       <p
-        className="scramble-text"
+        className={`scramble-text ${isSingleLineEvent ? "scramble-text--single-line" : ""}`}
         style={{ fontSize: `${fontSize}pt`, maxWidth: `${maxWidth}%` }}
         onClick={() => onScrambleClick(scramble)}
       >
@@ -118,7 +145,13 @@ function Scramble({
         onClick={onForwardScramble}
         aria-label="Next scramble"
       >
-        <img src={ForwardSVG} alt="" className="scramble-nav-icon" />
+        {navigationArrowStyle === "classic" ? (
+          <span className="scramble-nav-glyph" aria-hidden="true">
+            ▶
+          </span>
+        ) : (
+          <img src={ForwardSVG} alt="" className="scramble-nav-icon" />
+        )}
       </button>
     </div>
   );

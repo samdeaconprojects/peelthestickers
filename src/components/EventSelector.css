@@ -18,6 +18,19 @@
   right: 0;
 }
 
+.event-selector-trigger--compact .event-selector-box {
+  min-width: 88px;
+  padding: 5px 8px;
+}
+
+.event-selector-trigger--compact .event-selector-event {
+  font-size: 14pt;
+}
+
+.event-selector-trigger--compact .event-selector-session {
+  font-size: 9pt;
+}
+
 
 
 /* === Dropdown box === */

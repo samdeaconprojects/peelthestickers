@@ -1,21 +1,15 @@
-/* src/components/Social/Social.css */
-
 .socialHeader {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;   /* top-align so icons never drop */
+  align-items: flex-start;
   gap: 12px;
-
-  /*  was height: 118px; + overflow hidden (caused dead space + clipping) */
   height: 90px;
   padding: 8px 10px 0 10px;
-
-  flex-shrink: 0;            /* prevents header from shrinking */
-  overflow: visible;         /* prevents clipping of search */
+  flex-shrink: 0;
+  overflow: visible;
 }
 
-
-/* ---------- Search (shorter) ---------- */
+/* ---------- Search ---------- */
 
 .socialHeader input {
   font-size: 16pt;
@@ -24,8 +18,7 @@
   border: 2px solid #696767;
   width: 100%;
   height: 34px;
-
-  margin: 0;          /* ✅ was 10px (pushed/cut off in header) */
+  margin: 0;
   padding: 0 10px;
   color: white;
 }
@@ -36,8 +29,7 @@
   max-width: 320px;
   margin-right: 14px;
   position: relative;
-
-  padding-top: 2px;   /* ✅ replaces old input margin spacing */
+  padding-top: 2px;
 }
 
 .suggestionsList {
@@ -68,8 +60,7 @@
   display: flex;
   gap: 10px;
   flex-shrink: 0;
-
-  align-items: flex-start; /* keep icons at top */
+  align-items: flex-start;
   padding-top: 2px;
 }
 
@@ -79,28 +70,28 @@
   cursor: pointer;
   opacity: 0.5;
   position: relative;
-
-  /* ✅ make icon box deterministic so dot placement is consistent */
   width: 54px;
   height: 54px;
   padding: 0;
-
   display: flex;
   align-items: flex-start;
   justify-content: center;
-
-  line-height: 0; /* ✅ removes baseline weirdness */
+  line-height: 0;
 }
 
-.tabIconButton:hover { opacity: 1; }
-.tabIconButton.active { opacity: 1; }
+.tabIconButton:hover {
+  opacity: 1;
+}
+
+.tabIconButton.active {
+  opacity: 1;
+}
 
 .tabIcon {
   width: 34px;
   height: 34px;
   display: block;
-
-  margin-top: 6px; /*  consistent icon placement */
+  margin-top: 6px;
   filter: brightness(0) invert(1);
 }
 
@@ -108,10 +99,7 @@
   position: absolute;
   scale: 50%;
   left: 44%;
-
-  /*  was bottom:-6px; (inconsistent). Use fixed top position. */
-  top: 44px;  /* tweak 42–48 if you want it slightly lower/higher */
-
+  top: 44px;
   transform: translateX(-50%);
   width: 14px;
   height: 14px;
@@ -124,21 +112,17 @@
   cursor: default;
 }
 
-
-/* ---------- Header Conversation Strip (moved up) ---------- */
+/* ---------- Header Conversation Strip ---------- */
 
 .headerConversationStrip {
   flex: 1;
   min-width: 0;
-
   display: flex;
   flex-direction: row;
-  align-items: flex-start;  /* top-align strip contents */
-
+  align-items: flex-start;
   overflow-x: auto;
-  overflow-y: hidden;       /* no vertical growth */
-
-  padding: 0 6px;           /* remove vertical padding that adds height */
+  overflow-y: hidden;
+  padding: 0 6px;
   gap: 6px;
 }
 
@@ -146,10 +130,9 @@
 .headerConversationStrip .conversationPreview {
   transform: scale(0.75);
   transform-origin: top left;
-  padding: 0;              /* scaling handles the padding feel */
+  padding: 0;
   margin: 0;
 }
-
 
 /* Make the whole Social page a flex column that fills its area */
 .Page {
@@ -177,7 +160,6 @@
   padding: 0;
 }
 
-
 .activityPanel {
   flex: 1;
   min-height: 0;
@@ -186,17 +168,15 @@
   gap: 12px;
   padding: 10px;
   overflow-y: auto;
-
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 48px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 48px);
   mask-image: linear-gradient(to bottom, transparent 0px, black 48px);
 }
 
 .activityPanel::before {
   content: "";
-  height: 48px;   /* match the fade height */
+  height: 48px;
   flex-shrink: 0;
 }
-
 
 .chatBubble {
   width: 90%;
@@ -220,12 +200,8 @@
 }
 
 .socialPage .tabPanel {
-
   margin-top: 0px;
 }
-
-
-/* (conversationStrip removed from here; now in header) */
 
 .avatarContainer {
   display: flex;
@@ -246,12 +222,12 @@
   margin: 6px;
   border: 2px solid #2EC4B6;
   overflow: hidden;
-  position: relative; /* ✅ anchor for absolute cube */
+  position: relative;
 }
 
 /* ✅ reduce header-only tile spacing so the row sits high */
 .headerConversationStrip .profilePicturePost {
-  margin: 0; /* was 6px; pushes bar down */
+  margin: 0;
 }
 
 /* ✅ the “one true” centering method */
@@ -259,26 +235,22 @@
   position: absolute;
   top: 50%;
   left: 50%;
-
-  /* tuning knobs */
   --as: 1;
   --ax: 0px;
   --ay: 0px;
-
   transform:
     translate(-50%, -50%)
     translate(var(--ax), var(--ay))
     scale(var(--as));
-
   transform-origin: center;
-  pointer-events: none; /* ✅ avatar clicks still work */
+  pointer-events: none;
 }
 
 /* NxN cubes */
-.postNameCube--222 { --as: 2.6; --ax: -10px; --ay: 14px;  }
+.postNameCube--222 { --as: 2.6; --ax: -10px; --ay: 14px; }
 .postNameCube--333 { --as: 2.5; --ax: -12px; --ay: 1px; }
-.postNameCube--333oh {  --as: 2.5; --ax: -12px; --ay: 1px; }
-.postNameCube--333bld {  --as: 2.5; --ax: -12px; --ay: 1px; }
+.postNameCube--333oh { --as: 2.5; --ax: -12px; --ay: 1px; }
+.postNameCube--333bld { --as: 2.5; --ax: -12px; --ay: 1px; }
 
 .postNameCube--444 { --as: 2.30; --ax: -15px; --ay: -2px; }
 .postNameCube--555 { --as: 2.30; --ax: -17px; --ay: -6px; }
@@ -380,15 +352,108 @@
   color: #c8c8c8;
 }
 
+.sharedConversationStatsWrap {
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sharedConversationStatsToggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: #e8e8e8;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sharedConversationStatsToggle:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sharedConversationStats {
+  flex-shrink: 0;
+  padding: 0 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sharedConversationStatsTitle {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #c8c8c8;
+}
+
+.sharedConversationStatsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sharedConversationStatCard {
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sharedConversationStatValue {
+  font-size: 20px;
+  font-weight: 700;
+  color: white;
+}
+
+.sharedConversationStatLabel {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #c8c8c8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sharedConversationEventRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sharedConversationHeadToHeadRow {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sharedConversationHeadToHeadName {
+  color: #d7d7d7;
+  font-size: 12px;
+}
+
+.sharedConversationEventPill {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #f3f3f3;
+  font-size: 12px;
+}
+
 .conversationView {
   flex: 1;
   min-height: 0;
   padding-top: 0;
   margin-top: 0;
-  display: flex;             
-  flex-direction: column;     
+  display: flex;
+  flex-direction: column;
 }
-
 
 .messages {
   flex: 1;
@@ -399,7 +464,6 @@
   gap: 6px;
   padding: 10px;
   align-items: stretch;
-
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0px,
@@ -414,7 +478,7 @@
 
 .messages::before {
   content: "";
-  height: 48px;       /* must match fade height */
+  height: 48px;
   flex-shrink: 0;
 }
 
@@ -434,6 +498,17 @@
 .received {
   align-self: flex-start;
   color: white;
+}
+
+.sharedMessageAnchor {
+  border-radius: 14px;
+}
+
+.sharedMessageAnchor--target {
+  outline: 2px solid rgba(80, 182, 255, 0.55);
+  outline-offset: 4px;
+  box-shadow: 0 0 0 6px rgba(80, 182, 255, 0.10);
+  transition: box-shadow 0.2s ease, outline-color 0.2s ease;
 }
 
 .messageInput {
@@ -462,16 +537,11 @@
   background-color: transparent;
   color: white;
   cursor: pointer;
-}
-
-.messageInput button {
-  display: flex;              /*  key fix */
-  align-items: center;        /* vertical centering */
+  display: flex;
+  align-items: center;
   justify-content: center;
-
-  line-height: 1;             /* removes baseline drop */
+  line-height: 1;
 }
-
 
 .noConversation {
   color: #aaa;
@@ -479,19 +549,16 @@
   padding: 20px;
 }
 
-
 /* --- FIX: keep search anchored to the top-right even when collapsed --- */
 .searchContainer {
   position: relative;
   display: flex;
   align-items: center;
-
-  /* make it always claim the same space on the right */
   justify-content: flex-end;
   width: 25%;
   left: 30px;
   margin-right: 20px;
-  min-width: 260px;   /* prevents it collapsing too tiny */
+  min-width: 260px;
 }
 
 /* icon stays at the far right */
@@ -505,20 +572,18 @@
 
 /* input expands LEFT from the icon */
 .searchContainer input {
-  order: -1;               /* puts input to the left of the icon */
+  order: -1;
   width: 0;
   opacity: 0;
   padding: 0;
-  margin-right: 10px;      /* space between input and icon */
+  margin-right: 10px;
   pointer-events: none;
-
   font-size: 16pt;
   background-color: transparent;
   border-radius: 8px;
   border: 2px solid #B4B4B4;
   height: 34px;
   color: white;
-
   transition:
     width 0.01s ease,
     opacity 0.15s ease,
@@ -529,7 +594,7 @@
 /* expanded when open */
 .searchContainer.open input {
   width: 100%;
-  max-width: 320px;        /* adjust this to taste */
+  max-width: 320px;
   opacity: 1;
   padding: 0 10px;
   pointer-events: auto;
@@ -540,8 +605,8 @@
 .searchContainer .suggestionsList {
   position: absolute;
   top: 48px;
-  right: 0;                /* dropdown stays anchored to the right edge */
-  width: calc(100% - 40px);/* leaves room for icon, tweak if needed */
+  right: 0;
+  width: calc(100% - 40px);
   background: #1a1a1a;
   border: 1px solid #ccc;
   z-index: 2;

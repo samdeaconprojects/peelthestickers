@@ -4,13 +4,13 @@ import { formatTime } from "../TimeList/TimeUtils";
 import "./Stats.css";
 
 const CHART_WIDTH = 960;
-const CHART_HEIGHT = 320;
+const CHART_HEIGHT = 344;
 const CHART_PADDING_X = 42;
-const CHART_PADDING_TOP = 20;
+const CHART_PADDING_TOP = 24;
 const CHART_PADDING_BOTTOM = 42;
-const SEGMENT_WIDTH = 10;
-const SEGMENT_HEIGHT = 14;
-const SEGMENT_GAP = 4;
+const SEGMENT_WIDTH = 8;
+const SEGMENT_HEIGHT = 12;
+const SEGMENT_GAP = 3;
 
 const COLOR_PALETTE = [
   "#38d6c9",
@@ -145,6 +145,7 @@ function buildTimeline(daySolves, segmentSort, colorMode) {
   const sorted = sortDaySolves(daySolves, segmentSort);
   const chartInnerWidth = CHART_WIDTH - CHART_PADDING_X * 2;
   const chartBottom = CHART_HEIGHT - CHART_PADDING_BOTTOM;
+  const chartInnerHeight = chartBottom - CHART_PADDING_TOP;
   const columnWidth = chartInnerWidth / 24;
 
   const speedResolver = buildSpeedColorResolver(sorted);
@@ -165,16 +166,29 @@ function buildTimeline(daySolves, segmentSort, colorMode) {
   const resolveColor = colorMode === "speed" ? speedResolver : discrete.resolve;
   const hourCounts = new Map();
 
+  for (const solve of sorted) {
+    const date = parseSolveDate(solve);
+    if (!date) continue;
+    const hour = date.getHours();
+    hourCounts.set(hour, (hourCounts.get(hour) || 0) + 1);
+  }
+
+  const maxStack = Array.from(hourCounts.values()).reduce((max, count) => Math.max(max, count), 0);
+  const laneHeight = maxStack > 0 ? Math.min(SEGMENT_HEIGHT + SEGMENT_GAP, chartInnerHeight / maxStack) : SEGMENT_HEIGHT + SEGMENT_GAP;
+  const segmentHeight = Math.max(5, Math.min(SEGMENT_HEIGHT, laneHeight - 1));
+  const segmentWidth = maxStack > 28 ? 6 : SEGMENT_WIDTH;
+  const stackCursor = new Map();
+
   const segments = sorted.map((solve, index) => {
     const date = parseSolveDate(solve);
     if (!date) return null;
     const hour = date.getHours();
     const minuteRatio = (date.getMinutes() * 60 + date.getSeconds()) / 3600;
-    const stackIndex = hourCounts.get(hour) || 0;
-    hourCounts.set(hour, stackIndex + 1);
+    const stackIndex = stackCursor.get(hour) || 0;
+    stackCursor.set(hour, stackIndex + 1);
 
     const x = CHART_PADDING_X + columnWidth * (hour + minuteRatio);
-    const y = chartBottom - SEGMENT_HEIGHT - stackIndex * (SEGMENT_HEIGHT + SEGMENT_GAP);
+    const y = chartBottom - segmentHeight - stackIndex * laneHeight;
 
     return {
       id: solve?.solveRef || solve?.datetime || `solve-${index}`,
@@ -182,6 +196,8 @@ function buildTimeline(daySolves, segmentSort, colorMode) {
       hour,
       x,
       y,
+      width: segmentWidth,
+      height: segmentHeight,
       color: resolveColor(solve),
       label: `${formatClockTime(solve)} · ${formatTime(getSolveBaseMs(solve))}`,
       eventLabel: getSolveTagValue(solve, "Event") || "Event",
@@ -192,13 +208,14 @@ function buildTimeline(daySolves, segmentSort, colorMode) {
   }).filter(Boolean);
 
   const activeHours = new Set(segments.map((segment) => segment.hour));
-  const maxStack = Array.from(hourCounts.values()).reduce((max, count) => Math.max(max, count), 0);
 
   return {
     segments,
     activeHours: activeHours.size,
     totalSolves: sorted.length,
     maxStack,
+    segmentWidth,
+    segmentHeight,
     legend: discrete.legend || [],
   };
 }
@@ -253,7 +270,7 @@ function TimePeriodChart({
 
   return (
     <div className="timePeriodChart">
-      <div className="lineChartControls">
+      <div className="lineChartControls lineChartControls--time">
         <select
           className="statsSelect statsSelect--chart"
           value={segmentSort}
@@ -290,6 +307,11 @@ function TimePeriodChart({
           <span className="chartControlLabel">Active Hours</span>
           <span className="chartControlValue">{timeline.activeHours}</span>
         </div>
+
+        <div className="chartControlGroup">
+          <span className="chartControlLabel">Peak Stack</span>
+          <span className="chartControlValue">{timeline.maxStack}</span>
+        </div>
       </div>
 
       <div className="timeLineChartCanvas">
@@ -300,14 +322,22 @@ function TimePeriodChart({
           aria-label="Time period solve chart by hour"
         >
           {hourGuides.map((guide) => (
-            <line
-              key={`guide-${guide.hour}`}
-              x1={guide.x}
-              y1={CHART_PADDING_TOP}
-              x2={guide.x}
-              y2={CHART_HEIGHT - CHART_PADDING_BOTTOM}
-              className="timeLineGuide"
-            />
+            <g key={`guide-${guide.hour}`}>
+              <rect
+                x={guide.x}
+                y={CHART_PADDING_TOP}
+                width={(CHART_WIDTH - CHART_PADDING_X * 2) / 24}
+                height={CHART_HEIGHT - CHART_PADDING_BOTTOM - CHART_PADDING_TOP}
+                className={guide.hour % 2 === 0 ? "timeLineHourBand" : "timeLineHourBand timeLineHourBand--alt"}
+              />
+              <line
+                x1={guide.x}
+                y1={CHART_PADDING_TOP}
+                x2={guide.x}
+                y2={CHART_HEIGHT - CHART_PADDING_BOTTOM}
+                className="timeLineGuide"
+              />
+            </g>
           ))}
 
           <line
@@ -333,10 +363,10 @@ function TimePeriodChart({
           {timeline.segments.map((segment) => (
             <g key={segment.id}>
               <rect
-                x={segment.x - SEGMENT_WIDTH / 2}
+                x={segment.x - segment.width / 2}
                 y={segment.y}
-                width={SEGMENT_WIDTH}
-                height={SEGMENT_HEIGHT}
+                width={segment.width}
+                height={segment.height}
                 rx={4}
                 ry={4}
                 fill={segment.color}
@@ -378,6 +408,7 @@ function TimePeriodChart({
         <Detail
           solve={selectedSolve}
           userID={user?.UserID}
+          profileColor={user?.Color || user?.color || "#2EC4B6"}
           onClose={() => setSelectedSolve(null)}
           deleteTime={() => {
             const solveRef = selectedSolve?.solveRef || null;

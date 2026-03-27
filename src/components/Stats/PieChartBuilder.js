@@ -15,6 +15,8 @@ const PieChartBuilder = ({
   colorPalette,
   showLegend,
   showCenterLabel,
+  maxLegendItems,
+  promoteHoveredOverflowItem,
 }) => {
   const total = data.reduce((sum, entry) => sum + entry.value, 0);
   const [hoveredSlice, setHoveredSlice] = useState(null);
@@ -28,6 +30,27 @@ const PieChartBuilder = ({
     () => [...data].filter((entry) => entry.value > 0).sort((a, b) => b.value - a.value),
     [data]
   );
+
+  const legendData = useMemo(() => {
+    const withIndex = sortedData.map((entry, index) => ({ entry, index }));
+    if (!Number.isFinite(maxLegendItems) || maxLegendItems <= 0 || withIndex.length <= maxLegendItems) {
+      return withIndex;
+    }
+
+    const limit = Math.max(1, Math.floor(maxLegendItems));
+    const visible = withIndex.slice(0, limit);
+
+    if (
+      promoteHoveredOverflowItem &&
+      hoveredSlice != null &&
+      hoveredSlice >= limit &&
+      withIndex[hoveredSlice]
+    ) {
+      return [...visible.slice(0, Math.max(0, limit - 1)), withIndex[hoveredSlice]];
+    }
+
+    return visible;
+  }, [hoveredSlice, maxLegendItems, promoteHoveredOverflowItem, sortedData]);
 
   if (total === 0 || sortedData.length === 0) {
     return <p className="pieChartEmpty">No solves available</p>;
@@ -113,8 +136,18 @@ const PieChartBuilder = ({
         </svg>
       </div>
 
-      {showLegend && <div className="pieChartLegend">
-        {sortedData.map((entry, index) => {
+      {showLegend && (
+        <div
+          className={[
+            "pieChartLegend",
+            !maxLegendItems && sortedData.length > 6 ? "pieChartLegend--grid" : "",
+            !maxLegendItems && sortedData.length > 10 ? "pieChartLegend--gridWide" : "",
+            !maxLegendItems && sortedData.length > 14 ? "pieChartLegend--gridXL" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+        {legendData.map(({ entry, index }) => {
           const percent = Math.round((entry.value / total) * 100);
           const isActive = hoveredSlice === index;
           const legendMeta = legendValueMode === "count" ? `${entry.value}` : `${entry.value} · ${percent}%`;
@@ -143,7 +176,8 @@ const PieChartBuilder = ({
             </button>
           );
         })}
-      </div>}
+        </div>
+      )}
     </div>
   );
 };
@@ -170,6 +204,8 @@ PieChartBuilder.propTypes = {
   colorPalette: PropTypes.arrayOf(PropTypes.string),
   showLegend: PropTypes.bool,
   showCenterLabel: PropTypes.bool,
+  maxLegendItems: PropTypes.number,
+  promoteHoveredOverflowItem: PropTypes.bool,
 };
 
 PieChartBuilder.defaultProps = {
@@ -181,6 +217,8 @@ PieChartBuilder.defaultProps = {
   colorPalette: undefined,
   showLegend: true,
   showCenterLabel: true,
+  maxLegendItems: null,
+  promoteHoveredOverflowItem: false,
 };
 
 export default PieChartBuilder;

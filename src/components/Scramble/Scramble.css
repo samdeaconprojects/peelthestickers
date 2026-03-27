@@ -1,8 +1,10 @@
 .scramble-container {
+  --nav-side-gap: 10px;
+  --nav-hit-size: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 14px;
+  gap: var(--nav-side-gap);
 }
 
 /* =========================
@@ -20,8 +22,8 @@
   padding: 0 !important;            /* stop App.css padding effects */
   margin: 0 !important;
 
-  width: 36px;                      /* smaller hit box */
-  height: 36px;
+  width: var(--nav-hit-size);       /* smaller hit box */
+  height: var(--nav-hit-size);
   display: grid;
   place-items: center;
 
@@ -29,6 +31,10 @@
 
   opacity: 0.3;                     /* 30% default */
   transition: opacity 140ms ease, transform 120ms ease;
+}
+
+.scramble-prev-button {
+  margin-right: 12px !important;
 }
 
 /* 100% on hover */
@@ -58,6 +64,16 @@
   user-select: none;
 }
 
+.scramble-nav-glyph {
+  display: block;
+  color: #50b6ff;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+}
+
 /* optional tiny nudge */
 .scramble-prev-button .scramble-nav-icon {
   transform: translateX(-1px);
@@ -70,4 +86,8 @@
 .scramble-text span {
   white-space: nowrap;
   display: inline-block;
+}
+
+.scramble-text--single-line {
+  white-space: nowrap;
 }

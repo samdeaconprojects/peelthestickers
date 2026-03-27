@@ -1,6 +1,5 @@
 /* src/components/TimeList/TimeList.css */
 
-/* TimeList.css */
 .time-list-container {
   display: flex;
   justify-content: center;
@@ -8,6 +7,7 @@
   width: 100%;
   position: relative;
   padding-bottom: 2%;
+  flex-direction: row;
 }
 
 .highlight {
@@ -30,8 +30,8 @@
 
 .TimeList tr {
   display: grid;
-  grid-template-columns: repeat(12, 1fr) auto; /* 12 columns for solves + 1 for average */
-  gap: 6px; /* spacing belongs here */
+  grid-template-columns: repeat(12, 1fr) auto;
+  gap: 6px;
   width: 100%;
   align-items: stretch;
 }
@@ -53,15 +53,66 @@
   background-color: #2EC4B6;
 }
 
-/* -----------------------------
-   Horizontal mode
-   ----------------------------- */
+/* Shared average live panel */
+.timeListSharedMirror {
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.timeListSharedMirrorHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  min-height: 20px;
+}
+
+.timeListSharedMirrorName {
+  font-size: 11px;
+  font-weight: 900;
+  color: rgba(255,255,255,0.82);
+}
+
+.timeListSharedMirrorMeta {
+  font-size: 10px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.58);
+}
+
+.timeListSharedMirrorActions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.timeListSharedMirrorRefresh {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+  opacity: 1;
+}
+
+.TimeList--sharedMirror {
+  margin-bottom: 0;
+}
+
+/* Horizontal mode */
 .horizontal-shell {
+  --nav-side-gap: 10px;
+  --nav-hit-size: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  width: 100%;
+  gap: var(--nav-side-gap);
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
 }
 
 .horizontal-nav-btn {
@@ -73,8 +124,8 @@
   outline: none;
   box-shadow: none;
 
-  width: 34px;
-  height: 34px;
+  width: var(--nav-hit-size);
+  height: var(--nav-hit-size);
   display: grid;
   place-items: center;
 
@@ -84,6 +135,44 @@
   color: #50B6FF;
   font-weight: 900;
   font-size: 18px;
+  user-select: none;
+}
+
+.horizontal-shell > .horizontal-nav-btn:first-child {
+  margin-right: 12px;
+}
+
+.timelist-nav-icon {
+  width: 20px;
+  height: 20px;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+}
+
+.timelist-nav-icon--left {
+  transform: translateX(-1px);
+}
+
+.timelist-nav-icon--right {
+  transform: translateX(1px);
+}
+
+.timelist-nav-icon--up {
+  transform: rotate(-90deg);
+}
+
+.timelist-nav-icon--down {
+  transform: rotate(90deg);
+}
+
+.timelist-nav-glyph {
+  display: block;
+  color: #50b6ff;
+  font-weight: 900;
+  font-size: 18px;
+  line-height: 1;
+  pointer-events: none;
   user-select: none;
 }
 
@@ -101,7 +190,6 @@
   cursor: not-allowed;
 }
 
-/* Scrollable version */
 .horizontal-time-list {
   position: relative;
   display: flex;
@@ -113,14 +201,13 @@
   scrollbar-gutter: stable;
 }
 
-/* Non-scroll (paged) version */
 .horizontal-time-list.no-scroll {
   overflow: hidden;
 }
 
 .horizontal-row {
   display: grid;
-  grid-template-columns: repeat(var(--cols), 70px) 70px; /* N columns + label */
+  grid-template-columns: repeat(var(--cols), 70px) 70px;
   column-gap: 4px;
   justify-content: center;
   margin-bottom: 4px;
@@ -206,7 +293,6 @@
   color: #999;
 }
 
-/* Optional load-more UI */
 .timelist-loadmore {
   width: 100%;
   display: flex;
@@ -231,9 +317,6 @@
   opacity: 0.5;
 }
 
-/* -----------------------------
-   Existing stuff you had
-   ----------------------------- */
 .scramble-popup {
   position: fixed;
   top: 0;
@@ -262,14 +345,6 @@
   font-size: 24px;
 }
 
-.time-list-container {
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  width: 100%;
-  flex-direction: row;
-}
-
 .time-list-content {
   flex-grow: 1;
   width: 100%;
@@ -288,9 +363,12 @@
 .pagination-buttons button {
   background-color: transparent;
   border: none;
-  font-size: 20px;
   cursor: pointer;
   padding: 5px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
 }
 
 .pagination-buttons button:disabled {
@@ -320,7 +398,6 @@
   opacity: 0.8;
 }
 
-/* For smaller screens */
 @media (max-width: 1100px) {
   .TimeList tr {
     grid-template-columns: repeat(5, 1fr) auto;

@@ -1,8 +1,106 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import PropTypes from "prop-types";
+import { formatTime } from "../TimeList/TimeUtils";
 
 const STROKE = 1;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+function getNiceNumber(value, roundUp = false) {
+  const safeValue = Math.max(0, Number(value) || 0);
+  if (!safeValue) return 1;
+
+  const exponent = Math.floor(Math.log10(safeValue));
+  const fraction = safeValue / 10 ** exponent;
+  let niceFraction;
+
+  if (roundUp) {
+    if (fraction <= 1) niceFraction = 1;
+    else if (fraction <= 2) niceFraction = 2;
+    else if (fraction <= 5) niceFraction = 5;
+    else niceFraction = 10;
+  } else {
+    if (fraction < 1.5) niceFraction = 1;
+    else if (fraction < 3) niceFraction = 2;
+    else if (fraction < 7) niceFraction = 5;
+    else niceFraction = 10;
+  }
+
+  return niceFraction * 10 ** exponent;
+}
+
+function getNiceYScale(minValue, maxValue, tickCount) {
+  const safeMin = Number.isFinite(minValue) ? minValue : 0;
+  const safeMax = Number.isFinite(maxValue) ? maxValue : Math.max(1, safeMin + 1);
+  const targetTicks = Math.max(2, Number(tickCount) || 2);
+  const rawRange = Math.max(1, safeMax - safeMin);
+  const step = getNiceNumber(rawRange / targetTicks, true);
+  const niceMin = Math.max(0, Math.floor(safeMin / step) * step);
+  const niceMax = Math.max(niceMin + step, Math.ceil(safeMax / step) * step);
+  const tickTotal = Math.max(1, Math.round((niceMax - niceMin) / step));
+  const values = Array.from({ length: tickTotal + 1 }, (_, index) => niceMin + step * index);
+
+  return {
+    min: niceMin,
+    max: niceMax,
+    step,
+    values,
+  };
+}
+
+function formatAxisTimeLabel(secondsValue, preferWholeSeconds = false) {
+  const seconds = Number(secondsValue);
+  if (!Number.isFinite(seconds)) return "";
+
+  if (seconds >= 60) {
+    return formatTime(seconds * 1000).replace(/\.00$/, "");
+  }
+
+  if (preferWholeSeconds && Math.abs(seconds - Math.round(seconds)) < 0.001) {
+    return `${Math.round(seconds)}s`;
+  }
+
+  return `${seconds.toFixed(1)}s`;
+}
+
+function getXAxisLabelIndices(data) {
+  const safeData = Array.isArray(data) ? data : [];
+  const count = safeData.length;
+
+  if (count <= 0) return new Set();
+  if (count <= 12) {
+    return new Set(safeData.map((_, index) => index));
+  }
+
+  const isSequentialSolveCount = safeData.every((item, index) => Number(item?.label) === index + 1);
+  if (isSequentialSolveCount) {
+    const step = Math.max(1, Math.round(count / 5));
+    const indices = new Set([0, count - 1]);
+
+    safeData.forEach((item, index) => {
+      const labelValue = Number(item?.label);
+      if (Number.isFinite(labelValue) && labelValue % step === 0) {
+        indices.add(index);
+      }
+    });
+
+    return indices;
+  }
+
+  const fallbackStep = Math.max(1, Math.ceil(count / 6));
+  const indices = new Set([0, count - 1]);
+  safeData.forEach((_, index) => {
+    if (index % fallbackStep === 0) indices.add(index);
+  });
+  return indices;
+}
+
+function getXTickEntries(data) {
+  const safeData = Array.isArray(data) ? data : [];
+  const labelIndices = getXAxisLabelIndices(safeData);
+  return safeData
+    .map((item, index) => ({ item, index }))
+    .filter(({ index }) => labelIndices.has(index));
+}
 
 const LineChartBuilder = ({
   data,
@@ -26,8 +124,39 @@ const LineChartBuilder = ({
   showAxisLabels = true,
 }) => {
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, time: "" });
+  const containerRef = useRef(null);
+  const [size, setSize] = useState({
+    width: Math.max(1, Number(width) || 1),
+    height: Math.max(1, Number(height) || 1),
+  });
 
-  const FONT_SIZE = Math.max(10, Math.floor(width / 52));
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return undefined;
+
+    const updateSize = () => {
+      const nextWidth = Math.max(1, Math.round(node.clientWidth || width || 1));
+      const nextHeight = Math.max(1, Math.round(node.clientHeight || height || 1));
+      setSize((prev) =>
+        prev.width === nextWidth && prev.height === nextHeight
+          ? prev
+          : { width: nextWidth, height: nextHeight }
+      );
+    };
+
+    updateSize();
+
+    if (typeof ResizeObserver === "undefined") return undefined;
+
+    const observer = new ResizeObserver(() => updateSize());
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [height, width]);
+
+  const resolvedWidth = Math.max(1, Number(size.width) || Number(width) || 1);
+  const resolvedHeight = Math.max(1, Number(size.height) || Number(height) || 1);
+
+  const FONT_SIZE = Math.max(10, Math.floor(resolvedWidth / 52));
 
   const safeData = useMemo(() => (Array.isArray(data) ? data : []), [data]);
   const safeComparisonSeries = useMemo(
@@ -44,6 +173,7 @@ const LineChartBuilder = ({
     chartHeight,
     minX,
     minimumYFromData,
+    yTicks,
     yDenom,
     xDenom,
   } = useMemo(() => {
@@ -72,8 +202,13 @@ const LineChartBuilder = ({
     const resolvedMaxY = hasCustomRange
       ? parsedYMax
       : Math.max(1, Math.ceil(Math.max(dataMaxY, dataMinY, 1)));
+    const niceScale = getNiceYScale(
+      resolvedMinY,
+      resolvedMaxY,
+      Math.max(2, numberOfHorizontalGuides || 4)
+    );
 
-    const digits = parseFloat(resolvedMaxY.toString()).toFixed(precision).length + 3;
+    const digits = parseFloat(niceScale.max.toString()).toFixed(precision).length + 3;
     const yLabelRoom = digits * (FONT_SIZE * 0.62);
 
     const computedLeftPadding = Math.ceil(Math.max(FONT_SIZE * 2.05, yLabelRoom)) + 10;
@@ -88,20 +223,22 @@ const LineChartBuilder = ({
       rightPadding: computedRightPadding,
       topPadding: computedTopPadding,
       bottomPadding: computedBottomPadding,
-      chartWidth: Math.max(1, width - computedLeftPadding - computedRightPadding),
-      chartHeight: Math.max(1, height - computedTopPadding - computedBottomPadding),
+      chartWidth: Math.max(1, resolvedWidth - computedLeftPadding - computedRightPadding),
+      chartHeight: Math.max(1, resolvedHeight - computedTopPadding - computedBottomPadding),
       minX: _minX,
       maxX: _maxX,
-      minimumYFromData: resolvedMinY,
-      maximumYFromData: resolvedMaxY,
-      yDenom: resolvedMaxY - resolvedMinY || 1,
+      minimumYFromData: niceScale.min,
+      maximumYFromData: niceScale.max,
+      yTicks: niceScale.values,
+      yDenom: niceScale.max - niceScale.min || 1,
       xDenom: (_maxX - _minX) || 1,
     };
   }, [
+    numberOfHorizontalGuides,
     safeComparisonSeries,
     safeData,
-    width,
-    height,
+    resolvedWidth,
+    resolvedHeight,
     FONT_SIZE,
     precision,
     yMin,
@@ -132,27 +269,27 @@ const LineChartBuilder = ({
     yDenom,
   ]);
 
-  const Axis = ({ points }) => <polyline fill="none" stroke="#ccc" strokeWidth=".7" points={points} />;
+  const Axis = ({ points }) => (
+    <polyline fill="none" stroke="rgba(204, 204, 204, 0.58)" strokeWidth=".7" points={points} />
+  );
   const XAxis = () =>
     <Axis
-      points={`${leftPadding},${height - bottomPadding} ${width - rightPadding},${height - bottomPadding}`}
+      points={`${leftPadding},${resolvedHeight - bottomPadding} ${resolvedWidth - rightPadding},${resolvedHeight - bottomPadding}`}
     />;
   const YAxis = () =>
-    <Axis points={`${leftPadding},${topPadding} ${leftPadding},${height - bottomPadding}`} />;
+    <Axis points={`${leftPadding},${topPadding} ${leftPadding},${resolvedHeight - bottomPadding}`} />;
 
   const VerticalGuides = () => {
-    const guideCount = numberOfVerticalGuides || Math.max(1, safeData.length - 1);
+    const tickEntries = getXTickEntries(safeData);
     const startY = topPadding;
-    const endY = height - bottomPadding;
-    return new Array(guideCount).fill(0).map((_, index) => {
-      const ratio = (index + 1) / guideCount;
-      const xCoordinate = leftPadding + ratio * chartWidth;
+    const endY = resolvedHeight - bottomPadding;
+    return tickEntries.slice(1, -1).map(({ item, index }) => {
+      const xCoordinate = ((item.x - minX) / xDenom) * chartWidth + leftPadding;
       return (
         <polyline
-          key={index}
+          key={`x-guide-${index}-${item.label}`}
           fill="none"
-          stroke="#c2c2c2"
-          opacity=".2"
+          stroke="rgba(194, 194, 194, 0.14)"
           strokeWidth=".7"
           points={`${xCoordinate},${startY} ${xCoordinate},${endY}`}
         />
@@ -162,16 +299,15 @@ const LineChartBuilder = ({
 
   const HorizontalGuides = () => {
     const startX = leftPadding;
-    const endX = width - rightPadding;
-    return new Array(numberOfHorizontalGuides).fill(0).map((_, index) => {
-      const ratio = (index + 1) / numberOfHorizontalGuides;
+    const endX = resolvedWidth - rightPadding;
+    return (yTicks || []).slice(1, -1).map((tickValue) => {
+      const ratio = (tickValue - minimumYFromData) / yDenom;
       const yCoordinate = chartHeight - chartHeight * ratio + topPadding;
       return (
         <polyline
-          key={index}
+          key={`y-guide-${tickValue}`}
           fill="none"
-          stroke="#c2c2c2"
-          opacity=".2"
+          stroke="rgba(194, 194, 194, 0.14)"
           strokeWidth=".7"
           points={`${startX},${yCoordinate} ${endX},${yCoordinate}`}
         />
@@ -180,13 +316,10 @@ const LineChartBuilder = ({
   };
 
   const LabelsXAxis = () => {
-    const y = height - bottomPadding + FONT_SIZE * 1.35;
-    const n = safeData.length;
-    const step = n <= 12 ? 1 : Math.ceil(n / 10);
+    const y = resolvedHeight - bottomPadding + FONT_SIZE * 1.35;
+    const tickEntries = getXTickEntries(safeData);
 
-    return safeData.map((element, index) => {
-      if (index % step !== 0 && index !== n - 1) return null;
-
+    return tickEntries.map(({ item: element, index }) => {
       const x = ((element.x - minX) / xDenom) * chartWidth + leftPadding;
       return (
         <text
@@ -194,7 +327,7 @@ const LineChartBuilder = ({
           x={x}
           y={y}
           textAnchor="middle"
-          style={{ fill: "#808080", fontSize: FONT_SIZE, fontFamily: "Helvetica" }}
+          style={{ fill: "rgba(128, 128, 128, 0.72)", fontSize: FONT_SIZE, fontFamily: "Helvetica" }}
         >
           {element.label}
         </text>
@@ -203,19 +336,20 @@ const LineChartBuilder = ({
   };
 
   const LabelsYAxis = () => {
-    const PARTS = numberOfHorizontalGuides;
-    return new Array(PARTS + 1).fill(0).map((_, index) => {
+    const shouldUseWholeSeconds = (yTicks?.[1] ?? 1) - (yTicks?.[0] ?? 0) >= 1;
+    return (yTicks || []).map((tickValue) => {
       const x = leftPadding - FONT_SIZE * 0.8;
-      const yCoordinate = chartHeight - chartHeight * (index / PARTS) + topPadding + FONT_SIZE / 3;
+      const ratio = (tickValue - minimumYFromData) / yDenom;
+      const yCoordinate = chartHeight - chartHeight * ratio + topPadding + FONT_SIZE / 3;
       return (
         <text
-          key={index}
+          key={`y-label-${tickValue}`}
           x={x}
           y={yCoordinate}
           textAnchor="end"
-          style={{ fill: "#808080", fontSize: FONT_SIZE, fontFamily: "Helvetica" }}
+          style={{ fill: "rgba(128, 128, 128, 0.72)", fontSize: FONT_SIZE, fontFamily: "Helvetica" }}
         >
-          {(minimumYFromData + yDenom * (index / PARTS)).toFixed(1) + "s"}
+          {formatAxisTimeLabel(tickValue, shouldUseWholeSeconds)}
         </text>
       );
     });
@@ -292,7 +426,7 @@ const LineChartBuilder = ({
           <line
             x1={leftPadding}
             y1={y}
-            x2={width - rightPadding}
+            x2={resolvedWidth - rightPadding}
             y2={y}
             stroke={line.stroke || "#FFD54A"}
             strokeWidth={1.5}
@@ -332,11 +466,14 @@ const LineChartBuilder = ({
     });
 
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "visible" }}>
+    <div
+      ref={containerRef}
+      style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}
+    >
       <svg
-        viewBox={`0 0 ${width} ${height}`}
-        preserveAspectRatio="none"
-        style={{ width: "100%", height: "100%", overflow: "visible" }}
+        viewBox={`0 0 ${resolvedWidth} ${resolvedHeight}`}
+        preserveAspectRatio="xMidYMid meet"
+        style={{ width: "100%", height: "100%", overflow: "hidden", display: "block" }}
       >
         {showAxes && <XAxis />}
         {showAxisLabels && <LabelsXAxis />}

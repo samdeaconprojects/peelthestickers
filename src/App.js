@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+} from "react";
 import "./App.css";
 import Timer from "./components/Timer/Timer";
 import TimeList from "./components/TimeList/TimeList";
@@ -7,6 +13,7 @@ import AverageDetailModal from "./components/Detail/AverageDetailModal";
 import Profile from "./components/Profile/Profile";
 import Stats from "./components/Stats/Stats";
 import Social from "./components/Social/Social";
+import SharedAverageMessage from "./components/Social/SharedAverageMessage";
 import Settings from "./components/Settings/Settings";
 import Navigation from "./components/Navigation/Navigation";
 import PlayerBar from "./components/PlayerBar/PlayerBar";
@@ -20,12 +27,13 @@ import Detail from "./components/Detail/Detail";
 import SharePostModal from "./components/Social/SharePostModal";
 import TagBar from "./components/TagBar/TagBar";
 import { useSettings } from "./contexts/SettingsContext";
-import { generateScramble } from "./components/scrambleUtils";
+import { DbStatusProvider } from "./contexts/DbStatusContext";
 import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { getUser } from "./services/getUser";
 import { updateUser } from "./services/updateUser";
 import { getSessions } from "./services/getSessions";
 import { getLastNSolvesBySession } from "./services/getSolvesBySession";
+import { getSessionStats } from "./services/getSessionStats";
 import { getCustomEvents } from "./services/getCustomEvents";
 import { addSolve as addSolveToDB } from "./services/addSolve";
 import { deleteSolve } from "./services/deleteSolve";
@@ -35,20 +43,43 @@ import { deletePost as deletePostFromDB } from "./services/deletePost";
 import { updatePostComments } from "./services/updatePostComments";
 import { createSession } from "./services/createSession";
 import { createUser } from "./services/createUser";
+import { getMessages } from "./services/getMessages";
 import { updateSolvePenalty } from "./services/updateSolvePenalty";
 import { getSolveWindowFromStart } from "./services/getSolveWindow";
 import { sendMessage } from "./services/sendMessage";
+import { getTagValues } from "./services/getTagValues";
 import { setGanCurrentScramble } from "./smart/ganScrambleProgress";
+import {
+  clearScrambleQueue,
+  consumeScramble,
+  generateRelayScrambles,
+  generateScrambleForEvent,
+  getScrambleQueueSnapshot,
+  prependScramble,
+  replaceHeadScramble,
+  warmScrambleQueue,
+  setGlobalScrambleMode,
+} from "./services/scrambleService";
 
 import { DEFAULT_EVENTS } from "./defaultEvents";
 import {
+  addTagCatalogValue,
+  collectTagSelectionOptions,
   DEFAULT_TAG_CONFIG,
+  getTagCatalogOptionsForEvent,
+  getTagColorMapForEvent,
+  getTagScopeEventKey,
   makeEmptyTagSelection,
   normalizeTagConfig,
+  normalizeTagCatalog,
+  normalizeTagColorCatalog,
+  setTagColorCatalogValue,
+  SHARED_TAG_FIELDS,
 } from "./components/TagBar/tagUtils";
 import {
   calculateBestAverageOfFive,
   calculateAverage,
+  formatTime,
 } from "./components/TimeList/TimeUtils";
 
 const INITIAL_SESSIONS = {
@@ -110,6 +141,391 @@ function tokenProgressToStepProgress(scramble, tokenProgress) {
   return steps;
 }
 
+function getCubeCollectionOptionsForEvent(cubeCollection, eventCode) {
+  const ev = String(eventCode || "").trim().toUpperCase();
+  const globalOptions = new Set();
+  const scopedOptions = new Set();
+
+  for (const rawEntry of Array.isArray(cubeCollection) ? cubeCollection : []) {
+    const entry = String(rawEntry || "").trim();
+    if (!entry) continue;
+
+    const match = entry.match(/^([A-Za-z0-9]+)\s*:\s*(.+)$/);
+    if (!match) {
+      globalOptions.add(entry);
+      continue;
+    }
+
+    const [, rawScope, rawValue] = match;
+    const scope = String(rawScope || "").trim().toUpperCase();
+    const value = String(rawValue || "").trim();
+    if (!value) continue;
+
+    if (scope === ev) scopedOptions.add(value);
+  }
+
+  return Array.from(new Set([...scopedOptions, ...globalOptions])).sort((a, b) =>
+    a.localeCompare(b)
+  );
+}
+
+function normalizeSharedEventKey(evt) {
+  if (!evt) return "333";
+  const e = String(evt).trim().toUpperCase();
+
+  if (e === "3X3" || e === "3X3X3") return "333";
+  if (e === "2X2" || e === "2X2X2") return "222";
+  if (e === "4X4" || e === "4X4X4") return "444";
+  if (e === "5X5" || e === "5X5X5") return "555";
+  if (e === "6X6" || e === "6X6X6") return "666";
+  if (e === "7X7" || e === "7X7X7") return "777";
+
+  return e;
+}
+
+function sharedEventLabel(evt) {
+  const key = normalizeSharedEventKey(evt);
+  const labels = {
+    "222": "2x2",
+    "333": "3x3",
+    "444": "4x4",
+    "555": "5x5",
+    "666": "6x6",
+    "777": "7x7",
+    "333OH": "3x3 OH",
+    "333BLD": "3x3 BLD",
+    "MEGAMINX": "Megaminx",
+    "PYRAMINX": "Pyraminx",
+    "SKEWB": "Skewb",
+    "SQ1": "Square-1",
+    "CLOCK": "Clock",
+    RELAY: "Relay",
+  };
+  return labels[key] || key;
+}
+
+function summarizeSharedPlan(events = [], fallbackEvent = "333") {
+  const normalized =
+    Array.isArray(events) && events.length
+      ? events.map(normalizeSharedEventKey).filter(Boolean)
+      : [normalizeSharedEventKey(fallbackEvent)];
+
+  const counts = new Map();
+
+  normalized.forEach((event) => {
+    counts.set(event, (counts.get(event) || 0) + 1);
+  });
+
+  const entries = Array.from(counts.entries());
+
+  if (entries.length === 1) {
+    const [event, count] = entries[0];
+    return count > 1
+      ? `${sharedEventLabel(event)} ×${count}`
+      : sharedEventLabel(event);
+  }
+
+  return entries
+    .map(([event, count]) =>
+      count > 1 ? `${sharedEventLabel(event)} ×${count}` : sharedEventLabel(event)
+    )
+    .join(" + ");
+}
+
+function getSharedOpponentLabel(sharedSession, user) {
+  if (!sharedSession) return "Opponent";
+
+  const candidates = [
+    sharedSession.opponentName,
+    sharedSession.theirLabel,
+    sharedSession.theirUsername,
+    sharedSession.opponentUsername,
+    sharedSession.otherUsername,
+    sharedSession.targetUsername,
+    sharedSession.opponentID,
+    sharedSession.otherUserID,
+    sharedSession.targetUserID,
+  ].filter(Boolean);
+
+  if (candidates.length) return String(candidates[0]);
+
+  const creatorID = sharedSession.creatorID;
+  const opponentID = sharedSession.opponentID;
+
+  if (creatorID && user?.UserID && creatorID !== user.UserID) return creatorID;
+  if (opponentID && user?.UserID && opponentID !== user.UserID) return opponentID;
+
+  return "Opponent";
+}
+
+function getSharedOpponentColor(sharedSession) {
+  return (
+    sharedSession?.opponentColor ||
+    sharedSession?.theirColor ||
+    sharedSession?.color ||
+    "#888888"
+  );
+}
+
+function formatSharedTimeLabel(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return formatTime(n);
+}
+
+function getSharedSolveCount(sharedSession) {
+  return Math.max(
+    Array.isArray(sharedSession?.scrambles) ? sharedSession.scrambles.length : 0,
+    Array.isArray(sharedSession?.creatorScrambles) ? sharedSession.creatorScrambles.length : 0,
+    Array.isArray(sharedSession?.opponentScrambles) ? sharedSession.opponentScrambles.length : 0
+  );
+}
+
+function findSharedNextIndex(sharedSession, userID) {
+  const total = getSharedSolveCount(sharedSession);
+  if (!total) return 0;
+
+  for (let i = 0; i < total; i++) {
+    const row = sharedSession?.roundResults?.[i] || {};
+    const mine = row?.[userID];
+    if (!Number.isFinite(Number(mine?.time))) return i;
+  }
+
+  return total - 1;
+}
+
+function getSharedRoundParticipants(sharedSession, solveIndex, currentUserID) {
+  const row = sharedSession?.roundResults?.[solveIndex] || {};
+  return Object.entries(row)
+    .filter(([participantID, result]) => {
+      if (!participantID || participantID === currentUserID) return false;
+      return Number.isFinite(Number(result?.time));
+    })
+    .map(([participantID, result]) => ({
+      participantID,
+      time: Number(result?.time),
+      event: result?.event || null,
+      updatedAt: result?.updatedAt || null,
+    }))
+    .sort((a, b) => {
+      const aTs = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const bTs = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return bTs - aTs;
+    });
+}
+
+function getSharedParticipantLabel(sharedSession, participantID, fallback = "Opponent") {
+  if (!participantID) return fallback;
+
+  if (participantID === sharedSession?.creatorID) {
+    return (
+      sharedSession?.creatorName ||
+      sharedSession?.creatorUsername ||
+      sharedSession?.creatorLabel ||
+      participantID
+    );
+  }
+
+  if (participantID === sharedSession?.opponentID) {
+    return (
+      sharedSession?.opponentName ||
+      sharedSession?.theirLabel ||
+      sharedSession?.theirUsername ||
+      participantID
+    );
+  }
+
+  return participantID;
+}
+
+function parseSharedUpdatePayload(text) {
+  if (!String(text || "").startsWith("[sharedUpdate]")) return null;
+
+  const raw = String(text).slice("[sharedUpdate]".length);
+  const [sharedID, solveIndexRaw, timeRaw, senderID] = raw.split("|");
+
+  const solveIndex = Number(solveIndexRaw);
+  const time = Number(timeRaw);
+
+  if (!sharedID || !senderID || !Number.isFinite(solveIndex)) return null;
+
+  return {
+    sharedID,
+    solveIndex,
+    time: Number.isFinite(time) ? time : null,
+    senderID,
+  };
+}
+
+function parseSharedExtendPayload(text) {
+  if (!String(text || "").startsWith("[sharedExtend]")) return null;
+  try {
+    const parsed = JSON.parse(String(text).slice("[sharedExtend]".length));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildRoundResultsFromMessages(messages, sharedID) {
+  const nextRoundResults = {};
+
+  (Array.isArray(messages) ? messages : []).forEach((msg) => {
+    const payload = parseSharedUpdatePayload(msg?.text);
+    if (!payload || payload.sharedID !== sharedID) return;
+
+    nextRoundResults[payload.solveIndex] = {
+      ...(nextRoundResults[payload.solveIndex] || {}),
+      [payload.senderID]: {
+        ...(nextRoundResults[payload.solveIndex]?.[payload.senderID] || {}),
+        time: payload.time,
+        updatedAt:
+          msg?.timestamp || msg?.createdAt || msg?.datetime || new Date().toISOString(),
+      },
+    };
+  });
+
+  return nextRoundResults;
+}
+
+function mergeRoundResults(baseRoundResults, incomingRoundResults) {
+  const merged = { ...(baseRoundResults || {}) };
+
+  Object.entries(incomingRoundResults || {}).forEach(([solveIndex, incomingRow]) => {
+    const baseRow = merged[solveIndex] || {};
+    const nextRow = { ...baseRow };
+
+    Object.entries(incomingRow || {}).forEach(([participantID, incomingResult]) => {
+      const baseResult = baseRow?.[participantID] || null;
+      const incomingTs = incomingResult?.updatedAt
+        ? new Date(incomingResult.updatedAt).getTime()
+        : 0;
+      const baseTs = baseResult?.updatedAt ? new Date(baseResult.updatedAt).getTime() : 0;
+
+      nextRow[participantID] =
+        incomingTs >= baseTs && incomingResult?.time != null
+          ? incomingResult
+          : baseResult || incomingResult;
+    });
+
+    merged[solveIndex] = nextRow;
+  });
+
+  return merged;
+}
+
+function applySharedExtensionsToSession(session, messages = []) {
+  if (!session?.sharedID) return session;
+
+  const extensions = (Array.isArray(messages) ? messages : [])
+    .map((msg) => ({
+      payload: parseSharedExtendPayload(msg?.text),
+      timestamp: msg?.timestamp || msg?.createdAt || msg?.datetime || "",
+    }))
+    .filter((entry) => entry.payload?.sharedID === session.sharedID)
+    .sort((a, b) => String(a.timestamp || "").localeCompare(String(b.timestamp || "")));
+
+  if (!extensions.length) return session;
+
+  let next = { ...session };
+  extensions.forEach(({ payload }) => {
+    next = {
+      ...next,
+      creatorEvents: [...(next.creatorEvents || []), ...(payload.creatorEvents || [])],
+      opponentEvents: [...(next.opponentEvents || []), ...(payload.opponentEvents || [])],
+      creatorScrambles: [...(next.creatorScrambles || []), ...(payload.creatorScrambles || [])],
+      opponentScrambles: [...(next.opponentScrambles || []), ...(payload.opponentScrambles || [])],
+      events: [...(next.events || []), ...(payload.creatorEvents || payload.events || [])],
+      scrambles: [...(next.scrambles || []), ...(payload.creatorScrambles || payload.scrambles || [])],
+      count: Math.max(
+        Number(next.count || 0),
+        Number(payload.count || 0),
+        [...(next.scrambles || []), ...(payload.creatorScrambles || payload.scrambles || [])].length
+      ),
+    };
+  });
+
+  return next;
+}
+
+function getSharedMode(session) {
+  return String(session?.mode || session?.type || "average").trim().toLowerCase();
+}
+
+function getSharedTargetWins(session) {
+  const n = Number(session?.targetWins || 0);
+  return Number.isFinite(n) && n > 0 ? n : 3;
+}
+
+function getSharedPerspective(session, userID, fallbackEvent = "333") {
+  const creatorID = session?.creatorID || null;
+  const isCreator = creatorID && userID ? creatorID === userID : true;
+
+  const yourEvents = isCreator
+    ? session?.creatorEvents || session?.events || []
+    : session?.opponentEvents || session?.events || [];
+  const theirEvents = isCreator
+    ? session?.opponentEvents || session?.events || []
+    : session?.creatorEvents || session?.events || [];
+
+  const yourScrambles = isCreator
+    ? session?.creatorScrambles || session?.scrambles || []
+    : session?.opponentScrambles || session?.scrambles || [];
+  const theirScrambles = isCreator
+    ? session?.opponentScrambles || session?.scrambles || []
+    : session?.creatorScrambles || session?.scrambles || [];
+
+  return {
+    isCreator,
+    yourEvents,
+    theirEvents,
+    yourScrambles,
+    theirScrambles,
+    yourFallbackEvent: isCreator
+      ? session?.creatorEvent || session?.event || fallbackEvent
+      : session?.opponentEvent || session?.event || fallbackEvent,
+    theirFallbackEvent: isCreator
+      ? session?.opponentEvent || session?.event || fallbackEvent
+      : session?.creatorEvent || session?.event || fallbackEvent,
+  };
+}
+
+function computeSharedScore(session, currentUserID) {
+  const roundResults = session?.roundResults || {};
+  const opponentID = session?.opponentID || null;
+  let yourWins = 0;
+  let theirWins = 0;
+
+  Object.entries(roundResults).forEach(([solveIndex, row]) => {
+    const myTime = Number(row?.[currentUserID]?.time);
+    const peers = getSharedRoundParticipants(session, solveIndex, currentUserID);
+    const other =
+      peers.find((entry) => entry.participantID === opponentID) ||
+      peers[0] ||
+      null;
+    const theirTime = Number(other?.time);
+
+    if (!Number.isFinite(myTime) || !Number.isFinite(theirTime)) return;
+    if (myTime < theirTime) yourWins += 1;
+    else if (theirTime < myTime) theirWins += 1;
+  });
+
+  return { yourWins, theirWins };
+}
+
+function shouldCompleteSharedSessionNow(session, nextIndex, currentUserID) {
+  const mode = getSharedMode(session);
+  if (mode === "casual") return false;
+
+  if (mode === "head_to_head") {
+    const { yourWins, theirWins } = computeSharedScore(session, currentUserID);
+    return yourWins >= getSharedTargetWins(session) || theirWins >= getSharedTargetWins(session);
+  }
+
+  const total = getSharedSolveCount(session);
+  return nextIndex >= total;
+}
+
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -167,6 +583,7 @@ function App() {
 
   const [tagsByEvent, setTagsByEvent] = useState({});
   const [tagConfig, setTagConfig] = useState(DEFAULT_TAG_CONFIG);
+  const [homeDiscoveredTagOptions, setHomeDiscoveredTagOptions] = useState({});
 
   const [practiceMode, setPracticeMode] = useState(false);
   const [practiceSolves, setPracticeSolves] = useState([]);
@@ -182,23 +599,33 @@ function App() {
     tick: 0,
   });
 
+  const sharedReturnTargetRef = useRef(null);
+  const currentEventRef = useRef(currentEvent);
+  const displayedScrambleRef = useRef("");
+  const scrambleModeRef = useRef(settings?.scrambleMode || "random-state");
+
   const dbSuccessTimeoutRef = useRef(null);
   const dbErrorTimeoutRef = useRef(null);
+  const DB_STATUS_MIN_LOADING_MS = 900;
 
   const settingsAutosaveTimeoutRef = useRef(null);
+  const tagCatalogAutosaveTimeoutRef = useRef(null);
+  const tagColorCatalogAutosaveTimeoutRef = useRef(null);
   const lastSavedSettingsJsonRef = useRef("");
   const skipNextSettingsAutosaveRef = useRef(false);
 
-  const setDbPhase = (phase, op = "") => {
+  const setDbPhase = useCallback((phase, op = "") => {
     setDbStatus((prev) => ({
       phase,
       op,
       tick: (prev.tick || 0) + 1,
     }));
-  };
+  }, []);
 
-  const runDb = async (opLabel, fn, options = {}) => {
+  const runDb = useCallback(async (opLabel, fn, options = {}) => {
     const showStatus = options?.showStatus !== false;
+    const minLoadingMs = options?.minLoadingMs ?? DB_STATUS_MIN_LOADING_MS;
+    const loadingStartedAt = showStatus ? Date.now() : 0;
 
     try {
       if (showStatus) {
@@ -211,10 +638,16 @@ function App() {
       const res = await fn();
 
       if (showStatus) {
+        const elapsed = Date.now() - loadingStartedAt;
+        const remaining = Math.max(0, minLoadingMs - elapsed);
+        if (remaining > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remaining));
+        }
+
         setDbPhase("success", opLabel);
         dbSuccessTimeoutRef.current = setTimeout(() => {
           setDbPhase("idle", "");
-        }, 900);
+        }, 1250);
       }
 
       return res;
@@ -222,21 +655,29 @@ function App() {
       console.error(`DB op failed (${opLabel}):`, err);
 
       if (showStatus) {
+        const elapsed = Date.now() - loadingStartedAt;
+        const remaining = Math.max(0, minLoadingMs - elapsed);
+        if (remaining > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remaining));
+        }
+
         setDbPhase("error", opLabel);
         dbErrorTimeoutRef.current = setTimeout(() => {
           setDbPhase("idle", "");
-        }, 1400);
+        }, 1550);
       }
 
       throw err;
     }
-  };
+  }, [setDbPhase]);
 
   useEffect(() => {
     return () => {
       if (dbSuccessTimeoutRef.current) clearTimeout(dbSuccessTimeoutRef.current);
       if (dbErrorTimeoutRef.current) clearTimeout(dbErrorTimeoutRef.current);
       if (settingsAutosaveTimeoutRef.current) clearTimeout(settingsAutosaveTimeoutRef.current);
+      if (tagCatalogAutosaveTimeoutRef.current) clearTimeout(tagCatalogAutosaveTimeoutRef.current);
+      if (tagColorCatalogAutosaveTimeoutRef.current) clearTimeout(tagColorCatalogAutosaveTimeoutRef.current);
     };
   }, []);
 
@@ -316,6 +757,7 @@ function App() {
 
   const eventKey =
     String(currentEvent || "").toUpperCase() === "RELAY" ? "RELAY" : currentEvent;
+  const tagScopeEventKey = useMemo(() => getTagScopeEventKey(eventKey), [eventKey]);
 
   const isRelayActive =
     String(currentEvent || "").toUpperCase() === "RELAY" &&
@@ -326,18 +768,25 @@ function App() {
   const relayCurrentScramble = isRelayActive
     ? relayScrambles[relayLegIndex] || ""
     : "";
+  const sharedPerspective = useMemo(
+    () => getSharedPerspective(sharedSession, user?.UserID, currentEvent),
+    [sharedSession, user?.UserID, currentEvent]
+  );
   const sharedCurrentEvent = sharedSession
-    ? sharedSession.events?.[sharedIndex] || sharedSession.event || currentEvent
+    ? sharedPerspective.yourEvents?.[sharedIndex] ||
+      sharedPerspective.yourFallbackEvent ||
+      currentEvent
     : null;
 
   const displayedScramble = useMemo(() => {
     return sharedSession
-      ? sharedSession.scrambles[sharedIndex] || ""
+      ? sharedPerspective.yourScrambles?.[sharedIndex] || sharedSession.scrambles?.[sharedIndex] || ""
       : isRelayActive
       ? relayCurrentScramble
       : scrambles[currentEvent]?.[0] || "";
   }, [
     sharedSession,
+    sharedPerspective,
     sharedIndex,
     isRelayActive,
     relayCurrentScramble,
@@ -354,6 +803,51 @@ function App() {
   }, [sharedCurrentEvent, sharedSession, isRelayActive, relayCurrentEvent, currentEvent]);
 
   const scrambleProgressMode = "steps";
+
+  const syncScrambleQueue = useCallback(async (event, minCount = 10) => {
+    const ev = String(event || "").trim();
+    if (!ev) return [];
+
+    const cached = getScrambleQueueSnapshot(ev);
+    if (cached.length > 0) {
+      setScrambles((prev) => ({
+        ...(prev || {}),
+        [ev]: cached,
+      }));
+    }
+
+    const queue = await warmScrambleQueue(ev, minCount);
+    setScrambles((prev) => ({
+      ...(prev || {}),
+      [ev]: queue,
+    }));
+    return queue;
+  }, []);
+
+  useEffect(() => {
+    const mode = settings?.scrambleMode || "random-state";
+    const previousMode = scrambleModeRef.current;
+
+    setGlobalScrambleMode(mode);
+
+    if (previousMode !== mode) {
+      clearScrambleQueue();
+    }
+
+    scrambleModeRef.current = mode;
+
+    syncScrambleQueue(currentEvent, 10).catch((err) => {
+      console.error(`Failed to sync scramble queue for ${currentEvent}:`, err);
+    });
+  }, [settings?.scrambleMode, currentEvent, syncScrambleQueue]);
+
+  useEffect(() => {
+    currentEventRef.current = currentEvent;
+  }, [currentEvent]);
+
+  useEffect(() => {
+    displayedScrambleRef.current = displayedScramble;
+  }, [displayedScramble]);
 
   useEffect(() => {
     const norm = (x) =>
@@ -403,7 +897,126 @@ function App() {
     return () => window.removeEventListener("pts:cubeSolve", onCubeSolve);
   }, []);
 
-  const currentTags = tagsByEvent[eventKey] || makeEmptyTagSelection();
+  const tagCatalog = useMemo(() => normalizeTagCatalog(user?.TagCatalog), [user?.TagCatalog]);
+  const tagColorCatalog = useMemo(
+    () => normalizeTagColorCatalog(user?.TagColorCatalog),
+    [user?.TagColorCatalog]
+  );
+
+  const queueTagCatalogSave = useCallback(
+    (nextCatalog) => {
+      if (!user?.UserID) return;
+
+      if (tagCatalogAutosaveTimeoutRef.current) {
+        clearTimeout(tagCatalogAutosaveTimeoutRef.current);
+      }
+
+      tagCatalogAutosaveTimeoutRef.current = setTimeout(async () => {
+        try {
+          await updateUser(user.UserID, {
+            TagCatalog: normalizeTagCatalog(nextCatalog),
+          });
+        } catch (err) {
+          console.error("Failed to autosave tag catalog:", err);
+        }
+      }, 500);
+    },
+    [user?.UserID]
+  );
+
+  const queueTagColorCatalogSave = useCallback(
+    (nextCatalog) => {
+      if (!user?.UserID) return;
+
+      if (tagColorCatalogAutosaveTimeoutRef.current) {
+        clearTimeout(tagColorCatalogAutosaveTimeoutRef.current);
+      }
+
+      tagColorCatalogAutosaveTimeoutRef.current = setTimeout(async () => {
+        try {
+          await updateUser(user.UserID, {
+            TagColorCatalog: normalizeTagColorCatalog(nextCatalog),
+          });
+        } catch (err) {
+          console.error("Failed to autosave tag color catalog:", err);
+        }
+      }, 500);
+    },
+    [user?.UserID]
+  );
+
+  const rememberTagSelectionValues = useCallback(
+    (selection) => {
+      if (!tagScopeEventKey || !user?.UserID) return;
+
+      let nextCatalog = tagCatalog;
+      let changed = false;
+
+      for (const field of SHARED_TAG_FIELDS) {
+        const value = String(selection?.[field] || "").trim();
+        if (!value) continue;
+        const updated = addTagCatalogValue(nextCatalog, tagScopeEventKey, field, value);
+        if (JSON.stringify(updated) !== JSON.stringify(nextCatalog)) {
+          nextCatalog = updated;
+          changed = true;
+        }
+      }
+
+      if (!changed) return;
+
+      setUser((prev) => ({
+        ...(prev || {}),
+        TagCatalog: nextCatalog,
+      }));
+      queueTagCatalogSave(nextCatalog);
+    },
+    [tagScopeEventKey, user?.UserID, tagCatalog, queueTagCatalogSave]
+  );
+
+  const currentTags = useMemo(() => {
+    const base = {
+      ...makeEmptyTagSelection(),
+      ...(tagsByEvent[tagScopeEventKey] || {}),
+    };
+
+    if (!String(base.TimerInput || "").trim()) {
+      base.TimerInput = String(settings?.timerInput || "Keyboard").trim() || "Keyboard";
+    }
+
+    if (!String(base.SolveSource || "").trim()) {
+      if (practiceMode) base.SolveSource = "Practice";
+      else if (sharedSession?.sharedID) base.SolveSource = "Shared";
+      else if (
+        String(currentEvent || "").toUpperCase() === "RELAY" &&
+        activeSessionObj?.SessionType === "RELAY"
+      ) {
+        base.SolveSource = "Relay";
+      } else if (String(settings?.timerInput || "").trim() === "GAN Cube") {
+        base.SolveSource = "SmartCube";
+      } else {
+        base.SolveSource = "Standard";
+      }
+    }
+
+    return base;
+  }, [
+    tagsByEvent,
+    tagScopeEventKey,
+    settings?.timerInput,
+    practiceMode,
+    sharedSession?.sharedID,
+    currentEvent,
+    activeSessionObj?.SessionType,
+  ]);
+
+  const currentTagColors = useMemo(
+    () => getTagColorMapForEvent(tagColorCatalog, eventKey),
+    [tagColorCatalog, eventKey]
+  );
+
+  useEffect(() => {
+    rememberTagSelectionValues(currentTags);
+  }, [currentTags, rememberTagSelectionValues]);
 
   const buildTagPayload = (baseTags = {}) => {
     const t = currentTags || makeEmptyTagSelection();
@@ -429,12 +1042,6 @@ function App() {
 
     return payload;
   };
-
-  useEffect(() => {
-    if (!scrambles[currentEvent]) {
-      preloadScrambles(currentEvent);
-    }
-  }, [currentEvent]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -489,24 +1096,152 @@ function App() {
   }, [isSignedIn, user?.UserID, eventKey, currentSession]);
 
   useEffect(() => {
-    if (!sharedSession) return;
+    if (!isSignedIn || !user?.UserID || practiceMode) return;
 
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const normalizedEvent = String(eventKey || "").toUpperCase();
+        const sessionId = String(currentSession || "main");
+        const stats = await getSessionStats(user.UserID, normalizedEvent, sessionId);
+
+        if (cancelled) return;
+
+        setSessionStats((prev) => ({
+          ...(prev || {}),
+          [normalizedEvent]: {
+            ...(prev?.[normalizedEvent] || {}),
+            [sessionId]: stats || null,
+          },
+        }));
+
+        setSessionsList((prev) =>
+          Array.isArray(prev)
+            ? prev.map((session) =>
+                String(session?.Event || "").toUpperCase() === normalizedEvent &&
+                String(session?.SessionID || "main") === sessionId
+                  ? {
+                      ...session,
+                      Stats: stats || null,
+                    }
+                  : session
+              )
+            : prev
+        );
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Failed to refresh session stats for home summary:", err);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn, user?.UserID, eventKey, currentSession, practiceMode, statsMutationTick]);
+
+  useEffect(() => {
+    if (!sharedSession?.sharedID) return;
     setSharedIndex(0);
-  }, [sharedSession]);
+  }, [sharedSession?.sharedID]);
+
+  const adjustSessionSolveCount = useCallback((eventCode, sessionID, delta, fallbackBase = 0) => {
+    const ev = String(eventCode || "").toUpperCase();
+    const sid = String(sessionID || "main");
+    const change = Number(delta);
+
+    if (!ev || !Number.isFinite(change) || change === 0) return;
+
+    setSessionStats((prev) => {
+      const prevEventStats = prev?.[ev] || {};
+      const prevSessionStats = prevEventStats?.[sid] || null;
+      const baseCount = Number(
+        prevSessionStats?.SolveCountTotal ??
+          prevSessionStats?.solveCountTotal ??
+          prevSessionStats?.SolveCount ??
+          prevSessionStats?.solveCount ??
+          fallbackBase ??
+          0
+      );
+      const nextCount = Math.max(0, baseCount + change);
+
+      return {
+        ...(prev || {}),
+        [ev]: {
+          ...prevEventStats,
+          [sid]: {
+            ...(prevSessionStats || {}),
+            SolveCountTotal: nextCount,
+          },
+        },
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isSignedIn || !user?.UserID || !eventKey) {
+      setHomeDiscoveredTagOptions({});
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const valuesByField = await getTagValues(user.UserID, {
+          event: eventKey,
+        });
+
+        if (!cancelled) {
+          setHomeDiscoveredTagOptions(valuesByField || {});
+
+          let nextCatalog = tagCatalog;
+          let changed = false;
+
+          for (const field of SHARED_TAG_FIELDS) {
+            for (const value of Array.isArray(valuesByField?.[field]) ? valuesByField[field] : []) {
+              const updated = addTagCatalogValue(nextCatalog, tagScopeEventKey, field, value);
+              if (JSON.stringify(updated) !== JSON.stringify(nextCatalog)) {
+                nextCatalog = updated;
+                changed = true;
+              }
+            }
+          }
+
+          if (changed) {
+            setUser((prev) => ({
+              ...(prev || {}),
+              TagCatalog: nextCatalog,
+            }));
+            queueTagCatalogSave(nextCatalog);
+          }
+        }
+      } catch (err) {
+        console.error("Failed loading tag values for home selector:", err);
+        if (!cancelled) setHomeDiscoveredTagOptions({});
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn, user?.UserID, eventKey, currentSession, tagCatalog, queueTagCatalogSave, tagScopeEventKey]);
 
   useEffect(() => {
     if (!sharedSession) return;
 
     const { sessionID } = sharedSession;
+    const perspective = getSharedPerspective(sharedSession, user?.UserID, currentEvent);
     const nextSharedEvent =
-      sharedSession.events?.[sharedIndex] || sharedSession.event || "333";
+      perspective.yourEvents?.[sharedIndex] || perspective.yourFallbackEvent || "333";
 
     setCurrentEvent(nextSharedEvent);
-    setCurrentSession(sessionID);
+    setCurrentSession(sessionID || "main");
     setShowPlayerBar(true);
 
     console.log("Loaded Shared Session:", sessionID);
-  }, [sharedIndex, sharedSession]);
+  }, [sharedIndex, sharedSession, user?.UserID, currentEvent]);
 
   useEffect(() => {
     const isRelay =
@@ -522,96 +1257,250 @@ function App() {
     setRelayLegs(legs);
     setRelayLegIndex(0);
     setRelayLegTimes([]);
-    setRelayScrambles(legs.map((ev) => generateScramble(ev)));
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const generated = await generateRelayScrambles(legs);
+        if (cancelled) return;
+        setRelayScrambles(generated);
+      } catch (err) {
+        console.error("Failed to generate relay scrambles:", err);
+        if (!cancelled) setRelayScrambles([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [currentEvent, currentSession, activeSessionObj]);
 
-  const preloadScrambles = (event) => {
-    const newScrambles = Array.from({ length: 10 }, () => generateScramble(event));
-    setScrambles((prevScrambles) => ({
-      ...prevScrambles,
-      [event]: newScrambles,
-    }));
-  };
+  const preloadScrambles = useCallback(
+    async (event) => {
+      await syncScrambleQueue(event, 10);
+    },
+    [syncScrambleQueue]
+  );
 
-  const getNextScramble = () => {
-    const ev = currentEvent;
-    const nextScramble = scrambles[ev]?.[0] || generateScramble(ev);
+  const getNextScramble = useCallback(
+    async (eventOverride = null) => {
+      const ev = eventOverride || currentEventRef.current;
+      const { scramble, queue } = await consumeScramble(ev);
 
-    setScrambles((prev) => {
-      const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
-      const rest = arr.length ? arr.slice(1) : [];
-      const need = rest.length < 5 ? 10 : 0;
-      const refill = need ? Array.from({ length: need }, () => generateScramble(ev)) : [];
-
-      return {
+      setScrambles((prev) => ({
         ...(prev || {}),
-        [ev]: [...rest, ...refill],
-      };
-    });
+        [ev]: queue,
+      }));
 
-    return nextScramble;
-  };
+      warmScrambleQueue(ev, 10)
+        .then((refilled) => {
+          setScrambles((prev) => ({
+            ...(prev || {}),
+            [ev]: refilled,
+          }));
+        })
+        .catch((err) => {
+          console.error(`Failed to refill scramble queue for ${ev}:`, err);
+        });
 
-  const skipToNextScramble = () => {
-    const eventScrambles = scrambles[currentEvent] || [];
-    setScrambles((prevScrambles) => {
-      const updatedScrambles = { ...prevScrambles };
-      updatedScrambles[currentEvent] = [
-        ...eventScrambles.slice(1),
-        generateScramble(currentEvent),
-      ];
-      return updatedScrambles;
-    });
-  };
+      return scramble;
+    },
+    []
+  );
 
-  const resetRelaySet = () => {
+  const skipToNextScramble = useCallback(
+    async (eventOverride = null) => {
+      const ev = eventOverride || currentEventRef.current;
+      const { queue } = await replaceHeadScramble(ev);
+
+      setScrambles((prev) => ({
+        ...(prev || {}),
+        [ev]: queue,
+      }));
+
+      warmScrambleQueue(ev, 10)
+        .then((refilled) => {
+          setScrambles((prev) => ({
+            ...(prev || {}),
+            [ev]: refilled,
+          }));
+        })
+        .catch((err) => {
+          console.error(`Failed to refill scramble queue for ${ev}:`, err);
+        });
+    },
+    []
+  );
+
+  const resetRelaySet = useCallback(async () => {
     const legs = Array.isArray(relayLegs) ? relayLegs : [];
     if (!legs.length) return;
 
     setRelayLegIndex(0);
     setRelayLegTimes([]);
-    setRelayScrambles(legs.map((ev) => generateScramble(ev)));
-  };
 
-  const goForwardScramble = () => {
+    try {
+      const generated = await generateRelayScrambles(legs);
+      setRelayScrambles(generated);
+    } catch (err) {
+      console.error("Failed to reset relay scrambles:", err);
+      setRelayScrambles([]);
+    }
+  }, [relayLegs]);
+
+  const extendCasualSharedSession = useCallback(
+    async (session, batchSize = null) => {
+      if (!session?.sharedID) return session;
+
+      const size = Math.max(5, Number(batchSize || session?.batchSize || 25) || 25);
+      const perspective = getSharedPerspective(session, user?.UserID, currentEvent);
+      const baseEvent = normalizeSharedEventKey(
+        perspective.yourFallbackEvent || session?.event || currentEvent || "333"
+      );
+
+      const creatorEvents = [];
+      const opponentEvents = [];
+      const creatorScrambles = [];
+      const opponentScrambles = [];
+
+      for (let i = 0; i < size; i += 1) {
+        const scramble = await generateScrambleForEvent(baseEvent);
+        creatorEvents.push(baseEvent);
+        opponentEvents.push(baseEvent);
+        creatorScrambles.push(scramble);
+        opponentScrambles.push(scramble);
+      }
+
+      const payload = {
+        sharedID: session.sharedID,
+        count: getSharedSolveCount(session) + creatorScrambles.length,
+        creatorEvents,
+        opponentEvents,
+        creatorScrambles,
+        opponentScrambles,
+      };
+
+      const nextSession = applySharedExtensionsToSession(
+        {
+          ...session,
+          batchSize: size,
+        },
+        [{ text: `[sharedExtend]${JSON.stringify(payload)}`, timestamp: new Date().toISOString() }]
+      );
+
+      setSharedSession((prev) =>
+        prev?.sharedID === session.sharedID ? nextSession : prev
+      );
+
+      if (isSignedIn && user?.UserID && session?.conversationID) {
+        try {
+          await sendMessage(
+            session.conversationID,
+            user.UserID,
+            `[sharedExtend]${JSON.stringify(payload)}`
+          );
+        } catch (err) {
+          console.warn("Failed to broadcast shared extension:", err);
+        }
+      }
+
+      return nextSession;
+    },
+    [user?.UserID, currentEvent, isSignedIn]
+  );
+
+  const restorePreviousSessionAfterShared = useCallback(() => {
+    const target = sharedReturnTargetRef.current;
+
+    setSharedSession(null);
+    setSharedIndex(0);
+
+    if (target) {
+      setCurrentEvent(target.event || "333");
+      setCurrentSession(target.session || "main");
+      setActiveSessionObj(target.activeSessionObj || null);
+    }
+
+    sharedReturnTargetRef.current = null;
+  }, []);
+
+  const beginSharedSession = useCallback(
+    (session, options = {}) => {
+      if (!session) return;
+      const requestedIndex = Number(options?.targetIndex);
+      const resumeCurrent =
+        options?.mode === "resume" &&
+        sharedSession?.sharedID &&
+        sharedSession.sharedID === session.sharedID;
+      const nextIndex =
+        Number.isFinite(requestedIndex) && requestedIndex >= 0
+          ? requestedIndex
+          : resumeCurrent
+          ? sharedIndex
+          : session?.sharedID && user?.UserID
+          ? findSharedNextIndex(session, user.UserID)
+          : 0;
+
+      if (!sharedSession) {
+        sharedReturnTargetRef.current = {
+          event: currentEvent,
+          session: currentSession,
+          activeSessionObj,
+        };
+      }
+
+      setSharedSession(session);
+      setSharedIndex(nextIndex);
+      setShowPlayerBar(true);
+    },
+    [sharedSession, sharedIndex, currentEvent, currentSession, activeSessionObj, user?.UserID]
+  );
+
+  const goForwardScramble = useCallback(async () => {
     const isRelay =
       String(currentEvent || "").toUpperCase() === "RELAY" &&
       activeSessionObj?.SessionType === "RELAY";
 
     if (isRelay) {
-      resetRelaySet();
+      await resetRelaySet();
       return;
     }
 
     if (sharedSession) {
       setSharedIndex((i) => Math.min(i + 1, sharedSession.scrambles.length - 1));
     } else {
-      skipToNextScramble();
+      await skipToNextScramble();
     }
-  };
+  }, [
+    currentEvent,
+    activeSessionObj,
+    resetRelaySet,
+    sharedSession,
+    skipToNextScramble,
+  ]);
 
-  const goBackwardScramble = () => {
+  const goBackwardScramble = useCallback(async () => {
     const isRelay =
       String(currentEvent || "").toUpperCase() === "RELAY" &&
       activeSessionObj?.SessionType === "RELAY";
 
     if (isRelay) {
-      resetRelaySet();
+      await resetRelaySet();
       return;
     }
 
     if (sharedSession) {
       setSharedIndex((i) => Math.max(i - 1, 0));
     } else {
-      setScrambles((prev) => {
-        const arr = prev[currentEvent] || [];
-        return {
-          ...prev,
-          [currentEvent]: [generateScramble(currentEvent), ...arr],
-        };
-      });
+      const { queue } = await prependScramble(currentEvent);
+
+      setScrambles((prev) => ({
+        ...(prev || {}),
+        [currentEvent]: queue,
+      }));
     }
-  };
+  }, [currentEvent, activeSessionObj, resetRelaySet, sharedSession]);
 
   const toFiniteNumber = (value) => {
     const n = Number(value);
@@ -639,7 +1528,11 @@ function App() {
         : baseTags;
 
     const isDNF =
-      item?.IsDNF === true || item?.isDNF === true || item?.Penalty === "DNF" || item?.penalty === "DNF";
+      item?.IsDNF === true ||
+      item?.isDNF === true ||
+      item?.Penalty === "DNF" ||
+      item?.penalty === "DNF";
+
     const rawTimeMs = toFiniteNumber(
       item?.RawTimeMs ??
         item?.rawTimeMs ??
@@ -649,6 +1542,7 @@ function App() {
         item?.OriginalTime ??
         item?.originalTime
     );
+
     const explicitFinal = toFiniteNumber(item?.FinalTimeMs ?? item?.finalTimeMs);
     const finalTimeMs = isDNF
       ? null
@@ -681,6 +1575,58 @@ function App() {
     console.log("Merging shared session:", session);
   };
 
+  const refreshActiveSharedSession = useCallback(async () => {
+    if (!sharedSession?.conversationID || !sharedSession?.sharedID || !user?.UserID) return;
+
+    try {
+      const messages = await getMessages(sharedSession.conversationID, user.UserID, 100);
+      const incomingRoundResults = buildRoundResultsFromMessages(
+        messages,
+        sharedSession.sharedID
+      );
+
+      setSharedSession((prev) => {
+        if (!prev || prev.sharedID !== sharedSession.sharedID) return prev;
+        const extended = applySharedExtensionsToSession(
+          {
+            ...prev,
+            roundResults: mergeRoundResults(prev.roundResults, incomingRoundResults),
+          },
+          messages
+        );
+        return {
+          ...prev,
+          ...extended,
+          roundResults: mergeRoundResults(prev.roundResults, incomingRoundResults),
+        };
+      });
+
+      setSocialRefreshTick((tick) => tick + 1);
+    } catch (err) {
+      console.warn("Failed to refresh active shared session:", err);
+    }
+  }, [sharedSession, user?.UserID]);
+
+  useEffect(() => {
+    if (!isHomePage) return;
+    if (!sharedSession?.conversationID || !sharedSession?.sharedID) return;
+    if (!user?.UserID) return;
+
+    refreshActiveSharedSession();
+
+    const id = setInterval(() => {
+      refreshActiveSharedSession();
+    }, 10000);
+
+    return () => clearInterval(id);
+  }, [
+    isHomePage,
+    sharedSession?.conversationID,
+    sharedSession?.sharedID,
+    user?.UserID,
+    refreshActiveSharedSession,
+  ]);
+
   const clearPractice = () => {
     setPracticeSolves([]);
   };
@@ -690,8 +1636,7 @@ function App() {
   };
 
   const startPractice = () => {
-    setSharedSession(null);
-    setSharedIndex(0);
+    restorePreviousSessionAfterShared();
 
     setActiveSessionObj(null);
     setRelayLegIndex(0);
@@ -756,6 +1701,7 @@ function App() {
         ...prev,
         [ev]: [...(prev[ev] || []), ...(savedSolves || [])],
       }));
+      adjustSessionSolveCount(ev, targetSessionID, savedSolves.length, sessions[ev]?.length || 0);
 
       setShowPracticeExit(false);
       setPracticeMode(false);
@@ -767,6 +1713,8 @@ function App() {
 
   const handleSignUp = async (username, password) => {
     try {
+      const defaultProfileScramble = await generateScrambleForEvent("333");
+
       await runDb("Creating account", async () => {
         await createUser({
           userID: username,
@@ -774,13 +1722,14 @@ function App() {
           username: username,
           color: "#0E171D",
           profileEvent: "333",
-          profileScramble: generateScramble("333"),
+          profileScramble: defaultProfileScramble,
           chosenStats: [],
           headerStats: [],
           wcaid: null,
           cubeCollection: [],
           settings: {},
           tagConfig: DEFAULT_TAG_CONFIG,
+          tagCatalog: { Global: {}, ByEvent: {} },
           Friends: [],
         });
 
@@ -796,9 +1745,15 @@ function App() {
       const userID = profile?.PK?.split("#")[1] || username;
 
       skipNextSettingsAutosaveRef.current = true;
-      setAllSettings(profile?.Settings && typeof profile.Settings === "object" ? profile.Settings : {});
+      setAllSettings(
+        profile?.Settings && typeof profile.Settings === "object"
+          ? profile.Settings
+          : {}
+      );
       lastSavedSettingsJsonRef.current = JSON.stringify(
-        profile?.Settings && typeof profile.Settings === "object" ? profile.Settings : {}
+        profile?.Settings && typeof profile.Settings === "object"
+          ? profile.Settings
+          : {}
       );
 
       setTagConfig(normalizeTagConfig(profile?.TagConfig));
@@ -812,8 +1767,9 @@ function App() {
 
       setCurrentEvent(profile?.Settings?.lastEvent || "333");
       setCurrentSession(
-        profile?.Settings?.lastSessionByEvent?.[profile?.Settings?.lastEvent || "333"] ||
-          "main"
+        profile?.Settings?.lastSessionByEvent?.[
+          profile?.Settings?.lastEvent || "333"
+        ] || "main"
       );
       setShowPlayerBar(
         typeof profile?.Settings?.showPlayerBar === "boolean"
@@ -842,9 +1798,15 @@ function App() {
       };
 
       skipNextSettingsAutosaveRef.current = true;
-      setAllSettings(profile?.Settings && typeof profile.Settings === "object" ? profile.Settings : {});
+      setAllSettings(
+        profile?.Settings && typeof profile.Settings === "object"
+          ? profile.Settings
+          : {}
+      );
       lastSavedSettingsJsonRef.current = JSON.stringify(
-        profile?.Settings && typeof profile.Settings === "object" ? profile.Settings : {}
+        profile?.Settings && typeof profile.Settings === "object"
+          ? profile.Settings
+          : {}
       );
 
       setTagConfig(normalizeTagConfig(profile?.TagConfig));
@@ -907,6 +1869,13 @@ function App() {
       }
 
       setSessionStats(statsByEvent);
+
+      syncScrambleQueue(restoredEvent, 10).catch((err) => {
+        console.error(
+          `Failed to warm scramble queue for restored event ${restoredEvent}:`,
+          err
+        );
+      });
     } catch (error) {
       console.error("Sign-in error:", error);
     }
@@ -940,12 +1909,15 @@ function App() {
         ...prev,
         [ev]: [...(prev[ev] || []), pendingSolve],
       }));
+      adjustSessionSolveCount(ev, currentSession, 1, sessions[ev]?.length || 0);
     };
 
     const replacePendingSolve = (ev, pendingRef, savedSolve) => {
       setSessions((prev) => ({
         ...prev,
-        [ev]: (prev[ev] || []).map((s) => (s.solveRef === pendingRef ? savedSolve : s)),
+        [ev]: (prev[ev] || []).map((s) =>
+          s.solveRef === pendingRef ? savedSolve : s
+        ),
       }));
     };
 
@@ -954,11 +1926,20 @@ function App() {
         ...prev,
         [ev]: (prev[ev] || []).filter((s) => s.solveRef !== pendingRef),
       }));
+      adjustSessionSolveCount(ev, currentSession, -1, sessions[ev]?.length || 0);
     };
 
     if (practiceMode) {
-      const scramble = getNextScramble();
+      const practiceEvent = currentEventRef.current;
+      const shownScramble = String(displayedScrambleRef.current || "").trim();
+      const scramble = shownScramble || (await getNextScramble(practiceEvent));
       const timestamp = new Date().toISOString();
+
+      if (shownScramble) {
+        getNextScramble(practiceEvent).catch((err) => {
+          console.error(`Failed to advance scramble queue for ${practiceEvent}:`, err);
+        });
+      }
 
       const newSolve = {
         solveRef: `LOCAL#${timestamp}`,
@@ -967,7 +1948,6 @@ function App() {
         rawTimeMs: newTime,
         finalTimeMs: newTime,
         isDNF: false,
-
         scramble,
         event: currentEvent,
         penalty: null,
@@ -996,7 +1976,6 @@ function App() {
 
       if ((settings?.relayMode || "total") === "legs") {
         const legIdx = relayLegIndex;
-
         const nextLegTimes = [...relayLegTimes, newTime];
         setRelayLegTimes(nextLegTimes);
 
@@ -1052,7 +2031,6 @@ function App() {
             rawTimeMs: totalMs,
             finalTimeMs: totalMs,
             isDNF: false,
-
             scramble: "Relay",
             event: "RELAY",
             penalty: null,
@@ -1066,7 +2044,7 @@ function App() {
           }));
         }
 
-        resetRelaySet();
+        await resetRelaySet();
         return;
       }
 
@@ -1110,7 +2088,6 @@ function App() {
           rawTimeMs: totalMs,
           finalTimeMs: totalMs,
           isDNF: false,
-
           scramble: "Relay",
           event: "RELAY",
           penalty: null,
@@ -1124,35 +2101,57 @@ function App() {
         }));
       }
 
-      resetRelaySet();
+      await resetRelaySet();
       return;
     }
 
     let scramble;
     let activeSharedID = null;
     let solveIndexForBroadcast = null;
+    let shouldCompleteSharedSession = false;
+    let sharedConversationID = null;
+    let nextSharedIndex = null;
+    let nextSharedSessionState = sharedSession;
+    let sharedMode = sharedSession ? getSharedMode(sharedSession) : null;
+
+    const activeSolveEvent = sharedSession
+      ? normalizeSharedEventKey(
+          getSharedPerspective(sharedSession, user?.UserID, currentEvent).yourEvents?.[sharedIndex] ||
+            getSharedPerspective(sharedSession, user?.UserID, currentEvent).yourFallbackEvent ||
+            currentEvent
+        )
+      : currentEvent;
 
     if (sharedSession) {
-      scramble = sharedSession.scrambles[sharedIndex];
-
+      const perspective = getSharedPerspective(sharedSession, user?.UserID, currentEvent);
+      scramble =
+        perspective.yourScrambles?.[sharedIndex] ||
+        sharedSession.scrambles?.[sharedIndex] ||
+        "";
       solveIndexForBroadcast = sharedIndex;
       activeSharedID = sharedSession.sharedID;
+      sharedConversationID = sharedSession.conversationID || "";
 
-      const nextIndex = sharedIndex + 1;
-      setSharedIndex(nextIndex);
-
-      if (nextIndex >= sharedSession.scrambles.length) {
-        console.log("Shared session completed");
-        setSharedSession(null);
-      }
+      nextSharedIndex = sharedIndex + 1;
 
       setScrambles((prev) => ({
         ...prev,
-        [currentEvent]: [...(prev[currentEvent] || [])],
+        [activeSolveEvent]: [...(prev[activeSolveEvent] || [])],
       }));
     } else {
-      const consumed = getNextScramble();
-      scramble = smartMeta?.scramble ? String(smartMeta.scramble).trim() : consumed;
+      const solveEvent = currentEventRef.current;
+      const shownScramble = String(displayedScrambleRef.current || "").trim();
+
+      if (shownScramble) {
+        scramble = smartMeta?.scramble ? String(smartMeta.scramble).trim() : shownScramble;
+
+        getNextScramble(solveEvent).catch((err) => {
+          console.error(`Failed to advance scramble queue for ${solveEvent}:`, err);
+        });
+      } else {
+        const consumed = await getNextScramble(solveEvent);
+        scramble = smartMeta?.scramble ? String(smartMeta.scramble).trim() : consumed;
+      }
     }
 
     const timestamp =
@@ -1179,6 +2178,7 @@ function App() {
           IsShared: true,
           SharedID: sharedSession.sharedID,
           SharedIndex: sharedIndex,
+          SharedEvent: activeSolveEvent,
           ...smartTagPayload,
         })
       : buildTagPayload({
@@ -1186,19 +2186,52 @@ function App() {
         });
 
     if (isSignedIn && user) {
+      if (activeSharedID && solveIndexForBroadcast !== null) {
+        setSharedSession((prev) => {
+          if (!prev || prev.sharedID !== activeSharedID) return prev;
+
+          const nextRoundResults = {
+            ...(prev.roundResults || {}),
+            [solveIndexForBroadcast]: {
+              ...((prev.roundResults || {})[solveIndexForBroadcast] || {}),
+              [user.UserID]: {
+                time: newTime,
+                event: activeSolveEvent,
+                updatedAt: timestamp,
+              },
+            },
+          };
+
+          nextSharedSessionState = {
+            ...prev,
+            roundResults: nextRoundResults,
+          };
+          shouldCompleteSharedSession = shouldCompleteSharedSessionNow(
+            nextSharedSessionState,
+            nextSharedIndex,
+            user.UserID
+          );
+
+          return {
+            ...prev,
+            roundResults: nextRoundResults,
+          };
+        });
+      }
+
       const pendingSolve = createPendingSolve({
         createdAt: timestamp,
         time: newTime,
         scramble,
-        event: currentEvent,
+        event: activeSolveEvent,
         tags: newTags,
       });
-      appendPendingSolve(currentEvent, pendingSolve);
+      appendPendingSolve(activeSolveEvent, pendingSolve);
 
       try {
         const res = await runDb("Saving solve", () =>
           addSolveToDB(user.UserID, {
-            event: currentEvent,
+            event: activeSolveEvent,
             sessionID: currentSession,
             rawTimeMs: newTime,
             penalty: null,
@@ -1210,10 +2243,10 @@ function App() {
         );
 
         const savedSolve = normalizeSolve(res?.item);
-        replacePendingSolve(currentEvent, pendingSolve.solveRef, savedSolve);
+        replacePendingSolve(activeSolveEvent, pendingSolve.solveRef, savedSolve);
         setStatsMutationTick((t) => t + 1);
       } catch (err) {
-        removePendingSolve(currentEvent, pendingSolve.solveRef);
+        removePendingSolve(activeSolveEvent, pendingSolve.solveRef);
         console.error("Error adding solve (DB write failed):", err);
         return;
       }
@@ -1222,18 +2255,35 @@ function App() {
         try {
           const messageText = `[sharedUpdate]${activeSharedID}|${solveIndexForBroadcast}|${newTime}|${user.UserID}`;
 
-          const conversationID = activeSharedID
-            .replace("SHARED#", "")
-            .split("#")
-            .slice(0, 2)
-            .sort()
-            .join("#");
-          await sendMessage(conversationID, user.UserID, messageText);
+          const conversationID =
+            sharedConversationID ||
+            activeSharedID
+              .replace("SHARED#", "")
+              .split("#")
+              .slice(0, 2)
+              .sort()
+              .join("#");
 
-          setSocialRefreshTick((t) => t + 1);
+          await sendMessage(conversationID, user.UserID, messageText);
         } catch (err) {
           console.warn("Shared broadcast failed (solve still saved):", err);
         }
+      }
+
+      if (
+        activeSharedID &&
+        sharedMode === "casual" &&
+        nextSharedSessionState &&
+        nextSharedIndex >= getSharedSolveCount(nextSharedSessionState)
+      ) {
+        nextSharedSessionState = await extendCasualSharedSession(nextSharedSessionState);
+      }
+
+      if (shouldCompleteSharedSession) {
+        console.log("Shared session completed");
+        restorePreviousSessionAfterShared();
+      } else if (activeSharedID && Number.isFinite(nextSharedIndex)) {
+        setSharedIndex(nextSharedIndex);
       }
     } else {
       const localSolve = {
@@ -1243,9 +2293,8 @@ function App() {
         rawTimeMs: newTime,
         finalTimeMs: newTime,
         isDNF: false,
-
         scramble,
-        event: currentEvent,
+        event: activeSolveEvent,
         penalty: null,
         note: "",
         tags: newTags,
@@ -1253,8 +2302,15 @@ function App() {
 
       setSessions((prev) => ({
         ...prev,
-        [currentEvent]: [...(prev[currentEvent] || []), localSolve],
+        [activeSolveEvent]: [...(prev[activeSolveEvent] || []), localSolve],
       }));
+
+      if (shouldCompleteSharedSession) {
+        console.log("Shared session completed");
+        restorePreviousSessionAfterShared();
+      } else if (activeSharedID && Number.isFinite(nextSharedIndex)) {
+        setSharedIndex(nextSharedIndex);
+      }
     }
   };
 
@@ -1358,12 +2414,11 @@ function App() {
         [ev]: arr.filter((s) => s?.solveRef !== solveRefToDelete),
       };
     });
+    adjustSessionSolveCount(ev, currentSession, -1, sessions?.[ev]?.length || 0);
 
     if (isSignedIn && user) {
       try {
-        await runDb("Deleting solve", () => deleteSolve(user.UserID, solveRefToDelete), {
-          showStatus: false,
-        });
+        await runDb("Deleting solve", () => deleteSolve(user.UserID, solveRefToDelete));
         setStatsMutationTick((t) => t + 1);
       } catch (err) {
         alert("Failed to delete solve");
@@ -1476,6 +2531,10 @@ function App() {
     }
   };
 
+  const leaveSharedRun = useCallback(() => {
+    restorePreviousSessionAfterShared();
+  }, [restorePreviousSessionAfterShared]);
+
   const handleEventChange = (event) => {
     const nextEvent = event.target.value;
     const savedSession =
@@ -1485,6 +2544,7 @@ function App() {
 
     setCurrentEvent(nextEvent);
     setCurrentSession(savedSession);
+    sharedReturnTargetRef.current = null;
     setSharedSession(null);
     setSharedIndex(0);
 
@@ -1496,7 +2556,7 @@ function App() {
   };
 
   const onScrambleClick = () => {
-    const scrambleText = scrambles[currentEvent]?.[0] || "";
+    const scrambleText = displayedScramble || "";
     if (scrambleText) {
       navigator.clipboard
         .writeText(scrambleText)
@@ -1514,6 +2574,8 @@ function App() {
 
   const handleShowSignInPopup = () => setShowSignInPopup(true);
   const handleCloseSignInPopup = () => setShowSignInPopup(false);
+  const homeEventSelectorRef = useRef(null);
+
   const handleSignOut = () => {
     setShowSettingsPopup(false);
     setShowSignInPopup(false);
@@ -1524,6 +2586,7 @@ function App() {
     setCustomEvents([]);
     setSessions(INITIAL_SESSIONS);
     setScrambles({});
+    clearScrambleQueue();
     setSessionStats({});
     setStatsMutationTick(0);
     setCurrentEvent("333");
@@ -1544,25 +2607,40 @@ function App() {
     setSelectedAverageSolve(null);
     setSharedSession(null);
     setSharedIndex(0);
+    sharedReturnTargetRef.current = null;
     setShowPlayerBar(true);
+    setActiveSessionObj(null);
+    setRelayLegIndex(0);
+    setRelayLegTimes([]);
+    setRelayScrambles([]);
+    setRelayLegs([]);
   };
 
   const openEventSelector = () => {
-    const el = document.querySelector(".event-selector-trigger");
-    if (el) {
-      try {
-        el.click();
-      } catch (_) {}
-    }
+    homeEventSelectorRef.current?.open?.();
   };
+
+  const openSharedMatch = useCallback(() => {
+    setShowPlayerBar(true);
+
+    navigate("/social", {
+      state: {
+        openMessages: true,
+        conversationID: sharedSession?.conversationID || "",
+        sharedID: sharedSession?.sharedID || "",
+        scrollToShared: true,
+      },
+    });
+  }, [navigate, sharedSession]);
 
   const currentSolves = practiceMode ? practiceSolves || [] : sessions[eventKey] || [];
   const solvesSourceForDetail = practiceMode
     ? practiceSolves || []
     : sessions[eventKey] || [];
   const currentSessionStatsForEvent =
-    sessionStats?.[String(eventKey || "").toUpperCase()]?.[String(currentSession || "main")] ||
-    null;
+    sessionStats?.[String(eventKey || "").toUpperCase()]?.[
+      String(currentSession || "main")
+    ] || null;
   const currentSessionTotalSolveCount = Number(
     currentSessionStatsForEvent?.SolveCountTotal ??
       currentSessionStatsForEvent?.solveCountTotal ??
@@ -1570,6 +2648,218 @@ function App() {
       currentSessionStatsForEvent?.solveCount ??
       0
   );
+
+  const activeSharedMeta = useMemo(() => {
+    if (!sharedSession) return null;
+
+    const total = getSharedSolveCount(sharedSession);
+    const mode = getSharedMode(sharedSession);
+    const targetWins = getSharedTargetWins(sharedSession);
+
+    const safeTotal = Math.max(total, 1);
+    const solveNumber = Math.min(sharedIndex + 1, safeTotal);
+    const currentUserID = user?.UserID || null;
+
+    const opponentID = sharedSession?.opponentID || null;
+    const perspective = getSharedPerspective(sharedSession, currentUserID, currentEvent);
+    const yourEvents = perspective.yourEvents;
+    const theirEvents = perspective.theirEvents;
+    const yourFallbackEvent = perspective.yourFallbackEvent;
+    const theirFallbackEvent = perspective.theirFallbackEvent;
+
+    const yourPlanLabel = summarizeSharedPlan(yourEvents, yourFallbackEvent);
+    const theirPlanLabel = summarizeSharedPlan(theirEvents, theirFallbackEvent);
+    const samePlan = String(yourPlanLabel || "") === String(theirPlanLabel || "");
+
+    const opponentLabel = getSharedOpponentLabel(sharedSession, {
+      UserID: currentUserID,
+    });
+
+    const yourCurrentEvent =
+      yourEvents?.[sharedIndex] || yourFallbackEvent || currentEvent;
+    const theirCurrentEvent =
+      theirEvents?.[sharedIndex] || theirFallbackEvent || currentEvent;
+
+    const roundResults = sharedSession?.roundResults || {};
+    const currentRoundResults = roundResults?.[sharedIndex] || {};
+    const rows = Array.from({ length: total }, (_, index) => {
+      const rowResults = roundResults?.[index] || {};
+      const rowParticipants = getSharedRoundParticipants(sharedSession, index, currentUserID);
+      const primaryPeer =
+        rowParticipants.find((entry) => entry.participantID === opponentID) ||
+        rowParticipants[0] ||
+        null;
+
+      return {
+        index,
+        scramble: sharedSession?.scrambles?.[index] || "",
+        event: yourEvents?.[index] || yourFallbackEvent || currentEvent,
+        yourTime: Number.isFinite(Number(rowResults?.[currentUserID]?.time))
+          ? Number(rowResults[currentUserID].time)
+          : null,
+        theirTime: Number.isFinite(Number(primaryPeer?.time)) ? Number(primaryPeer.time) : null,
+        peers: rowParticipants.map((entry) => ({
+          name: getSharedParticipantLabel(sharedSession, entry.participantID, opponentLabel),
+          time: entry.time,
+          participantID: entry.participantID,
+        })),
+        complete:
+          Number.isFinite(Number(rowResults?.[currentUserID]?.time)) &&
+          rowParticipants.length > 0,
+      };
+    });
+    const otherRoundParticipants = getSharedRoundParticipants(
+      sharedSession,
+      sharedIndex,
+      currentUserID
+    );
+    const primaryOtherParticipant =
+      otherRoundParticipants.find((entry) => entry.participantID === opponentID) ||
+      otherRoundParticipants[0] ||
+      null;
+    const otherParticipantsCount = otherRoundParticipants.length;
+
+    const yourCurrentTimeLabel = formatSharedTimeLabel(
+      currentRoundResults?.[currentUserID]?.time
+    );
+
+    const theirCurrentTimeLabel = formatSharedTimeLabel(
+      primaryOtherParticipant?.time
+    );
+
+    const resolvedOpponentLabel =
+      otherParticipantsCount > 1
+        ? `${otherParticipantsCount} others`
+        : primaryOtherParticipant?.participantID || opponentLabel;
+
+    const score = computeSharedScore(sharedSession, currentUserID);
+    const modeLabel =
+      mode === "head_to_head" ? "Head to Head" : mode === "casual" ? "Casual" : "Average";
+    const centerLabel =
+      mode === "head_to_head"
+        ? `${samePlan ? sharedEventLabel(yourFallbackEvent) : "Mixed"} first to ${targetWins}`
+        : mode === "casual"
+        ? samePlan
+          ? `${sharedEventLabel(yourFallbackEvent)} shared session`
+          : "Mixed shared session"
+        : samePlan
+        ? `${yourPlanLabel} average`
+        : "Mixed match";
+    const subLabel =
+      mode === "head_to_head"
+        ? `Score ${score.yourWins}-${score.theirWins}`
+        : `Round ${solveNumber}/${safeTotal}`;
+
+    return {
+      active: true,
+      title: "Shared Session",
+      modeLabel,
+      opponentLabel: resolvedOpponentLabel,
+      yourLabel: "You",
+      theirLabel: resolvedOpponentLabel,
+      yourPlanLabel,
+      theirPlanLabel,
+      centerLabel,
+      subLabel,
+      currentRoundLabel: `Round ${solveNumber}/${safeTotal}`,
+      solveNumber,
+      total: safeTotal,
+      samePlan,
+      theirCurrentEventLabel: sharedEventLabel(theirCurrentEvent),
+      yourCurrentEventLabel: sharedEventLabel(yourCurrentEvent),
+      theirCurrentTimeLabel,
+      yourCurrentTimeLabel,
+      rows,
+      currentIndex: sharedIndex,
+      count: total,
+      targetWins,
+      mode,
+      yourWins: score.yourWins,
+      theirWins: score.theirWins,
+    };
+  }, [sharedSession, sharedIndex, user?.UserID, currentEvent]);
+
+  const activeSharedMessage = useMemo(() => {
+    if (!sharedSession?.sharedID) return null;
+
+    const creatorScrambles =
+      Array.isArray(sharedSession.creatorScrambles) && sharedSession.creatorScrambles.length
+        ? sharedSession.creatorScrambles
+        : Array.isArray(sharedSession.scrambles)
+        ? sharedSession.scrambles
+        : [];
+
+    const opponentScrambles =
+      Array.isArray(sharedSession.opponentScrambles) && sharedSession.opponentScrambles.length
+        ? sharedSession.opponentScrambles
+        : Array.isArray(sharedSession.scrambles)
+        ? sharedSession.scrambles
+        : creatorScrambles;
+
+    const creatorEvents =
+      Array.isArray(sharedSession.creatorEvents) && sharedSession.creatorEvents.length
+        ? sharedSession.creatorEvents
+        : Array.isArray(sharedSession.events)
+        ? sharedSession.events
+        : creatorScrambles.map(() => sharedSession.creatorEvent || sharedSession.event || "333");
+
+    const opponentEvents =
+      Array.isArray(sharedSession.opponentEvents) && sharedSession.opponentEvents.length
+        ? sharedSession.opponentEvents
+        : Array.isArray(sharedSession.events)
+        ? sharedSession.events
+        : opponentScrambles.map(
+            () => sharedSession.opponentEvent || sharedSession.event || "333"
+          );
+
+    const count = Math.max(
+      Number(sharedSession.count) || 0,
+      creatorScrambles.length,
+      opponentScrambles.length
+    );
+
+    return {
+      id: `${sharedSession.sharedID}-active`,
+      sender: sharedSession.creatorID || user?.UserID || "",
+      text: `[sharedAoN]${JSON.stringify({
+        v: 2,
+        mode: getSharedMode(sharedSession),
+        type: getSharedMode(sharedSession),
+        sharedID: sharedSession.sharedID,
+        count,
+        targetWins: sharedSession.targetWins || null,
+        batchSize: sharedSession.batchSize || null,
+        creatorID: sharedSession.creatorID || user?.UserID || null,
+        creatorEvent: sharedSession.creatorEvent || creatorEvents[0] || sharedSession.event || "333",
+        opponentEvent:
+          sharedSession.opponentEvent || opponentEvents[0] || sharedSession.event || "333",
+        creatorEvents,
+        opponentEvents,
+        creatorScrambles,
+        opponentScrambles,
+      })}`,
+    };
+  }, [sharedSession, user?.UserID]);
+
+  const activeSharedMessages = useMemo(() => {
+    if (!sharedSession?.sharedID) return [];
+
+    return Object.entries(sharedSession.roundResults || {})
+      .flatMap(([solveIndex, row]) =>
+        Object.entries(row || {}).map(([participantID, result]) => ({
+          id: `${sharedSession.sharedID}-${solveIndex}-${participantID}`,
+          sender: participantID,
+          text: `[sharedUpdate]${sharedSession.sharedID}|${solveIndex}|${result?.time}|${participantID}`,
+          createdAt: result?.updatedAt || null,
+          timestamp: result?.updatedAt || null,
+        }))
+      )
+      .sort((a, b) => {
+        const aTs = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bTs = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return aTs - bTs;
+      });
+  }, [sharedSession]);
 
   const requestBestAverageWindow = async (count, startSolveRef, targetAvg) => {
     if (
@@ -1626,12 +2916,77 @@ function App() {
 
     return false;
   };
+
+  const handleHomeSummarySelect = useCallback(
+    async (selection) => {
+      if (!selection || selection.value == null) return;
+
+      if (selection.kind === "single") {
+        const solveRef = currentSessionStatsForEvent?.[selection.solveField] || null;
+        let solve =
+          currentSolves.find(
+            (item) => String(item?.solveRef ?? item?.SK ?? "") === String(solveRef)
+          ) || null;
+
+        if (!solve && !practiceMode && isSignedIn && user?.UserID && solveRef) {
+          try {
+            const items = await getSolveWindowFromStart(
+              user.UserID,
+              currentEvent,
+              currentSession,
+              solveRef,
+              1
+            );
+            solve = normalizeSolve((items || [])[0]);
+          } catch (error) {
+            console.warn("Failed to load best single for home summary:", error);
+          }
+        }
+
+        if (!solve) {
+          const target = Number(selection.value);
+          solve =
+            currentSolves.find((item) => Math.round(Number(item?.time)) === Math.round(target)) || null;
+        }
+
+        if (solve) {
+          setSelectedAverageSolve({ ...solve, userID: user?.UserID });
+        }
+        return;
+      }
+
+      const handled = await requestBestAverageWindow(
+        selection.size,
+        currentSessionStatsForEvent?.[selection.startField] || null,
+        selection.value
+      );
+
+      if (!handled) {
+        console.warn(`Unable to open ${selection.label} from home summary.`);
+      }
+    },
+    [
+      currentEvent,
+      currentSession,
+      currentSolves,
+      isSignedIn,
+      normalizeSolve,
+      currentSessionStatsForEvent,
+      practiceMode,
+      requestBestAverageWindow,
+      user?.UserID,
+    ]
+  );
+
   const cubeModelHistoryOptions = Array.from(
     new Set(
       [
+        ...getCubeCollectionOptionsForEvent(user?.CubeCollection, eventKey),
         ...Object.values(sessions || {}).flatMap((eventSolves) =>
           (Array.isArray(eventSolves) ? eventSolves : [])
-            .map((solve) => String(solve?.tags?.CubeModel || solve?.Tags?.CubeModel || "").trim())
+            .map((solve) =>
+              String(solve?.tags?.CubeModel || solve?.Tags?.CubeModel || "").trim()
+            )
             .filter(Boolean)
         ),
         ...Object.values(tagsByEvent || {})
@@ -1640,6 +2995,41 @@ function App() {
       ].filter(Boolean)
     )
   ).sort((a, b) => a.localeCompare(b));
+
+  const baseHomeTagOptions = useMemo(
+    () => collectTagSelectionOptions([], tagConfig, cubeModelHistoryOptions),
+    [tagConfig, cubeModelHistoryOptions]
+  );
+
+  const catalogHomeTagOptions = useMemo(
+    () => getTagCatalogOptionsForEvent(tagCatalog, eventKey),
+    [tagCatalog, eventKey]
+  );
+
+  const mergedHomeTagOptions = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.keys({
+          ...baseHomeTagOptions,
+          ...catalogHomeTagOptions,
+          ...homeDiscoveredTagOptions,
+        }).map((field) => [
+          field,
+          Array.from(
+            new Set([
+              ...(Array.isArray(baseHomeTagOptions?.[field]) ? baseHomeTagOptions[field] : []),
+              ...(Array.isArray(catalogHomeTagOptions?.[field])
+                ? catalogHomeTagOptions[field]
+                : []),
+              ...(Array.isArray(homeDiscoveredTagOptions?.[field])
+                ? homeDiscoveredTagOptions[field]
+                : []),
+            ])
+          ).sort((a, b) => a.localeCompare(b)),
+        ])
+      ),
+    [baseHomeTagOptions, catalogHomeTagOptions, homeDiscoveredTagOptions]
+  );
 
   const avgOfFive = calculateAverage(
     currentSolves.slice(-5).map((s) => s.time),
@@ -1666,27 +3056,41 @@ function App() {
           )
         )
       : "N/A";
+  const isSharedHomeView = isHomePage && !!(sharedSession && activeSharedMessage);
+  const dbStatusValue = useMemo(
+    () => ({
+      dbStatus,
+      runDb,
+      setDbPhase,
+    }),
+    [dbStatus, runDb, setDbPhase]
+  );
 
   return (
-    <div className={`App ${!isHomePage ? "music-player-mode" : ""}`}>
-      <div
-        className={`navAndPage ${
-          isHomePage || !showPlayerBar ? "fullHeight" : "reducedHeight"
-        }`}
-      >
-        <Navigation
-          isSignedIn={isSignedIn}
-          handleSettingsClick={() => setShowSettingsPopup(true)}
-          user={user}
-          dbStatus={dbStatus}
-        />
+    <DbStatusProvider value={dbStatusValue}>
+      <div className={`App ${!isHomePage ? "music-player-mode" : ""}`}>
+        <div
+          className={`navAndPage ${
+            isHomePage || !showPlayerBar ? "fullHeight" : "reducedHeight"
+          }`}
+        >
+          <Navigation
+            isSignedIn={isSignedIn}
+            handleSettingsClick={() => setShowSettingsPopup(true)}
+            user={user}
+            dbStatus={dbStatus}
+          />
 
-        <div className="main-content">
-          <Routes>
+          <div
+            className={`main-content ${isHomePage ? "main-content--home" : ""} ${
+              isSharedHomeView ? "main-content--shared-home" : ""
+            }`}
+          >
+            <Routes>
             <Route
               path="/"
               element={
-                <>
+                <div className={`home-screen ${isSharedHomeView ? "home-screen--shared" : ""}`}>
                   <div className="scramble-select-container">
                     <div className="left-slot-auth">
                       <NameTag
@@ -1779,6 +3183,7 @@ function App() {
                             }}
                           >
                             <EventSelector
+                              ref={homeEventSelectorRef}
                               currentEvent={currentEvent}
                               handleEventChange={handleEventChange}
                               currentSession={currentSession}
@@ -1787,6 +3192,7 @@ function App() {
                               customEvents={customEvents}
                               userID={user?.UserID}
                               onSessionChange={() => {
+                                sharedReturnTargetRef.current = null;
                                 setSharedSession(null);
                                 setSharedIndex(0);
 
@@ -1853,6 +3259,9 @@ function App() {
                           </div>
 
                           <div
+                            className={`home-tag-dock ${
+                              isSharedHomeView ? "home-tag-dock--shared" : ""
+                            }`}
                             style={{
                               position: "absolute",
                               top: "76px",
@@ -1866,14 +3275,39 @@ function App() {
                             <TagBar
                               key={`tagbar-${eventKey}`}
                               tags={currentTags}
-                              onChange={(next) =>
+                              tagColors={currentTagColors}
+                              onChange={(next) => {
                                 setTagsByEvent((prev) => ({
                                   ...(prev || {}),
-                                  [eventKey]: next,
-                                }))
-                              }
+                                  [tagScopeEventKey]: next,
+                                }));
+                                rememberTagSelectionValues(next);
+                              }}
+                              onTagColorsChange={(next) => {
+                                let nextCatalog = tagColorCatalog;
+
+                                Object.entries(next || {}).forEach(([field, valueMap]) => {
+                                  Object.entries(valueMap || {}).forEach(([value, color]) => {
+                                    nextCatalog = setTagColorCatalogValue(
+                                      nextCatalog,
+                                      eventKey,
+                                      field,
+                                      value,
+                                      color
+                                    );
+                                  });
+                                });
+
+                                setUser((prev) => ({
+                                  ...(prev || {}),
+                                  TagColorCatalog: nextCatalog,
+                                }));
+                                queueTagColorCatalogSave(nextCatalog);
+                              }}
                               tagConfig={tagConfig}
                               cubeModelOptions={cubeModelHistoryOptions}
+                              discoveredOptions={mergedHomeTagOptions}
+                              profileColor={user?.Color || user?.color || "#2EC4B6"}
                               variant="home"
                               allowAdditions
                             />
@@ -1883,44 +3317,79 @@ function App() {
                     </div>
                   </div>
 
-                  <HomeStatsOverlay solves={currentSolves} settings={settings} user={user} />
-
-                  <Timer addTime={addSolve} activeScramble={displayedScramble} />
-
-                  <AveragesDisplay
-                    currentSolves={currentSolves}
-                    overallSessionStats={currentSessionStatsForEvent}
-                    setSelectedAverageSolves={setSelectedAverageSolves}
-                    onRequestBestAverageWindow={requestBestAverageWindow}
-                  />
-
-                  <TimeList
-                    user={user}
-                    applyPenalty={applyPenalty}
+                  <HomeStatsOverlay
                     solves={currentSolves}
-                    deleteTime={(index) =>
-                      practiceMode
-                        ? deletePracticeTime(index)
-                        : deleteTime(eventKey, index)
-                    }
-                    addPost={addPost}
-                    rowsToShow={3}
-                    onAverageClick={(solveArray) => {
-                      setSelectedAverageSolves(solveArray);
-                    }}
-                    setSessions={setSessions}
-                    sessionsList={sessionsList}
-                    currentEvent={currentEvent}
-                    currentSession={currentSession}
-                    eventKey={eventKey}
-                    practiceMode={practiceMode}
-                    totalSolveCount={
-                      Number.isFinite(currentSessionTotalSolveCount) &&
-                      currentSessionTotalSolveCount >= 0
-                        ? currentSessionTotalSolveCount
-                        : undefined
-                    }
+                    settings={settings}
+                    user={user}
+                    overallStats={currentSessionStatsForEvent}
+                    onSummarySelect={handleHomeSummarySelect}
                   />
+
+                  <Timer
+                    addTime={addSolve}
+                    activeScramble={displayedScramble}
+                    compact={isSharedHomeView}
+                  />
+
+                  {sharedSession && activeSharedMessage ? (
+                    <SharedAverageMessage
+                      msg={activeSharedMessage}
+                      user={user}
+                      messages={activeSharedMessages}
+                      onLoadSession={(session, options) => beginSharedSession(session, options)}
+                      onLeaveSharedSession={leaveSharedRun}
+                      onRequestRefresh={refreshActiveSharedSession}
+                      yourColor={user?.Color || user?.color || "#2EC4B6"}
+                      theirColor={getSharedOpponentColor(sharedSession)}
+                      yourUsername={user?.Username}
+                      theirUsername={getSharedOpponentLabel(sharedSession, user)}
+                      compactHome={isSharedHomeView}
+                      activeSharedID={sharedSession?.sharedID || null}
+                      sessionData={sharedSession}
+                      showStartAction={false}
+                      showRefreshAction={false}
+                    />
+                  ) : (
+                    <>
+                      <AveragesDisplay
+                        currentSolves={currentSolves}
+                        overallSessionStats={currentSessionStatsForEvent}
+                        setSelectedAverageSolves={setSelectedAverageSolves}
+                        onRequestBestAverageWindow={requestBestAverageWindow}
+                      />
+
+                      <TimeList
+                        user={user}
+                        applyPenalty={applyPenalty}
+                        solves={currentSolves}
+                        deleteTime={(index) =>
+                          practiceMode
+                            ? deletePracticeTime(index)
+                            : deleteTime(eventKey, index)
+                        }
+                        addPost={addPost}
+                        rowsToShow={3}
+                        onAverageClick={(solveArray) => {
+                          setSelectedAverageSolves(solveArray);
+                        }}
+                        setSessions={setSessions}
+                        sessionsList={sessionsList}
+                        currentEvent={currentEvent}
+                        currentSession={currentSession}
+                        eventKey={eventKey}
+                        practiceMode={practiceMode}
+                        tagConfig={tagConfig}
+                        cubeModelOptions={cubeModelHistoryOptions}
+                        discoveredTagOptions={mergedHomeTagOptions}
+                        totalSolveCount={
+                          Number.isFinite(currentSessionTotalSolveCount) &&
+                          currentSessionTotalSolveCount >= 0
+                            ? currentSessionTotalSolveCount
+                            : undefined
+                        }
+                      />
+                    </>
+                  )}
 
                   {selectedAverageSolves.length > 0 && (
                     <AverageDetailModal
@@ -1941,6 +3410,7 @@ function App() {
                   {selectedAverageSolve && (
                     <Detail
                       solve={selectedAverageSolve}
+                      profileColor={user?.Color || user?.color || "#2EC4B6"}
                       onClose={() => setSelectedAverageSolve(null)}
                       deleteTime={() => {
                         const selected = selectedAverageSolve;
@@ -1960,9 +3430,13 @@ function App() {
                       applyPenalty={applyPenalty}
                       userID={user?.UserID}
                       setSessions={setSessions}
+                      sessionsList={sessionsList}
+                      tagConfig={tagConfig}
+                      cubeModelOptions={cubeModelHistoryOptions}
+                      discoveredTagOptions={mergedHomeTagOptions}
                     />
                   )}
-                </>
+                </div>
               }
             />
 
@@ -2000,6 +3474,9 @@ function App() {
                   sessionStats={sessionStats}
                   sessionsList={sessionsList}
                   tagConfig={tagConfig}
+                  tagCatalog={tagCatalog}
+                  tagColorCatalog={tagColorCatalog}
+                  cubeModelOptions={cubeModelHistoryOptions}
                   statsMutationTick={statsMutationTick}
                   setSessions={setSessions}
                   setUser={setUser}
@@ -2010,6 +3487,27 @@ function App() {
                     deleteTime(eventKeyParam, index)
                   }
                   addPost={addPost}
+                  onTagColorsChange={(targetEventKey, next) => {
+                    let nextCatalog = tagColorCatalog;
+
+                    Object.entries(next || {}).forEach(([field, valueMap]) => {
+                      Object.entries(valueMap || {}).forEach(([value, color]) => {
+                        nextCatalog = setTagColorCatalogValue(
+                          nextCatalog,
+                          targetEventKey,
+                          field,
+                          value,
+                          color
+                        );
+                      });
+                    });
+
+                    setUser((prev) => ({
+                      ...(prev || {}),
+                      TagColorCatalog: nextCatalog,
+                    }));
+                    queueTagColorCatalogSave(nextCatalog);
+                  }}
                   onSettingsContextChange={setStatsSettingsContext}
                   recomputeRequest={statsRecomputeRequest}
                   importRequest={statsImportRequest}
@@ -2025,9 +3523,12 @@ function App() {
                   addPost={addPost}
                   deletePost={deletePost}
                   updateComments={handleUpdateComments}
-                  setSharedSession={setSharedSession}
+                  beginSharedSession={beginSharedSession}
+                  updateSharedSession={setSharedSession}
                   mergeSharedSession={mergeSharedSession}
                   refreshTick={socialRefreshTick}
+                  sharedSession={sharedSession}
+                  leaveSharedRun={leaveSharedRun}
                 />
               }
             />
@@ -2040,10 +3541,42 @@ function App() {
           sessions={sessions}
           currentEvent={currentEvent}
           currentSession={currentSession}
+          currentTags={currentTags}
+          currentTagColors={currentTagColors}
+          tagConfig={tagConfig}
+          onTagsChange={(next) => {
+            setTagsByEvent((prev) => ({
+              ...(prev || {}),
+              [tagScopeEventKey]: next,
+            }));
+            rememberTagSelectionValues(next);
+          }}
+          onTagColorsChange={(next) => {
+            let nextCatalog = tagColorCatalog;
+
+            Object.entries(next || {}).forEach(([field, valueMap]) => {
+              Object.entries(valueMap || {}).forEach(([value, color]) => {
+                nextCatalog = setTagColorCatalogValue(
+                  nextCatalog,
+                  eventKey,
+                  field,
+                  value,
+                  color
+                );
+              });
+            });
+
+            setUser((prev) => ({
+              ...(prev || {}),
+              TagColorCatalog: nextCatalog,
+            }));
+            queueTagColorCatalogSave(nextCatalog);
+          }}
+          cubeModelOptions={cubeModelHistoryOptions}
+          discoveredTagOptions={mergedHomeTagOptions}
           setCurrentSession={setCurrentSession}
           sharedSession={sharedSession}
-          sharedIndex={sharedIndex}
-          clearSharedSession={() => setSharedSession(null)}
+          sharedAverageMeta={activeSharedMeta}
           sessionsList={sessionsList}
           customEvents={customEvents}
           handleEventChange={handleEventChange}
@@ -2056,22 +3589,33 @@ function App() {
           addPost={addPost}
           user={user}
           applyPenalty={applyPenalty}
+          onRefreshSharedAverage={refreshActiveSharedSession}
+          onLeaveSharedSession={leaveSharedRun}
+          onSessionChange={() => {
+            sharedReturnTargetRef.current = null;
+            setSharedSession(null);
+            setSharedIndex(0);
+            setRelayLegIndex(0);
+            setRelayLegTimes([]);
+            setRelayScrambles([]);
+            setRelayLegs([]);
+          }}
+          onSelectSessionObj={(sessionObj) => {
+            setActiveSessionObj(sessionObj);
+          }}
           onHide={() => setShowPlayerBar(false)}
         />
       )}
 
       {!isHomePage && !showPlayerBar && (
-        <div
-          className="toggle-bar"
-          style={{ bottom: "12px" }}
-        >
+        <div className="toggle-bar" style={{ bottom: "12px" }}>
           <button
             className="toggle-button"
             onClick={() => setShowPlayerBar(true)}
             aria-label="Show player bar"
             title="Show player bar"
           >
-            &#x25B2;
+            <span className="toggle-button-glyph" aria-hidden="true">&#x25B2;</span>
           </button>
         </div>
       )}
@@ -2245,7 +3789,8 @@ function App() {
         isSubmitting={shareComposer.isSubmitting}
         error={shareComposer.error}
       />
-    </div>
+      </div>
+    </DbStatusProvider>
   );
 }
 

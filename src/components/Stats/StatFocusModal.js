@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 function StatFocusModal({
   isOpen,
@@ -12,6 +13,8 @@ function StatFocusModal({
   modalClassName = "",
   bodyClassName = "",
 }) {
+  const hasHeading = Boolean(title || subtitle);
+
   useEffect(() => {
     if (!isOpen) return undefined;
 
@@ -25,7 +28,7 @@ function StatFocusModal({
 
   if (!isOpen) return null;
 
-  return (
+  const modalContent = (
     <div
       className={`statFocusOverlay ${overlayClassName}`.trim()}
       onClick={(event) => {
@@ -34,10 +37,14 @@ function StatFocusModal({
     >
       <div className={`statFocusModal ${modalClassName}`.trim()}>
         <div className="statFocusHeader">
-          <div>
-            <div className="statFocusTitle">{title}</div>
-            {subtitle ? <div className="statFocusSubtitle">{subtitle}</div> : null}
-          </div>
+          {hasHeading ? (
+            <div>
+              {title ? <div className="statFocusTitle">{title}</div> : null}
+              {subtitle ? <div className="statFocusSubtitle">{subtitle}</div> : null}
+            </div>
+          ) : (
+            <div />
+          )}
 
           <button type="button" className="statFocusClose" onClick={onClose} aria-label="Close">
             ×
@@ -64,6 +71,10 @@ function StatFocusModal({
       </div>
     </div>
   );
+
+  if (typeof document === "undefined") return modalContent;
+
+  return createPortal(modalContent, document.body);
 }
 
 export default StatFocusModal;

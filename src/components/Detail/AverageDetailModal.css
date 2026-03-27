@@ -8,29 +8,19 @@
 .averageDetailFrame.statFocusModal {
   width: min(960px, calc(100vw - 56px));
   max-height: calc(100vh - 56px);
-  gap: 10px;
-  padding: 20px;
+  gap: 0;
+  padding: 12px 20px 20px;
   border-radius: 22px;
   background: rgba(29, 29, 29, 0.97);
+  color: #fff;
   border: 1.5px solid rgba(255,255,255,0.24);
   box-shadow: 0 24px 80px rgba(0,0,0,0.45);
 }
 
 .averageDetailFrame .statFocusHeader {
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.averageDetailFrame .statFocusTitle {
-  font-size: 28px;
-  font-weight: 900;
-}
-
-.averageDetailFrame .statFocusSubtitle {
-  margin-top: 4px;
-  font-size: 13px;
-  font-weight: 800;
-  color: rgba(255, 255, 255, 0.68);
+  justify-content: flex-end;
+  min-height: 0;
+  margin-bottom: 0;
 }
 
 .averageDetailFrame .statFocusClose {
@@ -44,59 +34,118 @@
 }
 
 .averageDetailBody.statFocusBody {
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .averageDetailModal {
   display: grid;
-  gap: 18px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
   color: #fff;
 }
 
-.averageDetailHero {
+.averageDetailTopRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.averageDetailSummary {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.averageDetailHeaderLine {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.averageDetailEventIcon {
+  width: 96px;
+  height: 92px;
+  flex: 0 0 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  position: relative;
+  box-sizing: border-box;
+  margin-left: -8px;
+}
+
+.averageDetailEventIconStage {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+}
+
+.averageDetailEventIconStage .puzzle-svg-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  transform: translate(-6px, 4px) scale(0.56);
+  transform-origin: center;
+}
+
+.averageDetailEventIconStage .puzzle-svg-inner {
+  overflow: visible;
+}
+
+.averageDetailTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 0;
+  flex: 1;
+  min-height: 72px;
+}
+
+.averageDetailTitleCopy {
   display: grid;
   gap: 6px;
-  padding: 20px;
-  border-radius: 16px;
-  background: rgba(0, 0, 0, 0.16);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  min-width: 0;
 }
 
 .averageDetailHeroLabel {
-  font-size: 0.78rem;
-  font-weight: 800;
-  color: rgba(255, 255, 255, 0.68);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: clamp(1.3rem, 2vw, 1.65rem);
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.96);
+  letter-spacing: 0.01em;
+  white-space: normal;
+  line-height: 1.08;
 }
 
 .averageDetailHeroValue {
-  font-size: clamp(2.4rem, 6vw, 3.8rem);
-  line-height: 1;
+  font-size: clamp(2.45rem, 5vw, 3.3rem);
+  line-height: 0.9;
   font-weight: 900;
   color: #fff;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  align-self: center;
+  min-width: 170px;
+  text-align: center;
 }
 
-.averageDetailHeroMeta {
-  font-size: 0.84rem;
-  color: rgba(255, 255, 255, 0.72);
-}
-
-.averageDetailSection {
-  display: grid;
-  gap: 14px;
-  padding: 16px;
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-}
-
-.averageDetailSectionHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
+.averageDetailHeroDate {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.46);
+  letter-spacing: 0.01em;
 }
 
 .averageDetailViewToggle {
@@ -104,7 +153,7 @@
   gap: 6px;
   padding: 4px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
@@ -117,6 +166,7 @@
   font-size: 0.8rem;
   font-weight: 800;
   cursor: pointer;
+  opacity: 1;
 }
 
 .averageDetailViewBtn.is-active {
@@ -124,19 +174,23 @@
   color: #fff;
 }
 
-.averageDetailSectionTitle {
-  font-size: 0.92rem;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.averageDetailList {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
-.averageDetailSectionMeta {
-  font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.62);
+.averageDetailList--table {
+  overflow: auto;
+  max-height: min(54vh, 520px);
+  padding-right: 4px;
 }
 
 .averageDetailEmbeddedTable.time-table-container {
+  overflow: visible;
+}
+
+.averageDetailList--table .averageDetailEmbeddedTable.time-table-container {
   overflow: visible;
 }
 
@@ -150,10 +204,10 @@
 
 .averageDetailEmbeddedTable .timelist-row {
   width: 100%;
-  padding: 14px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
   box-sizing: border-box;
 }
 
@@ -194,8 +248,8 @@
 .averageDetailEmbeddedTable .time-items-row {
   padding: 18px 16px;
   min-height: 74px;
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 @media (max-width: 720px) {
@@ -207,11 +261,41 @@
     width: calc(100vw - 24px);
   }
 
-  .averageDetailSection {
-    padding: 14px;
+  .averageDetailTopRow {
+    align-items: stretch;
   }
 
-  .averageDetailEmbeddedTable .timelist-row {
-    padding: 12px;
+  .averageDetailHeaderLine {
+    align-items: center;
+  }
+
+  .averageDetailEventIcon {
+    width: 84px;
+    height: 80px;
+    flex-basis: 84px;
+    margin-left: -4px;
+  }
+
+  .averageDetailEventIconStage {
+    width: 100%;
+    height: 100%;
+  }
+
+  .averageDetailEventIconStage .puzzle-svg-wrap {
+    transform: translate(-4px, 3px) scale(0.5);
+  }
+
+  .averageDetailTitleRow {
+    gap: 10px;
+    flex-wrap: wrap;
+    min-height: 0;
+  }
+
+  .averageDetailHeroLabel {
+    white-space: normal;
+  }
+
+  .averageDetailList--table {
+    max-height: min(58vh, 480px);
   }
 }

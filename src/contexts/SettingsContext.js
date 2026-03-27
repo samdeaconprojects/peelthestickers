@@ -1,4 +1,3 @@
-// src/contexts/SettingsContext.js
 import React, {
   createContext,
   useContext,
@@ -33,6 +32,20 @@ const defaultEventBindings = {
   "333BLD": "Alt+B",
 };
 
+function normalizeScrambleMode(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+
+  if (raw === "legacy") return "legacy";
+  return "random-state";
+}
+
+function normalizeNavigationArrowStyle(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+
+  if (raw === "classic") return "classic";
+  return "scramble";
+}
+
 export const defaultSettings = {
   primaryColor: "#0E171D",
   secondaryColor: "#ffffff",
@@ -44,6 +57,7 @@ export const defaultSettings = {
 
   disableKeypad: false,
   timeColorMode: "index",
+  sharedTimeColorMode: "profile",
 
   eventKeyBindings: defaultEventBindings,
 
@@ -68,15 +82,17 @@ export const defaultSettings = {
   wcaImportSolveSource: "WCA",
   wcaImportLastSyncAt: "",
 
-  // Updated provider values:
-  // "gan" | "gan-gen2-compatible" | "moyu-wcu" | "auto"
   smartCubeProvider: "gan",
+  navigationArrowStyle: "scramble",
+
+  // random-state = cubing.js default
+  // legacy = old generateScramble behavior
+  scrambleMode: "random-state",
 };
 
 function normalizeSmartCubeProvider(rawValue) {
   const raw = String(rawValue || "").trim().toLowerCase();
 
-  // Backward compatibility for old saved values
   if (raw === "moyu-gan") return "moyu-wcu";
 
   if (
@@ -105,11 +121,15 @@ function mergeSettings(input) {
     defaultSettings.homeStatsSolveLimit;
 
   const smartCubeProvider = normalizeSmartCubeProvider(safe.smartCubeProvider);
+  const scrambleMode = normalizeScrambleMode(safe.scrambleMode);
+  const navigationArrowStyle = normalizeNavigationArrowStyle(safe.navigationArrowStyle);
 
   return {
     ...defaultSettings,
     ...safe,
     smartCubeProvider,
+    navigationArrowStyle,
+    scrambleMode,
     eventKeyBindings: {
       ...defaultEventBindings,
       ...(safe.eventKeyBindings || {}),

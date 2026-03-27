@@ -661,6 +661,27 @@ function buildSolveItem({
 
 function getSolveTagPairsFromItem(solveItem) {
   const pairs = [];
+  const nestedTags =
+    solveItem?.Tags && typeof solveItem.Tags === "object" ? solveItem.Tags : {};
+  const nestedCustom =
+    nestedTags?.Custom && typeof nestedTags.Custom === "object" ? nestedTags.Custom : {};
+
+  const firstNonEmpty = (...values) => {
+    for (const value of values) {
+      if (value == null) continue;
+      if (Array.isArray(value)) {
+        for (const entry of value) {
+          const clean = cleanTagValue(entry);
+          if (clean) return clean;
+        }
+        continue;
+      }
+      if (typeof value === "object") continue;
+      const clean = cleanTagValue(value);
+      if (clean) return clean;
+    }
+    return "";
+  };
 
   const add = (key, value) => {
     const clean = cleanTagValue(value);
@@ -668,15 +689,84 @@ function getSolveTagPairsFromItem(solveItem) {
     pairs.push({ key, value: clean });
   };
 
-  add("CubeModel", solveItem?.Tag_CubeModel);
-  add("CrossColor", solveItem?.Tag_CrossColor);
-  add("TimerInput", solveItem?.Tag_TimerInput);
-  add("SolveSource", solveItem?.Tag_SolveSource);
-  add("Custom1", solveItem?.Tag_Custom1);
-  add("Custom2", solveItem?.Tag_Custom2);
-  add("Custom3", solveItem?.Tag_Custom3);
-  add("Custom4", solveItem?.Tag_Custom4);
-  add("Custom5", solveItem?.Tag_Custom5);
+  add(
+    "CubeModel",
+    firstNonEmpty(solveItem?.Tag_CubeModel, nestedTags?.CubeModel, nestedTags?.cubeModel, nestedTags?.cube)
+  );
+  add(
+    "CrossColor",
+    firstNonEmpty(
+      solveItem?.Tag_CrossColor,
+      nestedTags?.CrossColor,
+      nestedTags?.crossColor,
+      nestedTags?.cross
+    )
+  );
+  add(
+    "TimerInput",
+    firstNonEmpty(
+      solveItem?.Tag_TimerInput,
+      nestedTags?.TimerInput,
+      nestedTags?.InputType,
+      nestedTags?.inputType
+    )
+  );
+  add("SolveSource", firstNonEmpty(solveItem?.Tag_SolveSource, nestedTags?.SolveSource));
+  add(
+    "Custom1",
+    firstNonEmpty(
+      solveItem?.Tag_Custom1,
+      nestedTags?.Custom1,
+      nestedCustom?.Custom1,
+      nestedCustom?.custom1,
+      nestedCustom?.[1],
+      Array.isArray(nestedTags?.Custom) ? nestedTags.Custom[0] : null
+    )
+  );
+  add(
+    "Custom2",
+    firstNonEmpty(
+      solveItem?.Tag_Custom2,
+      nestedTags?.Custom2,
+      nestedCustom?.Custom2,
+      nestedCustom?.custom2,
+      nestedCustom?.[2],
+      Array.isArray(nestedTags?.Custom) ? nestedTags.Custom[1] : null
+    )
+  );
+  add(
+    "Custom3",
+    firstNonEmpty(
+      solveItem?.Tag_Custom3,
+      nestedTags?.Custom3,
+      nestedCustom?.Custom3,
+      nestedCustom?.custom3,
+      nestedCustom?.[3],
+      Array.isArray(nestedTags?.Custom) ? nestedTags.Custom[2] : null
+    )
+  );
+  add(
+    "Custom4",
+    firstNonEmpty(
+      solveItem?.Tag_Custom4,
+      nestedTags?.Custom4,
+      nestedCustom?.Custom4,
+      nestedCustom?.custom4,
+      nestedCustom?.[4],
+      Array.isArray(nestedTags?.Custom) ? nestedTags.Custom[3] : null
+    )
+  );
+  add(
+    "Custom5",
+    firstNonEmpty(
+      solveItem?.Tag_Custom5,
+      nestedTags?.Custom5,
+      nestedCustom?.Custom5,
+      nestedCustom?.custom5,
+      nestedCustom?.[5],
+      Array.isArray(nestedTags?.Custom) ? nestedTags.Custom[4] : null
+    )
+  );
 
   return pairs;
 }

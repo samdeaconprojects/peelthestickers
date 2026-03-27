@@ -16,20 +16,18 @@
 
 .detailPopupContent {
   background: rgba(29, 29, 29, 0.97);
+  color: #fff;
   padding: 20px;
   border: 1.5px solid rgba(255,255,255,0.24);
   border-radius: 22px;
   box-shadow: 0 24px 80px rgba(0,0,0,0.45);
   max-width: 80%;
   text-align: center;
-
-  /* ✅ FIX: allow content to stay inside + scroll */
   width: 600px;
   max-height: 80vh;
   height: auto;
-  overflow: auto;
-
   position: relative;
+  overflow: auto;
 }
 
 .closePopup {
@@ -47,9 +45,16 @@
   flex-direction: row;
 }
 
+.detailTimeWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
 .detailBottomRow {
   display: flex;
   flex-direction: row;
+  position: relative;
 }
 
 .detailFlexCol {
@@ -64,6 +69,13 @@
 .detailTime{
   font-size: 46pt;
 }
+
+.detailMetaLine {
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0.5;
+  text-align: left;
+ }
 
 .detailScramble{
   width: 60%;
@@ -85,6 +97,11 @@
 .detailCube{
   margin-top: 70px;
   width: 30%;
+  text-align: left;
+}
+
+.detailCube .puzzle-svg-wrap {
+  display: block;
 }
 
 .detailInfoSection{
@@ -111,91 +128,59 @@
   margin: 6px auto 0;
   display: flex;
   justify-content: flex-end;
+  position: relative;
+  z-index: 1;
 }
 
 .detailSaveNoteBtn {
-  background: transparent;
-  border: 1px solid rgba(255,255,255,0.35);
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.18);
   color: white;
   border-radius: 8px;
-  padding: 4px 10px;
+  padding: 6px 12px;
   font-size: 12px;
   cursor: pointer;
   opacity: 0.9;
+  font-weight: 700;
 }
 
-.detailSaveNoteBtn:hover {
+.detailSaveNoteBtn:hover:not(:disabled) {
   opacity: 1;
 }
 
-/* ✅ TAGS BLOCK (inside popup) */
 .detailTagsBlock {
   width: 85%;
   margin: 10px auto 0;
   text-align: left;
-  background: rgba(0,0,0,0.10);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 10px;
-  padding: 10px;
   box-sizing: border-box;
 }
 
-.detailTagsHeaderRow {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
+.detailTagSelector {
+  position: relative;
+  z-index: 3;
 }
 
-.detailTagsLabel {
-  font-size: 12px;
-  opacity: 0.75;
-}
-
-.detailSaveTagsBtn {
-  background: transparent;
-  border: 1px solid rgba(255,255,255,0.35);
-  color: white;
-  border-radius: 8px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  opacity: 0.9;
-}
-
-.detailSaveTagsBtn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.detailSaveTagsBtn:hover:not(:disabled) {
-  opacity: 1;
-}
-
-.detailTagRow {
-  display: flex;
-  align-items: center;
+.detailTagSelector .tagHomeSummary {
   gap: 10px;
-  margin-bottom: 8px;
 }
 
-.detailTagKey {
-  width: 90px;
-  font-size: 12px;
-  opacity: 0.75;
+.detailTagSelector .tagHomePopover {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  width: min(360px, calc(100vw - 96px));
+  background: rgb(29, 29, 29);
+  opacity: 1;
+  max-height: min(70vh, calc(100vh - 80px));
+  overflow: auto;
 }
 
-.detailTagInput {
-  flex: 1;
-  height: 28px;
-  border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.18);
-  background: rgba(61,61,61,0.8);
-  color: white;
-  padding: 0 10px;
-  outline: none;
-  font-size: 12px;
-  box-sizing: border-box;
+.detailActions {
+  position: relative;
+  z-index: 1;
 }
 
 .detailCustomWrap {
@@ -211,6 +196,42 @@
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+.detailCustomAddCircle {
+  width: 28px;
+  height: 28px;
+  margin-top: 2px;
+  margin-left: auto;
+  border-radius: 999px;
+  border: 1.5px solid rgba(171, 177, 186, 0.55);
+  background: rgba(140, 148, 159, 0.08);
+  color: rgba(255, 255, 255, 0.74);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.58;
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    background 140ms ease;
+}
+
+.detailCustomAddCircle:hover {
+  transform: translateY(-1px);
+  background: rgba(140, 148, 159, 0.12);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18);
+}
+
+.detailCustomAddCirclePlus {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.detailCustomAddRow {
+  margin-top: 8px;
 }
 
 .detailCustomKey {
@@ -255,14 +276,15 @@
 }
 
 .detailCustomAddBtn {
-  height: 28px;
+  height: 30px;
   border-radius: 8px;
   border: 1px solid rgba(255,255,255,0.18);
-  background: transparent;
+  background: rgba(255,255,255,0.08);
   color: white;
   cursor: pointer;
   opacity: 0.9;
   padding: 0 10px;
+  font-weight: 700;
 }
 
 .detailCustomAddBtn:hover {
@@ -302,5 +324,13 @@
     max-width: calc(100vw - 28px);
     max-height: calc(100vh - 28px);
     padding: 14px;
+  }
+
+  .detailTagSelector .tagHomePopover {
+    top: 50%;
+    left: 50%;
+    bottom: auto;
+    transform: translate(-50%, -50%);
+    width: min(360px, calc(100vw - 56px));
   }
 }

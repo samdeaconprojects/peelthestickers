@@ -8,6 +8,19 @@
   z-index: 2;
 }
 
+.timer-display--compact {
+  flex: 0 0 auto;
+}
+
+.timer-display--playerbar {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
 /* Timer text when in keyboard mode */
 .Timer {
   color: white;
@@ -17,6 +30,43 @@
   margin-right: 10%;
   margin-top: 25%;
   letter-spacing: 12px;
+}
+
+.Timer--with-minutes {
+  font-size: clamp(2rem, 13.25vw, 16.5rem);
+  letter-spacing: 8px;
+  margin-top: 19%;
+}
+
+.Timer--compact {
+  font-size: clamp(1.9rem, 8.6vw, 8.1rem);
+  margin-top: 0;
+  margin-right: 5%;
+  letter-spacing: 5px;
+}
+
+.Timer--compact.Timer--with-minutes {
+  font-size: clamp(1.8rem, 7.5vw, 6.9rem);
+  letter-spacing: 4px;
+  margin-top: 0;
+}
+
+.Timer--playerbar {
+  display: block;
+  font-size: 72px;
+  margin: 0 !important;
+  margin-top: 0 !important;
+  margin-right: 0 !important;
+  padding: 0;
+  line-height: 1;
+  letter-spacing: 5px;
+  transform: none;
+}
+
+.Timer--static {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
 }
 
 /* GAN controls shown subtly above timer */
@@ -118,6 +168,13 @@
   display: inline-block;   /* keeps Timer sizing/position behavior */
   text-align: center;
   z-index: 2;
+}
+
+.timer-center-wrap--playerbar {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
 }
 
 /* Controls column positioned to the LEFT of the timer (no layout shift) */

@@ -11,7 +11,7 @@ export const getSolveWindowFromStart = async (
   const ev = String(event || "").toUpperCase().trim();
   const sid = String(sessionID || "main").trim() || "main";
   const ref = String(startSolveRef || "").trim();
-  const count = Math.max(1, Math.min(50, Number(n || 5)));
+  const count = Math.max(1, Math.min(1000, Number(n || 5)));
 
   if (!id) throw new Error("getSolveWindowFromStart: userID required");
   if (!ev) throw new Error("getSolveWindowFromStart: event required");

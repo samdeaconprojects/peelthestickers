@@ -25,9 +25,14 @@ function normalizePost(item) {
   };
 }
 
-export const getPosts = async (userID) => {
+export const getPosts = async (userID, limit = 50) => {
   const id = String(userID || "").trim();
   if (!id) throw new Error("getPosts: userID required");
-  const data = await apiGet(`/api/posts/${encodeURIComponent(id)}`);
+  const qs = new URLSearchParams();
+  if (Number.isFinite(Number(limit)) && Number(limit) > 0) {
+    qs.set("limit", String(Math.min(Number(limit), 200)));
+  }
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const data = await apiGet(`/api/posts/${encodeURIComponent(id)}${suffix}`);
   return (data?.items || []).map(normalizePost);
 };

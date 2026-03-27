@@ -9,6 +9,7 @@
 .name-tag-link {
   display: inline-flex;         /* shrink/expand to fit content */
   align-items: center;
+  position: relative;
   text-decoration: none;
   color: inherit;
   border-radius: 8px;
@@ -19,13 +20,22 @@
   max-width: none;              /* remove the 200px cap */
 }
 
+.name-tag--xs .name-tag-link {
+  height: 32px;
+  padding: 2px 7px;
+  border-radius: 8px;
+}
+
 /* ✅ Default behavior (NxN should look exactly like before) */
 .nametagCube {
   flex: 0 0 auto;               /* fixed size, no stretching */
   margin-right: 18px;           /* space between cube and text */
   display: flex;
   align-items: center;          /* keep baseline stable */
-  
+}
+
+.name-tag--xs .nametagCube {
+  margin-right: 12px;
 }
 
 /* -------------------------------------------------
@@ -58,6 +68,16 @@
   transform: translateY(3px);
 }
 
+.name-tag--xs .nametagCube:not(
+  .nametagCube--pyraminx,
+  .nametagCube--megaminx,
+  .nametagCube--skewb,
+  .nametagCube--clock,
+  .nametagCube--sq1
+) {
+  transform: translateY(2px) scale(0.85);
+  transform-origin: left center;
+}
 
 /* Scale only the inner SVG/component */
 .nametagCube--pyraminx > * { transform: scale(0.30); transform-origin: center; }
@@ -76,4 +96,8 @@
 .name-tag-text {
   font-weight: 600;
   font-size: 10pt;
+}
+
+.name-tag--xs .name-tag-text {
+  font-size: 8.5pt;
 }

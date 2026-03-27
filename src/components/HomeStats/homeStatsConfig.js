@@ -27,11 +27,17 @@ export const HOME_STAT_CHART_TYPE_OPTIONS = [
   { value: "bar", label: "Bar Chart" },
   { value: "percent", label: "Percent Bar" },
   { value: "pie", label: "Pie Chart" },
+  { value: "summary", label: "Stats Summary" },
 ];
 
 export const HOME_STAT_COLOR_SCHEME_OPTIONS = [
   { value: "default", label: "Default Gradient" },
   { value: "profile", label: "Profile Color" },
+];
+
+export const HOME_STAT_SUMMARY_SURFACE_OPTIONS = [
+  { value: "flat", label: "Flat" },
+  { value: "gradient", label: "Gradient" },
 ];
 
 export const HOME_STAT_LINE_METRIC_OPTIONS = [
@@ -80,6 +86,8 @@ function defaultSlotConfig(slotKey) {
       width: meta.defaultWidth,
       height: meta.defaultHeight,
       opacity: meta.defaultOpacity,
+      summaryColorCustomized: false,
+      summarySurface: "flat",
     };
   }
 
@@ -95,6 +103,8 @@ function defaultSlotConfig(slotKey) {
       width: meta.defaultWidth,
       height: meta.defaultHeight,
       opacity: meta.defaultOpacity,
+      summaryColorCustomized: false,
+      summarySurface: "flat",
     };
   }
 
@@ -110,6 +120,8 @@ function defaultSlotConfig(slotKey) {
       width: meta.defaultWidth,
       height: meta.defaultHeight,
       opacity: meta.defaultOpacity,
+      summaryColorCustomized: false,
+      summarySurface: "flat",
     };
   }
 
@@ -124,6 +136,8 @@ function defaultSlotConfig(slotKey) {
     width: meta.defaultWidth,
     height: meta.defaultHeight,
     opacity: meta.defaultOpacity,
+    summaryColorCustomized: false,
+    summarySurface: "flat",
   };
 }
 
@@ -152,6 +166,9 @@ export function normalizeHomeStatsSlots(input) {
     const colorScheme = HOME_STAT_COLOR_SCHEME_OPTIONS.some((opt) => opt.value === raw.colorScheme)
       ? raw.colorScheme
       : fallback.colorScheme;
+    const summaryColorCustomized = !!raw.summaryColorCustomized;
+    const effectiveColorScheme =
+      chartType === "summary" && !summaryColorCustomized ? "default" : colorScheme;
     const lineMetric = HOME_STAT_LINE_METRIC_OPTIONS.some((opt) => opt.value === raw.lineMetric)
       ? raw.lineMetric
       : fallback.lineMetric;
@@ -163,11 +180,16 @@ export function normalizeHomeStatsSlots(input) {
     )
       ? raw.pieBreakdown
       : fallback.pieBreakdown;
+    const summarySurface = HOME_STAT_SUMMARY_SURFACE_OPTIONS.some(
+      (opt) => opt.value === raw.summarySurface
+    )
+      ? raw.summarySurface
+      : fallback.summarySurface;
 
     acc[slotKey] = {
       enabled: !!raw.enabled,
       chartType,
-      colorScheme,
+      colorScheme: effectiveColorScheme,
       lineMetric,
       lineGroupBy,
       pieBreakdown,
@@ -175,6 +197,8 @@ export function normalizeHomeStatsSlots(input) {
       width: clampNumber(raw.width, fallback.width, 120, 1200),
       height: clampNumber(raw.height, fallback.height, 90, 700),
       opacity: clampNumber(raw.opacity, fallback.opacity, 0.05, 1),
+      summaryColorCustomized,
+      summarySurface,
     };
     return acc;
   }, {});

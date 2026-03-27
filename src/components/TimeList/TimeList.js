@@ -9,6 +9,52 @@ import useSolveSelection from "../../hooks/useSolveSelection";
 import useBulkSolveActions from "../../hooks/useBulkSolveActions";
 import BulkSolveControls from "../SolveBulk/BulkSolveControls";
 import { normalizeEventCode } from "../SolveBulk/solveBulkUtils";
+import ForwardSVG from "../../assets/ForwardSVG.svg";
+import BackwardSVG from "../../assets/BackwardSVG.svg";
+
+function normalizeNavigationArrowStyle(style) {
+  return String(style || "").trim().toLowerCase() === "classic"
+    ? "classic"
+    : "scramble";
+}
+
+function NavigationArrow({ direction, style }) {
+  const resolvedStyle = normalizeNavigationArrowStyle(style);
+  const isClassic = resolvedStyle === "classic";
+
+  if (isClassic) {
+    const glyphMap = {
+      left: "◀",
+      right: "▶",
+      up: "▲",
+      down: "▼",
+    };
+
+    return (
+      <span className="timelist-nav-glyph" aria-hidden="true">
+        {glyphMap[direction] || "▶"}
+      </span>
+    );
+  }
+
+  const isBackward = direction === "left" || direction === "up";
+  const rotateClass =
+    direction === "up"
+      ? "timelist-nav-icon--up"
+      : direction === "down"
+      ? "timelist-nav-icon--down"
+      : direction === "left"
+      ? "timelist-nav-icon--left"
+      : "timelist-nav-icon--right";
+
+  return (
+    <img
+      src={isBackward ? BackwardSVG : ForwardSVG}
+      alt=""
+      className={`timelist-nav-icon ${rotateClass}`}
+    />
+  );
+}
 
 function clamp01(x) {
   if (!isFinite(x)) return 0;
@@ -60,6 +106,34 @@ function hasRealSolveRef(solve) {
   return typeof ref === "string" && ref.startsWith("SOLVE#");
 }
 
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function getSharedRowStatus(row = {}, currentIndex) {
+  const idx = Number(row?.index);
+  if (!Number.isFinite(idx)) return "pending";
+  if (idx < currentIndex) return "done";
+  if (idx === currentIndex) return "current";
+  return "upcoming";
+}
+
+function findSharedCurrentIndex(rows = []) {
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] || {};
+    if (!row.complete) return i;
+  }
+  return rows.length ? -1 : 0;
+}
+
+function buildSharedMirrorRows(rows = [], colsPerRow = 12) {
+  const out = [];
+  for (let i = 0; i < rows.length; i += colsPerRow) {
+    out.push(rows.slice(i, i + colsPerRow));
+  }
+  return out;
+}
+
 function TimeList({
   user,
   applyPenalty,
@@ -74,11 +148,19 @@ function TimeList({
   currentSession,
   eventKey,
   practiceMode,
+  tagConfig,
+  cubeModelOptions = [],
+  discoveredTagOptions = {},
   onAverageClick,
   onLoadMore,
   canLoadMore = true,
   isLoadingMore = false,
   totalSolveCount,
+
+  sharedAverageMeta = null,
+  onRefreshSharedAverage,
+  onLeaveSharedSession,
+  sharedAverageRefreshMs = 10000,
 }) {
   const { settings } = useSettings();
 
@@ -88,6 +170,9 @@ function TimeList({
 
   const isHorizontal = inPlayerBar ? false : settings.horizontalTimeList;
   const horizontalScrollEnabled = !!settings.horizontalTimeListScroll;
+  const navigationArrowStyle = normalizeNavigationArrowStyle(
+    settings?.navigationArrowStyle
+  );
 
   const timeColorModeRaw = settings?.timeColorMode || "binary";
   const timeColorMode = timeColorModeRaw === "spectrum" ? "bucket" : timeColorModeRaw;
@@ -145,12 +230,12 @@ function TimeList({
     const handleResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener("resize", handleResize);
 
-    const colsPerRow = windowWidth > 1100 ? 12 : 5;
+    const colsPerRow = window.innerWidth > 1100 ? 12 : 5;
     const totalRows = Math.ceil(solvesSafe.length / colsPerRow);
     setCurrentPage(Math.max(0, totalRows - rowsToShow));
 
     return () => window.removeEventListener("resize", handleResize);
-  }, [windowWidth, solvesSafe.length, rowsToShow]);
+  }, [solvesSafe.length, rowsToShow]);
 
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -179,6 +264,17 @@ function TimeList({
   useEffect(() => {
     setHorizontalPage(0);
   }, [eventKey, currentSession, horizontalCount, horizontalScrollEnabled]);
+
+  useEffect(() => {
+    if (!sharedAverageMeta?.active) return undefined;
+    if (typeof onRefreshSharedAverage !== "function") return undefined;
+
+    const id = window.setInterval(() => {
+      onRefreshSharedAverage();
+    }, Math.max(3000, Number(sharedAverageRefreshMs) || 10000));
+
+    return () => window.clearInterval(id);
+  }, [sharedAverageMeta?.active, onRefreshSharedAverage, sharedAverageRefreshMs]);
 
   const times = useMemo(() => solvesSafe.map((s) => s?.time), [solvesSafe]);
 
@@ -310,6 +406,30 @@ function TimeList({
     }));
     return buildRank01Map(items);
   }, [isHorizontal, horizontalScrollEnabled, horizontalSolves, pagedWindow.start]);
+
+  const sharedRows = useMemo(() => {
+    return safeArray(sharedAverageMeta?.rows).map((row, idx) => ({
+      index: Number.isFinite(Number(row?.index)) ? Number(row.index) : idx,
+      scramble: row?.scramble || "",
+      event: row?.event || "",
+      yourTime: row?.yourTime ?? null,
+      theirTime: row?.theirTime ?? null,
+      peers: safeArray(row?.peers),
+      complete: !!row?.complete,
+    }));
+  }, [sharedAverageMeta]);
+
+  const derivedSharedCurrentIndex = useMemo(() => {
+    if (Number.isFinite(Number(sharedAverageMeta?.currentIndex))) {
+      return Number(sharedAverageMeta.currentIndex);
+    }
+    return findSharedCurrentIndex(sharedRows);
+  }, [sharedAverageMeta, sharedRows]);
+
+  const sharedMirrorRows = useMemo(
+    () => buildSharedMirrorRows(sharedRows, colsPerRow),
+    [sharedRows, colsPerRow]
+  );
 
   const getPerfClassAndStyle = (value, min, max, rank01) => {
     if (timeColorMode === "binary") return { perfClass: "", perfStyle: null };
@@ -548,7 +668,7 @@ function TimeList({
     return { bestTime, worstTime, bestAo5, worstAo5, bestAo12, worstAo12 };
   }, [isHorizontal, horizontalSolves, ao5ByKey, ao12ByKey]);
 
-  if (solvesSafe.length === 0) {
+  if (solvesSafe.length === 0 && !sharedAverageMeta?.active) {
     return (
       <div className="time-list-container">
         <p>No solves available</p>
@@ -716,7 +836,7 @@ function TimeList({
         </div>
       )}
 
-      {isHorizontal ? (
+      {solvesSafe.length > 0 && (isHorizontal ? (
         <div className="horizontal-shell">
           {!horizontalScrollEnabled && (
             <button
@@ -726,7 +846,7 @@ function TimeList({
               disabled={!canPageOlder}
               title={`Older (${horizontalCount})`}
             >
-              ◀
+              <NavigationArrow direction="left" style={navigationArrowStyle} />
             </button>
           )}
 
@@ -876,6 +996,7 @@ function TimeList({
               <Detail
                 solve={selectedSolve}
                 userID={user?.UserID}
+                profileColor={user?.Color || user?.color || "#2EC4B6"}
                 onClose={() => setSelectedSolve(null)}
                 deleteTime={() => {
                   if (hasRealSolveRef(selectedSolve)) deleteTime(selectedSolve.solveRef);
@@ -883,6 +1004,10 @@ function TimeList({
                 addPost={addPost}
                 applyPenalty={hasRealSolveRef(selectedSolve) ? applyPenalty : null}
                 setSessions={setSessions}
+                sessionsList={sessionsList}
+                tagConfig={tagConfig}
+                cubeModelOptions={cubeModelOptions}
+                discoveredTagOptions={discoveredTagOptions}
               />
             )}
 
@@ -890,6 +1015,7 @@ function TimeList({
               <Detail
                 solve={selectedSolveList}
                 userID={user?.UserID}
+                profileColor={user?.Color || user?.color || "#2EC4B6"}
                 onClose={() => setSelectedSolveList(null)}
                 deleteTime={() => {}}
                 applyPenalty={selectedSolveListIsMutable ? applyPenalty : null}
@@ -902,6 +1028,10 @@ function TimeList({
                   })
                 }
                 setSessions={setSessions}
+                sessionsList={sessionsList}
+                tagConfig={tagConfig}
+                cubeModelOptions={cubeModelOptions}
+                discoveredTagOptions={discoveredTagOptions}
               />
             )}
           </div>
@@ -914,12 +1044,88 @@ function TimeList({
               disabled={!canPageNewer}
               title={`Newer (${horizontalCount})`}
             >
-              ▶
+              <NavigationArrow direction="right" style={navigationArrowStyle} />
             </button>
           )}
         </div>
       ) : (
         <div className="time-list-content">
+          {sharedAverageMeta?.active && sharedMirrorRows.length > 0 && (
+            <div className="timeListSharedMirror">
+              <div className="timeListSharedMirrorHeader">
+                <span className="timeListSharedMirrorName">
+                  {sharedAverageMeta?.theirLabel || "Them"}
+                </span>
+                <span className="timeListSharedMirrorMeta">
+                  {derivedSharedCurrentIndex === -1
+                    ? "Complete"
+                    : `Round ${derivedSharedCurrentIndex + 1} / ${safeArray(sharedRows).length || sharedAverageMeta?.count || 0}`}
+                </span>
+                {((typeof onRefreshSharedAverage === "function") ||
+                  (sharedAverageMeta?.active && typeof onLeaveSharedSession === "function")) && (
+                  <div className="timeListSharedMirrorActions">
+                    {typeof onRefreshSharedAverage === "function" && (
+                      <button
+                        type="button"
+                        className="timeListSharedMirrorRefresh"
+                        onClick={() => onRefreshSharedAverage()}
+                      >
+                        Refresh
+                      </button>
+                    )}
+                    {sharedAverageMeta?.active && typeof onLeaveSharedSession === "function" && (
+                      <button
+                        type="button"
+                        className="timeListSharedMirrorRefresh"
+                        onClick={() => onLeaveSharedSession()}
+                      >
+                        Exit
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <table className="TimeList TimeList--sharedMirror">
+                <tbody>
+                  {sharedMirrorRows.map((rowGroup, rowIdx) => (
+                    <tr key={`shared-${rowIdx}`}>
+                      {rowGroup.map((row, index) => {
+                        const primaryPeer = safeArray(row?.peers)[0];
+                        const value = Number.isFinite(Number(row?.theirTime))
+                          ? Number(row.theirTime)
+                          : Number.isFinite(Number(primaryPeer?.time))
+                          ? Number(primaryPeer.time)
+                          : null;
+
+                        return (
+                          <td
+                            key={`shared-${row.index}-${index}`}
+                            className={`TimeItem ${
+                              row.index === derivedSharedCurrentIndex ? "current-five" : ""
+                            }`}
+                            title={`Round ${row.index + 1}${row?.scramble ? `: ${row.scramble}` : ""}`}
+                          >
+                            {value != null ? formatTime(value) : "—"}
+                          </td>
+                        );
+                      })}
+                      {rowGroup.length < colsPerRow &&
+                        [...Array(colsPerRow - rowGroup.length)].map((_, index) => (
+                          <td className="TimeItem" key={`shared-pad-${rowIdx}-${index}`}>
+                            &nbsp;
+                          </td>
+                        ))}
+                      <td className="TimeItem current-five">
+                        {sharedAverageMeta?.theirLabel || "Them"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           <table className="TimeList">
             <tbody>{rows}</tbody>
           </table>
@@ -928,6 +1134,7 @@ function TimeList({
             <Detail
               solve={selectedSolve}
               userID={user?.UserID}
+              profileColor={user?.Color || user?.color || "#2EC4B6"}
               onClose={() => setSelectedSolve(null)}
               deleteTime={() => {
                 if (hasRealSolveRef(selectedSolve)) deleteTime(selectedSolve.solveRef);
@@ -935,6 +1142,10 @@ function TimeList({
               addPost={addPost}
               applyPenalty={hasRealSolveRef(selectedSolve) ? applyPenalty : null}
               setSessions={setSessions}
+              sessionsList={sessionsList}
+              tagConfig={tagConfig}
+              cubeModelOptions={cubeModelOptions}
+              discoveredTagOptions={discoveredTagOptions}
             />
           )}
 
@@ -942,6 +1153,7 @@ function TimeList({
             <Detail
               solve={selectedSolveList}
               userID={user?.UserID}
+              profileColor={user?.Color || user?.color || "#2EC4B6"}
               onClose={() => setSelectedSolveList(null)}
               deleteTime={() => {}}
               addPost={() =>
@@ -954,21 +1166,25 @@ function TimeList({
               }
               applyPenalty={selectedSolveListIsMutable ? applyPenalty : null}
               setSessions={setSessions}
+              sessionsList={sessionsList}
+              tagConfig={tagConfig}
+              cubeModelOptions={cubeModelOptions}
+              discoveredTagOptions={discoveredTagOptions}
             />
           )}
         </div>
-      )}
+      ))}
 
-      {!isHorizontal && (
+      {!isHorizontal && solvesSafe.length > 0 && (
         <div className="pagination-buttons">
           <button onClick={goToPreviousPage} disabled={validCurrentPage === 0}>
-            ▲
+            <NavigationArrow direction={inPlayerBar ? "left" : "up"} style={navigationArrowStyle} />
           </button>
           <button
             onClick={goToNextPage}
             disabled={(validCurrentPage + 1) * rowsToDisplay * colsPerRow >= solvesSafe.length}
           >
-            ▼
+            <NavigationArrow direction={inPlayerBar ? "right" : "down"} style={navigationArrowStyle} />
           </button>
         </div>
       )}

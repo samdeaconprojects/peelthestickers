@@ -4,9 +4,50 @@
   overflow: visible;
 }
 
+.puzzle-svg-wrap--oh {
+  --puzzle-oh-width: 104px;
+  --puzzle-oh-left: 50%;
+  --puzzle-oh-top: 100%;
+  --puzzle-oh-transform: translate(-52%, -26px);
+}
+
+.puzzle-svg-wrap--oh.puzzle-svg-wrap--musicPlayer {
+  --puzzle-oh-width: 88px;
+  --puzzle-oh-transform: translate(-52%, -20px);
+}
+
+.puzzle-svg-wrap--oh.puzzle-svg-wrap--statsHeader {
+  --puzzle-oh-width: 72px;
+  --puzzle-oh-transform: translate(-52%, -15px);
+}
+
+.puzzle-svg-wrap--oh.puzzle-svg-wrap--nameTag {
+  --puzzle-oh-width: 64px;
+  --puzzle-oh-transform: translate(-52%, -12px);
+}
+
+.puzzle-svg-wrap--oh.puzzle-svg-wrap--avatar,
+.puzzle-svg-wrap--oh.puzzle-svg-wrap--profile {
+  --puzzle-oh-width: 96px;
+  --puzzle-oh-transform: translate(-52%, -22px);
+}
+
 /* isolate transforms so flip icon never gets transformed/mirrored */
 .puzzle-svg-inner {
   position: relative;
+  z-index: 1;
+}
+
+.puzzle-svg-oh-hand {
+  position: absolute;
+  left: var(--puzzle-oh-left, 50%);
+  top: var(--puzzle-oh-top, 100%);
+  width: var(--puzzle-oh-width, 52px);
+  max-width: none;
+  transform: var(--puzzle-oh-transform, translate(-52%, -10px));
+  opacity: 0.7;
+  pointer-events: none;
+  z-index: 0;
 }
 
 /* flip button pinned to wrapper corner */

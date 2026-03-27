@@ -2,6 +2,13 @@
 import React, { useRef, useEffect, useState } from 'react';
 
 const sin15 = Math.sin(Math.PI / 180 * 15);
+const createSolvedSquare1 = () => ({
+  group1: [['yellow', 'orange', 'green'], ['yellow', 'green'], ['yellow', 'green', 'red'], ['yellow', 'red']],
+  group2: [['yellow', 'red', 'blue'], ['yellow', 'blue'], ['yellow', 'blue', 'orange'], ['yellow', 'orange']],
+  group3: [['white', 'red'], ['white', 'red', 'green'], ['white', 'green'], ['white', 'green', 'orange']],
+  group4: [['white', 'orange'], ['white', 'orange', 'blue'], ['white', 'blue'], ['white', 'blue', 'red']],
+  middleEdge: 0,
+});
 
 export default function Square1SVG({
   scramble = "(-5,0)/ (3,6)/ (5,-4)/ (-3,0)/ (1,-3)/ (0,-3)/ (0,-2)/ (0,-1)/ (-4,0)/ (0,-1)/ (4,0)/ (-3,-5)/",
@@ -9,21 +16,47 @@ export default function Square1SVG({
   backThickness = 10,
   showFront = true, // ✅ controlled by PuzzleSVG (true = show top, false = show bottom)
 }) {
-  const square1 = useRef({
-    group1: [['yellow','orange','green'], ['yellow','green'], ['yellow','green','red'], ['yellow','red']],
-    group2: [['yellow','red','blue'],    ['yellow','blue'],  ['yellow','blue','orange'], ['yellow','orange']],
-    group3: [['white','red'],            ['white','red','green'], ['white','green'], ['white','green','orange']],
-    group4: [['white','orange','blue'],  ['white','blue'],   ['white','blue','red'],   ['white','red']],
-    middleEdge: 0
-  });
+  const square1 = useRef(createSolvedSquare1());
 
   const [, setVersion] = useState(0);
 
+  function pieceUnits(piece) {
+    return piece.length === 2 ? 1 : 2;
+  }
+
+  function isSlashable(topRight, bottomRight) {
+    const topUnits = topRight.reduce((sum, piece) => sum + pieceUnits(piece), 0);
+    const bottomUnits = bottomRight.reduce((sum, piece) => sum + pieceUnits(piece), 0);
+    return topUnits === 6 && bottomUnits === 6;
+  }
+
+  function rotateClockwise(rightGroup, leftGroup, pieceCountRight, pieceCountLeft) {
+    for (let i = 0; i < pieceCountRight; i++) {
+      const lastElementRight = rightGroup.pop();
+      leftGroup.unshift(lastElementRight);
+    }
+
+    for (let i = 0; i < pieceCountLeft; i++) {
+      const lastElementLeft = leftGroup.pop();
+      rightGroup.unshift(lastElementLeft);
+    }
+  }
+
+  function rotateCounterClockwise(rightGroup, leftGroup, pieceCountRight, pieceCountLeft) {
+    for (let i = 0; i < pieceCountRight; i++) {
+      const firstElementRight = rightGroup.shift();
+      leftGroup.push(firstElementRight);
+    }
+
+    for (let i = 0; i < pieceCountLeft; i++) {
+      const firstElementLeft = leftGroup.shift();
+      rightGroup.push(firstElementLeft);
+    }
+  }
+
   function slash() {
     const s = square1.current;
-    const top = s.group1, bot = s.group3;
-    const count = g => g.reduce((sum,p) => sum + (p.length===2 ? 1 : 2), 0);
-    if (count(top) === 6 && count(bot) === 6) {
+    if (isSlashable(s.group1, s.group3)) {
       [s.group1, s.group3] = [s.group3, s.group1];
       s.middleEdge++;
     }
@@ -31,75 +64,99 @@ export default function Square1SVG({
 
   function turnClockwise(isTop, count) {
     const s = square1.current;
-    const right = isTop ? s.group1 : s.group3;
-    const left  = isTop ? s.group2 : s.group4;
+    const rightGroup = isTop ? s.group1 : s.group3;
+    const leftGroup = isTop ? s.group2 : s.group4;
 
-    let pr = 0, i = 0;
-    while (pr < count && i < right.length) {
-      pr += right[i].length === 2 ? 1 : 2;
-      i++;
+    let pieceCountRight = 0;
+    let pieceCountLeft = 0;
+
+    for (let i = 0; i < count; i++) {
+      const piece = rightGroup[rightGroup.length - 1 - pieceCountRight];
+      if (!piece) return;
+      if (piece.length !== 2) {
+        i++;
+      }
+      pieceCountRight++;
     }
-    if (pr !== count) return;
 
-    let pl = 0, j = 0;
-    while (pl < count && j < left.length) {
-      pl += left[j].length === 2 ? 1 : 2;
-      j++;
+    for (let i = 0; i < count; i++) {
+      const piece = leftGroup[leftGroup.length - 1 - pieceCountLeft];
+      if (!piece) return;
+      if (piece.length === 2) {
+        pieceCountLeft++;
+      } else {
+        i++;
+        if (i !== count) {
+          pieceCountLeft++;
+        }
+      }
     }
-    if (pl !== count) return;
 
-    for (let k = 0; k < i; k++) left.unshift(right.shift());
-    for (let k = 0; k < j; k++) right.unshift(left.shift());
+    rotateClockwise(rightGroup, leftGroup, pieceCountRight, pieceCountLeft);
   }
 
   function turnCounterClockwise(isTop, count) {
     const s = square1.current;
-    const right = isTop ? s.group1 : s.group3;
-    const left  = isTop ? s.group2 : s.group4;
+    const rightGroup = isTop ? s.group1 : s.group3;
+    const leftGroup = isTop ? s.group2 : s.group4;
 
-    let pr = 0, i = 0;
-    while (pr < count && i < right.length) {
-      pr += right[right.length - 1 - i].length === 2 ? 1 : 2;
-      i++;
-    }
-    if (pr !== count) return;
+    let pieceCountRight = 0;
+    let pieceCountLeft = 0;
 
-    let pl = 0, j = 0;
-    while (pl < count && j < left.length) {
-      pl += left[left.length - 1 - j].length === 2 ? 1 : 2;
-      j++;
-    }
-    if (pl !== count) return;
-
-    for (let k = 0; k < i; k++) left.push(right.pop());
-    for (let k = 0; k < j; k++) right.push(left.pop());
-  }
-
-  function parseAlgorithm(alg) {
-    const toks = alg.match(/\([^)]*\)|\//g) || [];
-    toks.forEach(t => {
-      if (t === '/') {
-        slash();
+    for (let i = 0; i < count; i++) {
+      const piece = rightGroup[pieceCountRight];
+      if (!piece) return;
+      if (piece.length === 2) {
+        pieceCountRight++;
       } else {
-        const [a,b] = t.slice(1,-1).split(',').map(Number);
-        if      (a > 0) turnClockwise(true,  a);
-        else if (a < 0) turnCounterClockwise(true, -a);
-        if      (b > 0) turnClockwise(false, b);
-        else if (b < 0) turnCounterClockwise(false, -b);
+        i++;
+        if (i !== count) {
+          pieceCountRight++;
+        }
       }
-    });
-    setVersion(v => v + 1);
+    }
+
+    for (let i = 0; i < count; i++) {
+      const piece = leftGroup[pieceCountLeft];
+      if (!piece) return;
+      if (piece.length !== 2) {
+        i++;
+      }
+      pieceCountLeft++;
+    }
+
+    rotateCounterClockwise(rightGroup, leftGroup, pieceCountRight, pieceCountLeft);
   }
 
   useEffect(() => {
-    square1.current = {
-      group1: [['yellow','orange','green'], ['yellow','green'], ['yellow','green','red'], ['yellow','red']],
-      group2: [['yellow','red','blue'],    ['yellow','blue'],  ['yellow','blue','orange'], ['yellow','orange']],
-      group3: [['white','red'],            ['white','red','green'], ['white','green'], ['white','green','orange']],
-      group4: [['white','orange','blue'],  ['white','blue'],   ['white','blue','red'],   ['white','red']],
-      middleEdge: 0
-    };
-    parseAlgorithm(scramble);
+    square1.current = createSolvedSquare1();
+    const tokens = String(scramble || "").match(/\([^)]*\)|\//g) || [];
+
+    tokens.forEach((token) => {
+      if (token === '/') {
+        slash();
+        return;
+      }
+
+      const [topMove, bottomMove] = token
+        .slice(1, -1)
+        .split(',')
+        .map(Number);
+
+      if (topMove > 0) {
+        turnClockwise(true, topMove);
+      } else if (topMove < 0) {
+        turnCounterClockwise(true, Math.abs(topMove));
+      }
+
+      if (bottomMove > 0) {
+        turnClockwise(false, bottomMove);
+      } else if (bottomMove < 0) {
+        turnCounterClockwise(false, Math.abs(bottomMove));
+      }
+    });
+
+    setVersion((v) => v + 1);
   }, [scramble]);
 
   function drawFace(gA, gB) {

@@ -4,7 +4,15 @@ import { Link } from "react-router-dom";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import "./NameTag.css";
 
-function NameTag({ isSignedIn, handleSignIn, user, name, picture, to, size = "sm" }) {
+function NameTag({
+  isSignedIn,
+  handleSignIn,
+  user,
+  name,
+  picture,
+  to,
+  size = "sm",
+}) {
   if (isSignedIn === false) {
     return (
       <div className={`name-tag name-tag--${size}`}>
@@ -28,7 +36,11 @@ function NameTag({ isSignedIn, handleSignIn, user, name, picture, to, size = "sm
 
   return (
     <div className={`name-tag name-tag--${size}`}>
-      <Link to={linkTo} className="name-tag-link" style={{ borderColor: profileColor }}>
+      <Link
+        to={linkTo}
+        className="name-tag-link"
+        style={{ borderColor: profileColor }}
+      >
         <div className={`nametagCube nametagCube--${evClass}`}>
           <PuzzleSVG
             event={ev}

@@ -1,13 +1,17 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import "./Detail.css";
-import RubiksCubeSVG from "../PuzzleSVGs/RubiksCubeSVG";
-import { getScrambledFaces } from "../scrambleUtils";
+import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import { formatTime } from "../TimeList/TimeUtils";
+import { currentEventToString } from "../scrambleUtils";
+import { useDbStatus } from "../../contexts/DbStatusContext";
 import { updateSolve } from "../../services/updateSolve";
+import TagBar from "../TagBar/TagBar";
 
 function Detail({
   solve,
   userID,
+  profileColor = "#2EC4B6",
   onClose,
   deleteTime,
   addPost,
@@ -16,7 +20,12 @@ function Detail({
   onNext,
   applyPenalty,
   setSessions,
+  sessionsList = [],
+  tagConfig,
+  cubeModelOptions = [],
+  discoveredTagOptions = {},
 }) {
+  const { runDb } = useDbStatus();
   const isArray = Array.isArray(solve);
 
   const getSolveRef = (s) => s?.solveRef || s?.SK || null;
@@ -25,6 +34,62 @@ function Detail({
   const getSolveTags = (s) => s?.tags || s?.Tags || {};
   const getSolveNote = (s) => s?.note ?? s?.Note ?? "";
   const getSolveEvent = (s) => s?.event || s?.Event || "";
+  const getSolveSessionID = (s) =>
+    s?.sessionID || s?.SessionID || s?.SessionId || s?.sessionId || "";
+  const getSolveSessionName = (s) =>
+    s?.sessionName || s?.SessionName || s?.session || s?.Session || "";
+  const getSolveScramble = (s) => {
+    const direct =
+      s?.scramble ??
+      s?.Scramble ??
+      s?.scrambleText ??
+      s?.ScrambleText ??
+      s?.scramble_text ??
+      s?.Scramble_text;
+
+    if (typeof direct === "string" && direct.trim()) return direct;
+
+    const tags = getSolveTags(s);
+    const tagScramble =
+      tags?.scramble ??
+      tags?.Scramble ??
+      tags?.scrambleText ??
+      tags?.ScrambleText;
+
+    if (typeof tagScramble === "string" && tagScramble.trim()) return tagScramble;
+
+    const relayIndex = Number.isFinite(Number(s?.fullIndex)) ? Number(s.fullIndex) : 0;
+    const relayScramble =
+      (Array.isArray(s?.relayScrambles) && s.relayScrambles[relayIndex]) ??
+      (Array.isArray(tags?.RelayScrambles) && tags.RelayScrambles[relayIndex]) ??
+      "";
+
+    return typeof relayScramble === "string" ? relayScramble : "";
+  };
+
+  const getSessionDisplayName = (s) => {
+    const explicitName = getSolveSessionName(s);
+    if (typeof explicitName === "string" && explicitName.trim()) return explicitName;
+
+    const sessionID = String(getSolveSessionID(s) || "").trim();
+    if (!sessionID) return "Main Session";
+
+    const match = (sessionsList || []).find(
+      (session) => String(session?.SessionID || session?.sessionID || "").trim() === sessionID
+    );
+
+    const matchedName =
+      match?.Name || match?.SessionName || match?.name || match?.sessionName || "";
+    if (typeof matchedName === "string" && matchedName.trim()) return matchedName;
+
+    return sessionID === "main" ? "Main Session" : sessionID;
+  };
+
+  const getSolveSubline = (s) => {
+    const eventLabel = currentEventToString(getSolveEvent(s) || "333");
+    const sessionLabel = getSessionDisplayName(s);
+    return `${eventLabel} · ${sessionLabel}`;
+  };
   const hasRealSolveRef = (s) => {
     const ref = getSolveRef(s);
     return typeof ref === "string" && ref.startsWith("SOLVE#");
@@ -96,7 +161,14 @@ function Detail({
   const [notes, setNotes] = useState(
     isArray ? solve.map((s) => getSolveNote(s)) : getSolveNote(solve)
   );
-  const [noteSaving, setNoteSaving] = useState(false);
+  const notesRef = useRef(notes);
+  const [saveState, setSaveState] = useState(
+    isArray
+      ? solve.map(() => ({ saving: false, error: "" }))
+      : { saving: false, error: "" }
+  );
+  const autosaveTimeoutsRef = useRef({});
+  const lastSavedRef = useRef({});
 
   const initTagState = (s) => {
     const t = getSolveTags(s);
@@ -108,6 +180,14 @@ function Detail({
     return {
       CubeModel: t?.CubeModel ? String(t.CubeModel) : "",
       CrossColor: t?.CrossColor ? String(t.CrossColor) : "",
+      SolveSource: t?.SolveSource ? String(t.SolveSource) : "",
+      TimerInput: t?.TimerInput ? String(t.TimerInput) : "",
+      Custom1: t?.Custom1 ? String(t.Custom1) : "",
+      Custom2: t?.Custom2 ? String(t.Custom2) : "",
+      Custom3: t?.Custom3 ? String(t.Custom3) : "",
+      Custom4: t?.Custom4 ? String(t.Custom4) : "",
+      Custom5: t?.Custom5 ? String(t.Custom5) : "",
+      customEditorOpen: false,
       customRows: Object.entries(customObj).map(([k, v]) => ({
         key: String(k),
         value: v == null ? "" : String(v),
@@ -122,23 +202,101 @@ function Detail({
   const [tagsState, setTagsState] = useState(
     isArray ? solve.map((s) => initTagState(s)) : initTagState(solve)
   );
+  const tagsStateRef = useRef(tagsState);
 
   useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
+
+  useEffect(() => {
+    tagsStateRef.current = tagsState;
+  }, [tagsState]);
+
+  useEffect(() => {
+    Object.values(autosaveTimeoutsRef.current || {}).forEach((timeoutId) => {
+      window.clearTimeout(timeoutId);
+    });
+    autosaveTimeoutsRef.current = {};
+
     setNotes(isArray ? solve.map((s) => getSolveNote(s)) : getSolveNote(solve));
     setTagsState(isArray ? solve.map((s) => initTagState(s)) : initTagState(solve));
+    setSaveState(
+      isArray
+        ? solve.map(() => ({ saving: false, error: "" }))
+        : { saving: false, error: "" }
+    );
+    lastSavedRef.current = Object.fromEntries(
+      (isArray ? solve : [solve]).map((item, idx) => {
+        const currentTags = initTagState(item);
+        return [
+          String(idx),
+          JSON.stringify({
+            note: getSolveNote(item),
+            tags: buildTagsPayload(currentTags),
+          }),
+        ];
+      })
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [solve, isArray]);
 
   useEffect(() => {
+    const items = isArray ? solve : [solve];
+
+    items.forEach((item, idx) => {
+      if (isReadOnlySolve(item)) return;
+
+      const key = String(idx);
+      const noteValue = String(isArray ? notes[idx] : notes);
+      const tagValue = isArray ? tagsState[idx] : tagsState;
+      const nextSignature = JSON.stringify({
+        note: noteValue,
+        tags: buildTagsPayload(tagValue),
+      });
+
+      if (lastSavedRef.current[key] === nextSignature) return;
+
+      if (autosaveTimeoutsRef.current[key]) {
+        window.clearTimeout(autosaveTimeoutsRef.current[key]);
+      }
+
+      autosaveTimeoutsRef.current[key] = window.setTimeout(() => {
+        saveSolveEdits(isArray ? idx : null);
+      }, 500);
+    });
+
+    return () => {
+      Object.values(autosaveTimeoutsRef.current || {}).forEach((timeoutId) => {
+        window.clearTimeout(timeoutId);
+      });
+      autosaveTimeoutsRef.current = {};
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notes, tagsState, isArray, solve]);
+
+  useEffect(() => {
+    const flushPendingAutosaves = () => {
+      Object.entries(autosaveTimeoutsRef.current || {}).forEach(([key, timeoutId]) => {
+        window.clearTimeout(timeoutId);
+        const idx = Number(key);
+        saveSolveEdits(isArray ? idx : null, {
+          notes: notesRef.current,
+          tagsState: tagsStateRef.current,
+        });
+      });
+      autosaveTimeoutsRef.current = {};
+    };
+
     const handleClickOutside = (event) => {
       if (event.target.className === "detailPopup") {
+        flushPendingAutosaves();
         onClose();
       }
     };
 
     document.addEventListener("click", handleClickOutside);
     return () => document.removeEventListener("click", handleClickOutside);
-  }, [onClose]);
+  }, [isArray, onClose]);
 
   const arrayIsMutable = useMemo(() => {
     if (!isArray) return false;
@@ -170,46 +328,23 @@ function Detail({
     if (patch.solveRef) Object.assign(s, { SK: patch.solveRef });
   };
 
-  const saveNote = async (index = null) => {
-    const s = isArray ? solve[index] : solve;
-    if (isReadOnlySolve(s)) return;
-
-    const resolved = resolveUserID(s);
-    const solveRef = getSolveRef(s);
-    const noteValue = isArray ? notes[index] : notes;
-
-    if (!resolved || !solveRef) {
-      console.error("Missing userID or solveRef:", { resolved, solveRef, s });
-      return;
-    }
-
-    try {
-      setNoteSaving(true);
-      const res = await updateSolve(resolved, solveRef, { Note: noteValue });
-
-      const savedItem = res?.item;
-      const nextPatch = {
-        note: savedItem?.Note ?? noteValue,
-        solveRef: savedItem?.SK ?? solveRef,
-        createdAt: savedItem?.CreatedAt ?? getSolveCreatedAt(s),
-      };
-
-      patchLocalSolve(s, solveRef, nextPatch);
-    } catch (err) {
-      console.error("Note update failed:", err);
-    } finally {
-      setNoteSaving(false);
-    }
-  };
-
   const buildTagsPayload = (tState) => {
     const payload = {};
 
     const cube = String(tState?.CubeModel || "").trim();
     const cross = String(tState?.CrossColor || "").trim();
+    const solveSource = String(tState?.SolveSource || "").trim();
+    const timerInput = String(tState?.TimerInput || "").trim();
 
     if (cube) payload.CubeModel = cube;
     if (cross) payload.CrossColor = cross;
+    if (solveSource) payload.SolveSource = solveSource;
+    if (timerInput) payload.TimerInput = timerInput;
+    if (String(tState?.Custom1 || "").trim()) payload.Custom1 = String(tState.Custom1).trim();
+    if (String(tState?.Custom2 || "").trim()) payload.Custom2 = String(tState.Custom2).trim();
+    if (String(tState?.Custom3 || "").trim()) payload.Custom3 = String(tState.Custom3).trim();
+    if (String(tState?.Custom4 || "").trim()) payload.Custom4 = String(tState.Custom4).trim();
+    if (String(tState?.Custom5 || "").trim()) payload.Custom5 = String(tState.Custom5).trim();
 
     const custom = {};
     for (const row of tState?.customRows || []) {
@@ -224,48 +359,65 @@ function Detail({
     return payload;
   };
 
-  const saveTags = async (index = null) => {
+  const setSaveStatus = (index, patch) => {
+    if (isArray) {
+      setSaveState((prev) => {
+        const next = [...prev];
+        next[index] = { ...next[index], ...patch };
+        return next;
+      });
+      return;
+    }
+    setSaveState((prev) => ({ ...prev, ...patch }));
+  };
+
+  const saveSolveEdits = async (index = null, overrides = null) => {
     const s = isArray ? solve[index] : solve;
     if (isReadOnlySolve(s)) return;
 
     const resolved = resolveUserID(s);
     const solveRef = getSolveRef(s);
+    const currentNotes = overrides?.notes ?? notesRef.current;
+    const currentTagsState = overrides?.tagsState ?? tagsStateRef.current;
+    const noteValue = String(isArray ? currentNotes[index] : currentNotes);
 
     if (!resolved || !solveRef) {
       console.error("Missing userID or solveRef:", { resolved, solveRef, s });
       return;
     }
 
-    const tState = isArray ? tagsState[index] : tagsState;
-    const payload = buildTagsPayload(tState);
-
-    const setSaving = (val, err = "") => {
-      if (isArray) {
-        setTagsState((prev) => {
-          const next = [...prev];
-          next[index] = { ...next[index], saving: val, error: err };
-          return next;
-        });
-      } else {
-        setTagsState((prev) => ({ ...prev, saving: val, error: err }));
-      }
-    };
+    const tState = isArray ? currentTagsState[index] : currentTagsState;
+    const tagsPayload = buildTagsPayload(tState);
 
     try {
-      setSaving(true, "");
-      const res = await updateSolve(resolved, solveRef, { Tags: payload });
+      setSaveStatus(index, { saving: true, error: "" });
+      const res = await runDb(
+        "Saving solve details",
+        () =>
+          updateSolve(resolved, solveRef, {
+            Note: noteValue,
+            Tags: tagsPayload,
+          }),
+        { minLoadingMs: 500 }
+      );
 
       const savedItem = res?.item;
+      const savedSignature = JSON.stringify({
+        note: savedItem?.Note ?? noteValue,
+        tags: savedItem?.Tags ?? tagsPayload,
+      });
       patchLocalSolve(s, solveRef, {
-        tags: savedItem?.Tags ?? payload,
+        note: savedItem?.Note ?? noteValue,
+        tags: savedItem?.Tags ?? tagsPayload,
         solveRef: savedItem?.SK ?? solveRef,
         createdAt: savedItem?.CreatedAt ?? getSolveCreatedAt(s),
       });
 
-      setSaving(false, "");
+      lastSavedRef.current[String(index ?? 0)] = savedSignature;
+      setSaveStatus(index, { saving: false, error: "" });
     } catch (err) {
-      console.error("Tags update failed:", err);
-      setSaving(false, "Failed to save tags.");
+      console.error("Solve update failed:", err);
+      setSaveStatus(index, { saving: false, error: "Failed to save changes." });
     }
   };
 
@@ -313,37 +465,6 @@ function Detail({
         const rows = [...(prev.customRows || [])];
         rows.splice(rowIndex, 1);
         return { ...prev, customRows: rows };
-      });
-    }
-  };
-
-  const addCustomRow = (index = null) => {
-    if (isArray) {
-      setTagsState((prev) => {
-        const next = [...prev];
-        const t = next[index];
-        const k = String(t.customKey || "").trim();
-        if (!k) return prev;
-        const v = String(t.customValue ?? "").trim();
-        next[index] = {
-          ...t,
-          customRows: [...(t.customRows || []), { key: k, value: v }],
-          customKey: "",
-          customValue: "",
-        };
-        return next;
-      });
-    } else {
-      setTagsState((prev) => {
-        const k = String(prev.customKey || "").trim();
-        if (!k) return prev;
-        const v = String(prev.customValue ?? "").trim();
-        return {
-          ...prev,
-          customRows: [...(prev.customRows || []), { key: k, value: v }],
-          customKey: "",
-          customValue: "",
-        };
       });
     }
   };
@@ -416,45 +537,52 @@ function Detail({
 
   const renderTagsEditor = (item, index) => {
     const t = isArray ? tagsState[index] : tagsState;
+    const saveMeta = isArray ? saveState[index] : saveState;
     const readOnly = isReadOnlySolve(item);
 
     return (
       <div className="detailTagsBlock">
-        <div className="detailTagsHeaderRow">
-          <div className="detailTagsLabel">Tags</div>
-
-          {!readOnly && (
-            <button
-              type="button"
-              className="detailSaveTagsBtn"
-              onClick={() => saveTags(index)}
-              disabled={!!t?.saving}
-              title="Save tags to DynamoDB"
-            >
-              {t?.saving ? "Saving..." : "Save Tags"}
-            </button>
-          )}
-        </div>
-
-        <div className="detailTagRow">
-          <div className="detailTagKey">Cube Model</div>
-          <input
-            className="detailTagInput"
-            value={t?.CubeModel || ""}
-            onChange={(e) => updateTagField("CubeModel", e.target.value, index)}
-            placeholder="Gan 16"
-            disabled={readOnly}
-          />
-        </div>
-
-        <div className="detailTagRow">
-          <div className="detailTagKey">Cross Color</div>
-          <input
-            className="detailTagInput"
-            value={t?.CrossColor || ""}
-            onChange={(e) => updateTagField("CrossColor", e.target.value, index)}
-            placeholder="White"
-            disabled={readOnly}
+        <div className="detailTagSelector">
+          <TagBar
+            tags={{
+              CubeModel: t?.CubeModel || "",
+              CrossColor: t?.CrossColor || "",
+              SolveSource: t?.SolveSource || "",
+              TimerInput: t?.TimerInput || "",
+              Custom1: t?.Custom1 || "",
+              Custom2: t?.Custom2 || "",
+              Custom3: t?.Custom3 || "",
+              Custom4: t?.Custom4 || "",
+              Custom5: t?.Custom5 || "",
+            }}
+            onChange={(next) => {
+              updateTagField("CubeModel", next?.CubeModel || "", index);
+              updateTagField("CrossColor", next?.CrossColor || "", index);
+              updateTagField("SolveSource", next?.SolveSource || "", index);
+              updateTagField("TimerInput", next?.TimerInput || "", index);
+              updateTagField("Custom1", next?.Custom1 || "", index);
+              updateTagField("Custom2", next?.Custom2 || "", index);
+              updateTagField("Custom3", next?.Custom3 || "", index);
+              updateTagField("Custom4", next?.Custom4 || "", index);
+              updateTagField("Custom5", next?.Custom5 || "", index);
+            }}
+            tagConfig={tagConfig}
+            fields={[
+              "CubeModel",
+              "CrossColor",
+              "SolveSource",
+              "TimerInput",
+              "Custom1",
+              "Custom2",
+              "Custom3",
+              "Custom4",
+              "Custom5",
+            ]}
+            cubeModelOptions={cubeModelOptions}
+            discoveredOptions={discoveredTagOptions}
+            profileColor={profileColor}
+            variant="home"
+            allowAdditions={!readOnly}
           />
         </div>
 
@@ -491,32 +619,7 @@ function Detail({
           </div>
         )}
 
-        {!readOnly && (
-          <div className="detailCustomAddRow">
-            <input
-              className="detailCustomKey"
-              value={t?.customKey || ""}
-              onChange={(e) => updateTagField("customKey", e.target.value, index)}
-              placeholder="new tag"
-            />
-            <input
-              className="detailCustomVal"
-              value={t?.customValue || ""}
-              onChange={(e) => updateTagField("customValue", e.target.value, index)}
-              placeholder="value"
-            />
-            <button
-              type="button"
-              className="detailCustomAddBtn"
-              onClick={() => addCustomRow(index)}
-              title="Add"
-            >
-              + Add
-            </button>
-          </div>
-        )}
-
-        {t?.error ? <div className="detailTagsError">{t.error}</div> : null}
+        {saveMeta?.error ? <div className="detailTagsError">{saveMeta.error}</div> : null}
       </div>
     );
   };
@@ -527,14 +630,17 @@ function Detail({
     return (
       <div key={index} className="detailSolveCard">
         <div className="detailTopRow">
-          <div className="detailTime">
-            {formatTime(getSolveFinalTimeMs(item), false, item.penalty)}
+          <div className="detailTimeWrap">
+            <div className="detailTime">
+              {formatTime(getSolveFinalTimeMs(item), false, item.penalty)}
+            </div>
+            <div className="detailMetaLine">{getSolveSubline(item)}</div>
           </div>
           <div
             className="detailScramble"
             style={{ fontSize: getScrambleFontSize(getSolveEvent(item)) }}
           >
-            {item.scramble}
+            {getSolveScramble(item)}
           </div>
         </div>
 
@@ -542,11 +648,9 @@ function Detail({
 
         <div className="detailBottomRow">
           <div className="detailCube">
-            <RubiksCubeSVG
-              n={getSolveEvent(item)}
-              faces={getScrambledFaces(item.scramble, getSolveEvent(item))}
-              isMusicPlayer={false}
-              isTimerCube={false}
+            <PuzzleSVG
+              event={getSolveEvent(item)}
+              scramble={getSolveScramble(item)}
             />
           </div>
 
@@ -563,21 +667,8 @@ function Detail({
               disabled={readOnly}
             />
 
-            {!readOnly && (
-              <div className="detailNoteButtonsRow">
-                <button
-                  type="button"
-                  className="detailSaveNoteBtn"
-                  onClick={() => saveNote(index)}
-                  disabled={noteSaving}
-                >
-                  {noteSaving ? "Saving..." : "Save Note"}
-                </button>
+                {renderTagsEditor(item, index)}
               </div>
-            )}
-
-            {renderTagsEditor(item, index)}
-          </div>
 
           <div className="detailActions">
             {!readOnly && typeof applyPenalty === "function" && (
@@ -605,24 +696,26 @@ function Detail({
 
   const singleReadOnly = !isArray && isReadOnlySolve(solve);
 
-  return (
+  const modalContent = (
     <div className="detailPopup">
       <div className="detailPopupContent">
         <span className="closePopup" onClick={onClose}>
           x
         </span>
-
         {!isArray ? (
           <div className="detailFlexCol">
             <div className="detailTopRow">
-              <div className="detailTime">
-                {formatTime(getSolveFinalTimeMs(solve), false, solve.penalty)}
+              <div className="detailTimeWrap">
+                <div className="detailTime">
+                  {formatTime(getSolveFinalTimeMs(solve), false, solve.penalty)}
+                </div>
+                <div className="detailMetaLine">{getSolveSubline(solve)}</div>
               </div>
               <div
                 className="detailScramble"
                 style={{ fontSize: getScrambleFontSize(getSolveEvent(solve)) }}
               >
-                {solve.scramble}
+                {getSolveScramble(solve)}
               </div>
             </div>
 
@@ -630,11 +723,9 @@ function Detail({
 
             <div className="detailBottomRow">
               <div className="detailCube">
-                <RubiksCubeSVG
-                  n={getSolveEvent(solve)}
-                  faces={getScrambledFaces(solve.scramble, getSolveEvent(solve))}
-                  isMusicPlayer={false}
-                  isTimerCube={false}
+                <PuzzleSVG
+                  event={getSolveEvent(solve)}
+                  scramble={getSolveScramble(solve)}
                 />
               </div>
 
@@ -646,19 +737,6 @@ function Detail({
                   onChange={(e) => setNotes(e.target.value)}
                   disabled={singleReadOnly}
                 />
-
-                {!singleReadOnly && (
-                  <div className="detailNoteButtonsRow">
-                    <button
-                      type="button"
-                      className="detailSaveNoteBtn"
-                      onClick={() => saveNote()}
-                      disabled={noteSaving}
-                    >
-                      {noteSaving ? "Saving..." : "Save Note"}
-                    </button>
-                  </div>
-                )}
 
                 {renderTagsEditor(solve, null)}
               </div>
@@ -699,6 +777,10 @@ function Detail({
       </div>
     </div>
   );
+
+  if (typeof document === "undefined") return modalContent;
+
+  return createPortal(modalContent, document.body);
 }
 
 export default Detail;

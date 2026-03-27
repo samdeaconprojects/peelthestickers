@@ -769,6 +769,7 @@ const TimeTable = ({
         <Detail
           solve={selectedSolve}
           userID={user?.UserID}
+          profileColor={user?.Color || user?.color || "#2EC4B6"}
           onClose={closeDetail}
           deleteTime={() => {
             const solveRef = selectedSolve?.solveRef || null;

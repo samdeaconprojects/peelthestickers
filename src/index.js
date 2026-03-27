@@ -12,7 +12,7 @@ import { SettingsProvider } from './contexts/SettingsContext'; // ✅ import the
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
-    <SettingsProvider> {/* ✅ wrap App in SettingsProvider */}
+    <SettingsProvider> {/* wrap App in SettingsProvider */}
       <Router>
         <App />
       </Router>

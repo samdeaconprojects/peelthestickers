@@ -8,6 +8,7 @@ import MegaminxSVG from "./MegaminxSVG";
 import ClockSVG from "./ClockSVG";
 import { getScrambledFaces } from "../scrambleUtils";
 import FlipIcon from "../../assets/Flip.svg";
+import ptsOH from "../../assets/ptsOH.svg";
 import "./PuzzleSVG.css";
 
 const PuzzleSVG = ({
@@ -18,27 +19,42 @@ const PuzzleSVG = ({
   isNameTagCube,   // keep supported for other places if you already use it
   isProfileCube,
   isAvatarCube,    // ✅ NEW: for Social message avatars / name tiles
+  isStatsHeaderIcon,
 }) => {
   const faceBasedEvents = ["222", "333", "444", "555", "666", "777", "333OH", "333BLD"];
   const isRubikEvent = faceBasedEvents.includes(event);
+  const showOneHandAsset = event === "333OH";
+  const oneHandScale = showOneHandAsset ? 0.9 : 1;
+
+  const headerSizeByEvent = {
+    SKEWB: 20,
+    SQ1: 18,
+    MEGAMINX: 19,
+    PYRAMINX: 22,
+    CLOCK: 17,
+  };
 
   // Base size for non-rubik puzzles
-  const size = event === "SQ1" ? 36 : 45;
+  const size = isStatsHeaderIcon
+    ? headerSizeByEvent[event] || 44
+    : event === "SQ1"
+      ? 36
+      : 45;
   const gap = 2;
 
   // Shared flip state
   const [showFront, setShowFront] = useState(true);
 
   useEffect(() => {
-    setShowFront(true);
+    setShowFront(event === "PYRAMINX" ? false : true);
   }, [event]);
 
   /**
    * ✅ Flip button:
-   * - Keep for timer HUD + profile header if you want
-   * - DON'T show it on Social avatars (isAvatarCube)
+   * - Keep only on interactive scramble surfaces
+   * - Hide on passive profile / nametag / avatar renders
    */
-  const showFlipButton = !isAvatarCube && (isTimerCube || isProfileCube || isMusicPlayer);
+  const showFlipButton = !isAvatarCube && !isProfileCube && !isNameTagCube && (isTimerCube || isMusicPlayer);
 
   /**
    * ✅ Wrapper nudges (THIS is the knob):
@@ -69,15 +85,54 @@ const PuzzleSVG = ({
     "SQ1": { x: 10, y: 10 },
   };
 
-  const avatarNudge = isAvatarCube ? (avatarNudgeByEvent[event] || { x: 10, y: 10 }) : { x: 0, y: 0 };
+  const avatarNudge =
+    isAvatarCube && !isStatsHeaderIcon
+      ? avatarNudgeByEvent[event] || { x: 10, y: 10 }
+      : { x: 0, y: 0 };
+
+  const headerNudgeByEvent = {
+    PYRAMINX: { x: 0, y: 3 },
+    MEGAMINX: { x: 0, y: 1 },
+    CLOCK: { x: 0, y: 0 },
+    SQ1: { x: 0, y: 0 },
+    SKEWB: { x: 0, y: 0 },
+  };
+
+  const headerNudge = isStatsHeaderIcon ? headerNudgeByEvent[event] || { x: 0, y: 0 } : { x: 0, y: 0 };
+  const headerScaleByEvent = {
+    "222": 0.26,
+    "333": 0.26,
+    "444": 0.24,
+    "555": 0.22,
+    "666": 0.2,
+    "777": 0.19,
+    "333OH": 0.26,
+    "333BLD": 0.26,
+    SKEWB: 1,
+    SQ1: 1,
+    MEGAMINX: 1,
+    PYRAMINX: 1,
+    CLOCK: 1,
+  };
+  const headerScale = isStatsHeaderIcon ? headerScaleByEvent[event] || 1 : 1;
 
   // Combine nudges (avatar + profile)
-  const nudgeX = profileNudge.x + avatarNudge.x;
-  const nudgeY = profileNudge.y + avatarNudge.y;
+  const nudgeX = profileNudge.x + avatarNudge.x + headerNudge.x;
+  const nudgeY = profileNudge.y + avatarNudge.y + headerNudge.y;
 
   if (isRubikEvent) {
     return (
-      <div className="puzzle-svg-wrap">
+      <div
+        className={[
+          "puzzle-svg-wrap",
+          showOneHandAsset ? "puzzle-svg-wrap--oh" : "",
+          isStatsHeaderIcon ? "puzzle-svg-wrap--statsHeader" : "",
+          isMusicPlayer ? "puzzle-svg-wrap--musicPlayer" : "",
+          isNameTagCube ? "puzzle-svg-wrap--nameTag" : "",
+          isAvatarCube ? "puzzle-svg-wrap--avatar" : "",
+          isProfileCube ? "puzzle-svg-wrap--profile" : "",
+        ].filter(Boolean).join(" ")}
+      >
         {showFlipButton && (
           <button
             className="puzzle-flip-btn"
@@ -93,7 +148,13 @@ const PuzzleSVG = ({
         )}
 
         {/* ✅ wrapper nudge does NOT change RubiksCubeSVG scaling */}
-        <div className="puzzle-svg-inner" style={{ transform: `translate(${nudgeX}px, ${nudgeY}px)` }}>
+        <div
+          className="puzzle-svg-inner"
+          style={{
+            transform: `translate(${nudgeX}px, ${nudgeY}px) scale(${headerScale * oneHandScale})`,
+            transformOrigin: "center",
+          }}
+        >
           <RubiksCubeSVG
             n={event}
             faces={getScrambledFaces(scramble, event)}
@@ -104,6 +165,10 @@ const PuzzleSVG = ({
             showFront={showFront}
           />
         </div>
+
+        {showOneHandAsset && (
+          <img className="puzzle-svg-oh-hand" src={ptsOH} alt="" aria-hidden="true" />
+        )}
       </div>
     );
   }

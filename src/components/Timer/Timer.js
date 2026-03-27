@@ -113,7 +113,7 @@ function tokenizeScramble(scramble) {
   return steps;
 }
 
-function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
+function Timer({ addTime, inPlayerBar = false, activeScramble = "", compact = false }) {
   const { settings } = useSettings();
 
   // ✅ keep latest addTime in a ref so Bluetooth callbacks always save
@@ -1325,6 +1325,9 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
     return formatMs(timeToDisplay);
   };
 
+  const displayTime = formatTime();
+  const displayHasMinutes = displayTime.includes(':');
+
   const getInspectionColor = () => {
     const ms = inspectionElapsed;
     if (ms >= 15000) return "#ff4d4d";
@@ -1364,9 +1367,9 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
     settings.timerInput === 'Keyboard' || forceKeyboardView || isGanMode || isCubeMode;
 
   return (
-    <div className="timer-display">
+    <div className={`timer-display ${compact ? "timer-display--compact" : ""} ${inPlayerBar ? "timer-display--playerbar" : ""}`}>
       {showKeyboardOrGanOrCube ? (
-        <div className="timer-center-wrap">
+        <div className={`timer-center-wrap ${inPlayerBar ? "timer-center-wrap--playerbar" : ""}`}>
           <div className="gan-side-controls">
             {/* GAN Timer controls */}
             {showGanControls && (
@@ -1455,7 +1458,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
               }}
             >
               <div
-                className="Timer"
+                className="Timer Timer--static"
                 style={{
                   color: getInspectionColor(),
                   transition: "color 120ms linear",
@@ -1481,7 +1484,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
           ) : (
             <>
               <p
-                className="Timer"
+                className={`Timer ${displayHasMinutes ? "Timer--with-minutes" : ""} ${(isGanMode || isCubeMode || settings.timerInput === "Keyboard") ? "Timer--static" : ""} ${compact ? "Timer--compact" : ""} ${inPlayerBar ? "Timer--playerbar" : ""}`}
                 style={
                   isGanMode
                     ? ganGreenStyle
@@ -1493,9 +1496,9 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "" }) {
                 }
               >
                 {(isGanMode || isCubeMode)
-                  ? formatTime()
+                  ? displayTime
                   : settings.timerInput === "Keyboard"
-                  ? formatTime()
+                  ? displayTime
                   : (manualTime || "Type")}
               </p>
             </>

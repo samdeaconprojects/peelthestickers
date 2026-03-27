@@ -36,6 +36,8 @@ const {
   buildSolveTagItems,
   buildStatsFromSolves,
   buildTopWindowCandidatesFromSolves,
+  getAllSolvesBySession,
+  getAllSolvesByEvent,
   getLastNSolvesBySession,
   getLastNSolvesByEvent,
   recomputeSessionStats,
@@ -71,6 +73,18 @@ function requirePkSk(res) {
 function hasCurrentStrictWindowVersion(item) {
   return Number(item?.StrictWindowVersion || 0) === STRICT_WINDOW_VERSION;
 }
+
+const ALLOWED_TAG_KEYS = new Set([
+  "CubeModel",
+  "CrossColor",
+  "TimerInput",
+  "SolveSource",
+  "Custom1",
+  "Custom2",
+  "Custom3",
+  "Custom4",
+  "Custom5",
+]);
 
 function buildDefaultTagConfig(tagOptions = null) {
   return {
@@ -1657,6 +1671,14 @@ function buildConversationMetaItem({
     UpdatedAt: ts,
     LastMessageAt: null,
     LastMessagePreview: "",
+    SharedStats: {
+      TotalSolves: 0,
+      TotalWins: 0,
+      TotalSessions: 0,
+      LastSharedAt: null,
+      ByEvent: {},
+      ByUser: {},
+    },
   };
 
   if (type === "DM") {
@@ -1713,8 +1735,576 @@ function buildUserConversationItems({
       UpdatedAt: ts,
       LastMessageAt: null,
       LastMessagePreview: "",
+      SharedStats: {
+        TotalSolves: 0,
+        TotalWins: 0,
+        TotalSessions: 0,
+        LastSharedAt: null,
+        ByEvent: {},
+        ByUser: {},
+      },
     };
   });
+}
+
+function createEmptySharedStats() {
+  return {
+    TotalSolves: 0,
+    TotalWins: 0,
+    TotalSessions: 0,
+    LastSharedAt: null,
+    ByEvent: {},
+    ByUser: {},
+  };
+}
+
+function normalizeSharedStats(stats) {
+  const safe = stats && typeof stats === "object" ? stats : {};
+  return {
+    TotalSolves: Number(safe.TotalSolves || 0),
+    TotalWins: Number(safe.TotalWins || 0),
+    TotalSessions: Number(safe.TotalSessions || 0),
+    LastSharedAt: safe.LastSharedAt || null,
+    ByEvent: safe.ByEvent && typeof safe.ByEvent === "object" ? safe.ByEvent : {},
+    ByUser: safe.ByUser && typeof safe.ByUser === "object" ? safe.ByUser : {},
+  };
+}
+
+function normalizeSharedPayload(text) {
+  if (!String(text || "").startsWith("[sharedAoN]")) return null;
+  try {
+    const parsed = JSON.parse(String(text).slice("[sharedAoN]".length));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseSharedUpdateMessage(text) {
+  if (!String(text || "").startsWith("[sharedUpdate]")) return null;
+  const raw = String(text).slice("[sharedUpdate]".length);
+  const [sharedID, solveIndexRaw, timeRaw, senderID] = raw.split("|");
+  const solveIndex = Number(solveIndexRaw);
+  const time = Number(timeRaw);
+  if (!sharedID || !senderID || !Number.isFinite(solveIndex) || !Number.isFinite(time)) return null;
+  return {
+    sharedID,
+    solveIndex,
+    time,
+    senderID,
+  };
+}
+
+function parseSharedExtendMessage(text) {
+  if (!String(text || "").startsWith("[sharedExtend]")) return null;
+  try {
+    const parsed = JSON.parse(String(text).slice("[sharedExtend]".length));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function getSharedRunKey(sharedID) {
+  return `SHAREDRUN#${String(sharedID || "").trim()}`;
+}
+
+async function getSharedRun(conversationID, sharedID) {
+  const out = await ddb.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: {
+        PK: `CONVO#${conversationID}`,
+        SK: getSharedRunKey(sharedID),
+      },
+      ConsistentRead: true,
+    })
+  );
+  return out.Item || null;
+}
+
+function buildSharedRunItem({
+  conversationID,
+  sharedID,
+  payload,
+  participantIDs = [],
+  createdAt,
+}) {
+  const ts = String(createdAt || nowIso());
+  const creatorEvents = Array.isArray(payload?.creatorEvents) ? payload.creatorEvents : [];
+  const opponentEvents = Array.isArray(payload?.opponentEvents) ? payload.opponentEvents : [];
+  const creatorScrambles = Array.isArray(payload?.creatorScrambles) ? payload.creatorScrambles : [];
+  const opponentScrambles = Array.isArray(payload?.opponentScrambles) ? payload.opponentScrambles : [];
+
+  return {
+    PK: `CONVO#${conversationID}`,
+    SK: getSharedRunKey(sharedID),
+    ItemType: "SHAREDRUN",
+    ConversationID: conversationID,
+    SharedID: sharedID,
+    SharedType: String(payload?.mode || payload?.type || "average").trim() || "average",
+    TargetWins: Number(payload?.targetWins || 0) || null,
+    BatchSize: Number(payload?.batchSize || 0) || null,
+    Count: Math.max(
+      Number(payload?.count || 0),
+      creatorEvents.length,
+      opponentEvents.length,
+      creatorScrambles.length,
+      opponentScrambles.length
+    ),
+    CreatorID: String(payload?.creatorID || "").trim() || null,
+    CreatorEvent: String(payload?.creatorEvent || payload?.event || "").trim() || null,
+    OpponentEvent: String(payload?.opponentEvent || payload?.event || "").trim() || null,
+    CreatorEvents: creatorEvents,
+    OpponentEvents: opponentEvents,
+    CreatorScrambles: creatorScrambles,
+    OpponentScrambles: opponentScrambles,
+    ParticipantIDs: normalizeMemberIDs(participantIDs),
+    RoundResults: {},
+    Summary: {
+      TotalSolves: 0,
+      TotalWins: 0,
+      ByUser: {},
+      ByEvent: {},
+    },
+    CreatedAt: ts,
+    UpdatedAt: ts,
+  };
+}
+
+function getSharedRoundEvent(runItem, participantID, solveIndex) {
+  const idx = Number(solveIndex);
+  if (!Number.isFinite(idx) || idx < 0) return null;
+
+  if (participantID && participantID === runItem?.CreatorID) {
+    return (
+      runItem?.CreatorEvents?.[idx] ||
+      runItem?.CreatorEvent ||
+      runItem?.OpponentEvent ||
+      null
+    );
+  }
+
+  if (participantID && runItem?.ParticipantIDs?.includes(participantID)) {
+    return (
+      runItem?.OpponentEvents?.[idx] ||
+      runItem?.OpponentEvent ||
+      runItem?.CreatorEvent ||
+      null
+    );
+  }
+
+  return (
+    runItem?.CreatorEvents?.[idx] ||
+    runItem?.OpponentEvents?.[idx] ||
+    runItem?.CreatorEvent ||
+    runItem?.OpponentEvent ||
+    null
+  );
+}
+
+function computeSharedRunSummary(runItem) {
+  const roundResults = runItem?.RoundResults && typeof runItem.RoundResults === "object"
+    ? runItem.RoundResults
+    : {};
+
+  const summary = {
+    TotalSolves: 0,
+    TotalWins: 0,
+    ByUser: {},
+    ByEvent: {},
+  };
+
+  const addSolve = (userID, event) => {
+    const uid = String(userID || "").trim();
+    const ev = normalizeEvent(event || runItem?.CreatorEvent || runItem?.OpponentEvent || "333");
+    if (!uid) return;
+
+    summary.TotalSolves += 1;
+    summary.ByUser[uid] = {
+      Solves: Number(summary.ByUser?.[uid]?.Solves || 0) + 1,
+      Wins: Number(summary.ByUser?.[uid]?.Wins || 0),
+    };
+    summary.ByEvent[ev] = {
+      Solves: Number(summary.ByEvent?.[ev]?.Solves || 0) + 1,
+      Wins: Number(summary.ByEvent?.[ev]?.Wins || 0),
+      ByUser: {
+        ...(summary.ByEvent?.[ev]?.ByUser || {}),
+        [uid]: {
+          Solves: Number(summary.ByEvent?.[ev]?.ByUser?.[uid]?.Solves || 0) + 1,
+          Wins: Number(summary.ByEvent?.[ev]?.ByUser?.[uid]?.Wins || 0),
+        },
+      },
+    };
+  };
+
+  const addWin = (userID, event) => {
+    const uid = String(userID || "").trim();
+    const ev = normalizeEvent(event || runItem?.CreatorEvent || runItem?.OpponentEvent || "333");
+    if (!uid) return;
+
+    summary.TotalWins += 1;
+    summary.ByUser[uid] = {
+      Solves: Number(summary.ByUser?.[uid]?.Solves || 0),
+      Wins: Number(summary.ByUser?.[uid]?.Wins || 0) + 1,
+    };
+    summary.ByEvent[ev] = {
+      Solves: Number(summary.ByEvent?.[ev]?.Solves || 0),
+      Wins: Number(summary.ByEvent?.[ev]?.Wins || 0) + 1,
+      ByUser: {
+        ...(summary.ByEvent?.[ev]?.ByUser || {}),
+        [uid]: {
+          Solves: Number(summary.ByEvent?.[ev]?.ByUser?.[uid]?.Solves || 0),
+          Wins: Number(summary.ByEvent?.[ev]?.ByUser?.[uid]?.Wins || 0) + 1,
+        },
+      },
+    };
+  };
+
+  Object.entries(roundResults).forEach(([solveIndex, row]) => {
+    const entrants = Object.entries(row || {})
+      .map(([participantID, result]) => ({
+        participantID,
+        time: Number(result?.time),
+        event: result?.event || getSharedRoundEvent(runItem, participantID, solveIndex),
+      }))
+      .filter((entry) => entry.participantID && Number.isFinite(entry.time));
+
+    entrants.forEach((entry) => addSolve(entry.participantID, entry.event));
+
+    if (entrants.length < 2) return;
+
+    const best = entrants.reduce((winner, entry) => {
+      if (!winner) return entry;
+      if (entry.time < winner.time) return entry;
+      return winner;
+    }, null);
+
+    const tied = entrants.filter((entry) => entry.time === best?.time);
+    if (best && tied.length === 1) {
+      addWin(best.participantID, best.event);
+    }
+  });
+
+  return summary;
+}
+
+function buildSharedStatsDelta(previousSummary, nextSummary, eventForSession = null, timestamp = null) {
+  const prev = previousSummary && typeof previousSummary === "object" ? previousSummary : {};
+  const next = nextSummary && typeof nextSummary === "object" ? nextSummary : {};
+  const delta = createEmptySharedStats();
+
+  delta.TotalSolves = Number(next.TotalSolves || 0) - Number(prev.TotalSolves || 0);
+  delta.TotalWins = Number(next.TotalWins || 0) - Number(prev.TotalWins || 0);
+  delta.LastSharedAt = timestamp || null;
+
+  const eventKeys = new Set([
+    ...Object.keys(prev.ByEvent || {}),
+    ...Object.keys(next.ByEvent || {}),
+  ]);
+  eventKeys.forEach((eventKey) => {
+    const prevEvent = prev.ByEvent?.[eventKey] || {};
+    const nextEvent = next.ByEvent?.[eventKey] || {};
+    const eventDelta = {
+      Solves: Number(nextEvent.Solves || 0) - Number(prevEvent.Solves || 0),
+      Wins: Number(nextEvent.Wins || 0) - Number(prevEvent.Wins || 0),
+      Sessions: 0,
+      ByUser: {},
+    };
+    const eventUserKeys = new Set([
+      ...Object.keys(prevEvent.ByUser || {}),
+      ...Object.keys(nextEvent.ByUser || {}),
+    ]);
+    eventUserKeys.forEach((userID) => {
+      const prevUser = prevEvent.ByUser?.[userID] || {};
+      const nextUser = nextEvent.ByUser?.[userID] || {};
+      const userDelta = {
+        Solves: Number(nextUser.Solves || 0) - Number(prevUser.Solves || 0),
+        Wins: Number(nextUser.Wins || 0) - Number(prevUser.Wins || 0),
+        Sessions: 0,
+      };
+      if (userDelta.Solves || userDelta.Wins || userDelta.Sessions) {
+        eventDelta.ByUser[userID] = userDelta;
+      }
+    });
+    if (eventDelta.Solves || eventDelta.Wins || eventDelta.Sessions) {
+      delta.ByEvent[eventKey] = eventDelta;
+    }
+  });
+
+  if (eventForSession) {
+    const ev = normalizeEvent(eventForSession);
+    delta.ByEvent[ev] = {
+      Solves: Number(delta.ByEvent?.[ev]?.Solves || 0),
+      Wins: Number(delta.ByEvent?.[ev]?.Wins || 0),
+      Sessions: Number(delta.ByEvent?.[ev]?.Sessions || 0) + 1,
+      ByUser: {
+        ...(delta.ByEvent?.[ev]?.ByUser || {}),
+      },
+    };
+  }
+
+  const userKeys = new Set([
+    ...Object.keys(prev.ByUser || {}),
+    ...Object.keys(next.ByUser || {}),
+  ]);
+  userKeys.forEach((userID) => {
+    const prevUser = prev.ByUser?.[userID] || {};
+    const nextUser = next.ByUser?.[userID] || {};
+    const userDelta = {
+      Solves: Number(nextUser.Solves || 0) - Number(prevUser.Solves || 0),
+      Wins: Number(nextUser.Wins || 0) - Number(prevUser.Wins || 0),
+      Sessions: 0,
+    };
+    if (userDelta.Solves || userDelta.Wins || userDelta.Sessions) {
+      delta.ByUser[userID] = userDelta;
+    }
+  });
+
+  return delta;
+}
+
+function mergeSharedStats(baseStats, deltaStats) {
+  const base = normalizeSharedStats(baseStats);
+  const delta = deltaStats && typeof deltaStats === "object" ? deltaStats : {};
+  const next = {
+    ...base,
+    TotalSolves: Number(base.TotalSolves || 0) + Number(delta.TotalSolves || 0),
+    TotalWins: Number(base.TotalWins || 0) + Number(delta.TotalWins || 0),
+    TotalSessions: Number(base.TotalSessions || 0) + Number(delta.TotalSessions || 0),
+    LastSharedAt: delta.LastSharedAt || base.LastSharedAt || null,
+    ByEvent: { ...(base.ByEvent || {}) },
+    ByUser: { ...(base.ByUser || {}) },
+  };
+
+  Object.entries(delta.ByEvent || {}).forEach(([eventKey, values]) => {
+    const current = next.ByEvent[eventKey] || {};
+    next.ByEvent[eventKey] = {
+      Solves: Number(current.Solves || 0) + Number(values.Solves || 0),
+      Wins: Number(current.Wins || 0) + Number(values.Wins || 0),
+      Sessions: Number(current.Sessions || 0) + Number(values.Sessions || 0),
+      ByUser: { ...(current.ByUser || {}) },
+    };
+    Object.entries(values.ByUser || {}).forEach(([userID, byUserValues]) => {
+      const currentByUser = next.ByEvent[eventKey].ByUser[userID] || {};
+      next.ByEvent[eventKey].ByUser[userID] = {
+        Solves: Number(currentByUser.Solves || 0) + Number(byUserValues.Solves || 0),
+        Wins: Number(currentByUser.Wins || 0) + Number(byUserValues.Wins || 0),
+        Sessions: Number(currentByUser.Sessions || 0) + Number(byUserValues.Sessions || 0),
+      };
+    });
+  });
+
+  Object.entries(delta.ByUser || {}).forEach(([userID, values]) => {
+    const current = next.ByUser[userID] || {};
+    next.ByUser[userID] = {
+      Solves: Number(current.Solves || 0) + Number(values.Solves || 0),
+      Wins: Number(current.Wins || 0) + Number(values.Wins || 0),
+      Sessions: Number(current.Sessions || 0) + Number(values.Sessions || 0),
+    };
+  });
+
+  return next;
+}
+
+async function applySharedStatsToConversation({
+  conversationID,
+  memberIDs,
+  deltaStats,
+  timestamp,
+}) {
+  const convoKey = { PK: `CONVO#${conversationID}`, SK: "META" };
+  const existingMeta = await ddb.send(
+    new GetCommand({ TableName: TABLE, Key: convoKey, ConsistentRead: true })
+  );
+  const nextMetaStats = mergeSharedStats(existingMeta.Item?.SharedStats, deltaStats);
+
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: convoKey,
+      UpdateExpression: "SET SharedStats = :stats, UpdatedAt = :updated",
+      ExpressionAttributeValues: {
+        ":stats": nextMetaStats,
+        ":updated": String(timestamp || nowIso()),
+      },
+    })
+  );
+
+  await Promise.all(
+    normalizeMemberIDs(memberIDs).map(async (userID) => {
+      const userKey = { PK: `USER#${userID}`, SK: `CONVO#${conversationID}` };
+      const existingUser = await ddb.send(
+        new GetCommand({ TableName: TABLE, Key: userKey, ConsistentRead: true })
+      );
+      const nextUserStats = mergeSharedStats(existingUser.Item?.SharedStats, deltaStats);
+      return ddb.send(
+        new UpdateCommand({
+          TableName: TABLE,
+          Key: userKey,
+          UpdateExpression: "SET SharedStats = :stats, UpdatedAt = :updated",
+          ExpressionAttributeValues: {
+            ":stats": nextUserStats,
+            ":updated": String(timestamp || nowIso()),
+          },
+        })
+      );
+    })
+  );
+}
+
+async function processSharedMessageEffects({
+  conversationID,
+  text,
+  memberIDs,
+  timestamp,
+}) {
+  const sharedPayload = normalizeSharedPayload(text);
+  if (sharedPayload?.sharedID) {
+    const existingRun = await getSharedRun(conversationID, sharedPayload.sharedID);
+    if (!existingRun) {
+      const item = buildSharedRunItem({
+        conversationID,
+        sharedID: sharedPayload.sharedID,
+        payload: sharedPayload,
+        participantIDs: memberIDs,
+        createdAt: timestamp,
+      });
+      await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+
+      const deltaStats = createEmptySharedStats();
+      deltaStats.TotalSessions = 1;
+      deltaStats.LastSharedAt = timestamp;
+      const eventKey = normalizeEvent(
+        sharedPayload.creatorEvent || sharedPayload.event || sharedPayload.opponentEvent || "333"
+      );
+      deltaStats.ByEvent[eventKey] = { Solves: 0, Wins: 0, Sessions: 1 };
+      normalizeMemberIDs(memberIDs).forEach((userID) => {
+        deltaStats.ByUser[userID] = { Solves: 0, Wins: 0, Sessions: 1 };
+      });
+      deltaStats.ByEvent[eventKey].ByUser = Object.fromEntries(
+        normalizeMemberIDs(memberIDs).map((userID) => [userID, { Solves: 0, Wins: 0, Sessions: 1 }])
+      );
+
+      await applySharedStatsToConversation({
+        conversationID,
+        memberIDs,
+        deltaStats,
+        timestamp,
+      });
+    }
+    return;
+  }
+
+  const updatePayload = parseSharedUpdateMessage(text);
+  if (!updatePayload?.sharedID) {
+    const extendPayload = parseSharedExtendMessage(text);
+    if (!extendPayload?.sharedID) return;
+
+    const runItem = await getSharedRun(conversationID, extendPayload.sharedID);
+    if (!runItem) return;
+
+    const creatorEvents = Array.isArray(extendPayload.creatorEvents) ? extendPayload.creatorEvents : [];
+    const opponentEvents = Array.isArray(extendPayload.opponentEvents) ? extendPayload.opponentEvents : [];
+    const creatorScrambles = Array.isArray(extendPayload.creatorScrambles)
+      ? extendPayload.creatorScrambles
+      : [];
+    const opponentScrambles = Array.isArray(extendPayload.opponentScrambles)
+      ? extendPayload.opponentScrambles
+      : [];
+
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: {
+          PK: `CONVO#${conversationID}`,
+          SK: getSharedRunKey(extendPayload.sharedID),
+        },
+        UpdateExpression:
+          "SET CreatorEvents = :creatorEvents, OpponentEvents = :opponentEvents, CreatorScrambles = :creatorScrambles, OpponentScrambles = :opponentScrambles, #count = :count, UpdatedAt = :updated",
+        ExpressionAttributeNames: {
+          "#count": "Count",
+        },
+        ExpressionAttributeValues: {
+          ":creatorEvents": [...(runItem.CreatorEvents || []), ...creatorEvents],
+          ":opponentEvents": [...(runItem.OpponentEvents || []), ...opponentEvents],
+          ":creatorScrambles": [...(runItem.CreatorScrambles || []), ...creatorScrambles],
+          ":opponentScrambles": [...(runItem.OpponentScrambles || []), ...opponentScrambles],
+          ":count": Math.max(
+            Number(runItem.Count || 0),
+            Number(extendPayload.count || 0),
+            (runItem.CreatorScrambles || []).length + creatorScrambles.length,
+            (runItem.OpponentScrambles || []).length + opponentScrambles.length
+          ),
+          ":updated": String(timestamp || nowIso()),
+        },
+      })
+    );
+    return;
+  }
+
+  const runItem = await getSharedRun(conversationID, updatePayload.sharedID);
+  if (!runItem) return;
+
+  const existingRow = runItem.RoundResults?.[updatePayload.solveIndex] || {};
+  const existingResult = existingRow?.[updatePayload.senderID] || null;
+  const existingTime = Number(existingResult?.time);
+
+  if (Number.isFinite(existingTime) && existingTime === updatePayload.time) {
+    return;
+  }
+
+  const previousSummary = runItem.Summary || createEmptySharedStats();
+  const nextRoundResults = {
+    ...(runItem.RoundResults || {}),
+    [updatePayload.solveIndex]: {
+      ...existingRow,
+      [updatePayload.senderID]: {
+        time: updatePayload.time,
+        event:
+          existingResult?.event ||
+          getSharedRoundEvent(runItem, updatePayload.senderID, updatePayload.solveIndex),
+        updatedAt: String(timestamp || nowIso()),
+      },
+    },
+  };
+
+  const nextRun = {
+    ...runItem,
+    RoundResults: nextRoundResults,
+  };
+  const nextSummary = computeSharedRunSummary(nextRun);
+
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: {
+        PK: `CONVO#${conversationID}`,
+        SK: getSharedRunKey(updatePayload.sharedID),
+      },
+      UpdateExpression: "SET RoundResults = :roundResults, Summary = :summary, UpdatedAt = :updated",
+      ExpressionAttributeValues: {
+        ":roundResults": nextRoundResults,
+        ":summary": nextSummary,
+        ":updated": String(timestamp || nowIso()),
+      },
+    })
+  );
+
+  const deltaStats = buildSharedStatsDelta(previousSummary, nextSummary, null, timestamp);
+  if (
+    deltaStats.TotalSolves ||
+    deltaStats.TotalWins ||
+    Object.keys(deltaStats.ByEvent || {}).length ||
+    Object.keys(deltaStats.ByUser || {}).length
+  ) {
+    await applySharedStatsToConversation({
+      conversationID,
+      memberIDs: runItem.ParticipantIDs || memberIDs,
+      deltaStats,
+      timestamp,
+    });
+  }
 }
 
 async function getConversationMeta(conversationID) {
@@ -2043,6 +2633,7 @@ app.post("/api/user", async (req, res) => {
       cubeCollection,
       settings,
       tagConfig,
+      tagCatalog,
       tagOptions,
     } = req.body || {};
 
@@ -2071,6 +2662,8 @@ app.post("/api/user", async (req, res) => {
       Settings: settings ?? {},
 
       TagConfig: tagConfig ?? buildDefaultTagConfig(tagOptions),
+      TagCatalog: tagCatalog ?? { Global: {}, ByEvent: {} },
+      TagColorCatalog: { Global: {}, ByEvent: {} },
 
       CreatedAt: ts,
       UpdatedAt: ts,
@@ -2400,6 +2993,62 @@ app.get("/api/tagStats/:userID", async (req, res) => {
   }
 });
 
+app.get("/api/tagValues/:userID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const userID = String(req.params.userID || "").trim();
+  const event = normalizeEvent(req.query?.event);
+  const sessionIDRaw = String(req.query?.sessionID || "").trim();
+  const sessionID = sessionIDRaw ? normalizeSessionID(sessionIDRaw) : "";
+
+  if (!userID) return res.status(400).json({ error: "Missing userID" });
+  if (!event) return res.status(400).json({ error: "Missing event" });
+
+  const valuesByField = Object.fromEntries(
+    Array.from(ALLOWED_TAG_KEYS).map((field) => [field, new Set()])
+  );
+
+  try {
+    const solves = sessionID
+      ? await getAllSolvesBySession(ddb, TABLE, userID, event, sessionID)
+      : await getAllSolvesByEvent(ddb, TABLE, userID, event);
+
+    for (const solve of solves || []) {
+      for (const pair of getSolveTagPairsFromItem(solve)) {
+        const tagKey = String(pair?.key || "").trim();
+        const tagValue = String(pair?.value || "").trim();
+        if (!ALLOWED_TAG_KEYS.has(tagKey) || !tagValue) continue;
+        valuesByField[tagKey].add(tagValue);
+      }
+    }
+
+    const resolvedValuesByField = Object.fromEntries(
+      Object.entries(valuesByField).map(([field, values]) => [
+        field,
+        Array.from(values).sort((a, b) => a.localeCompare(b)),
+      ])
+    );
+
+    console.log("GET /api/tagValues", {
+      userID,
+      event,
+      sessionID: sessionID || null,
+      counts: Object.fromEntries(
+        Object.entries(resolvedValuesByField).map(([field, values]) => [field, values.length])
+      ),
+      cubeModels: resolvedValuesByField.CubeModel || [],
+    });
+
+    return res.json({
+      ok: true,
+      valuesByField: resolvedValuesByField,
+    });
+  } catch (e) {
+    console.error("GET /api/tagValues error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
 // -------------------- SOLVES --------------------
 app.get("/api/solves/:userID", async (req, res) => {
   if (!requirePkSk(res)) return;
@@ -2501,7 +3150,7 @@ app.get("/api/solveWindow/:userID", async (req, res) => {
   const event = normalizeEvent(req.query?.event);
   const sessionID = normalizeSessionID(req.query?.sessionID || "main");
   const startSolveRef = String(req.query?.startSolveRef || "").trim();
-  const n = Math.max(1, Math.min(50, Number(req.query?.n || 5)));
+  const n = Math.max(1, Math.min(1000, Number(req.query?.n || 5)));
 
   if (!userID) return res.status(400).json({ error: "Missing userID" });
   if (!event) return res.status(400).json({ error: "Missing event" });
@@ -2555,19 +3204,7 @@ app.get("/api/solvesByTag/:userID", async (req, res) => {
   if (!rawTagKey) return res.status(400).json({ error: "Missing tagKey" });
   if (!rawTagValue) return res.status(400).json({ error: "Missing tagValue" });
 
-  const allowedTagKeys = new Set([
-    "CubeModel",
-    "CrossColor",
-    "TimerInput",
-    "SolveSource",
-    "Custom1",
-    "Custom2",
-    "Custom3",
-    "Custom4",
-    "Custom5",
-  ]);
-
-  if (!allowedTagKeys.has(rawTagKey)) {
+  if (!ALLOWED_TAG_KEYS.has(rawTagKey)) {
     return res.status(400).json({ error: "Invalid tagKey" });
   }
 
@@ -3478,6 +4115,8 @@ app.get("/api/posts/:userID", async (req, res) => {
   if (!userID) return res.status(400).json({ error: "Missing userID" });
 
   try {
+    const limitRaw = Number(req.query?.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 50;
     const out = await ddb.send(
       new QueryCommand({
         TableName: TABLE,
@@ -3487,6 +4126,7 @@ app.get("/api/posts/:userID", async (req, res) => {
           ":pfx": "POST#",
         },
         ScanIndexForward: false,
+        Limit: limit,
       })
     );
 
@@ -3763,6 +4403,8 @@ app.get("/api/conversations/:userID", async (req, res) => {
   if (!userID) return res.status(400).json({ error: "Missing userID" });
 
   try {
+    const limitRaw = Number(req.query?.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 100;
     const out = await ddb.send(
       new QueryCommand({
         TableName: TABLE,
@@ -3774,11 +4416,13 @@ app.get("/api/conversations/:userID", async (req, res) => {
       })
     );
 
-    const items = (out.Items || []).sort((a, b) =>
-      String(b.LastMessageAt || b.UpdatedAt || "").localeCompare(
-        String(a.LastMessageAt || a.UpdatedAt || "")
+    const items = (out.Items || [])
+      .sort((a, b) =>
+        String(b.LastMessageAt || b.UpdatedAt || "").localeCompare(
+          String(a.LastMessageAt || a.UpdatedAt || "")
+        )
       )
-    );
+      .slice(0, limit);
 
     return res.json({ ok: true, items });
   } catch (e) {
@@ -3830,6 +4474,12 @@ app.post("/api/message", async (req, res) => {
     };
 
     await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+    await processSharedMessageEffects({
+      conversationID,
+      text,
+      memberIDs: members.map((member) => member?.UserID).filter(Boolean),
+      timestamp,
+    });
     await touchConversationActivity({
       conversationID,
       meta,
@@ -3853,6 +4503,8 @@ app.get("/api/messages/:conversationID", async (req, res) => {
   if (!conversationID) return res.status(400).json({ error: "Missing conversationID" });
 
   try {
+    const limitRaw = Number(req.query?.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 100;
     let meta = await getConversationMeta(conversationID);
     let members = [];
 
@@ -3880,11 +4532,15 @@ app.get("/api/messages/:conversationID", async (req, res) => {
           ":pfx": "MSG#",
         },
         ConsistentRead: true,
-        ScanIndexForward: true,
+        ScanIndexForward: false,
+        Limit: limit,
       })
     );
 
-    const items = (out.Items || []).map((it) => ({
+    const items = (out.Items || [])
+      .slice()
+      .reverse()
+      .map((it) => ({
       sender: it.SenderID,
       text: it.Text,
       timestamp: it.CreatedAt,
@@ -3950,6 +4606,8 @@ app.get("/api/groupPosts/:groupID", async (req, res) => {
   if (!groupID) return res.status(400).json({ error: "Missing groupID" });
 
   try {
+    const limitRaw = Number(req.query?.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 50;
     if (viewerID) {
       const isMember = await isUserInGroup(groupID, viewerID);
       if (!isMember) {
@@ -3966,6 +4624,7 @@ app.get("/api/groupPosts/:groupID", async (req, res) => {
           ":pfx": "POST#",
         },
         ScanIndexForward: false,
+        Limit: limit,
       })
     );
 

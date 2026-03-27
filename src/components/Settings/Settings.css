@@ -171,6 +171,127 @@
   margin-bottom: 8px;
 }
 
+.settingsHintText--sectionStart {
+  margin: 0 0 12px;
+}
+
+.settingsCubeCollectionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settingsCubeCollectionCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.025));
+  box-shadow:
+    inset 0 0 0 1px rgba(7, 57, 60, 0.12),
+    0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.settingsCubeCollectionTitleRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.settingsCubeCollectionTitleBlock {
+  min-width: 0;
+}
+
+.settingsCubeCollectionTitle {
+  color: #fff;
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+
+.settingsCubeCollectionMeta {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.settingsCubeCollectionPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.settingsCubeCollectionPill {
+  --cube-model-pill-color: rgba(255,255,255,0.38);
+  --cube-model-pill-bg: rgba(255,255,255,0.05);
+  min-height: 30px;
+  border-radius: 10px;
+  border: 2px solid var(--cube-model-pill-color);
+  background: var(--cube-model-pill-bg);
+  color: white;
+  box-shadow:
+    inset 0 0 0 1px rgba(7, 57, 60, 0.18),
+    0 4px 10px rgba(0, 0, 0, 0.16);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+}
+
+.settingsCubeCollectionPill:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 0 0 1px rgba(7, 57, 60, 0.22),
+    0 6px 14px rgba(0, 0, 0, 0.2);
+}
+
+.settingsCubeCollectionPillText {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.settingsCubeCollectionPillRemove {
+  opacity: 0.66;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.settingsCubeCollectionEmpty {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.84rem;
+  font-weight: 700;
+  padding: 4px 0;
+}
+
+.settingsCubeCollectionInputRow {
+  display: flex;
+  gap: 8px;
+}
+
+.settingsCubeCollectionCard input[type="text"] {
+  margin-left: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.settingsCubeCollectionAddBtn {
+  min-width: 68px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.08);
+  color: white;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .settingsSubsection {
   margin: 14px 0 20px;
   padding: 14px;
@@ -186,6 +307,12 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   margin-bottom: 8px;
+}
+
+@media (max-width: 760px) {
+  .settingsCubeCollectionGrid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Save button styling */

@@ -3,13 +3,15 @@
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+    min-height: 0;
 }
 
-.tabContainer {
+.profilePage .tabContainer {
     display: flex;
+    margin-top: -24px;
 }
 
-.tabButton {
+.profilePage .tabButton {
     padding: 10px 20px;
     cursor: pointer;
     background-color: transparent;
@@ -23,29 +25,30 @@
     opacity: 50%;
 }
 
-.tabButton.active {
+.profilePage .tabButton.active {
     border-bottom: 2px solid #FFFFFF;
     opacity: 100%;
 }
 
-.tabButton:hover {
+.profilePage .tabButton:hover {
     opacity: 100%;
 }
 
 .profileContent {
     width: 100%;
     box-sizing: border-box;
-    overflow: visible;
+    overflow: hidden;
+    min-height: 0;
 }
 
 .tabPanel {
     width: 100%;
-    margin-top: 3%;
+    margin-top: 0;
     display: flex;
     flex-direction: column;
     row-gap: 30px;
     min-height: 0;
-    overflow: visible;
+    overflow: hidden;
 }
 
 .profileStatsPage {
@@ -54,8 +57,24 @@
   max-height: calc(100vh - 260px);
   overflow-y: auto;
   overflow-x: hidden;
+  padding: 0 4px 110px 0;
   padding-right: 4px;
   box-sizing: border-box;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 32px);
+  mask-image: linear-gradient(to bottom, transparent 0px, black 32px);
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.profileStatsPage::before {
+  content: "";
+  display: block;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+.profileStatsPage::-webkit-scrollbar {
+  display: none;
 }
 
 .profileStatsGrid {
@@ -133,6 +152,14 @@
   overflow-y: auto;   /* enable vertical scrolling */
   padding: 10px;
   align-items: center;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 32px);
+  mask-image: linear-gradient(to bottom, transparent 0px, black 32px);
+}
+
+.tabPanel.postsPanel::before {
+  content: "";
+  height: 26px;
+  flex-shrink: 0;
 }
 
 
@@ -533,7 +560,7 @@
 .profileName {
     font-size: 30pt;
     font-weight: bold;
-    margin-top: 50px;
+    margin-top: 0;
     white-space: nowrap;
 }
 
@@ -546,27 +573,39 @@
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
     color: #c2c2c2;
-    height: 120px;
-    margin: 5px;
+    min-height: 0;
+    margin: -12px 5px 4px;
 }
 
 .profileAndName {
     display: flex;
     flex-direction: row;
     color: #FFFFFF;
+    align-items: center;
+    gap: 0px;
 }
 
 .profileNameAndUsername {
     display: flex;
     flex-direction: column;
+    justify-content: flex-start;
+    margin-top: 0;
+}
+
+.profileIdentityRow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .profileHeaderActions {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
-    margin-top: 10px;
+    margin-top: 0;
 }
 
 .profileHeaderButton {
@@ -582,6 +621,206 @@
 
 .profileHeaderButton:hover {
     background: rgba(255, 255, 255, 0.05);
+}
+
+.statsEditorOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.statsEditor {
+  width: min(1040px, 100%);
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  border-radius: 22px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: linear-gradient(180deg, rgba(18, 27, 34, 0.98), rgba(12, 18, 24, 0.98));
+  box-shadow: 0 24px 70px rgba(0,0,0,0.45);
+  padding: 24px;
+  box-sizing: border-box;
+  color: white;
+}
+
+.statsEditorHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, rgba(18, 27, 34, 0.98), rgba(18, 27, 34, 0.92));
+  padding-bottom: 14px;
+}
+
+.statsEditorHeader h3 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.statsEditorHeader p {
+  margin: 8px 0 0;
+  color: rgba(255,255,255,0.68);
+}
+
+.statsEditorClose,
+.statsEditorPrimary,
+.statsEditorSecondary,
+.statsEditorRemove {
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.statsEditorClose,
+.statsEditorSecondary {
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.06);
+  color: white;
+}
+
+.statsEditorSecondary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.statsEditorPrimary {
+  border: 1px solid rgba(46, 196, 182, 0.5);
+  background: linear-gradient(135deg, rgba(46, 196, 182, 0.25), rgba(80, 182, 255, 0.25));
+  color: white;
+}
+
+.statsEditorRemove {
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.9);
+  padding: 8px 12px;
+}
+
+.statsEditorToolbar {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.statsEditorToolbarTitle {
+  color: rgba(255,255,255,0.75);
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.statsEditorLibrary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, max-content));
+  gap: 10px;
+  align-items: start;
+}
+
+.statsLibraryCard {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: white;
+  cursor: pointer;
+  box-sizing: border-box;
+  white-space: nowrap;
+  font: inherit;
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.statsEditorList {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.statsEditorItem {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.035);
+}
+
+.statsEditorItemHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.statsEditorItemActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.statsEditorItemTitle {
+  color: white;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.statsEditorItemMeta {
+  margin-top: 4px;
+  color: rgba(255,255,255,0.55);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.statsEditorControls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.statsEditorField {
+  display: grid;
+  gap: 7px;
+}
+
+.statsEditorField span {
+  color: rgba(255,255,255,0.72);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.statsEditorField select {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(8, 13, 18, 0.88);
+  color: white;
+  padding: 11px 12px;
+}
+
+.statsEditorActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
 }
 
 .profileContent {
@@ -650,34 +889,46 @@
   /* add to Profile.css */
 
 .widgetBar {
-    display: flex;
-    gap: 12px;
-    margin: 16px 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(68px, max-content));
+    gap: 8px;
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+    align-self: center;
+    justify-content: end;
   }
   
   .widget {
     background-color: rgba(100, 100, 100, 0.1);
-    padding: 8px 12px;
-    border-radius: 8px;
+    padding: 7px 10px;
+    border-radius: 9px;
     cursor: pointer;
-    text-align: center;
+    text-align: left;
+    min-height: 52px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
   }
   
   .widgetTitle {
-    font-size: 0.75rem;
+    font-size: 0.64rem;
     color: #aaa;
+    line-height: 1.1;
   }
   
   .widgetValue {
-    font-size: 1.1rem;
+    font-size: 0.9rem;
     font-weight: bold;
+    line-height: 1.15;
   }
   
   .widgetOverlay {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0,0,0,0.5);
-    z-index: 100;
+    z-index: 1201;
   }
   
   .widgetDetail {
@@ -686,9 +937,10 @@
     transform: translateX(-50%);
     background: #222;
     padding: 16px;
-    border-radius: 6px;
-    z-index: 101;
-    max-width: 300px;
+    border-radius: 14px;
+    z-index: 1202;
+    max-width: 340px;
+    width: calc(100% - 32px);
   }
 
   .friendsList a {
@@ -744,3 +996,24 @@
 .postTitleCube--skewb    { --as: 1.8; --ax: -40px; --ay: 5px; }
 .postTitleCube--clock    { --as: 1.25; --ax: -80px; --ay: -40px; }
 .postTitleCube--sq1      { --as: 1.6; --ax: -70px; --ay: -55px; }
+
+@media (max-width: 900px) {
+  .statsEditor {
+    padding: 18px;
+    max-height: calc(100vh - 32px);
+  }
+
+  .statsEditorHeader,
+  .statsEditorItemHeader,
+  .statsEditorActions {
+    flex-direction: column;
+  }
+
+  .statsEditorLibrary {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+
+  .widgetBar {
+    min-width: 100%;
+  }
+}

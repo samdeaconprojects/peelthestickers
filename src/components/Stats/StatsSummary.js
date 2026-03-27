@@ -632,6 +632,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
   selectedDay = "",
   onStatSelect,
   compareSummary = null,
+  loading = false,
 }) {
   const view = useMemo(
     () => buildViewSummary(solves, overallStats?.SolveCountTotal ?? null, loadedSolveCount),
@@ -646,7 +647,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
   if (mode === "all-events") {
     const rows = Array.isArray(allEventsBreakdown) ? allEventsBreakdown : [];
     return (
-      <section className="ssCard ssCard--view">
+      <section className={`ssCard ssCard--view ${loading ? "is-loading" : ""}`} aria-busy={loading}>
         <div className="statsSummaryEmpty">
           {rows.length ? `All events overview: ${rows.length} events cached.` : "No solves available"}
         </div>
@@ -656,7 +657,10 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
 
   if (!view) {
     return (
-      <section className={`ssCard ${viewMode === "time" ? "ssCard--time" : "ssCard--view"}`}>
+      <section
+        className={`ssCard ${viewMode === "time" ? "ssCard--time" : "ssCard--view"} ${loading ? "is-loading" : ""}`}
+        aria-busy={loading}
+      >
         <div className="statsSummaryEmpty">
           {viewMode === "time" ? "No solves available for the selected day" : "No solves available"}
         </div>
@@ -665,7 +669,10 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
   }
 
   return (
-    <section className={`ssCard ${viewMode === "time" ? "ssCard--time" : "ssCard--view"}`}>
+    <section
+      className={`ssCard ${viewMode === "time" ? "ssCard--time" : "ssCard--view"} ${loading ? "is-loading" : ""}`}
+      aria-busy={loading}
+    >
       {viewMode === "time" ? (
         timeView ? (
           <>
@@ -1028,6 +1035,7 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
   onStatSelect,
   compareSummary = null,
   profileColor = "#50B6FF",
+  loading = false,
 }) {
   const { view, overall, overallTitle } = useStatsSummaryData({
     solves,
@@ -1062,14 +1070,14 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
 
   if (!view && !overallStats && !overallSolves?.length) {
     return (
-      <section className="ssCard ssCard--overall" style={overallCardStyle}>
+      <section className={`ssCard ssCard--overall ${loading ? "is-loading" : ""}`} style={overallCardStyle} aria-busy={loading}>
         <div className="statsSummaryEmpty">No solves available</div>
       </section>
     );
   }
 
   return (
-    <section className="ssCard ssCard--overall" style={overallCardStyle}>
+    <section className={`ssCard ssCard--overall ${loading ? "is-loading" : ""}`} style={overallCardStyle} aria-busy={loading}>
       <div className="ssOverallHeader">
         <div className="ssOverallTitle">{overallTitle}</div>
         <div className="ssOverallCount">{formatCount(overall.solveCountTotal)} solves</div>

@@ -2,6 +2,8 @@
 
 .Navigation {
   width: 70px;
+  min-width: 70px;
+  flex: 0 0 70px;
   left: 0;
   top: 0;
   bottom: 0;
@@ -31,6 +33,12 @@
   text-decoration: none;
 }
 
+.nav-logo-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .nav-item-current {
   --nav-active-dot-color: rgba(255, 255, 255, 0.95);
   --nav-active-shadow-color: rgba(255, 255, 255, 0.35);
@@ -48,8 +56,159 @@
   transition: filter 180ms ease;
 }
 
-.Navigation a:hover .logo {
+.Navigation a:hover .logo,
+.Navigation a:hover .pts-status-logo {
   filter: drop-shadow(0 0 18px rgba(255, 255, 255, 0.36));
+}
+
+.pts-status-logo {
+  width: 55px;
+  height: 55px;
+  margin-top: 10px;
+  margin-left: 10px;
+  display: inline-flex;
+  position: relative;
+  filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.28));
+  transition:
+    filter 1400ms cubic-bezier(0.19, 1, 0.22, 1),
+    transform 240ms ease;
+}
+
+.pts-status-logo__base,
+.pts-status-logo__overlay,
+.pts-status-logo__flash {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+}
+
+.pts-status-logo__base {
+  display: block;
+}
+
+.pts-status-logo__liquid-clip {
+  opacity: 0;
+  transition: opacity 2800ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity;
+}
+
+.pts-status-logo__liquid {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ptsLogoFill 1.15s ease-in-out infinite alternate;
+}
+
+.pts-status-logo__wave {
+  animation: ptsLogoWave 0.95s ease-in-out infinite alternate;
+}
+
+.pts-status-logo__wave--color {
+  animation-duration: 1.18s;
+}
+
+.pts-status-logo__flash {
+  opacity: 0;
+  transform: scale(0.992);
+  pointer-events: none;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-position: center;
+  mask-size: contain;
+  -webkit-mask-size: contain;
+  transition:
+    opacity 3200ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 3200ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.pts-status-logo.is-loading {
+  transform: translateY(-1px);
+}
+
+.pts-status-logo.is-loading .pts-status-logo__liquid-clip {
+  opacity: 1;
+  animation: ptsLogoPulse 1.1s ease-in-out infinite alternate;
+}
+
+.pts-status-logo.is-success .pts-status-logo__liquid-clip,
+.pts-status-logo.is-error .pts-status-logo__liquid-clip {
+  opacity: 1;
+  animation: none;
+}
+
+.pts-status-logo.is-success .pts-status-logo__flash,
+.pts-status-logo.is-error .pts-status-logo__flash {
+  opacity: 1;
+  transform: scale(1);
+  animation: none;
+}
+
+.pts-status-logo.is-success .pts-status-logo__liquid,
+.pts-status-logo.is-error .pts-status-logo__liquid {
+  animation: none;
+  transform: translateY(-20px);
+}
+
+.pts-status-logo.is-success .pts-status-logo__wave,
+.pts-status-logo.is-error .pts-status-logo__wave {
+  animation: none;
+  transform: translateX(0);
+}
+
+.pts-status-logo.is-success {
+  filter:
+    drop-shadow(0 0 12px rgba(46, 196, 182, 0.42))
+    drop-shadow(0 0 24px rgba(46, 196, 182, 0.24));
+}
+
+.pts-status-logo.is-error {
+  filter:
+    drop-shadow(0 0 12px rgba(246, 66, 88, 0.42))
+    drop-shadow(0 0 24px rgba(246, 66, 88, 0.22));
+}
+
+@keyframes ptsLogoPulse {
+  0% {
+    opacity: 0.36;
+  }
+
+  100% {
+    opacity: 0.94;
+  }
+}
+
+@keyframes ptsLogoFill {
+  0% {
+    transform: translateY(30px);
+  }
+
+  100% {
+    transform: translateY(-20px);
+  }
+}
+
+@keyframes ptsLogoWave {
+  0% {
+    transform: translateX(-4px);
+  }
+
+  100% {
+    transform: translateX(4px);
+  }
+}
+
+@keyframes ptsLogoFlashIn {
+  0% {
+    transform: scale(0.96);
+    opacity: 0.55;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .profile, .stats, .social, .settings {
@@ -57,6 +216,21 @@
   display: block;
   margin: 10px 0;
   cursor: pointer;
+}
+
+.profile-icon-mask {
+  width: 30px;
+  height: 30px;
+  max-width: none;
+  background-color: var(--profile-icon-color, #ffffff);
+  -webkit-mask-image: var(--profile-icon-mask);
+  mask-image: var(--profile-icon-mask);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
 
 .nav-profile-chip {
@@ -161,6 +335,11 @@
 
 .nav-item-current--profile .nav-icon--active img.profile {
   filter: brightness(0) invert(1) drop-shadow(0 0 12px var(--nav-active-shadow-color));
+}
+
+.nav-item-current--profile .nav-icon--active .profile-icon-mask {
+  background-color: #ffffff;
+  filter: drop-shadow(0 0 12px var(--nav-active-shadow-color));
 }
 
 .nav-item-current--social {

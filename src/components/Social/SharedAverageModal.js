@@ -19,6 +19,7 @@ const EVENT_OPTIONS = [
 ];
 
 const COUNT_OPTIONS = [1, 2, 3, 5, 12, 50, 100];
+const TARGET_WIN_OPTIONS = [1, 2, 3, 5];
 
 const createEventRow = (event = "333") => ({
   id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -104,17 +105,21 @@ function SharedAverageModal({
   yourLabel = "You",
   theirLabel = "Them",
 }) {
-  const [mode, setMode] = useState("shared");
+  const [mode, setMode] = useState("average");
   const [sharedEvent, setSharedEvent] = useState(defaultEvent);
   const [count, setCount] = useState(5);
+  const [targetWins, setTargetWins] = useState(3);
+  const [casualEvent, setCasualEvent] = useState(defaultEvent);
   const [yourRows, setYourRows] = useState([createEventRow(yourDefaultEvent)]);
   const [theirRows, setTheirRows] = useState([createEventRow(theirDefaultEvent)]);
 
   useEffect(() => {
     if (!isOpen) return;
-    setMode("shared");
+    setMode("average");
     setSharedEvent(defaultEvent || "333");
     setCount(5);
+    setTargetWins(3);
+    setCasualEvent(defaultEvent || "333");
     setYourRows([createEventRow(yourDefaultEvent || defaultEvent || "333")]);
     setTheirRows([createEventRow(theirDefaultEvent || defaultEvent || "333")]);
   }, [defaultEvent, isOpen, theirDefaultEvent, yourDefaultEvent]);
@@ -134,9 +139,9 @@ function SharedAverageModal({
   };
 
   const handleConfirm = () => {
-    if (mode === "separate" && isTwoPerson) {
+    if (mode === "average-separate" && isTwoPerson) {
       onConfirm({
-        mode,
+        mode: "average",
         creatorPlan: yourRows.map((row) => ({
           event: row.event,
           count: Number(row.count) || 1,
@@ -150,8 +155,32 @@ function SharedAverageModal({
       return;
     }
 
+    if (mode === "head_to_head") {
+      onConfirm({
+        mode: "head_to_head",
+        count: Math.max(1, Number(targetWins) * 2 - 1),
+        targetWins: Number(targetWins) || 3,
+        creatorEvent: sharedEvent,
+        opponentEvent: sharedEvent,
+      });
+      onClose();
+      return;
+    }
+
+    if (mode === "casual") {
+      onConfirm({
+        mode: "casual",
+        count: 25,
+        batchSize: 25,
+        creatorEvent: casualEvent,
+        opponentEvent: casualEvent,
+      });
+      onClose();
+      return;
+    }
+
     onConfirm({
-      mode: "shared",
+      mode: "average",
       count,
       creatorEvent: sharedEvent,
       opponentEvent: sharedEvent,
@@ -162,28 +191,52 @@ function SharedAverageModal({
   return (
     <div className="sharedAverageOverlay">
       <div className="sharedAverageModal">
-        <h2>Start Shared Average</h2>
+        <h2>Start Shared Session</h2>
 
-        {isTwoPerson && (
-          <div className="sharedAverageModeToggle" role="tablist" aria-label="Average mode">
+        <div className="sharedAverageModeToggle" role="tablist" aria-label="Shared mode">
+          <button
+            type="button"
+            className={mode === "average" || mode === "average-separate" ? "isActive" : ""}
+            onClick={() => setMode("average")}
+          >
+            Average
+          </button>
+          <button
+            type="button"
+            className={mode === "head_to_head" ? "isActive" : ""}
+            onClick={() => setMode("head_to_head")}
+          >
+            Head to Head
+          </button>
+          <button
+            type="button"
+            className={mode === "casual" ? "isActive" : ""}
+            onClick={() => setMode("casual")}
+          >
+            Casual
+          </button>
+        </div>
+
+        {(mode === "average" || mode === "average-separate") && isTwoPerson && (
+          <div className="sharedAverageModeToggle" role="tablist" aria-label="Average format">
             <button
               type="button"
-              className={mode === "shared" ? "isActive" : ""}
-              onClick={() => setMode("shared")}
+              className={mode === "average" ? "isActive" : ""}
+              onClick={() => setMode("average")}
             >
               Same Event
             </button>
             <button
               type="button"
-              className={mode === "separate" ? "isActive" : ""}
-              onClick={() => setMode("separate")}
+              className={mode === "average-separate" ? "isActive" : ""}
+              onClick={() => setMode("average-separate")}
             >
               Separate Events
             </button>
           </div>
         )}
 
-        {mode === "separate" && isTwoPerson ? (
+        {mode === "average-separate" && isTwoPerson ? (
           <div className="sharedAverageSplitGrid">
             <EventRows
               label={yourLabel}
@@ -200,6 +253,40 @@ function SharedAverageModal({
               onRemove={removeRow(setTheirRows)}
             />
           </div>
+        ) : mode === "head_to_head" ? (
+          <>
+            <label>
+              Event
+              <EventSelect value={sharedEvent} onChange={setSharedEvent} />
+            </label>
+
+            <label>
+              First to
+              <select value={targetWins} onChange={(e) => setTargetWins(Number(e.target.value))}>
+                {TARGET_WIN_OPTIONS.map((wins) => (
+                  <option key={wins} value={wins}>
+                    {wins} win{wins === 1 ? "" : "s"}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <p className="sharedAverageHelperText">
+              Shared scrambles, round-by-round scoring, match ends when someone reaches the target.
+            </p>
+          </>
+        ) : mode === "casual" ? (
+          <>
+            <label>
+              Event
+              <EventSelect value={casualEvent} onChange={setCasualEvent} />
+            </label>
+
+            <p className="sharedAverageHelperText">
+              Shared scrambles in a long-running session. It behaves like normal solving and grows
+              automatically as you go.
+            </p>
+          </>
         ) : (
           <>
             <label>

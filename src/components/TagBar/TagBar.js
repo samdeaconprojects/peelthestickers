@@ -18,9 +18,15 @@ function EditorField({
   onActivate,
   onSelectValue,
   allowAdditions,
+  getChipStyle,
+  getColorValue,
+  onColorChange,
 }) {
   const [draftValue, setDraftValue] = useState(value || "");
-  const listId = useMemo(() => `tagbar-list-${field}-${Math.random().toString(36).slice(2)}`, [field]);
+  const listId = useMemo(
+    () => `tagbar-list-${field}-${Math.random().toString(36).slice(2)}`,
+    [field]
+  );
 
   useEffect(() => {
     setDraftValue(value || "");
@@ -36,7 +42,9 @@ function EditorField({
     <div className={`tagEditorField ${isActive ? "is-active" : ""}`}>
       <button type="button" className="tagEditorFieldBtn" onClick={onActivate}>
         <span className="tagEditorFieldLabel">{label}</span>
-        <span className={`tagEditorFieldValue ${value ? "is-set" : ""}`}>{value || "Any"}</span>
+        <span className={`tagEditorFieldValue ${value ? "is-set" : ""}`}>
+          {value || `+ ${label}`}
+        </span>
       </button>
 
       {isActive && (
@@ -44,19 +52,31 @@ function EditorField({
           <div className="tagEditorOptions">
             <button
               type="button"
-              className={`tagEditorOption ${!value ? "is-active" : ""}`}
+              className={`tagEditorOption tagEditorOption--any ${!value ? "is-active" : ""}`}
               onClick={() => onSelectValue("")}
             >
-              Any
+              <span className="tagHomeChipIconWrap" aria-hidden="true">
+                <img src={tagBadge} alt="" className="tagHomeChipIcon" />
+              </span>
+              <span className="tagHomeChipText">
+                <span className="tagHomeChipValue">Any</span>
+              </span>
             </button>
+
             {options.map((option) => (
               <button
                 key={`${field}-${option}`}
                 type="button"
                 className={`tagEditorOption ${value === option ? "is-active" : ""}`}
+                style={getChipStyle(field, option)}
                 onClick={() => onSelectValue(option)}
               >
-                {option}
+                <span className="tagHomeChipIconWrap" aria-hidden="true">
+                  <img src={tagBadge} alt="" className="tagHomeChipIcon" />
+                </span>
+                <span className="tagHomeChipText">
+                  <span className="tagHomeChipValue">{option}</span>
+                </span>
               </button>
             ))}
           </div>
@@ -72,6 +92,7 @@ function EditorField({
                 if (e.key === "Enter") handleAdd();
               }}
             />
+
             {options.length > 0 && (
               <datalist id={listId}>
                 {options.map((option) => (
@@ -79,12 +100,26 @@ function EditorField({
                 ))}
               </datalist>
             )}
+
             {allowAdditions && (
               <button type="button" className="tagEditorAddBtn" onClick={handleAdd}>
                 Apply
               </button>
             )}
           </div>
+
+          {typeof onColorChange === "function" && !!String(value || "").trim() && (
+            <label className="tagEditorColorRow">
+              <span className="tagEditorColorLabel">Color</span>
+              <input
+                type="color"
+                className="tagEditorColorInput"
+                value={getColorValue(value) || "#2ec4b6"}
+                onChange={(e) => onColorChange(value, e.target.value)}
+                aria-label={`${label} ${value} color`}
+              />
+            </label>
+          )}
         </div>
       )}
     </div>
@@ -95,17 +130,57 @@ export default function TagBar({
   tags,
   onChange,
   tagConfig,
+  fields = null,
   cubeModelOptions = [],
   discoveredOptions = {},
+  profileColor = "#2EC4B6",
+  tagColors = {},
+  onTagColorsChange = null,
   variant = "compact",
   allowAdditions = false,
+  activeField: controlledActiveField = null,
+  onActiveFieldChange = null,
 }) {
   const wrapRef = useRef(null);
-  const safeTags = useMemo(() => sanitizeTagSelection(tags || makeEmptyTagSelection()), [tags]);
-  const cfg = useMemo(() => normalizeTagConfig(tagConfig || DEFAULT_TAG_CONFIG), [tagConfig]);
-  const fieldMeta = useMemo(() => getSharedTagFieldMeta(cfg), [cfg]);
-  const [activeField, setActiveField] = useState("CubeModel");
+  const safeTags = useMemo(
+    () => sanitizeTagSelection(tags || makeEmptyTagSelection()),
+    [tags]
+  );
+  const safeTagColors = useMemo(() => {
+    const next = {};
+    Object.keys(tagColors || {}).forEach((field) => {
+      const valueMap = tagColors?.[field] && typeof tagColors[field] === "object" ? tagColors[field] : {};
+      next[field] = Object.fromEntries(
+        Object.entries(valueMap)
+          .map(([value, color]) => [String(value || "").trim(), String(color || "").trim()])
+          .filter(([value, color]) => value && /^#[0-9a-fA-F]{6}$/.test(color))
+      );
+    });
+    return next;
+  }, [tagColors]);
+  const cfg = useMemo(
+    () => normalizeTagConfig(tagConfig || DEFAULT_TAG_CONFIG),
+    [tagConfig]
+  );
+  const fieldMeta = useMemo(() => {
+    const allFields = getSharedTagFieldMeta(cfg);
+    if (!Array.isArray(fields) || fields.length === 0) return allFields;
+    const allowed = new Set(fields.map((field) => String(field || "").trim()).filter(Boolean));
+    return allFields.filter((item) => allowed.has(item.field));
+  }, [cfg, fields]);
+
+  const [uncontrolledActiveField, setUncontrolledActiveField] = useState("CubeModel");
   const [homeEditorOpen, setHomeEditorOpen] = useState(false);
+
+  const activeField = controlledActiveField || uncontrolledActiveField;
+
+  const setActiveField = (field) => {
+    if (typeof onActiveFieldChange === "function") {
+      onActiveFieldChange(field);
+      return;
+    }
+    setUncontrolledActiveField(field);
+  };
 
   useEffect(() => {
     const onDown = (e) => {
@@ -118,12 +193,25 @@ export default function TagBar({
 
   const optionsByField = useMemo(() => {
     return fieldMeta.reduce((acc, item) => {
-      const discovered = Array.isArray(discoveredOptions?.[item.field]) ? discoveredOptions[item.field] : [];
+      const discovered = Array.isArray(discoveredOptions?.[item.field])
+        ? discoveredOptions[item.field]
+        : [];
       const fromCubeHistory =
-        item.field === "CubeModel" && Array.isArray(cubeModelOptions) ? cubeModelOptions : [];
+        item.field === "CubeModel" && Array.isArray(cubeModelOptions)
+          ? cubeModelOptions
+          : [];
+
       acc[item.field] = Array.from(
-        new Set([...(item.options || []), ...discovered, ...fromCubeHistory, safeTags[item.field] || ""].filter(Boolean))
+        new Set(
+          [
+            ...(item.options || []),
+            ...discovered,
+            ...fromCubeHistory,
+            safeTags[item.field] || "",
+          ].filter(Boolean)
+        )
       ).sort((a, b) => a.localeCompare(b));
+
       return acc;
     }, {});
   }, [cubeModelOptions, discoveredOptions, fieldMeta, safeTags]);
@@ -135,10 +223,51 @@ export default function TagBar({
     });
   };
 
+  const setFieldColor = (field, tagValue, color) => {
+    if (typeof onTagColorsChange !== "function") return;
+    const nextValue = String(tagValue || "").trim();
+    const nextColor = String(color || "").trim();
+    if (!nextValue || !/^#[0-9a-fA-F]{6}$/.test(nextColor)) return;
+    onTagColorsChange({
+      ...safeTagColors,
+      [field]: {
+        ...(safeTagColors[field] || {}),
+        [nextValue]: nextColor,
+      },
+    });
+  };
+
   const visibleHomeFields = fieldMeta.filter((item) => {
     if (item.field === "CubeModel" || item.field === "CrossColor") return true;
     return !!String(safeTags[item.field] || "").trim();
   });
+
+  const isAutomaticHomeField = (field) => field === "SolveSource" || field === "TimerInput";
+
+  const resolveCrossColorTone = (value) => {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized) return profileColor;
+    if (normalized === "white") return "#f4f1e8";
+    if (normalized === "yellow") return "#f2c94c";
+    if (normalized === "red") return "#eb5757";
+    if (normalized === "orange") return "#f2994a";
+    if (normalized === "blue") return "#4a90e2";
+    if (normalized === "green") return "#27ae60";
+    return profileColor;
+  };
+
+  const getHomeChipStyle = (field, value) => {
+    if (isAutomaticHomeField(field)) return null;
+
+    const tone =
+      safeTagColors?.[field]?.[String(value || "").trim()] ||
+      (field === "CrossColor" ? resolveCrossColorTone(value) : profileColor);
+    return {
+      "--tag-chip-color": tone,
+      "--tag-chip-border": tone,
+      "--tag-chip-bg": `${tone}22`,
+    };
+  };
 
   const renderEditor = () => (
     <div className={`tagEditor tagEditor--${variant === "home" ? "home" : "stats"}`}>
@@ -153,6 +282,9 @@ export default function TagBar({
           onActivate={() => setActiveField(item.field)}
           onSelectValue={(value) => setField(item.field, value)}
           allowAdditions={allowAdditions}
+          getChipStyle={getHomeChipStyle}
+          getColorValue={(option) => safeTagColors?.[item.field]?.[String(option || "").trim()] || ""}
+          onColorChange={(option, color) => setFieldColor(item.field, option, color)}
         />
       ))}
     </div>
@@ -165,44 +297,50 @@ export default function TagBar({
           {visibleHomeFields.map((item) => {
             const value = safeTags[item.field] || "";
             return (
-              <button
+              <div
                 key={item.field}
-                type="button"
-                className={`tagHomeChip ${value ? "is-set" : ""}`}
-                onClick={() => {
-                  setActiveField(item.field);
-                  setHomeEditorOpen(true);
-                }}
+                className={`tagHomeItem ${isAutomaticHomeField(item.field) ? "is-automatic" : ""}`}
               >
-                <span className="tagHomeChipIconWrap" aria-hidden="true">
-                  <img src={tagBadge} alt="" className="tagHomeChipIcon" />
-                </span>
-                <span className="tagHomeChipText">
-                  <span className="tagHomeChipLabel">{item.label}</span>
-                  <span className="tagHomeChipValue">{value || "Any"}</span>
-                </span>
-              </button>
+                <span className="tagHomeItemLabel">{item.label}</span>
+                <button
+                  type="button"
+                  className={`tagHomeChip ${value ? "is-set" : ""}`}
+                  style={getHomeChipStyle(item.field, value)}
+                  onClick={() => {
+                    setActiveField(item.field);
+                    setHomeEditorOpen(true);
+                  }}
+                >
+                  <span className="tagHomeChipIconWrap" aria-hidden="true">
+                    <img src={tagBadge} alt="" className="tagHomeChipIcon" />
+                  </span>
+                  <span className="tagHomeChipText">
+                    <span className="tagHomeChipValue">{value || `+ ${item.label}`}</span>
+                  </span>
+                </button>
+              </div>
             );
           })}
 
           {visibleHomeFields.length < fieldMeta.length && (
-            <button
-              type="button"
-              className="tagHomeChip tagHomeChip--add"
-              onClick={() => {
-                const nextField = fieldMeta.find((item) => !String(safeTags[item.field] || "").trim());
-                setActiveField(nextField?.field || "CubeModel");
-                setHomeEditorOpen(true);
-              }}
-            >
-              <span className="tagHomeChipPlus" aria-hidden="true">
-                +
-              </span>
-              <span className="tagHomeChipText">
-                <span className="tagHomeChipLabel">Tag</span>
-                <span className="tagHomeChipValue">Add tag</span>
-              </span>
-            </button>
+            <div className="tagHomeItem tagHomeItem--add is-automatic">
+              <button
+                type="button"
+                className="tagHomeAddButton"
+                onClick={() => {
+                  const nextField = fieldMeta.find(
+                    (item) => !String(safeTags[item.field] || "").trim()
+                  );
+                  setActiveField(nextField?.field || "CubeModel");
+                  setHomeEditorOpen(true);
+                }}
+                aria-label="Add tag"
+              >
+                <span className="tagHomeAddButtonPlus" aria-hidden="true">
+                  +
+                </span>
+              </button>
+            </div>
           )}
         </div>
 
@@ -210,7 +348,11 @@ export default function TagBar({
           <div className="tagHomePopover">
             <div className="tagHomePopoverHeader">
               <span>Tags</span>
-              <button type="button" className="tagHomeClose" onClick={() => setHomeEditorOpen(false)}>
+              <button
+                type="button"
+                className="tagHomeClose"
+                onClick={() => setHomeEditorOpen(false)}
+              >
                 x
               </button>
             </div>

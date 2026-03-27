@@ -1,17 +1,13 @@
-/* styles.css or App.css */
 :root {
-  --primary-color: #0E171D; /* Green by default */
-  --secondary-color: white; /* Dark grey by default */
+  --primary-color: #0E171D;
+  --secondary-color: white;
   --current-page-color: #2ec4b6;
+  --player-bar-height: 176px;
 }
 
 .App {
   display: flex;
   flex-direction: column;
-  /*
-  flex-direction: column;
-  justify-content: space-between;
-  */
   height: 100vh;
   background-color: var(--primary-color);
   color: var(--secondary-color);
@@ -19,11 +15,7 @@
 
 .navAndPage {
   display: flex;
-}
-
-/* App.css */
-.navAndPage {
-  transition: height 0.3s ease; /* Smooth transition when height changes */
+  transition: height 0.3s ease;
 }
 
 .navAndPage.fullHeight {
@@ -31,14 +23,14 @@
 }
 
 .navAndPage.reducedHeight {
-  height: calc(100% - 150px);
+  height: calc(100% - var(--player-bar-height));
 }
 
 .toggle-bar {
   position: fixed;
   right: 12px;
   padding: 0;
-  z-index: 1200;
+  z-index: 2005;
 }
 
 button {
@@ -46,9 +38,9 @@ button {
   z-index: 500;
   height: 35px;
   background-color: transparent;
-  border: solid #FFFFFF 2px;
+  border: solid #ffffff 2px;
   border-radius: 8px;
-  color: #FFFFFF;
+  color: #ffffff;
   opacity: 50%;
 }
 
@@ -58,19 +50,25 @@ button:hover {
 }
 
 .toggle-button {
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.32);
-  background: rgba(14, 23, 29, 0.92);
+  background: rgba(14, 23, 29, 0.98);
   color: white;
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
   cursor: pointer;
   outline: none;
   opacity: 1;
   display: grid;
   place-items: center;
+  padding: 0;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.32);
+}
+
+.toggle-button-glyph {
+  font-size: 14px;
 }
 
 .player-bar {
@@ -78,7 +76,7 @@ button:hover {
 }
 
 body {
-  font-family: 'Jost', sans-serif;
+  font-family: "Jost", sans-serif;
 }
 
 .main-content {
@@ -91,27 +89,33 @@ body {
   justify-content: space-between;
   position: relative;
   overflow-y: scroll;
-  overflow-x: hidden; /*?*/
+  overflow-x: hidden;
 }
 
-/* Hide scrollbars in a container for Webkit-based browsers (e.g., Chrome, Safari) */
+.main-content--home {
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.main-content--shared-home {
+  padding-bottom: 12px;
+}
+
 .main-content::-webkit-scrollbar {
-  display: none; /* Hide scrollbar for Chrome, Safari, and Opera */
+  display: none;
 }
 
-/* Hide scrollbars in a container for Firefox */
 .main-content {
-  scrollbar-width: none; /* Hide scrollbar for Firefox */
+  scrollbar-width: none;
 }
 
-/* Hide scrollbars in Internet Explorer 10+ and Edge */
 .main-content {
-  -ms-overflow-style: none; /* Hide scrollbar for IE and Edge */
+  -ms-overflow-style: none;
 }
 
 .timer-display {
   text-align: right;
-  font-family: 'Droid Sans Mono', monospace;
+  font-family: "Droid Sans Mono", monospace;
   display: flex;
   max-height: 30%;
 }
@@ -125,12 +129,11 @@ body {
 }
 
 .cube {
-  position: relative;  
+  position: relative;
   height: 150px;
   min-width: 150px;
   margin-top: 80px;
 }
-
 
 .music-player-mode .cube {
   top: 90%;
@@ -152,24 +155,21 @@ body {
   background-color: transparent;
 }
 
-/*  this header row should not be height-clamped */
 .scramble-select-container {
   display: flex;
   flex-direction: row;
-  align-items: flex-start;     /* ✅ keep top aligned */
+  align-items: flex-start;
   justify-content: space-between;
   width: 100%;
   padding-top: 6px;
   padding-bottom: 6px;
 }
 
-/* left slot already 13% */
 .left-slot-auth {
   width: 13%;
   transform: translate(8px, -8px);
 }
 
-/* center scramble stays centered */
 .scramble-container {
   flex: 1;
   text-align: center;
@@ -185,77 +185,71 @@ body {
   overflow-wrap: break-word;
   text-align: center;
   margin-right: 4vw;
-  white-space: pre-wrap;  /* for \n - like mega */
+  white-space: pre-wrap;
   word-break: break-word;
 }
 
 .scrambleRelayContainer {
+  position: relative;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
 }
 
-/* right HUD fixed width */
 .cube-and-event {
   width: 240px;
   margin-right: -20px;
   display: flex;
   flex-direction: column;
-  align-items: center;         /*  center selector under cube */
+  align-items: center;
   justify-content: flex-start;
   gap: 10px;
-  flex: 0 0 240px;             /*  don’t shrink */
+  flex: 0 0 240px;
 }
 
-/* cube area */
 .cube-and-event .puzzle-hud {
   display: flex;
   justify-content: center;
   align-items: center;
   width: 100%;
-   padding-top: 18px;   /* tweak 12–28 */
+  padding-top: 18px;
   box-sizing: border-box;
 }
 
-/* selector area */
 .cube-and-event .event-hud {
   display: flex;
   justify-content: center;
   width: 100%;
 }
 
-/* ✅ don't let global cube margin push the HUD down */
 .cube-and-event .cube {
   margin-top: 0 !important;
 }
 
-/* Give the puzzle a little breathing room from the top of the HUD */
 .cube-and-event .puzzle-hud {
-  padding-top: 16px;   /* tweak: try 12px–24px */
+  padding-top: 16px;
   box-sizing: border-box;
 }
 
-/* Optional: even more drop for bigger NxN */
 .cube-and-event .puzzle-hud .cube {
-  margin-top: 0px;    /* tweak: 0–16px */
+  margin-top: 0px;
 }
 
-
 select {
-  border: #FDFFFC solid 1px;
+  border: #fdfffc solid 1px;
   border-radius: 5px;
   font-size: x-large;
   width: 100px;
   height: 35px;
   background-color: transparent;
-  color: #FDFFFC;
+  color: #fdfffc;
 }
 
 .TimeList {
   text-align: center;
   width: 100%;
-}
-
-.music-player-mode .content {
 }
 
 .music-player-mode .player {
@@ -290,28 +284,71 @@ select {
   width: 100%;
 }
 
-.music-player-mode .time-list-container {
-}
-
-.music-player-mode .TimeList table {
-  width: 100%;
-}
-
-.music-player-mode .TimeList td {
-}
-
 .Page {
   width: 100%;
+}
+
+.home-screen {
+  width: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.home-screen > * {
+  width: 100%;
+}
+
+.home-screen--shared {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  gap: 0;
+}
+
+.home-screen--shared .scramble-select-container {
+  flex: 0 0 auto;
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-bottom: -12px;
+}
+
+.home-screen--shared .cube-and-event {
+  margin-right: -10px;
+}
+
+.home-screen--shared .event-hud {
+  transform: scale(0.92);
+  transform-origin: top center;
+}
+
+.home-screen--shared .timer-display {
+  margin-top: -52px;
+  margin-bottom: -34px;
+}
+
+.home-screen--shared .sharedAverageCard {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.home-tag-dock--shared {
+  top: 68px !important;
+  right: 10px !important;
+  width: min(340px, 32vw);
+  max-width: 340px;
 }
 
 .left-slot-auth .auth-button {
   height: 35px;
   background-color: transparent;
-  border: solid #FFFFFF 2px;
+  border: solid #ffffff 2px;
   border-radius: 8px;
-  color: #FFFFFF;
+  color: #ffffff;
   opacity: 50%;
 }
+
 .left-slot-auth .auth-button:hover {
   opacity: 100%;
   cursor: pointer;

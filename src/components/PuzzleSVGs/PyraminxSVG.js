@@ -10,6 +10,9 @@ const FACE_COLORS = {
 };
 
 const faceNames = ["green", "blue", "red", "yellow"];
+const FRONT_LEFT_FACE_PATH_TO_STICKER = [0, 2, 1, 3, 4, 5, 6, 7, 8];
+const FRONT_RIGHT_FACE_PATH_TO_STICKER = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+const BACK_FACE_PATH_TO_STICKER = [8, 3, 7, 6, 0, 2, 1, 5, 4];
 
 export default function PyraminxSVG({
   scramble = "B R U R' L U' L U l b",
@@ -17,6 +20,7 @@ export default function PyraminxSVG({
   showFront = true,   // ✅ controlled by PuzzleSVG flip button
 }) {
   const containerRef = useRef(null);
+  const isFrontView = !showFront;
 
   // faces[faceIndex][stickerIndex] where stickerIndex is 0..8
   const [faces, setFaces] = useState(
@@ -101,55 +105,58 @@ export default function PyraminxSVG({
     const paths = svg.querySelectorAll("path");
     if (!paths || paths.length < 18) return;
 
-    // ✅ Your Figma export order:
-    // first 9 paths = left side (were yellow)
-    // next 9 paths  = right side (were green)
-    //
-    // Map those to actual pyraminx faces.
-    // Front view shows: left=yellow face, right=green face (matches your design)
-    // Back view shows: left=blue face,   right=red face (reasonable opposite pairing)
-    const [leftFaceIdx, rightFaceIdx] = showFront ? [3, 0] : [1, 2];
+    // Match the p5 face layout:
+    // front view = green, blue
+    // back view = red, yellow
+    const [leftFaceIdx, rightFaceIdx] = isFrontView ? [0, 1] : [2, 3];
 
-    const left = faces[leftFaceIdx];   // 9 stickers
-    const right = faces[rightFaceIdx]; // 9 stickers
+    const left = faces[leftFaceIdx];
+    const right = faces[rightFaceIdx];
+    const leftPathToSticker = isFrontView
+      ? FRONT_LEFT_FACE_PATH_TO_STICKER
+      : BACK_FACE_PATH_TO_STICKER;
+    const rightPathToSticker = isFrontView
+      ? FRONT_RIGHT_FACE_PATH_TO_STICKER
+      : BACK_FACE_PATH_TO_STICKER;
 
-    // Write fills
+    // The template path order does not match the logical sticker order from the p5 model,
+    // so we remap each visible face explicitly before writing colors.
     for (let i = 0; i < 9; i++) {
       const p = paths[i];
-      const c = left?.[i];
+      const c = left?.[leftPathToSticker[i]];
       if (c && FACE_COLORS[c]) p.setAttribute("fill", FACE_COLORS[c]);
     }
     for (let i = 0; i < 9; i++) {
       const p = paths[i + 9];
-      const c = right?.[i];
+      const c = right?.[rightPathToSticker[i]];
       if (c && FACE_COLORS[c]) p.setAttribute("fill", FACE_COLORS[c]);
     }
-  }, [faces, showFront]);
+  }, [faces, isFrontView]);
 
   // Size the whole SVG nicely. Your SVG has a huge native viewBox,
   // so scaling via CSS width works great.
-  const px = Math.round(size * 2.6); // your existing
-const pad = Math.round(size * 0.35); // ✅ adds breathing room
+  const px = Math.round(size * 2.6);
+  const pad = Math.max(4, Math.round(size * 0.08));
 
-return (
-  <div
-    ref={containerRef}
-    style={{
-      display: "inline-block",
-      padding: pad,
-      boxSizing: "border-box",
-      width: px + pad * 2,
-      height: "auto",
-    }}
-  >
-    <PyraminxTemplate
+  return (
+    <div
+      ref={containerRef}
       style={{
-        width: "100%",
+        display: "inline-block",
+        padding: pad,
+        boxSizing: "border-box",
+        width: px + pad * 2,
         height: "auto",
-        display: "block",
       }}
-    />
-  </div>
-);
+    >
+      <PyraminxTemplate
+        style={{
+          width: "100%",
+          height: "auto",
+          display: "block",
+        }}
+      />
+    </div>
+  );
 
 }

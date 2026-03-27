@@ -23,7 +23,204 @@ export const DEFAULT_TAG_CONFIG = {
   ],
 };
 
-export const SHARED_TAG_FIELDS = ["CubeModel", "CrossColor", "Custom1", "Custom2", "Custom3", "Custom4", "Custom5"];
+export const SHARED_TAG_FIELDS = [
+  "CubeModel",
+  "CrossColor",
+  "TimerInput",
+  "SolveSource",
+  "Custom1",
+  "Custom2",
+  "Custom3",
+  "Custom4",
+  "Custom5",
+];
+
+const TAG_SCOPE_EVENT_ALIASES = {
+  "333OH": "333",
+  "333BLD": "333",
+  "333FM": "333",
+  "333FT": "333",
+  "333MBLD": "333",
+  "MBLD": "333",
+  "444BLD": "444",
+  "555BLD": "555",
+};
+
+function normalizeEventKey(eventKey) {
+  return String(eventKey || "").trim().toUpperCase();
+}
+
+export function getTagScopeEventKey(eventKey) {
+  const normalized = normalizeEventKey(eventKey);
+  return TAG_SCOPE_EVENT_ALIASES[normalized] || normalized;
+}
+
+function getTagScopeEventCandidates(eventKey) {
+  const normalized = normalizeEventKey(eventKey);
+  const shared = getTagScopeEventKey(normalized);
+  if (!normalized) return [shared].filter(Boolean);
+  if (shared === normalized) return [normalized];
+  return [shared, normalized];
+}
+
+export function makeEmptyTagOptionsByField() {
+  return Object.fromEntries(SHARED_TAG_FIELDS.map((field) => [field, []]));
+}
+
+export function normalizeTagCatalog(input) {
+  const raw = input && typeof input === "object" ? input : {};
+  const globalRaw = raw.Global && typeof raw.Global === "object" ? raw.Global : {};
+  const byEventRaw = raw.ByEvent && typeof raw.ByEvent === "object" ? raw.ByEvent : {};
+
+  const normalizeFieldMap = (fieldMap) =>
+    Object.fromEntries(
+      SHARED_TAG_FIELDS.map((field) => [
+        field,
+        Array.from(
+          new Set(
+            (Array.isArray(fieldMap?.[field]) ? fieldMap[field] : [])
+              .map((value) => String(value || "").trim())
+              .filter(Boolean)
+          )
+        ).sort((a, b) => a.localeCompare(b)),
+      ])
+    );
+
+  return {
+    Global: normalizeFieldMap(globalRaw),
+    ByEvent: Object.fromEntries(
+      Object.entries(byEventRaw).map(([eventKey, fieldMap]) => [
+        String(eventKey || "").trim().toUpperCase(),
+        normalizeFieldMap(fieldMap),
+      ])
+    ),
+  };
+}
+
+export function getTagCatalogOptionsForEvent(tagCatalog, eventKey) {
+  const safe = normalizeTagCatalog(tagCatalog);
+  const scopedKeys = getTagScopeEventCandidates(eventKey);
+
+  return Object.fromEntries(
+    SHARED_TAG_FIELDS.map((field) => [
+      field,
+      Array.from(
+        new Set([
+          ...(Array.isArray(safe.Global?.[field]) ? safe.Global[field] : []),
+          ...scopedKeys.flatMap((key) =>
+            Array.isArray(safe.ByEvent?.[key]?.[field]) ? safe.ByEvent[key][field] : []
+          ),
+        ])
+      ).sort((a, b) => a.localeCompare(b)),
+    ])
+  );
+}
+
+export function addTagCatalogValue(tagCatalog, eventKey, field, value) {
+  const ev = getTagScopeEventKey(eventKey);
+  const key = String(field || "").trim();
+  const nextValue = String(value || "").trim();
+  const safe = normalizeTagCatalog(tagCatalog);
+
+  if (!ev || !SHARED_TAG_FIELDS.includes(key) || !nextValue) return safe;
+
+  const nextEventMap = {
+    ...(safe.ByEvent?.[ev] || makeEmptyTagOptionsByField()),
+    [key]: Array.from(
+      new Set([...(safe.ByEvent?.[ev]?.[key] || []), nextValue])
+    ).sort((a, b) => a.localeCompare(b)),
+  };
+
+  return {
+    Global: safe.Global,
+    ByEvent: {
+      ...safe.ByEvent,
+      [ev]: nextEventMap,
+    },
+  };
+}
+
+export function makeEmptyTagColorMapByField() {
+  return Object.fromEntries(SHARED_TAG_FIELDS.map((field) => [field, {}]));
+}
+
+export function normalizeTagColorCatalog(input) {
+  const raw = input && typeof input === "object" ? input : {};
+  const globalRaw = raw.Global && typeof raw.Global === "object" ? raw.Global : {};
+  const byEventRaw = raw.ByEvent && typeof raw.ByEvent === "object" ? raw.ByEvent : {};
+
+  const normalizeFieldMap = (fieldMap) =>
+    Object.fromEntries(
+      SHARED_TAG_FIELDS.map((field) => {
+        const rawValueMap =
+          fieldMap?.[field] && typeof fieldMap[field] === "object" ? fieldMap[field] : {};
+        const normalizedEntries = Object.entries(rawValueMap)
+          .map(([value, color]) => [String(value || "").trim(), String(color || "").trim()])
+          .filter(
+            ([value, color]) => value && /^#[0-9a-fA-F]{6}$/.test(color)
+          )
+          .sort((a, b) => a[0].localeCompare(b[0]));
+
+        return [field, Object.fromEntries(normalizedEntries)];
+      })
+    );
+
+  return {
+    Global: normalizeFieldMap(globalRaw),
+    ByEvent: Object.fromEntries(
+      Object.entries(byEventRaw).map(([eventKey, fieldMap]) => [
+        String(eventKey || "").trim().toUpperCase(),
+        normalizeFieldMap(fieldMap),
+      ])
+    ),
+  };
+}
+
+export function getTagColorMapForEvent(tagColorCatalog, eventKey) {
+  const safe = normalizeTagColorCatalog(tagColorCatalog);
+  const scopedKeys = getTagScopeEventCandidates(eventKey);
+
+  return Object.fromEntries(
+    SHARED_TAG_FIELDS.map((field) => [
+      field,
+      scopedKeys.reduce(
+        (acc, key) => ({
+          ...acc,
+          ...((safe.ByEvent?.[key] || makeEmptyTagColorMapByField())?.[field] || {}),
+        }),
+        { ...(safe.Global?.[field] || {}) }
+      ),
+    ])
+  );
+}
+
+export function setTagColorCatalogValue(tagColorCatalog, eventKey, field, value, color) {
+  const ev = getTagScopeEventKey(eventKey);
+  const key = String(field || "").trim();
+  const tagValue = String(value || "").trim();
+  const nextColor = String(color || "").trim();
+  const safe = normalizeTagColorCatalog(tagColorCatalog);
+
+  if (!ev || !SHARED_TAG_FIELDS.includes(key) || !tagValue || !/^#[0-9a-fA-F]{6}$/.test(nextColor)) {
+    return safe;
+  }
+
+  const nextFieldMap = {
+    ...((safe.ByEvent?.[ev] || makeEmptyTagColorMapByField())?.[key] || {}),
+    [tagValue]: nextColor,
+  };
+
+  return {
+    Global: safe.Global,
+    ByEvent: {
+      ...safe.ByEvent,
+      [ev]: {
+        ...(safe.ByEvent?.[ev] || makeEmptyTagColorMapByField()),
+        [key]: nextFieldMap,
+      },
+    },
+  };
+}
 
 export function normalizeTagConfig(input) {
   const cfg = input && typeof input === "object" ? input : {};
@@ -70,6 +267,8 @@ export function makeEmptyTagSelection() {
   return {
     CubeModel: "",
     CrossColor: "",
+    TimerInput: "",
+    SolveSource: "",
     Custom1: "",
     Custom2: "",
     Custom3: "",
@@ -124,6 +323,8 @@ export function getSharedTagLabels(tagConfig) {
   const labelByField = {
     CubeModel: cfg.Fixed.CubeModel.label || "Cube Model",
     CrossColor: cfg.Fixed.CrossColor.label || "Cross Color",
+    TimerInput: cfg.Fixed.TimerInput.label || "Timer Input",
+    SolveSource: cfg.Fixed.SolveSource.label || "Solve Source",
   };
 
   for (const slot of cfg.CustomSlots || []) {
@@ -146,6 +347,16 @@ export function getSharedTagFieldMeta(tagConfig) {
       label: cfg.Fixed.CrossColor.label || "Cross Color",
       options: cfg.Fixed.CrossColor.options || [],
     },
+    {
+      field: "TimerInput",
+      label: cfg.Fixed.TimerInput.label || "Timer Input",
+      options: cfg.Fixed.TimerInput.options || [],
+    },
+    {
+      field: "SolveSource",
+      label: cfg.Fixed.SolveSource.label || "Solve Source",
+      options: cfg.Fixed.SolveSource.options || [],
+    },
     ...(cfg.CustomSlots || []).map((slot, index) => ({
       field: slot.slot,
       label: slot.label || `Custom ${index + 1}`,
@@ -162,6 +373,8 @@ export function collectTagSelectionOptions(solves, tagConfig, cubeModelOptions =
       ...(Array.isArray(cubeModelOptions) ? cubeModelOptions : []),
     ]),
     CrossColor: new Set(cfg.Fixed.CrossColor.options || []),
+    TimerInput: new Set(cfg.Fixed.TimerInput.options || []),
+    SolveSource: new Set(cfg.Fixed.SolveSource.options || []),
     Custom1: new Set(cfg.CustomSlots?.[0]?.options || []),
     Custom2: new Set(cfg.CustomSlots?.[1]?.options || []),
     Custom3: new Set(cfg.CustomSlots?.[2]?.options || []),
