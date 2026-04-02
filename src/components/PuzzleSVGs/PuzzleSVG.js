@@ -91,6 +91,12 @@ const PuzzleSVG = ({
       : { x: 0, y: 0 };
 
   const headerNudgeByEvent = {
+    "222": { x: -9, y: -4 },
+    "333": { x: -9, y: -4 },
+    "444": { x: -9, y: -4 },
+    "555": { x: -10, y: -5 },
+    "666": { x: -10, y: -5 },
+    "777": { x: -11, y: -6 },
     PYRAMINX: { x: 0, y: 3 },
     MEGAMINX: { x: 0, y: 1 },
     CLOCK: { x: 0, y: 0 },
@@ -100,12 +106,12 @@ const PuzzleSVG = ({
 
   const headerNudge = isStatsHeaderIcon ? headerNudgeByEvent[event] || { x: 0, y: 0 } : { x: 0, y: 0 };
   const headerScaleByEvent = {
-    "222": 0.26,
-    "333": 0.26,
-    "444": 0.24,
-    "555": 0.22,
-    "666": 0.2,
-    "777": 0.19,
+    "222": 0.29,
+    "333": 0.29,
+    "444": 0.27,
+    "555": 0.25,
+    "666": 0.23,
+    "777": 0.22,
     "333OH": 0.26,
     "333BLD": 0.26,
     SKEWB: 1,

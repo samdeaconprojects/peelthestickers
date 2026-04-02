@@ -101,7 +101,7 @@ function Post({
       {resolvedPostType === "stat-share" ? (
         <>
           <div className="titleAndContent">
-            <StatSharePost note={trimmedNote} statShare={statShare} />
+            <StatSharePost note={trimmedNote} statShare={statShare} shareColor={postColor} />
           </div>
 
           <div className="dateAndName">

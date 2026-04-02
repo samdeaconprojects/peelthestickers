@@ -3,6 +3,8 @@
   --secondary-color: white;
   --current-page-color: #2ec4b6;
   --player-bar-height: 176px;
+  --player-bar-bg: #181F23;
+  --player-bar-bg-rgb: 24, 31, 35;
 }
 
 .App {
@@ -54,7 +56,7 @@ button:hover {
   height: 38px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.32);
-  background: rgba(14, 23, 29, 0.98);
+  background: rgba(var(--player-bar-bg-rgb), 0.98);
   color: white;
   font-size: 16px;
   line-height: 1;
@@ -69,6 +71,45 @@ button:hover {
 
 .toggle-button-glyph {
   font-size: 14px;
+}
+
+.deleteUndoToast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(var(--player-bar-bg-rgb), 0.96);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(14px);
+}
+
+.deleteUndoToastText {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.deleteUndoToastAction,
+.deleteUndoToastDismiss {
+  border: none;
+  background: transparent;
+  color: #2ec4b6;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  opacity: 1;
+  padding: 0;
+  height: auto;
+}
+
+.deleteUndoToastDismiss {
+  color: rgba(255, 255, 255, 0.74);
 }
 
 .player-bar {
@@ -126,6 +167,7 @@ body {
   justify-content: center;
   align-items: center;
   display: flex;
+  transform: translateY(-10px);
 }
 
 .cube {
@@ -196,6 +238,7 @@ body {
   align-items: center;
   min-width: 0;
   flex: 1;
+  padding-top: 1em;
 }
 
 .cube-and-event {
@@ -352,4 +395,87 @@ select {
 .left-slot-auth .auth-button:hover {
   opacity: 100%;
   cursor: pointer;
+}
+
+.manualSolvePopup {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 16, 0.62);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+}
+
+.manualSolvePopupContent {
+  position: relative;
+  width: min(460px, 88vw);
+  background: rgba(29, 29, 29, 0.97);
+  border: 1.5px solid rgba(255, 255, 255, 0.24);
+  border-radius: 12px;
+  padding: 22px 20px 18px;
+  color: white;
+}
+
+.manualSolvePopupContent h2 {
+  margin: 0 0 8px;
+}
+
+.manualSolvePopupSubtext {
+  margin: 0 0 14px;
+  opacity: 0.78;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.manualSolveFieldLabel {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.manualSolveInput,
+.manualSolveTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #3d3d3d;
+  color: white;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font: inherit;
+  outline: none;
+}
+
+.manualSolveTextarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
+.manualSolveError {
+  color: #f87171;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.manualSolveActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.manualSolveActions button {
+  opacity: 1;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  padding: 0 14px;
+}
+
+.manualSolvePrimary {
+  border-color: rgba(46, 196, 182, 0.85) !important;
+  background: rgba(46, 196, 182, 0.14) !important;
 }

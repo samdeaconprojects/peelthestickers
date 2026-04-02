@@ -137,6 +137,71 @@ function groupByDate(solves, mode) {
     .filter(Boolean);
 }
 
+function parseBucketDayKey(dayKey) {
+  if (!dayKey) return null;
+  const date = new Date(`${dayKey}T12:00:00`);
+  return isNaN(date.getTime()) ? null : date;
+}
+
+function groupBucketItems(bucketItems, mode) {
+  const map = new Map();
+
+  for (const item of Array.isArray(bucketItems) ? bucketItems : []) {
+    const dayKey = String(item?.BucketDay || "").trim();
+    const date = parseBucketDayKey(dayKey);
+    if (!date) continue;
+
+    let key;
+    switch (mode) {
+      case "day":
+        key = dayKey;
+        break;
+      case "week":
+        key = `${date.getFullYear()}-W${String(getWeekNumber(date)).padStart(2, "0")}`;
+        break;
+      case "month":
+        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+        break;
+      case "year":
+        key = `${date.getFullYear()}`;
+        break;
+      default:
+        key = dayKey;
+        break;
+    }
+
+    const existing = map.get(key) || {
+      bucketKey: key,
+      bucketLabel: formatBucketLabel(mode, key),
+      timestamp: date.getTime(),
+      SolveCountIncluded: 0,
+      SumFinalTimeMs: 0,
+    };
+
+    existing.timestamp = Math.min(existing.timestamp, date.getTime());
+    existing.SolveCountIncluded += Number(item?.SolveCountIncluded || 0);
+    existing.SumFinalTimeMs += Number(item?.SumFinalTimeMs || 0);
+
+    map.set(key, existing);
+  }
+
+  return Array.from(map.values())
+    .sort((a, b) => a.timestamp - b.timestamp)
+    .map((item) => {
+      if (!item.SolveCountIncluded) return null;
+      return {
+        isBucket: true,
+        bucketKey: item.bucketKey,
+        bucketLabel: item.bucketLabel,
+        time: item.SumFinalTimeMs / item.SolveCountIncluded,
+        timestamp: item.timestamp,
+        solve: null,
+        fullIndex: null,
+      };
+    })
+    .filter(Boolean);
+}
+
 /* -----------------------------
    ROLLING AVERAGES (AoN)
 ----------------------------- */
@@ -339,15 +404,21 @@ function buildProcessedChartData(
   groupMode,
   style = null,
   useHeatmap = true,
-  xScaleMode = "ordinal"
+  xScaleMode = "ordinal",
+  bucketItems = []
 ) {
-  const baseValid = (Array.isArray(solves) ? solves : []).filter((solve) => {
-    const ms = getSolveBaseMs(solve);
-    return typeof ms === "number" && isFinite(ms);
-  });
+  const hasBucketItems = Array.isArray(bucketItems) && bucketItems.length > 0;
+  const baseValid = hasBucketItems
+    ? []
+    : (Array.isArray(solves) ? solves : []).filter((solve) => {
+        const ms = getSolveBaseMs(solve);
+        return typeof ms === "number" && isFinite(ms);
+      });
 
   let processed = [];
-  if (groupMode === "solve") {
+  if (hasBucketItems) {
+    processed = groupBucketItems(bucketItems, groupMode === "solve" ? "day" : groupMode);
+  } else if (groupMode === "solve") {
     processed = baseValid;
   } else {
     processed = groupByDate(baseValid, groupMode);
@@ -384,7 +455,9 @@ function buildProcessedChartData(
   const data = processed.map((item, index) => {
     const baseTimeMs = item.isBucket ? item.time : getSolveBaseMs(item);
     const solveForDetail = item.isBucket ? item.solve : item;
-    const timestamp = getSolveTimestamp(solveForDetail);
+    const timestamp = item.isBucket
+      ? item.timestamp ?? getSolveTimestamp(solveForDetail)
+      : getSolveTimestamp(solveForDetail);
     const fallbackLabel = item.isBucket ? item.bucketLabel : `${index + 1}`;
     const label =
       xScaleMode === "datetime"
@@ -402,6 +475,10 @@ function buildProcessedChartData(
       fullIndex: item.fullIndex,
       isDNF: item.isBucket ? false : item.penalty === "DNF",
       isBucket: !!item.isBucket,
+      bucketDay:
+        item.isBucket && /^\d{4}-\d{2}-\d{2}$/.test(String(item.bucketKey || ""))
+          ? String(item.bucketKey)
+          : "",
       selectionIndex,
     };
   });
@@ -415,6 +492,7 @@ function buildProcessedChartData(
 function LineChart({
   user,
   solves,
+  bucketItems = [],
   comparisonSeries = [],
   seriesStyle = null,
   legendItems = [],
@@ -429,10 +507,14 @@ function LineChart({
   eventKey,
   practiceMode = false,
   allowViewPicker = true,
+  initialControlState = null,
+  controlsSyncKey = "",
   viewMode = "standard",
   selectedDay = "",
   onSelectedDayChange = null,
   onSolveOpen = null,
+  onControlsChange = null,
+  onBucketSelect = null,
 }) {
   const DEFAULT_DOT_SIZE = 5;
   const MIN_DOT_SIZE = 2;
@@ -440,30 +522,54 @@ function LineChart({
 
   const [selectedSolve, setSelectedSolve] = useState(null);
 
-  const [showAo5, setShowAo5] = useState(true);
-  const [showAo12, setShowAo12] = useState(true);
-  const [showMean, setShowMean] = useState(true);
-  const [showGrid, setShowGrid] = useState(true);
-  const [groupMode, setGroupMode] = useState("solve");
-  const [xScaleMode, setXScaleMode] = useState("ordinal");
-  const [dotSize, setDotSize] = useState(() => getDefaultDotSizeForSolveCount(solves?.length || DEFAULT_DOT_SIZE));
-  const [useTightAutoScale, setUseTightAutoScale] = useState(true);
-  const [yMinInput, setYMinInput] = useState("");
-  const [yMaxInput, setYMaxInput] = useState("");
+  const resolvedInitialControlState = useMemo(() => ({
+    showAo5: initialControlState?.showAo5 !== false,
+    showAo12: initialControlState?.showAo12 !== false,
+    showMean: initialControlState?.showMean !== false,
+    showGrid: initialControlState?.showGrid !== false,
+    groupMode: initialControlState?.groupMode || "solve",
+    xScaleMode: initialControlState?.xScaleMode || "ordinal",
+    dotSize: Math.min(
+      MAX_DOT_SIZE,
+      Math.max(
+        MIN_DOT_SIZE,
+        Number(initialControlState?.dotSize) ||
+          getDefaultDotSizeForSolveCount(solves?.length || DEFAULT_DOT_SIZE)
+      )
+    ),
+    useTightAutoScale: initialControlState?.useTightAutoScale !== false,
+    yMinInput: String(initialControlState?.yMinInput || ""),
+    yMaxInput: String(initialControlState?.yMaxInput || ""),
+  }), [initialControlState, solves]);
+
+  const [showAo5, setShowAo5] = useState(() => resolvedInitialControlState.showAo5);
+  const [showAo12, setShowAo12] = useState(() => resolvedInitialControlState.showAo12);
+  const [showMean, setShowMean] = useState(() => resolvedInitialControlState.showMean);
+  const [showGrid, setShowGrid] = useState(() => resolvedInitialControlState.showGrid);
+  const [groupMode, setGroupMode] = useState(() => resolvedInitialControlState.groupMode);
+  const [xScaleMode, setXScaleMode] = useState(() => resolvedInitialControlState.xScaleMode);
+  const [dotSize, setDotSize] = useState(() => resolvedInitialControlState.dotSize);
+  const [useTightAutoScale, setUseTightAutoScale] = useState(
+    () => resolvedInitialControlState.useTightAutoScale
+  );
+  const [yMinInput, setYMinInput] = useState(() => resolvedInitialControlState.yMinInput);
+  const [yMaxInput, setYMaxInput] = useState(() => resolvedInitialControlState.yMaxInput);
 
   const selection = useSolveSelection();
   const hasComparison = Array.isArray(comparisonSeries) && comparisonSeries.length > 0;
+  const hasBucketItems = Array.isArray(bucketItems) && bucketItems.length > 0;
   const baseValid = useMemo(() => {
+    if (hasBucketItems) return [];
     const input = Array.isArray(solves) ? solves : [];
     return input.filter((solve) => {
       const ms = getSolveBaseMs(solve);
       return typeof ms === "number" && isFinite(ms);
     });
-  }, [solves]);
+  }, [hasBucketItems, solves]);
 
   const bulkSelectableSolves = useMemo(() => {
-    return groupMode === "solve" && !hasComparison ? baseValid : [];
-  }, [groupMode, baseValid, hasComparison]);
+    return groupMode === "solve" && !hasComparison && !hasBucketItems ? baseValid : [];
+  }, [groupMode, baseValid, hasBucketItems, hasComparison]);
 
   const bulkActions = useBulkSolveActions({
     user,
@@ -503,11 +609,12 @@ function LineChart({
       groupMode,
       seriesStyle,
       shouldUseHeatmap,
-      xScaleMode
+      xScaleMode,
+      bucketItems
     );
     const data = primary.data;
     const extraSeries = [];
-    const solveLevel = groupMode === "solve";
+    const solveLevel = groupMode === "solve" && !hasBucketItems;
 
     if (solveLevel && showAo5 && !hasComparison) {
       const ao5 = rollingAverageSeconds(data, 5);
@@ -535,7 +642,8 @@ function LineChart({
         groupMode,
         series?.style || null,
         false,
-        xScaleMode
+        xScaleMode,
+        series?.bucketItems || []
       );
       return {
         id: series?.id || `compare-${index}`,
@@ -551,9 +659,9 @@ function LineChart({
       extraSeries,
       compareData,
     };
-  }, [comparisonSeries, groupMode, hasComparison, seriesStyle, showAo5, showAo12, solves, xScaleMode]);
+  }, [bucketItems, comparisonSeries, groupMode, hasBucketItems, hasComparison, seriesStyle, showAo5, showAo12, solves, xScaleMode]);
 
-  const solveLevel = groupMode === "solve";
+  const solveLevel = groupMode === "solve" && !hasBucketItems;
   const bulkEnabled = solveLevel && !hasComparison;
   const isTimeView = viewMode === "time";
   const profileColor = normalizeHexColor(user?.Color || user?.color || "#2EC4B6");
@@ -566,9 +674,59 @@ function LineChart({
   }, [groupMode, isTimeView]);
 
   useEffect(() => {
+    if (!hasBucketItems) return;
+    if (groupMode === "solve") {
+      setGroupMode("day");
+    }
+  }, [groupMode, hasBucketItems]);
+
+  useEffect(() => {
     if (groupMode !== "solve") return;
     setDotSize(getDefaultDotSizeForSolveCount(baseValid.length || solves?.length || DEFAULT_DOT_SIZE));
   }, [baseValid.length, groupMode, solves]);
+
+  useEffect(() => {
+    if (!controlsSyncKey) return;
+    const next = resolvedInitialControlState;
+    setShowAo5(next.showAo5);
+    setShowAo12(next.showAo12);
+    setShowMean(next.showMean);
+    setShowGrid(next.showGrid);
+    setGroupMode(next.groupMode);
+    setXScaleMode(next.xScaleMode);
+    setDotSize(next.dotSize);
+    setUseTightAutoScale(next.useTightAutoScale);
+    setYMinInput(next.yMinInput);
+    setYMaxInput(next.yMaxInput);
+  }, [controlsSyncKey, resolvedInitialControlState]);
+
+  useEffect(() => {
+    if (typeof onControlsChange !== "function") return;
+    onControlsChange({
+      showAo5,
+      showAo12,
+      showMean,
+      showGrid,
+      groupMode,
+      xScaleMode,
+      dotSize,
+      useTightAutoScale,
+      yMinInput,
+      yMaxInput,
+    });
+  }, [
+    dotSize,
+    groupMode,
+    onControlsChange,
+    showAo5,
+    showAo12,
+    showGrid,
+    showMean,
+    useTightAutoScale,
+    xScaleMode,
+    yMaxInput,
+    yMinInput,
+  ]);
 
   const scaleValues = useMemo(
     () =>
@@ -617,7 +775,16 @@ function LineChart({
     event?.preventDefault?.();
     event?.stopPropagation?.();
 
-    if (!point || point.isBucket || point.selectionIndex == null || !bulkEnabled) {
+    if (point?.isBucket) {
+      if (typeof onBucketSelect === "function" && point.bucketDay) {
+        onBucketSelect(point.bucketDay);
+        return;
+      }
+      openSolveDetail(solve);
+      return;
+    }
+
+    if (!point || point.selectionIndex == null || !bulkEnabled) {
       openSolveDetail(solve);
       return;
     }
@@ -699,8 +866,20 @@ function LineChart({
           setBulkCubeModel={bulkActions.setBulkCubeModel}
           bulkCrossColor={bulkActions.bulkCrossColor}
           setBulkCrossColor={bulkActions.setBulkCrossColor}
-          bulkCustomLines={bulkActions.bulkCustomLines}
-          setBulkCustomLines={bulkActions.setBulkCustomLines}
+          bulkTimerInput={bulkActions.bulkTimerInput}
+          setBulkTimerInput={bulkActions.setBulkTimerInput}
+          bulkSolveSource={bulkActions.bulkSolveSource}
+          setBulkSolveSource={bulkActions.setBulkSolveSource}
+          bulkCustom1={bulkActions.bulkCustom1}
+          setBulkCustom1={bulkActions.setBulkCustom1}
+          bulkCustom2={bulkActions.bulkCustom2}
+          setBulkCustom2={bulkActions.setBulkCustom2}
+          bulkCustom3={bulkActions.bulkCustom3}
+          setBulkCustom3={bulkActions.setBulkCustom3}
+          bulkCustom4={bulkActions.bulkCustom4}
+          setBulkCustom4={bulkActions.setBulkCustom4}
+          bulkCustom5={bulkActions.bulkCustom5}
+          setBulkCustom5={bulkActions.setBulkCustom5}
           bulkMoveEvent={bulkActions.bulkMoveEvent}
           setBulkMoveEvent={bulkActions.setBulkMoveEvent}
           bulkMoveSession={bulkActions.bulkMoveSession}
@@ -720,7 +899,7 @@ function LineChart({
         <div className="lineChartControls">
           <div className="chartControlGroup chartControlGroup--mode">
             <div className="chartModeGrid">
-              {!isTimeView && (
+              {!isTimeView && !hasBucketItems && (
                 <button
                   type="button"
                   className={`statsToggleBtn ${groupMode === "solve" ? "is-active" : ""}`}

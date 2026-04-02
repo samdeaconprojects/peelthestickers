@@ -30,7 +30,7 @@
 
 .TimeList tr {
   display: grid;
-  grid-template-columns: repeat(12, 1fr) auto;
+  grid-template-columns: repeat(var(--timelist-cols, 12), minmax(0, 1fr)) auto;
   gap: 6px;
   width: 100%;
   align-items: stretch;
@@ -49,8 +49,32 @@
   box-sizing: border-box;
 }
 
-.TimeList td:nth-child(13) {
+.TimeList td.averageCell {
   background-color: #2EC4B6;
+}
+
+.TimeList--nonRolling tr + tr {
+  margin-top: 10px;
+}
+
+.TimeList--nonRolling tbody {
+  overflow-y: visible;
+  padding-top: 4px;
+}
+
+.TimeList--nonRolling td {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  overflow: visible;
+}
+
+.TimeList--nonRolling td.nonRollingAverageCell {
+  background-color: rgba(80, 182, 255, 0.34);
+  transition: background-color 140ms ease, opacity 140ms ease;
+}
+
+.TimeList--nonRolling td.nonRollingAverageCell:hover {
+  background-color: rgb(80, 182, 255);
 }
 
 /* Shared average live panel */

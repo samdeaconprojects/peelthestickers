@@ -172,6 +172,18 @@ function getSolveKey(solve, fallbackIndex) {
   return `idx:${fallbackIndex}`;
 }
 
+function getSolveDisplayNumber(solve, fallbackNumber, preserveInputOrder = false) {
+  const explicitDisplay = Number(solve?.sessionDisplayNumber ?? solve?.__displayNumber);
+  if (Number.isFinite(explicitDisplay)) {
+    return explicitDisplay;
+  }
+  const sessionIndex = Number(solve?.fullIndex);
+  if (preserveInputOrder && Number.isFinite(sessionIndex)) {
+    return sessionIndex + 1;
+  }
+  return fallbackNumber;
+}
+
 function getPerfClassByRank01(rank01) {
   if (!isFinite(rank01)) return "";
   if (rank01 <= 0.2) return "fastest";
@@ -382,18 +394,27 @@ const TimeTable = ({
   const tableRows = useMemo(() => {
     return sortedSolves.map((solve, index) => {
       const key = getSolveKey(solve, index);
+      const fallbackNumber =
+        sortBy === "date" && sortDirection === "desc"
+          ? totalDisplayed - index
+          : index + 1;
       return {
         ...solve,
         __ao5: showAverages ? averagesByKey.ao5.get(key) ?? null : null,
         __ao12: showAverages ? averagesByKey.ao12.get(key) ?? null : null,
-        __displayNumber:
-          sortBy === "date" && sortDirection === "desc"
-            ? totalDisplayed - index
-            : index + 1,
+        __displayNumber: getSolveDisplayNumber(solve, fallbackNumber, preserveInputOrder),
         __sortedIndex: index,
       };
     });
-  }, [sortedSolves, showAverages, averagesByKey, sortBy, sortDirection, totalDisplayed]);
+  }, [
+    sortedSolves,
+    showAverages,
+    averagesByKey,
+    sortBy,
+    sortDirection,
+    totalDisplayed,
+    preserveInputOrder,
+  ]);
 
   const itemRows = useMemo(() => {
     const chunks = chunkArray(sortedSolves, itemRowSize);
@@ -412,14 +433,14 @@ const TimeTable = ({
 
       const solvesWithDisplay = chunk.map((solve, solveIndex) => {
         const flatIndex = rowIndex * itemRowSize + solveIndex;
-        const displayNumber =
+        const fallbackNumber =
           sortBy === "date" && sortDirection === "desc"
             ? totalDisplayed - flatIndex
             : flatIndex + 1;
 
         return {
           ...solve,
-          __displayNumber: displayNumber,
+          __displayNumber: getSolveDisplayNumber(solve, fallbackNumber, preserveInputOrder),
           __flatIndex: flatIndex,
         };
       });
@@ -468,6 +489,7 @@ const TimeTable = ({
     sortDirection,
     totalDisplayed,
     overallVisibleRankMap,
+    preserveInputOrder,
   ]);
 
   const handleSolvePrimaryAction = (solve) => {
@@ -509,8 +531,20 @@ const TimeTable = ({
           setBulkCubeModel={bulkActions.setBulkCubeModel}
           bulkCrossColor={bulkActions.bulkCrossColor}
           setBulkCrossColor={bulkActions.setBulkCrossColor}
-          bulkCustomLines={bulkActions.bulkCustomLines}
-          setBulkCustomLines={bulkActions.setBulkCustomLines}
+          bulkTimerInput={bulkActions.bulkTimerInput}
+          setBulkTimerInput={bulkActions.setBulkTimerInput}
+          bulkSolveSource={bulkActions.bulkSolveSource}
+          setBulkSolveSource={bulkActions.setBulkSolveSource}
+          bulkCustom1={bulkActions.bulkCustom1}
+          setBulkCustom1={bulkActions.setBulkCustom1}
+          bulkCustom2={bulkActions.bulkCustom2}
+          setBulkCustom2={bulkActions.setBulkCustom2}
+          bulkCustom3={bulkActions.bulkCustom3}
+          setBulkCustom3={bulkActions.setBulkCustom3}
+          bulkCustom4={bulkActions.bulkCustom4}
+          setBulkCustom4={bulkActions.setBulkCustom4}
+          bulkCustom5={bulkActions.bulkCustom5}
+          setBulkCustom5={bulkActions.setBulkCustom5}
           bulkMoveEvent={bulkActions.bulkMoveEvent}
           setBulkMoveEvent={bulkActions.setBulkMoveEvent}
           bulkMoveSession={bulkActions.bulkMoveSession}

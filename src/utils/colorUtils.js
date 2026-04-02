@@ -21,3 +21,25 @@ export function hexToRgbString(hex, fallback = "33, 33, 33") {
   const [r, g, b] = hexToRgbTuple(hex, [33, 33, 33]);
   return `${r}, ${g}, ${b}`;
 }
+
+function clampChannel(value) {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function rgbTupleToHex([r, g, b]) {
+  return `#${[r, g, b]
+    .map((channel) => clampChannel(channel).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+export function darkenHex(hex, amount = 0.12, fallback = "#181F23") {
+  const safeAmount = Math.max(0, Math.min(1, Number(amount) || 0));
+  const fallbackTuple = hexToRgbTuple(fallback, [24, 31, 35]);
+  const [r, g, b] = hexToRgbTuple(hex, fallbackTuple);
+
+  return rgbTupleToHex([
+    r * (1 - safeAmount),
+    g * (1 - safeAmount),
+    b * (1 - safeAmount),
+  ]);
+}

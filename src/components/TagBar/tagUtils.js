@@ -116,6 +116,36 @@ export function getTagCatalogOptionsForEvent(tagCatalog, eventKey) {
   );
 }
 
+export function getCubeModelOptionsForEvent(tagConfig, eventKey) {
+  const cfg = normalizeTagConfig(tagConfig);
+  const scopedKeys = getTagScopeEventCandidates(eventKey);
+  const byEvent =
+    cfg?.Fixed?.CubeModel?.optionsByEvent &&
+    typeof cfg.Fixed.CubeModel.optionsByEvent === "object"
+      ? cfg.Fixed.CubeModel.optionsByEvent
+      : null;
+
+  if (!byEvent) {
+    return Array.isArray(cfg?.Fixed?.CubeModel?.options)
+      ? cfg.Fixed.CubeModel.options
+      : [];
+  }
+
+  const scopedOptions = Array.from(
+    new Set(
+      scopedKeys.flatMap((key) =>
+        Array.isArray(byEvent?.[key]) ? byEvent[key] : []
+      )
+    )
+  ).sort((a, b) => a.localeCompare(b));
+
+  if (scopedOptions.length > 0) return scopedOptions;
+
+  return Array.isArray(cfg?.Fixed?.CubeModel?.options)
+    ? cfg.Fixed.CubeModel.options
+    : [];
+}
+
 export function addTagCatalogValue(tagCatalog, eventKey, field, value) {
   const ev = getTagScopeEventKey(eventKey);
   const key = String(field || "").trim();
@@ -232,6 +262,22 @@ export function normalizeTagConfig(input) {
       CubeModel: {
         label: fixed?.CubeModel?.label || "Cube Model",
         options: Array.isArray(fixed?.CubeModel?.options) ? fixed.CubeModel.options : [],
+        optionsByEvent:
+          fixed?.CubeModel?.optionsByEvent &&
+          typeof fixed.CubeModel.optionsByEvent === "object"
+            ? Object.fromEntries(
+                Object.entries(fixed.CubeModel.optionsByEvent).map(([eventKey, values]) => [
+                  String(eventKey || "").trim().toUpperCase(),
+                  Array.from(
+                    new Set(
+                      (Array.isArray(values) ? values : [])
+                        .map((value) => String(value || "").trim())
+                        .filter(Boolean)
+                    )
+                  ).sort((a, b) => a.localeCompare(b)),
+                ])
+              )
+            : {},
       },
       CrossColor: {
         label: fixed?.CrossColor?.label || "Cross Color",
@@ -363,6 +409,40 @@ export function getSharedTagFieldMeta(tagConfig) {
       options: slot.options || [],
     })),
   ];
+}
+
+export function resolveTagChipTone(field, value, tagColors = {}, profileColor = "#2EC4B6") {
+  const normalizedField = String(field || "").trim();
+  const normalizedValue = String(value || "").trim();
+  const colorMap =
+    tagColors?.[normalizedField] && typeof tagColors[normalizedField] === "object"
+      ? tagColors[normalizedField]
+      : {};
+
+  if (normalizedValue && /^#[0-9a-fA-F]{6}$/.test(String(colorMap[normalizedValue] || "").trim())) {
+    return String(colorMap[normalizedValue]).trim();
+  }
+
+  if (normalizedField === "CrossColor") {
+    const lowerValue = normalizedValue.toLowerCase();
+    if (lowerValue === "white") return "#f4f1e8";
+    if (lowerValue === "yellow") return "#f2c94c";
+    if (lowerValue === "red") return "#eb5757";
+    if (lowerValue === "orange") return "#f2994a";
+    if (lowerValue === "blue") return "#4a90e2";
+    if (lowerValue === "green") return "#27ae60";
+  }
+
+  return profileColor;
+}
+
+export function getTagChipStyle(field, value, tagColors = {}, profileColor = "#2EC4B6") {
+  const tone = resolveTagChipTone(field, value, tagColors, profileColor);
+  return {
+    "--tag-chip-color": tone,
+    "--tag-chip-border": tone,
+    "--tag-chip-bg": `${tone}22`,
+  };
 }
 
 export function collectTagSelectionOptions(solves, tagConfig, cubeModelOptions = []) {

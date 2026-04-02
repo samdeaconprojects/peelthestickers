@@ -56,6 +56,11 @@ const buildLegacyDmConversationID = (a, b) =>
     .sort()
     .join("#");
 
+const isInteractiveFeedTarget = (target) =>
+  !!target?.closest?.(
+    "button, input, select, textarea, a, .statsToggleBtn, .statsMiniBtn, .chartScaleInput, .lineChartDot, [data-interactive='solve-point'], svg .timeLineSegment, .timeLineSegment"
+  );
+
 const normalizeConversationRecord = (item, profile = null) => {
   const conversationID = String(
     item?.ConversationID || item?.conversationID || ""
@@ -1425,14 +1430,24 @@ function Social({
                   const isStatShare = !!statShare;
                   if (isStatShare) {
                     return (
-                      <div className="statFeedPost" onClick={() => setSelectedPost(post)}>
+                      <div
+                        className="statFeedPost"
+                        onClick={(event) => {
+                          if (isInteractiveFeedTarget(event.target)) return;
+                          setSelectedPost(post);
+                        }}
+                      >
                         <div
                           style={{
                             border: `2px solid ${withAlpha(post.postColor, 0.5)}`,
                             borderRadius: 12,
                           }}
                         >
-                          <StatSharePost note={post.Note} statShare={statShare} />
+                          <StatSharePost
+                            note={post.Note}
+                            statShare={statShare}
+                            shareColor={post.postColor}
+                          />
                           <div className="statFeedMeta">
                             <div className="postDate">
                               {formatPostDate(post.DateTime || post.date)}
@@ -1715,6 +1730,7 @@ function Social({
           note={selectedPost.Note}
           postType={selectedPost.PostType}
           statShare={selectedPost.StatShare || selectedPost.statShare || null}
+          postColor={selectedPost.postColor || ""}
           onClose={() => setSelectedPost(null)}
           onDelete={() => handleDelete(selectedPost)}
           onAddComment={handleAddComment}

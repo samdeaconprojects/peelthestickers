@@ -17,20 +17,61 @@ function stepsInToken(tok) {
   return t.endsWith("2") ? 2 : 1;
 }
 
+function getScrambleControlLayout(currentEvent, isMusicPlayer) {
+  switch (currentEvent) {
+    case "444":
+      return {
+        prevShiftX: "10px",
+        nextShiftX: "-10px",
+        addButtonOffset: isMusicPlayer ? "72px" : "78px",
+      };
+    case "555":
+      return {
+        prevShiftX: "12px",
+        nextShiftX: "-12px",
+        addButtonOffset: isMusicPlayer ? "68px" : "74px",
+      };
+    case "666":
+      return {
+        prevShiftX: "14px",
+        nextShiftX: "-14px",
+        addButtonOffset: isMusicPlayer ? "64px" : "70px",
+      };
+    case "777":
+      return {
+        prevShiftX: "16px",
+        nextShiftX: "-16px",
+        addButtonOffset: isMusicPlayer ? "60px" : "66px",
+      };
+    default:
+      return {
+        prevShiftX: "0px",
+        nextShiftX: "0px",
+        addButtonOffset: "88px",
+      };
+  }
+}
+
 function Scramble({
   onScrambleClick,
   onForwardScramble,
   onBackwardScramble,
+  onAddSolveClick,
   scramble,
   currentEvent,
   isMusicPlayer,
   scrambleProgress = 0, // ✅ now treated as STEP progress
+  copyFeedback = "idle",
 }) {
   const { settings } = useSettings();
   const navigationArrowStyle = normalizeNavigationArrowStyle(
     settings?.navigationArrowStyle
   );
   const isSingleLineEvent = currentEvent === "SKEWB" || currentEvent === "PYRAMINX";
+  const controlLayout = useMemo(
+    () => getScrambleControlLayout(currentEvent, isMusicPlayer),
+    [currentEvent, isMusicPlayer]
+  );
   let fontSize, maxWidth;
 
   switch (currentEvent) {
@@ -86,7 +127,29 @@ function Scramble({
   }, [scramble, currentEvent]);
 
   return (
-    <div className="scramble-container">
+    <div
+      className="scramble-container"
+      style={{
+        "--scramble-prev-shift-x": controlLayout.prevShiftX,
+        "--scramble-next-shift-x": controlLayout.nextShiftX,
+        "--scramble-add-offset": controlLayout.addButtonOffset,
+      }}
+    >
+      <div
+        className={`scramble-copy-indicator scramble-copy-indicator--top ${
+          copyFeedback !== "idle" ? "scramble-copy-indicator--visible" : ""
+        }`}
+        aria-live="polite"
+      >
+        {copyFeedback === "copied"
+          ? "Copied"
+          : copyFeedback === "error"
+            ? "Copy failed"
+            : copyFeedback === "empty"
+              ? "No scramble"
+              : ""}
+      </div>
+
       <button
         type="button"
         className="scramble-nav-btn scramble-prev-button"
@@ -102,42 +165,64 @@ function Scramble({
         )}
       </button>
 
-      <p
-        className={`scramble-text ${isSingleLineEvent ? "scramble-text--single-line" : ""}`}
-        style={{ fontSize: `${fontSize}pt`, maxWidth: `${maxWidth}%` }}
-        onClick={() => onScrambleClick(scramble)}
-      >
-        {tokens.length ? (
-          (() => {
-            // mark tokens done by consuming steps from scrambleProgress
-            let remaining = Math.max(0, Number(scrambleProgress || 0));
+      <div className="scramble-content">
+        <button
+          type="button"
+          className="scramble-click-target"
+          onClick={() => onScrambleClick(scramble)}
+          aria-label="Copy scramble"
+          title="Copy scramble"
+        >
+          <div
+            className={`scramble-text ${isSingleLineEvent ? "scramble-text--single-line" : ""}`}
+            style={{ fontSize: `${fontSize}pt`, maxWidth: `${maxWidth}%` }}
+          >
+            {tokens.length ? (
+              (() => {
+                // mark tokens done by consuming steps from scrambleProgress
+                let remaining = Math.max(0, Number(scrambleProgress || 0));
 
-            return tokens.map((t, i) => {
-              const need = stepsInToken(t);
-              const done = remaining >= need;
-              remaining -= need;
+                return tokens.map((t, i) => {
+                  const need = stepsInToken(t);
+                  const done = remaining >= need;
+                  remaining -= need;
 
-              return (
-  <span
-    key={`${t}-${i}`}
-    style={{
-      opacity: done ? 0.35 : 1,
-      textDecoration: done ? "line-through" : "none",
-      transition: "opacity 120ms linear",
-      marginRight: i === tokens.length - 1 ? 0 : 8,
-      whiteSpace: "nowrap", //  prevents F and ' splitting
-      display: "inline-block", //  extra safety across browsers
-    }}
-  >
-    {t}
-  </span>
-);
-            });
-          })()
-        ) : (
-          scramble
-        )}
-      </p>
+                  return (
+                    <span
+                      key={`${t}-${i}`}
+                      style={{
+                        opacity: done ? 0.35 : 1,
+                        textDecoration: done ? "line-through" : "none",
+                        transition: "opacity 120ms linear",
+                        marginRight: i === tokens.length - 1 ? 0 : 8,
+                        whiteSpace: "nowrap",
+                        display: "inline-block",
+                      }}
+                    >
+                      {t}
+                    </span>
+                  );
+                });
+              })()
+            ) : (
+              scramble
+            )}
+          </div>
+        </button>
+
+        {typeof onAddSolveClick === "function" ? (
+          <button
+            type="button"
+            className="scramble-add-btn"
+            aria-label="Add solve manually"
+            title="Add Solve"
+            data-tooltip="Add Solve"
+            onClick={onAddSolveClick}
+          >
+            +
+          </button>
+        ) : null}
+      </div>
 
       <button
         type="button"

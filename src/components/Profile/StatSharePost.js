@@ -7,9 +7,10 @@ import TimeTable from "../Stats/TimeTable";
 
 function noop() {}
 
-function StatShareCanvas({ statShare }) {
+function StatShareCanvas({ statShare, shareColor = "" }) {
   const render = statShare?.render || {};
   const cardKey = render.cardKey || statShare?.cardKey || statShare?.kind || "summary";
+  const sharedUser = shareColor ? { Color: shareColor, color: shareColor } : null;
   const summaryProps = {
     solves: render.solves || [],
     overallSolves: render.overallSolves || [],
@@ -52,7 +53,7 @@ function StatShareCanvas({ statShare }) {
     return (
       <div className="stats-item stats-item--line sharedStatExact">
         <LineChart
-          user={null}
+          user={sharedUser}
           solves={render.solves || []}
           comparisonSeries={render.comparisonSeries || []}
           seriesStyle={render.seriesStyle || null}
@@ -67,10 +68,11 @@ function StatShareCanvas({ statShare }) {
           currentSession={render.currentSession || "main"}
           eventKey={render.eventKey || render.currentEvent || "333"}
           practiceMode={false}
-          allowViewPicker={true}
+          allowViewPicker={render.showControls === true}
           viewMode={render.viewMode || "standard"}
           selectedDay={render.selectedDay || ""}
           onSelectedDayChange={noop}
+          initialControlState={render.chartControls || null}
         />
       </div>
     );
@@ -106,7 +108,7 @@ function StatShareCanvas({ statShare }) {
     return (
       <div className="stats-item stats-item--table sharedStatExact">
         <TimeTable
-          user={null}
+          user={sharedUser}
           solves={render.solves || []}
           seriesStyle={render.seriesStyle || null}
           deleteTime={noop}
@@ -126,7 +128,7 @@ function StatShareCanvas({ statShare }) {
   return null;
 }
 
-function StatSharePost({ note = "", statShare = null }) {
+function StatSharePost({ note = "", statShare = null, shareColor = "" }) {
   const trimmedNote = String(note || "").trim();
   const cardKey = statShare?.render?.cardKey || statShare?.cardKey || statShare?.kind || "summary";
   const showHeader = !String(cardKey).startsWith("summary");
@@ -145,7 +147,7 @@ function StatSharePost({ note = "", statShare = null }) {
           ) : null}
         </div>
       ) : null}
-      <StatShareCanvas statShare={statShare} />
+      <StatShareCanvas statShare={statShare} shareColor={shareColor} />
     </div>
   );
 }

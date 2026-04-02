@@ -74,6 +74,10 @@ function normalizeUserRecord(user) {
     profileScramble: user.profileScramble ?? profileScramble,
     WCAID: firstNonEmpty(user.WCAID, user.wcaid),
     wcaid: firstNonEmpty(user.wcaid, user.WCAID),
+    Friends: Array.isArray(user.Friends) ? user.Friends.map((id) => String(id || "").trim()).filter(Boolean) : [],
+    StatsAllowedFriends: Array.isArray(user.StatsAllowedFriends)
+      ? user.StatsAllowedFriends.map((id) => String(id || "").trim()).filter(Boolean)
+      : [],
   };
 }
 

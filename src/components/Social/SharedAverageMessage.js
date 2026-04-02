@@ -7,6 +7,7 @@ import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import Detail from "../Detail/Detail";
 import AverageDetailModal from "../Detail/AverageDetailModal";
 import "./SharedAverageMessage.css";
+import "../Profile/NameTag.css";
 
 // keep importing so nothing else breaks if you rely on it elsewhere
 import TimeItem from "../TimeList/TimeItem";
@@ -462,6 +463,8 @@ function SharedAverageMessage({
         id,
         name: member?.name || member?.username || id,
         username: member?.username || member?.name || id,
+        profileEvent: member?.profileEvent || "333",
+        profileScramble: member?.profileScramble || "",
         color:
           member?.color ||
           (id === user?.UserID ? safeYourColor : safeTheirColor),
@@ -476,6 +479,8 @@ function SharedAverageMessage({
         id,
         name: id === user?.UserID ? nameYou : id,
         username: id === user?.UserID ? nameYou : id,
+        profileEvent: "333",
+        profileScramble: "",
         color: id === user?.UserID ? safeYourColor : safeTheirColor,
         isYou: id === user?.UserID,
       });
@@ -486,6 +491,8 @@ function SharedAverageMessage({
         id: user.UserID,
         name: nameYou,
         username: nameYou,
+        profileEvent: user?.ProfileEvent || user?.profileEvent || "333",
+        profileScramble: user?.ProfileScramble || user?.profileScramble || "",
         color: safeYourColor,
         isYou: true,
       });
@@ -496,7 +503,18 @@ function SharedAverageMessage({
       if (!a.isYou && b.isYou) return 1;
       return String(a.name || a.id).localeCompare(String(b.name || b.id));
     });
-  }, [memberProfiles, updates, user?.UserID, nameYou, safeYourColor, safeTheirColor]);
+  }, [
+    memberProfiles,
+    updates,
+    user?.UserID,
+    user?.ProfileEvent,
+    user?.profileEvent,
+    user?.ProfileScramble,
+    user?.profileScramble,
+    nameYou,
+    safeYourColor,
+    safeTheirColor,
+  ]);
 
   const computed = useMemo(() => {
     const yt = {};
@@ -1305,6 +1323,33 @@ function SharedAverageMessage({
   };
 
   const groupBorderGradient = buildGroupBorderGradient(groupComputed?.members || []);
+  const groupMemberCount = groupComputed?.members?.length || 0;
+  const groupDensityClass =
+    groupMemberCount >= 14
+      ? "sharedAverageTable--groupDense"
+      : groupMemberCount >= 9
+      ? "sharedAverageTable--groupCompact"
+      : "";
+
+  const renderGroupNameTag = (member) => {
+    const eventKey = String(member?.profileEvent || "333");
+    const eventClass = eventKey.toLowerCase();
+    return (
+      <span className="sharedAverageGroupNameTag" style={{ borderColor: member.color || "#ffffff" }}>
+        <span className={`nametagCube nametagCube--${eventClass}`}>
+          <PuzzleSVG
+            event={eventKey}
+            scramble={member?.profileScramble || ""}
+            isTimerCube={false}
+            isNameTagCube={true}
+          />
+        </span>
+        <span className="nametagText">
+          <span className="name-tag-text">@{member.name}</span>
+        </span>
+      </span>
+    );
+  };
   if (isGroupConversation && groupBorderGradient) {
     cardStyle.background = `
       linear-gradient(rgba(${primaryRgb}, 0.97), rgba(${primaryRgb}, 0.97)) padding-box,
@@ -1319,42 +1364,86 @@ function SharedAverageMessage({
     >
       {isGroupConversation ? (
         <div className="sharedAverageTop sharedAverageTop--group">
-          <div className="sharedAverageGroupHeader">
-            <div className="sharedAverageCenterTitle">{centerTitle}</div>
-            <div className="sharedAverageCurrentSolveBadge">{groupCurrentSolveBadge}</div>
-          </div>
+          <div className="sharedAverageGroupHeader sharedAverageGroupHeader--row">
+            <div className="sharedAverageGroupTitleRow">
+              <div className="sharedAverageViewToggle sharedAverageViewToggle--groupTitle" role="tablist" aria-label="Shared average view">
+                <button
+                  type="button"
+                  className={viewMode === "summary" ? "isActive" : ""}
+                  onClick={() => setViewMode("summary")}
+                >
+                  Table
+                </button>
+                <button
+                  type="button"
+                  className={viewMode === "items" ? "isActive" : ""}
+                  onClick={() => setViewMode("items")}
+                >
+                  Time Items
+                </button>
+              </div>
+              <div className="sharedAverageCenterTitle sharedAverageCenterTitle--group">
+                {centerTitle}
+              </div>
+            </div>
+            <div className="sharedAverageGroupToolbar">
+              <div className="sharedAverageCurrentSolveBadge">{groupCurrentSolveBadge}</div>
 
-          <div
-            className="sharedAverageGroupRoster"
-            style={{
-              "--shared-group-cols": Math.max(2, groupComputed?.members?.length || 2),
-            }}
-          >
-            {(groupComputed?.members || []).map((member) => (
-              <button
-                key={member.id}
-                type="button"
-                className={`sharedAverageGroupMember ${member.isYou ? "isYou" : ""}`}
-                onClick={() => openGroupAverageDetail(member.id)}
-              >
-                <span className="sharedAverageGroupMemberName">{member.name}</span>
-                <span className="sharedAverageGroupMemberStatLabel">
-                  {member.headline?.label || "AVG"}
-                </span>
-                <span className="sharedAverageGroupMemberAvg">
-                  {member.headline?.value != null ? formatAverageMs(member.headline.value) : "–"}
-                </span>
-                <span className="sharedAverageGroupMemberMeta">
-                  Mean {member.mean != null ? formatAverageMs(member.mean) : "–"}
-                </span>
-                <span className="sharedAverageGroupMemberMeta">
-                  Best {member.best != null ? formatSolveMs(member.best) : "–"}
-                </span>
-                <span className="sharedAverageGroupMemberMeta">
-                  {member.wins} {scoreLabel.toLowerCase()} • {member.doneCount}/{groupComputed?.count || 0}
-                </span>
-              </button>
-            ))}
+              {(showStartAction ||
+                (showRefreshAction && typeof onRequestRefresh === "function") ||
+                (isActiveSession && typeof onLeaveSharedSession === "function") ||
+                isActiveSession ||
+                onDismiss) && (
+                <div className="sharedAverageActions sharedAverageActions--group">
+                  {showStartAction && typeof onLoadSession === "function" && (
+                    <button
+                      className="sharedAverageBtn sharedAverageBtnPrimary"
+                      onClick={() =>
+                        openSharedSession({ mode: isActiveSession ? "resume" : "next" })
+                      }
+                    >
+                      {isActiveSession ? "Resume" : "Start Session"}
+                    </button>
+                  )}
+
+                  {isActiveSession && typeof onLoadSession === "function" && (
+                    <button
+                      className="sharedAverageBtn sharedAverageBtnGhost"
+                      onClick={() => openSharedSession({ targetIndex: nextSolveIndex })}
+                    >
+                      Go To Next
+                    </button>
+                  )}
+
+                  {isActiveSession && typeof onLeaveSharedSession === "function" && (
+                    <button
+                      className="sharedAverageBtn sharedAverageBtnGhost"
+                      onClick={() => onLeaveSharedSession()}
+                    >
+                      Exit
+                    </button>
+                  )}
+
+                  {showRefreshAction && typeof onRequestRefresh === "function" && (
+                    <button
+                      className="sharedAverageBtn sharedAverageBtnGhost"
+                      onClick={() => {
+                        onRequestRefresh();
+                        setLastRefreshTick(Date.now());
+                      }}
+                    >
+                      Refresh
+                    </button>
+                  )}
+
+                  {onDismiss && (
+                    <button className="sharedAverageBtn sharedAverageBtnGhost" onClick={onDismiss}>
+                      Dismiss
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       ) : (
@@ -1469,7 +1558,7 @@ function SharedAverageMessage({
       )}
 
       <div className="sharedAverageBody">
-        <div className="sharedAverageControls">
+        <div className={`sharedAverageControls ${isGroupConversation ? "sharedAverageControls--group" : ""}`}>
           <div className="sharedAverageViewToggle" role="tablist" aria-label="Shared average view">
             <button
               type="button"
@@ -1487,7 +1576,8 @@ function SharedAverageMessage({
             </button>
           </div>
 
-          {(showStartAction ||
+          {!isGroupConversation &&
+            (showStartAction ||
             (showRefreshAction && typeof onRequestRefresh === "function") ||
             (isActiveSession && typeof onLeaveSharedSession === "function") ||
             isActiveSession ||
@@ -1547,7 +1637,15 @@ function SharedAverageMessage({
           {viewMode === "summary" ? (
             <div className="sharedAverageTableWrap">
               {isGroupConversation ? (
-                <table className="sharedAverageTable sharedAverageTable--group">
+                <table
+                  className={[
+                    "sharedAverageTable",
+                    "sharedAverageTable--group",
+                    groupDensityClass,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                >
                   <thead>
                     <tr>
                       <th className="sharedAverageIdx sharedAverageGroupTableIndex">#</th>
@@ -1556,21 +1654,34 @@ function SharedAverageMessage({
                           <button
                             type="button"
                             className="sharedAverageGroupHeaderBtn"
+                            style={{ "--member-accent": member.color || "#ffffff" }}
                             onClick={() => openGroupAverageDetail(member.id)}
                           >
-                            <span className="sharedAverageGroupHeaderName">{member.name}</span>
-                            <span className="sharedAverageGroupHeaderLabel">
-                              {member.headline?.label || "AVG"}
+                            <span className="sharedAverageGroupHeaderTopRow">
+                              {renderGroupNameTag(member)}
+                              <span className="sharedAverageGroupHeaderMetric">
+                                <span className="sharedAverageGroupHeaderMetricLabel">
+                                  {member.headline?.label || "AVG"}
+                                </span>
+                                <span className="sharedAverageGroupHeaderAvg">
+                                  {member.headline?.value != null
+                                    ? formatAverageMs(member.headline.value)
+                                    : "–"}
+                                </span>
+                              </span>
                             </span>
-                            <span className="sharedAverageGroupHeaderAvg">
-                              {member.headline?.value != null
-                                ? formatAverageMs(member.headline.value)
-                                : "–"}
-                            </span>
-                            <span className="sharedAverageGroupHeaderMeta">
-                              Best {member.best != null ? formatSolveMs(member.best) : "–"} • Mean{" "}
-                              {member.mean != null ? formatAverageMs(member.mean) : "–"} • {member.wins}{" "}
-                              {scoreLabel.toLowerCase()}
+                            <span className="sharedAverageGroupHeaderMetaRow">
+                              <span className="sharedAverageGroupHeaderMeta sharedAverageGroupHeaderMeta--best">
+                                {groupMemberCount >= 14 ? "B" : "Best"}{" "}
+                                {member.best != null ? formatSolveMs(member.best) : "–"}
+                              </span>
+                              <span className="sharedAverageGroupHeaderMeta sharedAverageGroupHeaderMeta--worst">
+                                {groupMemberCount >= 14 ? "W" : "Worst"}{" "}
+                                {member.max != null ? formatSolveMs(member.max) : "–"}
+                              </span>
+                              <span className="sharedAverageGroupHeaderMeta">
+                                {member.wins} {scoreLabel.toLowerCase()}
+                              </span>
                             </span>
                           </button>
                         </th>
@@ -1827,6 +1938,7 @@ function SharedAverageMessage({
           isOpen={true}
           title={selectedSharedAverage.title}
           solves={selectedSharedAverage.solves}
+          profileColor={safeYourColor}
           onClose={() => setSelectedSharedAverage(null)}
           onSolveOpen={(solve) => {
             setSelectedSharedAverage(null);

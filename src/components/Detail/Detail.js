@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import "./Detail.css";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
@@ -24,6 +24,8 @@ function Detail({
   tagConfig,
   cubeModelOptions = [],
   discoveredTagOptions = {},
+  tagColors = {},
+  onTagColorsChange = null,
 }) {
   const { runDb } = useDbStatus();
   const isArray = Array.isArray(solve);
@@ -33,6 +35,7 @@ function Detail({
     s?.createdAt || s?.CreatedAt || s?.DateTime || s?.datetime || s?.date || null;
   const getSolveTags = (s) => s?.tags || s?.Tags || {};
   const getSolveNote = (s) => s?.note ?? s?.Note ?? "";
+  const getSolvePenalty = (s) => s?.penalty ?? s?.Penalty ?? (s?.isDNF || s?.IsDNF ? "DNF" : null);
   const getSolveEvent = (s) => s?.event || s?.Event || "";
   const getSolveSessionID = (s) =>
     s?.sessionID || s?.SessionID || s?.SessionId || s?.sessionId || "";
@@ -72,7 +75,7 @@ function Detail({
     if (typeof explicitName === "string" && explicitName.trim()) return explicitName;
 
     const sessionID = String(getSolveSessionID(s) || "").trim();
-    if (!sessionID) return "Main Session";
+    if (!sessionID) return "Main";
 
     const match = (sessionsList || []).find(
       (session) => String(session?.SessionID || session?.sessionID || "").trim() === sessionID
@@ -82,13 +85,15 @@ function Detail({
       match?.Name || match?.SessionName || match?.name || match?.sessionName || "";
     if (typeof matchedName === "string" && matchedName.trim()) return matchedName;
 
-    return sessionID === "main" ? "Main Session" : sessionID;
+    return sessionID === "main" ? "Main" : sessionID;
   };
 
   const getSolveSubline = (s) => {
     const eventLabel = currentEventToString(getSolveEvent(s) || "333");
     const sessionLabel = getSessionDisplayName(s);
-    return `${eventLabel} · ${sessionLabel}`;
+    const solveIndex = Number(s?.fullIndex);
+    const indexLabel = Number.isFinite(solveIndex) ? ` · Solve #${solveIndex + 1}` : "";
+    return `${eventLabel} · ${sessionLabel}${indexLabel}`;
   };
   const hasRealSolveRef = (s) => {
     const ref = getSolveRef(s);
@@ -274,29 +279,33 @@ function Detail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notes, tagsState, isArray, solve]);
 
-  useEffect(() => {
-    const flushPendingAutosaves = () => {
-      Object.entries(autosaveTimeoutsRef.current || {}).forEach(([key, timeoutId]) => {
-        window.clearTimeout(timeoutId);
-        const idx = Number(key);
-        saveSolveEdits(isArray ? idx : null, {
-          notes: notesRef.current,
-          tagsState: tagsStateRef.current,
-        });
+  const flushPendingAutosaves = useCallback(() => {
+    Object.entries(autosaveTimeoutsRef.current || {}).forEach(([key, timeoutId]) => {
+      window.clearTimeout(timeoutId);
+      const idx = Number(key);
+      saveSolveEdits(isArray ? idx : null, {
+        notes: notesRef.current,
+        tagsState: tagsStateRef.current,
       });
-      autosaveTimeoutsRef.current = {};
+    });
+    autosaveTimeoutsRef.current = {};
+  }, [isArray]);
+
+  const handleOverlayClose = useCallback(() => {
+    flushPendingAutosaves();
+    onClose();
+  }, [flushPendingAutosaves, onClose]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      handleOverlayClose();
     };
 
-    const handleClickOutside = (event) => {
-      if (event.target.className === "detailPopup") {
-        flushPendingAutosaves();
-        onClose();
-      }
-    };
-
-    document.addEventListener("click", handleClickOutside);
-    return () => document.removeEventListener("click", handleClickOutside);
-  }, [isArray, onClose]);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleOverlayClose]);
 
   const arrayIsMutable = useMemo(() => {
     if (!isArray) return false;
@@ -473,6 +482,9 @@ function Detail({
     const s = isArray ? solve[index] : solve;
     if (isReadOnlySolve(s) || typeof applyPenalty !== "function") return;
 
+    const currentPenalty = getSolvePenalty(s);
+    const nextPenalty = currentPenalty === penalty ? null : penalty;
+
     const solveRef = getSolveRef(s);
     const rawTimeMs = getSolveRawTimeMs(s);
 
@@ -487,25 +499,25 @@ function Detail({
     }
 
     const newTime =
-      penalty === "+2"
+      nextPenalty === "+2"
         ? rawTimeMs + 2000
-        : penalty === "DNF"
+        : nextPenalty === "DNF"
         ? Number.MAX_SAFE_INTEGER
         : rawTimeMs;
 
     const updatedSolve = {
       ...s,
-      penalty,
+      penalty: nextPenalty,
       time: newTime,
       rawTimeMs,
-      finalTimeMs: penalty === "DNF" ? null : newTime,
-      isDNF: penalty === "DNF",
+      finalTimeMs: nextPenalty === "DNF" ? null : newTime,
+      isDNF: nextPenalty === "DNF",
       solveRef,
       createdAt: getSolveCreatedAt(s),
     };
 
     patchLocalSolve(s, solveRef, updatedSolve);
-    applyPenalty(solveRef, penalty, newTime);
+    applyPenalty(solveRef, nextPenalty, newTime);
   };
 
   const handleDelete = (index) => {
@@ -580,6 +592,8 @@ function Detail({
             ]}
             cubeModelOptions={cubeModelOptions}
             discoveredOptions={discoveredTagOptions}
+            tagColors={tagColors}
+            onTagColorsChange={onTagColorsChange}
             profileColor={profileColor}
             variant="home"
             allowAdditions={!readOnly}
@@ -626,6 +640,7 @@ function Detail({
 
   const renderSolveCard = (item, index) => {
     const readOnly = isReadOnlySolve(item);
+    const penalty = getSolvePenalty(item);
 
     return (
       <div key={index} className="detailSolveCard">
@@ -670,15 +685,27 @@ function Detail({
                 {renderTagsEditor(item, index)}
               </div>
 
-          <div className="detailActions">
-            {!readOnly && typeof applyPenalty === "function" && (
-              <div className="penalty-buttons">
-                <button onClick={() => handlePenaltyChange("+2", index)}>+2</button>
-                <button onClick={() => handlePenaltyChange("DNF", index)}>DNF</button>
-                <button onClick={() => handlePenaltyChange(null, index)}>Clear</button>
-              </div>
-            )}
+        <div className="detailActions">
+          {!readOnly && typeof applyPenalty === "function" && (
+            <div className="penalty-buttons">
+              <button
+                type="button"
+                className={penalty === "+2" ? "is-active" : ""}
+                onClick={() => handlePenaltyChange("+2", index)}
+              >
+                +2
+              </button>
+              <button
+                type="button"
+                className={penalty === "DNF" ? "is-active" : ""}
+                onClick={() => handlePenaltyChange("DNF", index)}
+              >
+                DNF
+              </button>
+            </div>
+          )}
 
+          <div className="detailPrimaryActions">
             <button className="share-button" onClick={() => handleShare(index)}>
               Share
             </button>
@@ -690,18 +717,25 @@ function Detail({
             )}
           </div>
         </div>
+        </div>
       </div>
     );
   };
 
   const singleReadOnly = !isArray && isReadOnlySolve(solve);
+  const singlePenalty = !isArray ? getSolvePenalty(solve) : null;
 
   const modalContent = (
-    <div className="detailPopup">
-      <div className="detailPopupContent">
-        <span className="closePopup" onClick={onClose}>
-          x
-        </span>
+    <div
+      className="detailPopup"
+      onClick={(event) => {
+        event.stopPropagation();
+        if (event.target === event.currentTarget) {
+          handleOverlayClose();
+        }
+      }}
+    >
+      <div className="detailPopupContent" onClick={(event) => event.stopPropagation()}>
         {!isArray ? (
           <div className="detailFlexCol">
             <div className="detailTopRow">
@@ -744,21 +778,34 @@ function Detail({
               <div className="detailActions">
                 {!singleReadOnly && typeof applyPenalty === "function" && (
                   <div className="penalty-buttons">
-                    <button onClick={() => handlePenaltyChange("+2")}>+2</button>
-                    <button onClick={() => handlePenaltyChange("DNF")}>DNF</button>
-                    <button onClick={() => handlePenaltyChange(null)}>Clear</button>
+                    <button
+                      type="button"
+                      className={singlePenalty === "+2" ? "is-active" : ""}
+                      onClick={() => handlePenaltyChange("+2")}
+                    >
+                      +2
+                    </button>
+                    <button
+                      type="button"
+                      className={singlePenalty === "DNF" ? "is-active" : ""}
+                      onClick={() => handlePenaltyChange("DNF")}
+                    >
+                      DNF
+                    </button>
                   </div>
                 )}
 
-                <button className="share-button" onClick={() => handleShare()}>
-                  Share
-                </button>
-
-                {!singleReadOnly && typeof deleteTime === "function" && (
-                  <button className="delete-button" onClick={() => handleDelete()}>
-                    Delete
+                <div className="detailPrimaryActions">
+                  <button className="share-button" onClick={() => handleShare()}>
+                    Share
                   </button>
-                )}
+
+                  {!singleReadOnly && typeof deleteTime === "function" && (
+                    <button className="delete-button" onClick={() => handleDelete()}>
+                      Delete
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 

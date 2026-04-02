@@ -13,6 +13,7 @@ function PostDetail({
   note = "",
   postType = "solve",
   statShare = null,
+  postColor = "",
   comments = [],
   onClose,
   onDelete,
@@ -50,7 +51,7 @@ function PostDetail({
 
         {resolvedPostType === "stat-share" ? (
           <div style={{ marginBottom: "1em", color: "white" }}>
-            <StatSharePost note={trimmedNote} statShare={statShare} />
+            <StatSharePost note={trimmedNote} statShare={statShare} shareColor={postColor} />
           </div>
         ) : (
           <>

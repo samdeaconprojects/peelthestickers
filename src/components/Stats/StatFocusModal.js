@@ -8,6 +8,7 @@ function StatFocusModal({
   children,
   actionMessage,
   actionButtons = [],
+  optionsContent = null,
   onClose,
   overlayClassName = "",
   modalClassName = "",
@@ -50,6 +51,8 @@ function StatFocusModal({
             ×
           </button>
         </div>
+
+        {optionsContent ? <div className="statFocusOptions">{optionsContent}</div> : null}
 
         <div className="statFocusActions">
           {actionButtons.map((button) => (

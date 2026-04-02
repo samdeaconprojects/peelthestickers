@@ -7,6 +7,11 @@ const {
 } = require("@aws-sdk/lib-dynamodb");
 const crypto = require("crypto");
 const STRICT_WINDOW_VERSION = 2;
+const DAY_BUCKET_VERSION = 3;
+const DEFAULT_DAY_BUCKET_TIMEZONE =
+  process.env.PTS_DEFAULT_TIMEZONE ||
+  Intl.DateTimeFormat().resolvedOptions().timeZone ||
+  "UTC";
 
 function nowIso() {
   return new Date().toISOString();
@@ -19,6 +24,47 @@ function normalizeEvent(event) {
 function normalizeSessionID(sessionID) {
   const sid = String(sessionID || "main").trim();
   return sid || "main";
+}
+
+function normalizeTimeZone(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  try {
+    Intl.DateTimeFormat("en-CA", {
+      timeZone: raw,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    return raw;
+  } catch {
+    return "";
+  }
+}
+
+function getDayBucketTimeZone(value) {
+  return normalizeTimeZone(value) || DEFAULT_DAY_BUCKET_TIMEZONE;
+}
+
+function getDayKey(createdAt, { timeZone } = {}) {
+  const raw = String(createdAt || "").trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const date = new Date(raw);
+  if (!Number.isFinite(date.getTime())) return "";
+
+  const resolvedTimeZone = getDayBucketTimeZone(timeZone);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: resolvedTimeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  if (!byType.year || !byType.month || !byType.day) return "";
+  return `${byType.year}-${byType.month}-${byType.day}`;
 }
 
 function normalizePenalty(penalty) {
@@ -139,6 +185,172 @@ function computeWindowMeanMs(solvesSlice) {
   const sum = times.reduce((acc, t) => acc + t, 0);
   const avg = sum / times.length;
   return Number.isFinite(avg) ? Math.round(avg) : Infinity;
+}
+
+const DAY_BUCKET_WINDOW_CONFIGS = Object.freeze([
+  {
+    key: "Mo3",
+    kind: "mo3",
+    size: 3,
+    bestField: "BestMo3Ms",
+    startField: "BestMo3StartSolveSK",
+  },
+  {
+    key: "Ao5",
+    kind: "ao",
+    size: 5,
+    bestField: "BestAo5Ms",
+    startField: "BestAo5StartSolveSK",
+  },
+  {
+    key: "Ao12",
+    kind: "ao",
+    size: 12,
+    bestField: "BestAo12Ms",
+    startField: "BestAo12StartSolveSK",
+  },
+]);
+const DAY_BUCKET_BOUNDARY_LIMIT = Math.max(
+  0,
+  ...DAY_BUCKET_WINDOW_CONFIGS.map((config) => Math.max(0, config.size - 1))
+);
+
+function summarizeSolveForDayBucket(solve) {
+  if (!solve) return null;
+  return {
+    SK: solve?.SK || null,
+    CreatedAt: solve?.CreatedAt || null,
+    FinalTimeMs: getFinalTimeMs(solve),
+    Penalty: normalizePenalty(solve?.Penalty ?? solve?.penalty),
+    IsDNF: isDnfSolve(solve),
+  };
+}
+
+function expandDayBucketSolveSummary(summary) {
+  if (!summary) return null;
+  return {
+    SK: summary?.SK || null,
+    CreatedAt: summary?.CreatedAt || null,
+    FinalTimeMs: Number.isFinite(Number(summary?.FinalTimeMs)) ? Number(summary.FinalTimeMs) : null,
+    Penalty: normalizePenalty(summary?.Penalty),
+    IsDNF: summary?.IsDNF === true || normalizePenalty(summary?.Penalty) === "DNF",
+  };
+}
+
+function summarizeSolveListForDayBucket(solves = [], limit = DAY_BUCKET_BOUNDARY_LIMIT) {
+  const input = Array.isArray(solves) ? solves : [];
+  const max = Math.max(0, Number(limit) || 0);
+  if (max <= 0) return [];
+  return input.slice(0, max).map(summarizeSolveForDayBucket).filter(Boolean);
+}
+
+function tailSolveListForDayBucket(solves = [], limit = DAY_BUCKET_BOUNDARY_LIMIT) {
+  const input = Array.isArray(solves) ? solves : [];
+  const max = Math.max(0, Number(limit) || 0);
+  if (max <= 0) return [];
+  return input.slice(-max).map(summarizeSolveForDayBucket).filter(Boolean);
+}
+
+function getHistogramSecondKey(finalMs) {
+  return Number.isFinite(finalMs) && finalMs >= 0 ? String(Math.floor(finalMs / 1000)) : "";
+}
+
+function mergeHistogramCounts(...maps) {
+  const out = {};
+  for (const map of maps) {
+    if (!map || typeof map !== "object") continue;
+    for (const [key, value] of Object.entries(map)) {
+      const count = Number(value || 0);
+      if (!count) continue;
+      out[key] = Number(out[key] || 0) + count;
+    }
+  }
+  return out;
+}
+
+function computeDayBucketWindowValueMs(solves, config) {
+  if (!config || !Array.isArray(solves) || solves.length !== config.size) return Infinity;
+  return config.kind === "mo3" ? computeWindowMeanMs(solves) : computeWindowAverageMs(solves);
+}
+
+function buildWindowSummaryFromSolves(solves = [], config) {
+  const input = Array.isArray(solves) ? solves : [];
+  const windowSize = Number(config?.size || 0);
+
+  if (!config || windowSize < 1) {
+    return {
+      [config?.bestField || "BestWindowMs"]: null,
+      [config?.startField || "BestWindowStartSolveSK"]: null,
+      [config?.worstField || "WorstWindowMs"]: null,
+      [config?.worstStartField || "WorstWindowStartSolveSK"]: null,
+    };
+  }
+
+  let bestValue = null;
+  let bestStart = null;
+  let worstValue = null;
+  let worstStart = null;
+  for (let i = 0; i <= input.length - windowSize; i += 1) {
+    const slice = input.slice(i, i + windowSize);
+    const valueMs = computeDayBucketWindowValueMs(slice, config);
+    if (!Number.isFinite(valueMs)) continue;
+    if (bestValue == null || valueMs < bestValue) {
+      bestValue = valueMs;
+      bestStart = slice[0]?.SK || null;
+    }
+    if (worstValue == null || valueMs > worstValue) {
+      worstValue = valueMs;
+      worstStart = slice[0]?.SK || null;
+    }
+  }
+
+  return {
+    [config.bestField]: bestValue,
+    [config.startField]: bestStart,
+    [config.worstField]: worstValue,
+    [config.worstStartField]: worstStart,
+  };
+}
+
+function evaluateCrossBoundaryWindow(leftSuffix = [], rightPrefix = [], config) {
+  const left = (Array.isArray(leftSuffix) ? leftSuffix : []).map(expandDayBucketSolveSummary).filter(Boolean);
+  const right = (Array.isArray(rightPrefix) ? rightPrefix : []).map(expandDayBucketSolveSummary).filter(Boolean);
+  const combined = [...left, ...right];
+  const windowSize = Number(config?.size || 0);
+
+  if (!config || windowSize < 1 || combined.length < windowSize) {
+    return { value: null, startSolveSK: null };
+  }
+
+  let best = null;
+  let bestStart = null;
+  const leftCount = left.length;
+
+  for (let i = 0; i <= combined.length - windowSize; i += 1) {
+    const end = i + windowSize;
+    const crossesBoundary = i < leftCount && end > leftCount;
+    if (!crossesBoundary) continue;
+    const slice = combined.slice(i, end);
+    const valueMs = computeDayBucketWindowValueMs(slice, config);
+    if (!Number.isFinite(valueMs)) continue;
+    if (best == null || valueMs < best) {
+      best = valueMs;
+      bestStart = slice[0]?.SK || null;
+    }
+  }
+
+  return { value: best, startSolveSK: bestStart };
+}
+
+function mergeBoundarySolveLists(prefix = [], suffix = [], limit = DAY_BUCKET_BOUNDARY_LIMIT) {
+  const max = Math.max(0, Number(limit) || 0);
+  const input = [...(Array.isArray(prefix) ? prefix : []), ...(Array.isArray(suffix) ? suffix : [])]
+    .map(expandDayBucketSolveSummary)
+    .filter(Boolean);
+  return {
+    prefix: input.slice(0, max).map(summarizeSolveForDayBucket).filter(Boolean),
+    suffix: input.slice(-max).map(summarizeSolveForDayBucket).filter(Boolean),
+  };
 }
 
 const BEST_WINDOW_CONFIGS = Object.freeze([
@@ -392,6 +604,271 @@ function bestStrictWindow(solves, n, kind = "ao") {
   return { value: best, startSolveSK: bestStart };
 }
 
+function buildDayBucketSK({ dayKey, event = "", mainOnly = false } = {}) {
+  const day = String(dayKey || "").trim();
+  if (!day) throw new Error("Missing dayKey for day bucket");
+
+  const ev = normalizeEvent(event);
+  if (!ev) {
+    return `DAYBUCKET#ALL#${day}`;
+  }
+
+  return mainOnly
+    ? `DAYBUCKET#EVENT#${ev}#MAIN#${day}`
+    : `DAYBUCKET#EVENT#${ev}#${day}`;
+}
+
+function buildDayBucketSummaryFromSolves(solves = []) {
+  const input = Array.isArray(solves) ? solves : [];
+
+  let SolveCountTotal = 0;
+  let SolveCountIncluded = 0;
+  let DNFCount = 0;
+  let Plus2Count = 0;
+  let SumFinalTimeMs = 0;
+  let SumFinalTimeSqMs = 0;
+  let BestSingleMs = null;
+  let BestSingleSolveSK = null;
+  let BestSingleAt = null;
+  let Plus2BestMs = null;
+  let FirstSolveAt = null;
+  let LastSolveAt = null;
+  const HistogramBySecond = {};
+
+  for (const solve of input) {
+    SolveCountTotal += 1;
+
+    const createdAt = String(solve?.CreatedAt || "");
+    if (!FirstSolveAt || createdAt < FirstSolveAt) FirstSolveAt = createdAt || FirstSolveAt;
+    if (!LastSolveAt || createdAt > LastSolveAt) LastSolveAt = createdAt || LastSolveAt;
+
+    const penalty = normalizePenalty(solve?.Penalty ?? solve?.penalty);
+    if (penalty === "DNF" || isDnfSolve(solve)) DNFCount += 1;
+    if (penalty === "+2") Plus2Count += 1;
+
+    const finalMs = getFinalTimeMs(solve);
+    if (!Number.isFinite(finalMs)) {
+      HistogramBySecond.DNF = Number(HistogramBySecond.DNF || 0) + 1;
+      continue;
+    }
+
+    const histogramKey = getHistogramSecondKey(finalMs);
+    if (histogramKey) {
+      HistogramBySecond[histogramKey] = Number(HistogramBySecond[histogramKey] || 0) + 1;
+    }
+
+    if (!Number.isFinite(finalMs)) continue;
+
+    SolveCountIncluded += 1;
+    SumFinalTimeMs += finalMs;
+    SumFinalTimeSqMs += finalMs * finalMs;
+
+    if (penalty === "+2" && (Plus2BestMs == null || finalMs < Plus2BestMs)) {
+      Plus2BestMs = finalMs;
+    }
+
+    if (
+      BestSingleMs == null ||
+      finalMs < BestSingleMs ||
+      (finalMs === BestSingleMs && createdAt < String(BestSingleAt || ""))
+    ) {
+      BestSingleMs = finalMs;
+      BestSingleSolveSK = solve?.SK || null;
+      BestSingleAt = createdAt || null;
+    }
+
+  }
+
+  return {
+    DayBucketVersion: DAY_BUCKET_VERSION,
+    BoundaryWindowMax: DAY_BUCKET_BOUNDARY_LIMIT,
+    SolveCountTotal,
+    SolveCountIncluded,
+    DNFCount,
+    Plus2Count,
+    SumFinalTimeMs,
+    SumFinalTimeSqMs,
+    MeanMs: SolveCountIncluded > 0 ? Math.round(SumFinalTimeMs / SolveCountIncluded) : null,
+    BestSingleMs,
+    BestSingleSolveSK,
+    BestSingleAt,
+    Plus2BestMs,
+    HistogramBySecond,
+    PrefixSolves: summarizeSolveListForDayBucket(input),
+    SuffixSolves: tailSolveListForDayBucket(input),
+    ...DAY_BUCKET_WINDOW_CONFIGS.reduce(
+      (acc, config) => ({ ...acc, ...buildWindowSummaryFromSolves(input, config) }),
+      {}
+    ),
+    FirstSolveAt,
+    LastSolveAt,
+    UpdatedAt: nowIso(),
+  };
+}
+
+function mergeDayBucketSummaries(summaries = []) {
+  const input = Array.isArray(summaries) ? summaries.filter(Boolean) : [];
+  if (!input.length) {
+    return buildDayBucketSummaryFromSolves([]);
+  }
+
+  const asFiniteOrNull = (value) =>
+    value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
+
+  let merged = null;
+
+  for (const rawItem of input) {
+    const item = rawItem || {};
+    if (!merged) {
+      merged = {
+        DayBucketVersion: DAY_BUCKET_VERSION,
+        BoundaryWindowMax: DAY_BUCKET_BOUNDARY_LIMIT,
+        SolveCountTotal: Number(item?.SolveCountTotal || 0),
+        SolveCountIncluded: Number(item?.SolveCountIncluded || 0),
+        DNFCount: Number(item?.DNFCount || 0),
+        Plus2Count: Number(item?.Plus2Count || 0),
+        SumFinalTimeMs: Number(item?.SumFinalTimeMs || 0),
+        SumFinalTimeSqMs: Number(item?.SumFinalTimeSqMs || 0),
+        MeanMs: asFiniteOrNull(item?.MeanMs),
+        BestSingleMs: asFiniteOrNull(item?.BestSingleMs),
+        BestSingleSolveSK: item?.BestSingleSolveSK || null,
+        BestSingleAt: item?.BestSingleAt || null,
+        Plus2BestMs: asFiniteOrNull(item?.Plus2BestMs),
+        HistogramBySecond: mergeHistogramCounts(item?.HistogramBySecond),
+        PrefixSolves: (Array.isArray(item?.PrefixSolves) ? item.PrefixSolves : [])
+          .map(summarizeSolveForDayBucket)
+          .filter(Boolean),
+        SuffixSolves: (Array.isArray(item?.SuffixSolves) ? item.SuffixSolves : [])
+          .map(summarizeSolveForDayBucket)
+          .filter(Boolean),
+        BestMo3Ms: asFiniteOrNull(item?.BestMo3Ms),
+        BestMo3StartSolveSK: item?.BestMo3StartSolveSK || null,
+        BestAo5Ms: asFiniteOrNull(item?.BestAo5Ms),
+        BestAo5StartSolveSK: item?.BestAo5StartSolveSK || null,
+        BestAo12Ms: asFiniteOrNull(item?.BestAo12Ms),
+        BestAo12StartSolveSK: item?.BestAo12StartSolveSK || null,
+        FirstSolveAt: item?.FirstSolveAt || null,
+        LastSolveAt: item?.LastSolveAt || null,
+      };
+      continue;
+    }
+
+    const next = {
+      DayBucketVersion: DAY_BUCKET_VERSION,
+      BoundaryWindowMax: DAY_BUCKET_BOUNDARY_LIMIT,
+      SolveCountTotal: Number(merged.SolveCountTotal || 0) + Number(item?.SolveCountTotal || 0),
+      SolveCountIncluded:
+        Number(merged.SolveCountIncluded || 0) + Number(item?.SolveCountIncluded || 0),
+      DNFCount: Number(merged.DNFCount || 0) + Number(item?.DNFCount || 0),
+      Plus2Count: Number(merged.Plus2Count || 0) + Number(item?.Plus2Count || 0),
+      SumFinalTimeMs: Number(merged.SumFinalTimeMs || 0) + Number(item?.SumFinalTimeMs || 0),
+      SumFinalTimeSqMs:
+        Number(merged.SumFinalTimeSqMs || 0) + Number(item?.SumFinalTimeSqMs || 0),
+      BestSingleMs: merged.BestSingleMs,
+      BestSingleSolveSK: merged.BestSingleSolveSK,
+      BestSingleAt: merged.BestSingleAt,
+      Plus2BestMs: merged.Plus2BestMs,
+      HistogramBySecond: mergeHistogramCounts(merged.HistogramBySecond, item?.HistogramBySecond),
+      PrefixSolves: mergeBoundarySolveLists(merged.PrefixSolves, item?.PrefixSolves).prefix,
+      SuffixSolves: mergeBoundarySolveLists(merged.SuffixSolves, item?.SuffixSolves).suffix,
+      BestMo3Ms: merged.BestMo3Ms,
+      BestMo3StartSolveSK: merged.BestMo3StartSolveSK,
+      BestAo5Ms: merged.BestAo5Ms,
+      BestAo5StartSolveSK: merged.BestAo5StartSolveSK,
+      BestAo12Ms: merged.BestAo12Ms,
+      BestAo12StartSolveSK: merged.BestAo12StartSolveSK,
+      FirstSolveAt: merged.FirstSolveAt,
+      LastSolveAt: merged.LastSolveAt,
+    };
+
+    const itemBestSingleMs = Number(item?.BestSingleMs);
+    const itemBestSingleAt = String(item?.BestSingleAt || "");
+    if (
+      Number.isFinite(itemBestSingleMs) &&
+      (next.BestSingleMs == null ||
+        itemBestSingleMs < next.BestSingleMs ||
+        (itemBestSingleMs === next.BestSingleMs &&
+          itemBestSingleAt < String(next.BestSingleAt || "")))
+    ) {
+      next.BestSingleMs = itemBestSingleMs;
+      next.BestSingleSolveSK = item?.BestSingleSolveSK || null;
+      next.BestSingleAt = itemBestSingleAt || null;
+    }
+
+    const itemPlus2Best = asFiniteOrNull(item?.Plus2BestMs);
+    if (itemPlus2Best != null && (next.Plus2BestMs == null || itemPlus2Best < next.Plus2BestMs)) {
+      next.Plus2BestMs = itemPlus2Best;
+    }
+
+    const firstAt = String(item?.FirstSolveAt || "");
+    if (firstAt && (!next.FirstSolveAt || firstAt < next.FirstSolveAt)) next.FirstSolveAt = firstAt;
+
+    const lastAt = String(item?.LastSolveAt || "");
+    if (lastAt && (!next.LastSolveAt || lastAt > next.LastSolveAt)) next.LastSolveAt = lastAt;
+
+    for (const config of DAY_BUCKET_WINDOW_CONFIGS) {
+      const bestField = config.bestField;
+      const bestStartField = config.startField;
+      const currentBestValue = asFiniteOrNull(next[bestField]);
+      const itemBestValue = asFiniteOrNull(item?.[bestField]);
+      if (itemBestValue != null && (currentBestValue == null || itemBestValue < currentBestValue)) {
+        next[bestField] = itemBestValue;
+        next[bestStartField] = item?.[bestStartField] || null;
+      }
+
+      const cross = evaluateCrossBoundaryWindow(merged.SuffixSolves, item?.PrefixSolves, config);
+      if (
+        Number.isFinite(cross.value) &&
+        (asFiniteOrNull(next[bestField]) == null || cross.value < Number(next[bestField]))
+      ) {
+        next[bestField] = cross.value;
+        next[bestStartField] = cross.startSolveSK;
+      }
+    }
+
+    next.MeanMs =
+      next.SolveCountIncluded > 0 ? Math.round(next.SumFinalTimeMs / next.SolveCountIncluded) : null;
+    merged = next;
+  }
+
+  return {
+    ...merged,
+    UpdatedAt: nowIso(),
+  };
+}
+
+function buildDayBucketItem({
+  userID,
+  dayKey,
+  event = "",
+  mainOnly = false,
+  timeZone = "",
+  solves = [],
+  sourceBuckets = null,
+}) {
+  const day = String(dayKey || "").trim();
+  if (!day) throw new Error("Missing dayKey for day bucket item");
+
+  const ev = normalizeEvent(event);
+  const summary = sourceBuckets
+    ? mergeDayBucketSummaries(sourceBuckets)
+    : buildDayBucketSummaryFromSolves(solves);
+
+  return {
+    PK: `USER#${userID}`,
+    SK: buildDayBucketSK({ dayKey: day, event: ev, mainOnly }),
+    ItemType: "DAYBUCKET",
+    BucketDay: day,
+    Scope: ev ? "EVENT" : "ALL",
+    BucketTimeZone: getDayBucketTimeZone(timeZone),
+    UpdatedAt: nowIso(),
+    stale: false,
+    ...(ev ? { Event: ev } : {}),
+    ...(mainOnly ? { SessionID: "main", ScopeVariant: "MAIN" } : {}),
+    ...summary,
+  };
+}
+
 function buildStatsFromSolves(solves = []) {
   if (!Array.isArray(solves) || solves.length === 0) {
     return {
@@ -406,21 +883,29 @@ function buildStatsFromSolves(solves = []) {
       BestSingleMs: null,
       BestSingleSolveSK: null,
       BestSingleAt: null,
+      WorstSingleMs: null,
+      WorstSingleSolveSK: null,
 
       BestMo3Ms: null,
       BestMo3StartSolveSK: null,
       BestMo3StrictMs: null,
       BestMo3StrictStartSolveSK: null,
+      WorstMo3Ms: null,
+      WorstMo3StartSolveSK: null,
 
       BestAo5Ms: null,
       BestAo5StartSolveSK: null,
       BestAo5StrictMs: null,
       BestAo5StrictStartSolveSK: null,
+      WorstAo5Ms: null,
+      WorstAo5StartSolveSK: null,
 
       BestAo12Ms: null,
       BestAo12StartSolveSK: null,
       BestAo12StrictMs: null,
       BestAo12StrictStartSolveSK: null,
+      WorstAo12Ms: null,
+      WorstAo12StartSolveSK: null,
 
       BestAo25Ms: null,
       BestAo25StartSolveSK: null,
@@ -451,6 +936,8 @@ function buildStatsFromSolves(solves = []) {
   let BestSingleMs = null;
   let BestSingleSolveSK = null;
   let BestSingleAt = null;
+  let WorstSingleMs = null;
+  let WorstSingleSolveSK = null;
 
   for (const solve of solves) {
     SolveCountTotal += 1;
@@ -470,17 +957,43 @@ function buildStatsFromSolves(solves = []) {
         BestSingleSolveSK = solve?.SK || null;
         BestSingleAt = solve?.CreatedAt || null;
       }
+
+      if (WorstSingleMs === null || finalMs > WorstSingleMs) {
+        WorstSingleMs = finalMs;
+        WorstSingleSolveSK = solve?.SK || null;
+      }
     }
   }
 
   const MeanMs =
     SolveCountIncluded > 0 ? Math.round(SumFinalTimeMs / SolveCountIncluded) : null;
 
-  const mo3 = bestMeanForWindow(solves, 3);
+  const mo3 = buildWindowSummaryFromSolves(solves, {
+    kind: "mo3",
+    size: 3,
+    bestField: "BestMo3Ms",
+    startField: "BestMo3StartSolveSK",
+    worstField: "WorstMo3Ms",
+    worstStartField: "WorstMo3StartSolveSK",
+  });
   const mo3Strict = bestStrictWindow(solves, 3, "mo3");
-  const ao5 = bestAoForWindow(solves, 5);
+  const ao5 = buildWindowSummaryFromSolves(solves, {
+    kind: "ao",
+    size: 5,
+    bestField: "BestAo5Ms",
+    startField: "BestAo5StartSolveSK",
+    worstField: "WorstAo5Ms",
+    worstStartField: "WorstAo5StartSolveSK",
+  });
   const ao5Strict = bestStrictWindow(solves, 5, "ao");
-  const ao12 = bestAoForWindow(solves, 12);
+  const ao12 = buildWindowSummaryFromSolves(solves, {
+    kind: "ao",
+    size: 12,
+    bestField: "BestAo12Ms",
+    startField: "BestAo12StartSolveSK",
+    worstField: "WorstAo12Ms",
+    worstStartField: "WorstAo12StartSolveSK",
+  });
   const ao12Strict = bestStrictWindow(solves, 12, "ao");
   const ao25 = bestAoForWindow(solves, 25);
   const ao50 = bestAoForWindow(solves, 50);
@@ -501,21 +1014,29 @@ function buildStatsFromSolves(solves = []) {
     BestSingleMs,
     BestSingleSolveSK,
     BestSingleAt,
+    WorstSingleMs,
+    WorstSingleSolveSK,
 
-    BestMo3Ms: mo3.value,
-    BestMo3StartSolveSK: mo3.startSolveSK,
+    BestMo3Ms: mo3.BestMo3Ms,
+    BestMo3StartSolveSK: mo3.BestMo3StartSolveSK,
     BestMo3StrictMs: mo3Strict.value,
     BestMo3StrictStartSolveSK: mo3Strict.startSolveSK,
+    WorstMo3Ms: mo3.WorstMo3Ms,
+    WorstMo3StartSolveSK: mo3.WorstMo3StartSolveSK,
 
-    BestAo5Ms: ao5.value,
-    BestAo5StartSolveSK: ao5.startSolveSK,
+    BestAo5Ms: ao5.BestAo5Ms,
+    BestAo5StartSolveSK: ao5.BestAo5StartSolveSK,
     BestAo5StrictMs: ao5Strict.value,
     BestAo5StrictStartSolveSK: ao5Strict.startSolveSK,
+    WorstAo5Ms: ao5.WorstAo5Ms,
+    WorstAo5StartSolveSK: ao5.WorstAo5StartSolveSK,
 
-    BestAo12Ms: ao12.value,
-    BestAo12StartSolveSK: ao12.startSolveSK,
+    BestAo12Ms: ao12.BestAo12Ms,
+    BestAo12StartSolveSK: ao12.BestAo12StartSolveSK,
     BestAo12StrictMs: ao12Strict.value,
     BestAo12StrictStartSolveSK: ao12Strict.startSolveSK,
+    WorstAo12Ms: ao12.WorstAo12Ms,
+    WorstAo12StartSolveSK: ao12.WorstAo12StartSolveSK,
 
     BestAo25Ms: ao25.value,
     BestAo25StartSolveSK: ao25.startSolveSK,
@@ -1447,6 +1968,8 @@ module.exports = {
   nowIso,
   normalizeEvent,
   normalizeSessionID,
+  getDayKey,
+  getDayBucketTimeZone,
   normalizePenalty,
   createSolveID,
   buildSolveSK,
@@ -1459,8 +1982,13 @@ module.exports = {
   computeWindowMeanMs,
   buildStatsFromSolves,
   STRICT_WINDOW_VERSION,
+  DAY_BUCKET_VERSION,
   BEST_WINDOW_CONFIGS,
   CACHED_WINDOW_CONFIGS,
+  buildDayBucketSK,
+  buildDayBucketItem,
+  buildDayBucketSummaryFromSolves,
+  mergeDayBucketSummaries,
   buildTopWindowCandidatesFromSolves,
   buildWindowCandidateStatsFromSolves,
   buildCachedWindowCandidateStatsFromSolves,

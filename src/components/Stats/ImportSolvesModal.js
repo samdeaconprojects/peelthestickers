@@ -12,6 +12,9 @@ import { formatTime } from "../TimeList/TimeUtils";
  *      9.31 | R U R' ... | PB
  *      1:10.25 | scramble...
  *
+ *  - PTS JSON export:
+ *      { "format":"pts-export", "data": { "sessions": [{ "session": {...}, "solves": [...] }] } }
+ *
  *  - JSON (generic):
  *      [
  *        { "time": 9310, "scramble": "...", "penalty": null, "note": "", "datetime": "..." }
@@ -33,11 +36,15 @@ export default function ImportSolvesModal({
   busy,
   importProgress,
 }) {
-  const [mode, setMode] = useState("auto"); // "auto" | "lines" | "json" | "cstimer" | "csv"
+  const [mode, setMode] = useState("auto"); // "auto" | "lines" | "json" | "pts-export" | "cstimer" | "csv"
   const [raw, setRaw] = useState("");
   const [error, setError] = useState("");
   const [preview, setPreview] = useState([]);
   const [meta, setMeta] = useState(null); // parsing summary
+  const [confirmReady, setConfirmReady] = useState(false);
+  const [selectedFileName, setSelectedFileName] = useState("");
+  const [selectedFileSize, setSelectedFileSize] = useState(0);
+  const [loadingFile, setLoadingFile] = useState(false);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -46,6 +53,18 @@ export default function ImportSolvesModal({
     document.addEventListener("click", handleClickOutside);
     return () => document.removeEventListener("click", handleClickOutside);
   }, [onClose]);
+
+  useEffect(() => {
+    setConfirmReady(false);
+  }, [raw, mode]);
+
+  const selectedFileSummary = useMemo(() => {
+    if (!selectedFileName) return "";
+    const bytes = Number(selectedFileSize || 0);
+    if (!Number.isFinite(bytes) || bytes <= 0) return selectedFileName;
+    if (bytes < 1024 * 1024) return `${selectedFileName} (${(bytes / 1024).toFixed(1)} KB)`;
+    return `${selectedFileName} (${(bytes / (1024 * 1024)).toFixed(1)} MB)`;
+  }, [selectedFileName, selectedFileSize]);
 
   /* ---------------------------- FORMAT DETECTION ---------------------------- */
 
@@ -65,6 +84,14 @@ export default function ImportSolvesModal({
           Object.keys(obj).some((k) => /^session\d+$/.test(k));
 
         if (hasSessions) return "cstimer";
+
+        const isPtsExport =
+          obj &&
+          typeof obj === "object" &&
+          String(obj?.format || "").trim().toLowerCase() === "pts-export" &&
+          Array.isArray(obj?.data?.sessions);
+
+        if (isPtsExport) return "pts-export";
 
         // Generic JSON array or {solves:[...]}
         if (Array.isArray(obj)) return "json";
@@ -302,6 +329,84 @@ export default function ImportSolvesModal({
     return out;
   };
 
+  const parsePtsExport = (text) => {
+    const obj = JSON.parse(text);
+    const sessionBundles = Array.isArray(obj?.data?.sessions) ? obj.data.sessions : null;
+    if (!Array.isArray(sessionBundles)) {
+      throw new Error("PTS export must include data.sessions.");
+    }
+
+    const out = [];
+    for (const bundle of sessionBundles) {
+      const session = bundle?.session && typeof bundle.session === "object" ? bundle.session : {};
+      const sessionEvent = String(session?.Event || session?.event || event || "").toUpperCase();
+      const sourceSessionID = String(session?.SessionID || session?.sessionID || "main").trim() || "main";
+      const sourceSessionName = String(
+        session?.SessionName || session?.sessionName || session?.Name || sourceSessionID
+      ).trim() || sourceSessionID;
+      const sourceSessionOpts = {
+        ...(String(session?.SessionType || "").trim()
+          ? { sessionType: String(session.SessionType).trim() }
+          : {}),
+        ...(Array.isArray(session?.RelayLegs) ? { relayLegs: session.RelayLegs } : {}),
+      };
+
+      for (const s of Array.isArray(bundle?.solves) ? bundle.solves : []) {
+        const rawTime =
+          s?.rawTimeMs ??
+          s?.RawTimeMs ??
+          s?.originalTime ??
+          s?.OriginalTime ??
+          s?.time ??
+          s?.Time ??
+          s?.finalTimeMs ??
+          s?.FinalTimeMs ??
+          s?.ms;
+        const ms = parseTimeToMs(rawTime);
+        if (ms == null) continue;
+
+        const penalty = normalizePenalty(s?.penalty ?? s?.Penalty ?? null);
+        const originalTime =
+          s?.rawTimeMs ??
+          s?.RawTimeMs ??
+          s?.originalTime ??
+          s?.OriginalTime ??
+          (penalty === "+2" ? Math.max(0, ms - 2000) : ms);
+
+        out.push({
+          time: ms,
+          scramble: s?.scramble ?? s?.Scramble ?? "",
+          penalty,
+          note: s?.note ?? s?.Note ?? "",
+          datetime:
+            (() => {
+              const dtMs = normalizeDate(
+                s?.datetime ??
+                  s?.DateTime ??
+                  s?.createdAt ??
+                  s?.CreatedAt ??
+                  s?.date ??
+                  s?.Date ??
+                  s?.timestamp ??
+                  s?.timestampMs ??
+                  s?.ts
+              );
+              return dtMs ? new Date(dtMs).toISOString() : new Date().toISOString();
+            })(),
+          tags: s?.tags ?? s?.Tags ?? {},
+          originalTime,
+          event: String(s?.event ?? s?.Event ?? sessionEvent ?? event ?? "").toUpperCase(),
+          _importSource: "pts-export",
+          _importSessionID: sourceSessionID,
+          _importSessionName: sourceSessionName,
+          _importSessionOpts: sourceSessionOpts,
+        });
+      }
+    }
+
+    return out;
+  };
+
   // Basic delimiter parser (CSV/TSV). Not a full RFC CSV parser — good enough for most exports.
   const parseDelimited = (text) => {
     const lines = String(text || "").trim().split(/\r?\n/).filter(Boolean);
@@ -447,6 +552,9 @@ export default function ImportSolvesModal({
   };
 
   const buildHelpText = useMemo(() => {
+    if (mode === "pts-export") {
+      return `Paste a PTS export JSON file. Session structure is preserved when imported.`;
+    }
     if (mode === "cstimer") {
       return `Paste csTimer JSON export (the full {"session1":..., "properties":...} file).`;
     }
@@ -490,6 +598,7 @@ Example:
   const handleBuildPreview = () => {
     setError("");
     setMeta(null);
+    setConfirmReady(false);
 
     try {
       const fmt = mode === "auto" ? detectFormat(raw) : mode;
@@ -505,7 +614,8 @@ Example:
       }
 
       let parsed = [];
-      if (fmt === "cstimer") parsed = parseCsTimer(raw);
+      if (fmt === "pts-export") parsed = parsePtsExport(raw);
+      else if (fmt === "cstimer") parsed = parseCsTimer(raw);
       else if (fmt === "json") parsed = parseGenericJson(raw);
       else if (fmt === "csv") parsed = parseDelimited(raw);
       else parsed = parseLines(raw);
@@ -522,10 +632,15 @@ Example:
       const byEvent = {};
       for (const s of parsed) byEvent[s.event || event] = (byEvent[s.event || event] || 0) + 1;
 
+      const sessionCount = new Set(
+        parsed.map((s) => `${String(s?.event || event)}::${String(s?._importSessionID || "main")}`)
+      ).size;
+
       setMeta({
         detected: fmt,
         total: parsed.length,
         byEvent,
+        sessions: fmt === "pts-export" ? sessionCount : null,
       });
 
       // Preview only; import should use FULL parsed (see handleImport)
@@ -542,7 +657,8 @@ Example:
     try {
       const fmt = mode === "auto" ? detectFormat(raw) : mode;
       let parsed = [];
-      if (fmt === "cstimer") parsed = parseCsTimer(raw);
+      if (fmt === "pts-export") parsed = parsePtsExport(raw);
+      else if (fmt === "cstimer") parsed = parseCsTimer(raw);
       else if (fmt === "json") parsed = parseGenericJson(raw);
       else if (fmt === "csv") parsed = parseDelimited(raw);
       else parsed = parseLines(raw);
@@ -554,10 +670,50 @@ Example:
         return;
       }
 
+      if (!confirmReady) {
+        const byEvent = {};
+        for (const s of parsed) byEvent[s.event || event] = (byEvent[s.event || event] || 0) + 1;
+        const sessionCount = new Set(
+          parsed.map((s) => `${String(s?.event || event)}::${String(s?._importSessionID || "main")}`)
+        ).size;
+
+        setMeta({
+          detected: fmt,
+          total: parsed.length,
+          byEvent,
+          sessions: fmt === "pts-export" ? sessionCount : null,
+        });
+        setPreview(parsed.slice(0, 200));
+        setConfirmReady(true);
+        return;
+      }
+
       // IMPORTANT: send ALL parsed solves, not just preview
       await onImport?.({ parsedSolves: parsed, detectedFormat: fmt });
     } catch (e) {
       setError(e?.message || "Import failed to parse input.");
+    }
+  };
+
+  const handleFileSelected = async (file) => {
+    if (!file) return;
+    setLoadingFile(true);
+    setError("");
+    setMeta(null);
+    setPreview([]);
+    setConfirmReady(false);
+
+    try {
+      const text = await file.text();
+      setRaw(text);
+      setSelectedFileName(String(file.name || "").trim());
+      setSelectedFileSize(Number(file.size || 0));
+    } catch (e) {
+      setError(e?.message || "Failed to read file.");
+      setSelectedFileName("");
+      setSelectedFileSize(0);
+    } finally {
+      setLoadingFile(false);
     }
   };
 
@@ -597,6 +753,13 @@ Example:
           </button>
           <button
             type="button"
+            className={`importModeBtn ${mode === "pts-export" ? "active" : ""}`}
+            onClick={() => setMode("pts-export")}
+          >
+            PTS Export
+          </button>
+          <button
+            type="button"
             className={`importModeBtn ${mode === "cstimer" ? "active" : ""}`}
             onClick={() => setMode("cstimer")}
           >
@@ -613,6 +776,29 @@ Example:
 
         <div className="importHelp">{buildHelpText}</div>
 
+        <div className="importFileRow">
+          <label className="importFileButton">
+            <input
+              type="file"
+              accept=".json,.txt,.csv,.tsv,text/plain,application/json,text/csv"
+              onChange={(e) => handleFileSelected(e.target.files?.[0] || null)}
+              disabled={busy || loadingFile}
+            />
+            {loadingFile ? "Loading file..." : "Choose File"}
+          </label>
+          {selectedFileSummary ? (
+            <div className="importFileMeta">{selectedFileSummary}</div>
+          ) : (
+            <div className="importFileMeta">Or paste data below</div>
+          )}
+        </div>
+
+        {selectedFileSize > 5 * 1024 * 1024 ? (
+          <div className="importWarning">
+            Large files are supported, but browser-side parsing may still feel heavy before upload begins.
+          </div>
+        ) : null}
+
         <textarea
           className="importTextarea"
           value={raw}
@@ -622,6 +808,8 @@ Example:
               ? '{"session1":[[[0,7963],"R U ...","",1759353585,"333"]], "properties":{...}}'
               : mode === "json"
                 ? '[{ "time": 9310, "scramble": "..." }]'
+                : mode === "pts-export"
+                  ? '{ "format": "pts-export", "data": { "sessions": [ ... ] } }'
                 : mode === "csv"
                   ? "time,scramble,note,penalty,event,date\n9.31,\"R U R' ...\",\"PB\",,333,2026-01-01T12:00:00Z"
                   : "9.31 | R U R' ... | note"
@@ -634,6 +822,7 @@ Example:
           <div className="importMeta" style={{ marginTop: 10, opacity: 0.9 }}>
             <div><b>Detected:</b> {meta.detected}</div>
             <div><b>Total solves:</b> {meta.total}</div>
+            {meta.sessions ? <div><b>Sessions:</b> {meta.sessions}</div> : null}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               {Object.entries(meta.byEvent || {}).map(([ev, n]) => (
                 <div key={ev}><b>{ev}</b>: {n}</div>
@@ -642,10 +831,35 @@ Example:
           </div>
         )}
 
+        {confirmReady && meta ? (
+          <div className="importConfirmBox">
+            <div className="importConfirmTitle">Confirm Import</div>
+            <div className="importConfirmText">
+              {meta.detected === "pts-export"
+                ? `This will import ${meta.total} solves across ${meta.sessions || 0} sessions and preserve the exported session structure where possible.`
+                : `This will import ${meta.total} solves into the current stats import flow.`}
+            </div>
+            <div className="importConfirmText">
+              {meta.detected === "pts-export"
+                ? "Existing matching sessions will be reused. Missing sessions will be created."
+                : `Current target context: ${event} / ${sessionID}.`}
+            </div>
+          </div>
+        ) : null}
+
         <div className="importActions">
           <button type="button" onClick={handleBuildPreview} disabled={busy}>
             Preview
           </button>
+          {confirmReady ? (
+            <button
+              type="button"
+              onClick={() => setConfirmReady(false)}
+              disabled={busy}
+            >
+              Back
+            </button>
+          ) : null}
           <button
             type="button"
             className="importPrimary"
@@ -653,7 +867,7 @@ Example:
             disabled={busy || !raw.trim()}
             title={!raw.trim() ? "Paste something first" : "Import all parsed solves"}
           >
-            {busy ? "Importing…" : "Import"}
+            {busy ? "Importing…" : confirmReady ? "Confirm Import" : "Review Import"}
           </button>
         </div>
 

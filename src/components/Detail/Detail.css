@@ -30,16 +30,6 @@
   overflow: auto;
 }
 
-.closePopup {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  cursor: pointer;
-  font-size: 24px;
-  color: white;
-  opacity: 0.9;
-}
-
 .detailTopRow {
   display: flex;
   flex-direction: row;
@@ -55,6 +45,7 @@
   display: flex;
   flex-direction: row;
   position: relative;
+  align-items: stretch;
 }
 
 .detailFlexCol {
@@ -88,7 +79,7 @@
 
 /* ✅ NEW: date row */
 .detailDateRow {
-  font-size: 12px;
+  font-size: 13px;
   opacity: 0.7;
   margin-top: -6px;
   margin-bottom: 6px;
@@ -110,9 +101,12 @@
 }
 
 .detailNotes{
-  width: 85%;
+  display: block;
+  width: 90%;
   height: 80px;
   margin-top: 24px;
+  margin-left: auto;
+  margin-right: 0;
   background-color: #3D3D3D;
   opacity: 70%;
   border-radius: 8px;
@@ -149,8 +143,8 @@
 }
 
 .detailTagsBlock {
-  width: 85%;
-  margin: 10px auto 0;
+  width: 92%;
+  margin: 10px 0 0 auto;
   text-align: left;
   box-sizing: border-box;
 }
@@ -161,7 +155,17 @@
 }
 
 .detailTagSelector .tagHomeSummary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.detailTagSelector .tagHomeItem {
+  min-width: 0;
+}
+
+.detailTagSelector .tagHomeChip {
+  min-width: 0;
 }
 
 .detailTagSelector .tagHomePopover {
@@ -179,8 +183,51 @@
 }
 
 .detailActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 110px;
   position: relative;
   z-index: 1;
+}
+
+.detailPrimaryActions {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  width: 82px;
+}
+
+.detailPrimaryActions button {
+  width: 100%;
+}
+
+.penalty-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-self: center;
+  justify-content: center;
+  margin-top: 28px;
+  margin-right: -10px;
+}
+
+.penalty-buttons button {
+  min-width: 54px;
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.penalty-buttons button.is-active {
+  border-color: rgba(46, 196, 182, 0.92);
+  background: rgba(46, 196, 182, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(46, 196, 182, 0.28);
 }
 
 .detailCustomWrap {
@@ -332,5 +379,30 @@
     bottom: auto;
     transform: translate(-50%, -50%);
     width: min(360px, calc(100vw - 56px));
+  }
+
+  .detailTagSelector .tagHomeSummary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detailBottomRow {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .detailCube {
+    width: 100%;
+    margin-top: 12px;
+  }
+
+  .detailNotes,
+  .detailTagsBlock {
+    width: 100%;
+  }
+
+  .detailActions,
+  .detailPrimaryActions {
+    width: 100%;
+    align-items: flex-end;
   }
 }

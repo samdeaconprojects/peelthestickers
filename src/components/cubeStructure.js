@@ -401,7 +401,10 @@ export function rotateFaceCounterClockwise(matrix) {
   }
 
 export function parseAlgorithm(alg, faces, n) {
-    const moves = alg.split(' ');
+    const moves = String(alg || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
   
     moves.forEach(move => {
   

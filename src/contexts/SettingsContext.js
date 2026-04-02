@@ -11,26 +11,17 @@ import {
   normalizeHomeStatsSlots,
   normalizeHomeStatsSolveLimit,
 } from "../components/HomeStats/homeStatsConfig";
+import { darkenHex, hexToRgbString } from "../utils/colorUtils";
+import {
+  defaultEventBindings,
+  defaultPageBindings,
+  defaultSolveBindings,
+  defaultUiBindings,
+} from "../utils/keybindings";
 
 const SettingsContext = createContext(null);
 
 export const useSettings = () => useContext(SettingsContext);
-
-const defaultEventBindings = {
-  "222": "Alt+2",
-  "333": "Alt+3",
-  "444": "Alt+4",
-  "555": "Alt+5",
-  "666": "Alt+6",
-  "777": "Alt+7",
-  SQ1: "Alt+Q",
-  SKEWB: "Alt+S",
-  CLOCK: "Alt+C",
-  "333OH": "Alt+O",
-  MEGAMINX: "Alt+M",
-  PYRAMINX: "Alt+P",
-  "333BLD": "Alt+B",
-};
 
 function normalizeScrambleMode(rawValue) {
   const raw = String(rawValue || "").trim().toLowerCase();
@@ -46,6 +37,23 @@ function normalizeNavigationArrowStyle(rawValue) {
   return "scramble";
 }
 
+function normalizeTimeListColumns(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+  if (raw === "5" || raw === "12") return raw;
+  return "auto";
+}
+
+function normalizeNonRollingMaxRows(rawValue) {
+  const value = Number(rawValue);
+  if (value === 1 || value === 2 || value === 3) return value;
+  return 3;
+}
+
+function normalizeStatsSummaryLayout(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+  return raw === "tile" ? "tile" : "row";
+}
+
 export const defaultSettings = {
   primaryColor: "#0E171D",
   secondaryColor: "#ffffff",
@@ -54,12 +62,17 @@ export const defaultSettings = {
   horizontalTimeList: true,
   horizontalTimeListScroll: false,
   horizontalTimeListCols: "auto",
+  nonRollingTimeListCols: "auto",
+  nonRollingTimeListMaxRows: 3,
 
   disableKeypad: false,
   timeColorMode: "index",
   sharedTimeColorMode: "profile",
 
   eventKeyBindings: defaultEventBindings,
+  pageKeyBindings: defaultPageBindings,
+  uiKeyBindings: defaultUiBindings,
+  solveKeyBindings: defaultSolveBindings,
 
   inspectionEnabled: false,
   inspectionCountDirection: "up",
@@ -84,6 +97,8 @@ export const defaultSettings = {
 
   smartCubeProvider: "gan",
   navigationArrowStyle: "scramble",
+  showAddSolveButton: true,
+  statsSummaryLayout: "row",
 
   // random-state = cubing.js default
   // legacy = old generateScramble behavior
@@ -123,6 +138,12 @@ function mergeSettings(input) {
   const smartCubeProvider = normalizeSmartCubeProvider(safe.smartCubeProvider);
   const scrambleMode = normalizeScrambleMode(safe.scrambleMode);
   const navigationArrowStyle = normalizeNavigationArrowStyle(safe.navigationArrowStyle);
+  const horizontalTimeListCols = normalizeTimeListColumns(safe.horizontalTimeListCols);
+  const nonRollingTimeListCols = normalizeTimeListColumns(safe.nonRollingTimeListCols);
+  const nonRollingTimeListMaxRows = normalizeNonRollingMaxRows(
+    safe.nonRollingTimeListMaxRows
+  );
+  const statsSummaryLayout = normalizeStatsSummaryLayout(safe.statsSummaryLayout);
 
   return {
     ...defaultSettings,
@@ -130,9 +151,25 @@ function mergeSettings(input) {
     smartCubeProvider,
     navigationArrowStyle,
     scrambleMode,
+    horizontalTimeListCols,
+    nonRollingTimeListCols,
+    nonRollingTimeListMaxRows,
+    statsSummaryLayout,
     eventKeyBindings: {
       ...defaultEventBindings,
       ...(safe.eventKeyBindings || {}),
+    },
+    pageKeyBindings: {
+      ...defaultPageBindings,
+      ...(safe.pageKeyBindings || {}),
+    },
+    uiKeyBindings: {
+      ...defaultUiBindings,
+      ...(safe.uiKeyBindings || {}),
+    },
+    solveKeyBindings: {
+      ...defaultSolveBindings,
+      ...(safe.solveKeyBindings || {}),
     },
     lastSessionByEvent:
       safe.lastSessionByEvent && typeof safe.lastSessionByEvent === "object"
@@ -164,13 +201,21 @@ export const SettingsProvider = ({ children }) => {
   const [settings, setSettings] = useState(defaultSettings);
 
   useEffect(() => {
+    const primaryColor = settings.primaryColor || defaultSettings.primaryColor;
+    const playerBarColor = darkenHex(primaryColor, 0.19, "#181F23");
+
     document.documentElement.style.setProperty(
       "--primary-color",
-      settings.primaryColor || defaultSettings.primaryColor
+      primaryColor
     );
     document.documentElement.style.setProperty(
       "--secondary-color",
       settings.secondaryColor || defaultSettings.secondaryColor
+    );
+    document.documentElement.style.setProperty("--player-bar-bg", playerBarColor);
+    document.documentElement.style.setProperty(
+      "--player-bar-bg-rgb",
+      hexToRgbString(playerBarColor, "24, 31, 35")
     );
   }, [settings.primaryColor, settings.secondaryColor]);
 

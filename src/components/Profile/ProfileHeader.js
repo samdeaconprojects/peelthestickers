@@ -1,7 +1,10 @@
-import React, { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import "./Profile.css";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
+import NameTag from "./NameTag";
+import { getUser } from "../../services/getUser";
+import { updateUser } from "../../services/updateUser";
 
 function getFavoriteEvent(sessionStats) {
   if (!sessionStats || typeof sessionStats !== "object") return null;
@@ -23,7 +26,14 @@ function getFavoriteEvent(sessionStats) {
   return best;
 }
 
-export default function ProfileHeader({ user, sessionStats, isOwn = false, onEditStats }) {
+export default function ProfileHeader({
+  user,
+  currentUser = null,
+  setCurrentUser = null,
+  sessionStats,
+  isOwn = false,
+  onEditStats,
+}) {
   const {
     Name,
     UserID,
@@ -36,6 +46,61 @@ export default function ProfileHeader({ user, sessionStats, isOwn = false, onEdi
   } = user;
 
   const [openWidget, setOpenWidget] = useState(null);
+  const [friendProfiles, setFriendProfiles] = useState([]);
+  const [isLoadingFriends, setIsLoadingFriends] = useState(false);
+  const [friendActionBusy, setFriendActionBusy] = useState({});
+  const navigate = useNavigate();
+  const currentUserID = String(currentUser?.UserID || "").trim();
+  const canManageFriends = isOwn && currentUserID && currentUserID === String(user?.UserID || "").trim();
+  const allowedFriendSet = useMemo(
+    () => new Set(Array.isArray(currentUser?.StatsAllowedFriends) ? currentUser.StatsAllowedFriends : []),
+    [currentUser?.StatsAllowedFriends]
+  );
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (openWidget !== "friends" || !Friends.length) {
+      if (!Friends.length) {
+        setFriendProfiles([]);
+        setIsLoadingFriends(false);
+      }
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    setIsLoadingFriends(true);
+
+    const loadFriendProfiles = async () => {
+      const profiles = await Promise.all(
+        Friends.map(async (friendID) => {
+          try {
+            return await getUser(friendID);
+          } catch (error) {
+            console.warn("Failed to load friend profile", friendID, error);
+            return {
+              UserID: friendID,
+              userID: friendID,
+              Name: friendID,
+              name: friendID,
+            };
+          }
+        })
+      );
+
+      if (!isCancelled) {
+        setFriendProfiles(profiles);
+        setIsLoadingFriends(false);
+      }
+    };
+
+    loadFriendProfiles();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [Friends, openWidget]);
 
   const cubeTransforms = {
     "222": "translate(15px, 18px) scale(0.7)",
@@ -68,6 +133,82 @@ export default function ProfileHeader({ user, sessionStats, isOwn = false, onEdi
   }, [sessionStats]);
 
   const favoriteEvent = useMemo(() => getFavoriteEvent(sessionStats), [sessionStats]);
+
+  const setFriendBusy = (friendID, key, value) => {
+    setFriendActionBusy((prev) => ({
+      ...prev,
+      [friendID]: {
+        ...(prev?.[friendID] || {}),
+        [key]: value,
+      },
+    }));
+  };
+
+  const handleToggleFriendStatsAccess = async (friendID, shouldAllow) => {
+    if (!canManageFriends || !currentUserID || typeof setCurrentUser !== "function") return;
+
+    setFriendBusy(friendID, "share", true);
+    try {
+      const currentAllowed = Array.isArray(currentUser?.StatsAllowedFriends)
+        ? currentUser.StatsAllowedFriends
+        : [];
+      const nextAllowed = shouldAllow
+        ? Array.from(new Set([...currentAllowed, friendID]))
+        : currentAllowed.filter((id) => id !== friendID);
+
+      await updateUser(currentUserID, { StatsAllowedFriends: nextAllowed });
+      setCurrentUser((prev) => ({
+        ...(prev || {}),
+        StatsAllowedFriends: nextAllowed,
+      }));
+    } catch (error) {
+      console.error("Failed to update friend stats access", friendID, error);
+    } finally {
+      setFriendBusy(friendID, "share", false);
+    }
+  };
+
+  const handleViewFriendStats = (friendID) => {
+    navigate(`/stats?user=${encodeURIComponent(friendID)}`);
+    setOpenWidget(null);
+  };
+
+  const handleRemoveFriend = async (friendID) => {
+    if (!canManageFriends || !currentUserID || typeof setCurrentUser !== "function") return;
+
+    const confirmed = window.confirm(`Remove @${friendID} from your friends list?`);
+    if (!confirmed) return;
+
+    setFriendBusy(friendID, "remove", true);
+    try {
+      const nextFriends = (Array.isArray(currentUser?.Friends) ? currentUser.Friends : []).filter(
+        (id) => id !== friendID
+      );
+      const nextAllowed = (Array.isArray(currentUser?.StatsAllowedFriends)
+        ? currentUser.StatsAllowedFriends
+        : []
+      ).filter((id) => id !== friendID);
+
+      await updateUser(currentUserID, {
+        Friends: nextFriends,
+        StatsAllowedFriends: nextAllowed,
+      });
+
+      setCurrentUser((prev) => ({
+        ...(prev || {}),
+        Friends: nextFriends,
+        StatsAllowedFriends: nextAllowed,
+      }));
+      setFriendProfiles((prev) =>
+        prev.filter((friend) => String(friend?.UserID || friend?.userID || "") !== friendID)
+      );
+    } catch (error) {
+      console.error("Failed to remove friend", friendID, error);
+    } finally {
+      setFriendBusy(friendID, "remove", false);
+    }
+  };
+
   const widgets = [
     {
       key: "solves",
@@ -107,13 +248,61 @@ export default function ProfileHeader({ user, sessionStats, isOwn = false, onEdi
       title: "Friends",
       value: Friends.length,
       detail: Friends.length ? (
-        <ul className="friendsList">
-          {Friends.map((fid) => (
-            <li key={fid}>
-              <Link to={`/profile/${fid}`}>@{fid}</Link>
-            </li>
-          ))}
-        </ul>
+        <div className="friendsList">
+          {isLoadingFriends && !friendProfiles.length ? (
+            <div className="friendsListStatus">Loading friends...</div>
+          ) : (
+            friendProfiles.map((friend) => (
+              <div
+                key={friend?.UserID || friend?.userID}
+                className={`friendListRow ${canManageFriends ? "friendListRow--managed" : ""}`}
+              >
+                <NameTag user={friend} size="xs" />
+                {canManageFriends ? (
+                  <div className="friendListActions">
+                    <label className="friendStatsSwitch">
+                      <input
+                        type="checkbox"
+                        checked={allowedFriendSet.has(String(friend?.UserID || friend?.userID || ""))}
+                        disabled={!!friendActionBusy?.[friend?.UserID || friend?.userID]?.share}
+                        onChange={(event) =>
+                          handleToggleFriendStatsAccess(
+                            String(friend?.UserID || friend?.userID || ""),
+                            event.target.checked
+                          )
+                        }
+                      />
+                      <span className="friendStatsSwitchLabel">Share</span>
+                    </label>
+                    <button
+                      type="button"
+                      className="friendStatsButton"
+                      disabled={
+                        !Array.isArray(friend?.StatsAllowedFriends) ||
+                        !friend.StatsAllowedFriends.includes(currentUserID)
+                      }
+                      onClick={() =>
+                        handleViewFriendStats(String(friend?.UserID || friend?.userID || ""))
+                      }
+                    >
+                      Stats
+                    </button>
+                    <button
+                      type="button"
+                      className="friendRemoveButton"
+                      disabled={!!friendActionBusy?.[friend?.UserID || friend?.userID]?.remove}
+                      onClick={() =>
+                        handleRemoveFriend(String(friend?.UserID || friend?.userID || ""))
+                      }
+                    >
+                      x
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ))
+          )}
+        </div>
       ) : (
         <div>No friends yet.</div>
       ),
@@ -188,7 +377,9 @@ export default function ProfileHeader({ user, sessionStats, isOwn = false, onEdi
       {openWidget && (
         <>
           <div className="widgetOverlay" onClick={() => setOpenWidget(null)} />
-          <div className="widgetDetail">
+          <div
+            className={`widgetDetail ${openWidget === "friends" ? "widgetDetail--friends" : ""}`}
+          >
             {widgets.find((w) => w.key === openWidget)?.detail}
           </div>
         </>

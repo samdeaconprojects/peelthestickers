@@ -1,10 +1,61 @@
 .scramble-container {
-  --nav-side-gap: 10px;
+  --nav-side-gap: 4px;
   --nav-hit-size: 34px;
-  display: flex;
+  --scramble-prev-shift-x: 0px;
+  --scramble-next-shift-x: 0px;
+  --scramble-add-offset: 88px;
+  position: relative;
+  display: inline-flex !important;
+  flex: 0 1 auto !important;
   align-items: center;
   justify-content: center;
   gap: var(--nav-side-gap);
+  width: fit-content !important;
+  max-width: 100% !important;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.scramble-content {
+  position: relative;
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.scramble-click-target {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  background: none !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  display: inline-block;
+  padding: 8px 10px 12px !important;
+  margin: calc(1em - 8px) -10px -12px !important;
+  min-width: 0;
+  cursor: pointer;
+  opacity: 0.9 !important;
+}
+
+.scramble-click-target:focus,
+.scramble-click-target:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.scramble-click-target:hover {
+  opacity: 1 !important;
+}
+
+.scramble-click-target .scramble-text {
+  pointer-events: none;
+  margin: 0;
+  display: inline-block;
 }
 
 /* =========================
@@ -26,15 +77,21 @@
   height: var(--nav-hit-size);
   display: grid;
   place-items: center;
-
   cursor: pointer;
 
   opacity: 0.3;                     /* 30% default */
+  transform: translate(var(--scramble-nav-shift-x, 0px), 14px);
   transition: opacity 140ms ease, transform 120ms ease;
 }
 
 .scramble-prev-button {
-  margin-right: 12px !important;
+  --scramble-nav-shift-x: var(--scramble-prev-shift-x);
+  margin-right: 4px !important;
+}
+
+.scramble-next-button {
+  --scramble-nav-shift-x: var(--scramble-next-shift-x);
+  margin-left: -6px !important;
 }
 
 /* 100% on hover */
@@ -44,7 +101,7 @@
 
 /* press */
 .scramble-nav-btn:active {
-  transform: scale(0.94);
+  transform: translate(var(--scramble-nav-shift-x, 0px), 14px) scale(0.94);
   opacity: 1;
 }
 
@@ -90,4 +147,85 @@
 
 .scramble-text--single-line {
   white-space: nowrap;
+}
+
+.scramble-copy-indicator {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-3px);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(8, 12, 16, 0.92);
+  color: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.scramble-copy-indicator--top {
+  top: -15px;
+}
+
+.scramble-copy-indicator--visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.scramble-add-btn {
+  position: absolute;
+  left: calc(100% + var(--scramble-add-offset));
+  top: 50%;
+  transform: translateY(calc(-50% + 14px));
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 999px !important;
+  border: 1px solid rgba(255, 255, 255, 0.42) !important;
+  background: rgba(14, 23, 29, 0.92) !important;
+  color: white !important;
+  display: grid;
+  place-items: center;
+  padding: 0 !important;
+  margin: 0 !important;
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0.82;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.22);
+}
+
+.scramble-add-btn:hover {
+  opacity: 1;
+}
+
+.scramble-add-btn:active {
+  transform: translateY(calc(-50% + 14px)) scale(0.96);
+}
+
+.scramble-add-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(8, 12, 16, 0.94);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.scramble-add-btn:hover::after,
+.scramble-add-btn:focus-visible::after {
+  opacity: 1;
 }

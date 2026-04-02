@@ -73,7 +73,7 @@ function Navigation({
   const isProfilePage = location.pathname === '/profile' || location.pathname.startsWith('/profile/');
   const isStatsPage = location.pathname === '/stats';
   const isSocialPage = location.pathname === '/social';
-  const profileColor = user?.Color || user?.color || '#FFFFFF';
+  const profileColor = user?.Color || user?.color || '#2EC4B6';
 
   return (
     <nav className="Navigation">

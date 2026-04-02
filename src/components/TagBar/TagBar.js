@@ -3,6 +3,7 @@ import "./TagBar.css";
 import tagBadge from "../../assets/Tag.svg";
 import {
   DEFAULT_TAG_CONFIG,
+  getTagChipStyle,
   getSharedTagFieldMeta,
   makeEmptyTagSelection,
   normalizeTagConfig,
@@ -244,29 +245,9 @@ export default function TagBar({
 
   const isAutomaticHomeField = (field) => field === "SolveSource" || field === "TimerInput";
 
-  const resolveCrossColorTone = (value) => {
-    const normalized = String(value || "").trim().toLowerCase();
-    if (!normalized) return profileColor;
-    if (normalized === "white") return "#f4f1e8";
-    if (normalized === "yellow") return "#f2c94c";
-    if (normalized === "red") return "#eb5757";
-    if (normalized === "orange") return "#f2994a";
-    if (normalized === "blue") return "#4a90e2";
-    if (normalized === "green") return "#27ae60";
-    return profileColor;
-  };
-
   const getHomeChipStyle = (field, value) => {
     if (isAutomaticHomeField(field)) return null;
-
-    const tone =
-      safeTagColors?.[field]?.[String(value || "").trim()] ||
-      (field === "CrossColor" ? resolveCrossColorTone(value) : profileColor);
-    return {
-      "--tag-chip-color": tone,
-      "--tag-chip-border": tone,
-      "--tag-chip-bg": `${tone}22`,
-    };
+    return getTagChipStyle(field, value, safeTagColors, profileColor);
   };
 
   const renderEditor = () => (

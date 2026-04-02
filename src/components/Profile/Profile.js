@@ -32,6 +32,11 @@ const withAlpha = (hex, alpha = 0.12) => {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
+const isInteractiveFeedTarget = (target) =>
+  !!target?.closest?.(
+    "button, input, select, textarea, a, .statsToggleBtn, .statsMiniBtn, .chartScaleInput, .lineChartDot, [data-interactive='solve-point'], svg .timeLineSegment, .timeLineSegment"
+  );
+
 function normalizeSolve(item) {
   if (!item) return null;
 
@@ -223,7 +228,7 @@ function getProfileStatItemClass(chart) {
   }
 }
 
-function Profile({ user, setUser, deletePost: deletePostProp }) {
+function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = true }) {
   const { runDb } = useDbStatus();
   const { userID: paramID } = useParams();
   const isOwn = !paramID || paramID === user?.UserID;
@@ -502,6 +507,8 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
     <div className="Page profilePage">
       <ProfileHeader
         user={viewedProfile}
+        currentUser={user}
+        setCurrentUser={setUser}
         sessionStats={viewedSessionStats}
         isOwn={isOwn}
         onEditStats={openStatsEditor}
@@ -709,7 +716,7 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
       <div className="profileContent">
         {activeTab === 0 && (
           <div className="tabPanel">
-            <div className="profileStatsPage">
+            <div className={`profileStatsPage ${showPlayerBar ? "profileStatsPage--withPlayerBar" : "profileStatsPage--noPlayerBar"}`}>
               <div className="profileStatsGrid">
                 {visibleStats.map((item, idx) => {
                   const cardClassName = getProfileStatItemClass(item.chart);
@@ -829,10 +836,17 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
                       <div
                         key={`${post.DateTime || post.date}-${idx}`}
                         className="statFeedPost"
-                        onClick={() => setSelectedPost(post)}
+                        onClick={(event) => {
+                          if (isInteractiveFeedTarget(event.target)) return;
+                          setSelectedPost(post);
+                        }}
                       >
                         <div style={{ border: `2px solid ${withAlpha(viewedProfile.Color, 0.5)}`, borderRadius: 12 }}>
-                        <StatSharePost note={post.Note} statShare={statShare} />
+                        <StatSharePost
+                          note={post.Note}
+                          statShare={statShare}
+                          shareColor={viewedProfile.Color || viewedProfile.color || ""}
+                        />
                         <div className="statFeedMeta">
                           <div className="postDate">
                             {formatPostDate(post.DateTime ? new Date(post.DateTime) : post.date)}
@@ -910,6 +924,7 @@ function Profile({ user, setUser, deletePost: deletePostProp }) {
           note={selectedPost.Note}
           postType={selectedPost.PostType}
           statShare={selectedPost.StatShare || selectedPost.statShare || null}
+          postColor={viewedProfile.Color || viewedProfile.color || ""}
           onClose={() => setSelectedPost(null)}
           onDelete={() =>
             handleDeletePost(selectedPost.DateTime || selectedPost.date)

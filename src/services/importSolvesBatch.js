@@ -42,6 +42,7 @@ export async function importSolvesBatch(userID, event, sessionID, solves = [], o
       event: ev,
       sessionID: sid,
       solves: chunk,
+      skipPostWriteRecompute: true,
     });
     if (Array.isArray(out?.addedSolves) && out.addedSolves.length) {
       addedSolves.push(...out.addedSolves);
@@ -76,6 +77,10 @@ export async function importSolvesBatch(userID, event, sessionID, solves = [], o
       userID,
       event: ev,
       sessionID: sid,
+    });
+    await apiPost("/api/recomputeEventStats", {
+      userID,
+      event: ev,
     });
   } catch (e) {
     // Solves were already written; keep import successful and allow manual recompute fallback.

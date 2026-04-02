@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
+import TagBar from "../TagBar/TagBar";
 
 function BulkSolveControls({
   selectionCount,
@@ -46,6 +47,13 @@ function BulkSolveControls({
 
   getSessionsForEvent,
 
+  tagConfig,
+  cubeModelOptions = [],
+  discoveredTagOptions = {},
+  tagColors = {},
+  onTagColorsChange = null,
+  profileColor = "#2EC4B6",
+
   applyBulkTags,
   applyBulkMove,
   applyBulkDelete,
@@ -53,6 +61,9 @@ function BulkSolveControls({
 
   enableShare = true,
 }) {
+  const bulkUiRef = useRef(null);
+  const bulkModalRef = useRef(null);
+
   const bulkBarStyle = {
     position: "fixed",
     top: "10px",
@@ -108,7 +119,7 @@ function BulkSolveControls({
   };
 
   const modalCard = {
-    width: "560px",
+    width: "720px",
     maxWidth: "94vw",
     background: "#181F23",
     border: "1px solid rgba(255,255,255,0.12)",
@@ -150,9 +161,66 @@ function BulkSolveControls({
     cursor: "pointer",
   };
 
+  const bulkTags = {
+    CubeModel: bulkCubeModel || "",
+    CrossColor: bulkCrossColor || "",
+    TimerInput: bulkTimerInput || "",
+    SolveSource: bulkSolveSource || "",
+    Custom1: bulkCustom1 || "",
+    Custom2: bulkCustom2 || "",
+    Custom3: bulkCustom3 || "",
+    Custom4: bulkCustom4 || "",
+    Custom5: bulkCustom5 || "",
+  };
+
+  const clearBulkTagDraft = () => {
+    setBulkCubeModel("");
+    setBulkCrossColor("");
+    setBulkTimerInput("");
+    setBulkSolveSource("");
+    setBulkCustom1("");
+    setBulkCustom2("");
+    setBulkCustom3("");
+    setBulkCustom4("");
+    setBulkCustom5("");
+  };
+
+  const dismissBulkTags = () => {
+    clearBulkTagDraft();
+    setShowBulkTags(false);
+  };
+
+  useEffect(() => {
+    if (!selectionCount) return undefined;
+
+    const handlePointerDown = (event) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+
+      if (bulkUiRef.current?.contains(target)) return;
+      if (bulkModalRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest("[data-bulk-select-item=\"true\"]")) return;
+
+      clearBulkTagDraft();
+      setShowBulkTags(false);
+      setShowBulkMove(false);
+      setShowBulkShare(false);
+      clearSelection();
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [
+    selectionCount,
+    clearSelection,
+    setShowBulkMove,
+    setShowBulkShare,
+    setShowBulkTags,
+  ]);
+
   return (
     <>
-      <div style={bulkBarStyle} data-bulk-ui>
+      <div ref={bulkUiRef} style={bulkBarStyle} data-bulk-ui>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <div style={{ fontWeight: 900, color: "white" }}>{selectionCount} selected</div>
           <div style={{ fontSize: "12px", opacity: 0.85 }}>
@@ -190,8 +258,13 @@ function BulkSolveControls({
       </div>
 
       {showBulkTags && (
-        <div style={modalBackdrop} data-bulk-modal onMouseDown={() => setShowBulkTags(false)}>
-          <div style={modalCard} data-bulk-modal onMouseDown={(e) => e.stopPropagation()}>
+        <div style={modalBackdrop} data-bulk-modal onMouseDown={dismissBulkTags}>
+          <div
+            ref={bulkModalRef}
+            style={modalCard}
+            data-bulk-modal
+            onMouseDown={(e) => e.stopPropagation()}
+          >
             <div style={{ fontSize: "16px", fontWeight: 900, marginBottom: "6px" }}>
               Edit Tags ({selectionCount})
             </div>
@@ -213,134 +286,49 @@ function BulkSolveControls({
               </button>
             </div>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "10px",
-                marginBottom: "10px",
-              }}
-            >
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
-                  Cube Model
-                </div>
-                <input
-                  style={inputStyle}
-                  value={bulkCubeModel}
-                  onChange={(e) => setBulkCubeModel(e.target.value)}
-                  placeholder="GAN 12"
-                />
-              </div>
-
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
-                  Cross Color
-                </div>
-                <input
-                  style={inputStyle}
-                  value={bulkCrossColor}
-                  onChange={(e) => setBulkCrossColor(e.target.value)}
-                  placeholder="White"
-                />
-              </div>
-
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
-                  Timer Input
-                </div>
-                <input
-                  style={inputStyle}
-                  value={bulkTimerInput}
-                  onChange={(e) => setBulkTimerInput(e.target.value)}
-                  placeholder="Keyboard"
-                />
-              </div>
-
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
-                  Solve Source
-                </div>
-                <input
-                  style={inputStyle}
-                  value={bulkSolveSource}
-                  onChange={(e) => setBulkSolveSource(e.target.value)}
-                  placeholder="Standard"
-                />
-              </div>
+            <div style={{ marginBottom: "14px" }}>
+              <TagBar
+                tags={bulkTags}
+                onChange={(next) => {
+                  setBulkCubeModel(next?.CubeModel || "");
+                  setBulkCrossColor(next?.CrossColor || "");
+                  setBulkTimerInput(next?.TimerInput || "");
+                  setBulkSolveSource(next?.SolveSource || "");
+                  setBulkCustom1(next?.Custom1 || "");
+                  setBulkCustom2(next?.Custom2 || "");
+                  setBulkCustom3(next?.Custom3 || "");
+                  setBulkCustom4(next?.Custom4 || "");
+                  setBulkCustom5(next?.Custom5 || "");
+                }}
+                tagConfig={tagConfig}
+                cubeModelOptions={cubeModelOptions}
+                discoveredOptions={discoveredTagOptions}
+                tagColors={tagColors}
+                onTagColorsChange={onTagColorsChange}
+                profileColor={profileColor}
+                variant="stats"
+                allowAdditions={true}
+                fields={[
+                  "CubeModel",
+                  "CrossColor",
+                  "TimerInput",
+                  "SolveSource",
+                  "Custom1",
+                  "Custom2",
+                  "Custom3",
+                  "Custom4",
+                  "Custom5",
+                ]}
+              />
             </div>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "10px",
-                marginBottom: "10px",
-              }}
-            >
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
-                  Custom1
-                </div>
-                <input
-                  style={inputStyle}
-                  value={bulkCustom1}
-                  onChange={(e) => setBulkCustom1(e.target.value)}
-                  placeholder="Home"
-                />
-              </div>
-
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
-                  Custom2
-                </div>
-                <input
-                  style={inputStyle}
-                  value={bulkCustom2}
-                  onChange={(e) => setBulkCustom2(e.target.value)}
-                  placeholder="Comp"
-                />
-              </div>
-
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
-                  Custom3
-                </div>
-                <input
-                  style={inputStyle}
-                  value={bulkCustom3}
-                  onChange={(e) => setBulkCustom3(e.target.value)}
-                  placeholder=""
-                />
-              </div>
-
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
-                  Custom4
-                </div>
-                <input
-                  style={inputStyle}
-                  value={bulkCustom4}
-                  onChange={(e) => setBulkCustom4(e.target.value)}
-                  placeholder=""
-                />
-              </div>
-
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
-                  Custom5
-                </div>
-                <input
-                  style={inputStyle}
-                  value={bulkCustom5}
-                  onChange={(e) => setBulkCustom5(e.target.value)}
-                  placeholder=""
-                />
-              </div>
+            <div style={{ fontSize: "12px", opacity: 0.78, marginBottom: "10px" }}>
+              Leave a tag empty to skip it. Merge adds onto existing tags, replace overwrites the
+              shared tag fields for the selected solves.
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-              <button type="button" style={bulkBtnStyle} onClick={() => setShowBulkTags(false)}>
+              <button type="button" style={bulkBtnStyle} onClick={dismissBulkTags}>
                 Cancel
               </button>
               <button type="button" style={bulkPrimaryBtnStyle} onClick={applyBulkTags}>
@@ -353,7 +341,12 @@ function BulkSolveControls({
 
       {showBulkMove && (
         <div style={modalBackdrop} data-bulk-modal onMouseDown={() => setShowBulkMove(false)}>
-          <div style={modalCard} data-bulk-modal onMouseDown={(e) => e.stopPropagation()}>
+          <div
+            ref={bulkModalRef}
+            style={modalCard}
+            data-bulk-modal
+            onMouseDown={(e) => e.stopPropagation()}
+          >
             <div style={{ fontSize: "16px", fontWeight: 900, marginBottom: "6px" }}>
               Move Solves ({selectionCount})
             </div>
@@ -419,7 +412,12 @@ function BulkSolveControls({
 
       {enableShare && showBulkShare && (
         <div style={modalBackdrop} data-bulk-modal onMouseDown={() => setShowBulkShare(false)}>
-          <div style={modalCard} data-bulk-modal onMouseDown={(e) => e.stopPropagation()}>
+          <div
+            ref={bulkModalRef}
+            style={modalCard}
+            data-bulk-modal
+            onMouseDown={(e) => e.stopPropagation()}
+          >
             <div style={{ fontSize: "16px", fontWeight: 900, marginBottom: "6px" }}>
               Share Solves ({selectionCount})
             </div>

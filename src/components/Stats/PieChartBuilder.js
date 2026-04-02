@@ -17,6 +17,7 @@ const PieChartBuilder = ({
   showCenterLabel,
   maxLegendItems,
   promoteHoveredOverflowItem,
+  reverseLayout,
 }) => {
   const total = data.reduce((sum, entry) => sum + entry.value, 0);
   const [hoveredSlice, setHoveredSlice] = useState(null);
@@ -107,7 +108,10 @@ const PieChartBuilder = ({
   const activePercent = Math.round((activeSlice.value / total) * 100);
 
   return (
-    <div className="pieChartRoot" style={{ width, height }}>
+    <div
+      className={`pieChartRoot ${reverseLayout ? "pieChartRoot--reverse" : ""}`}
+      style={{ width, height }}
+    >
       <div className="pieChartCanvas">
         <svg
           className="pieChartSvg"
@@ -151,21 +155,31 @@ const PieChartBuilder = ({
           const percent = Math.round((entry.value / total) * 100);
           const isActive = hoveredSlice === index;
           const legendMeta = legendValueMode === "count" ? `${entry.value}` : `${entry.value} · ${percent}%`;
+          const legendColor = resolvedPalette[index % resolvedPalette.length];
           return (
             <button
               key={entry.label}
               type="button"
               className={`pieChartLegendItem ${isActive ? "is-active" : ""}`}
+              style={{
+                "--pie-legend-accent": legendColor,
+                "--pie-legend-bar-width": `${Math.max(percent, 6)}%`,
+              }}
               onClick={() => {
                 if (!interactive || typeof onSliceClick !== "function") return;
                 onSliceClick(entry.solves);
               }}
               onMouseEnter={() => setHoveredSlice(index)}
               onMouseLeave={() => setHoveredSlice(null)}
+              onFocus={() => setHoveredSlice(index)}
+              onBlur={() => setHoveredSlice(null)}
             >
+              <span className="pieChartLegendBar" aria-hidden="true">
+                <span className="pieChartLegendBarFill" />
+              </span>
               <span
                 className="pieChartLegendSwatch"
-                style={{ backgroundColor: resolvedPalette[index % resolvedPalette.length] }}
+                style={{ backgroundColor: legendColor }}
               />
               <span className="pieChartLegendText" title={entry.label}>
                 {entry.label}
@@ -206,6 +220,7 @@ PieChartBuilder.propTypes = {
   showCenterLabel: PropTypes.bool,
   maxLegendItems: PropTypes.number,
   promoteHoveredOverflowItem: PropTypes.bool,
+  reverseLayout: PropTypes.bool,
 };
 
 PieChartBuilder.defaultProps = {
@@ -219,6 +234,7 @@ PieChartBuilder.defaultProps = {
   showCenterLabel: true,
   maxLegendItems: null,
   promoteHoveredOverflowItem: false,
+  reverseLayout: false,
 };
 
 export default PieChartBuilder;

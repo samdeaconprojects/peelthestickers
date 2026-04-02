@@ -41,6 +41,10 @@
 .homeStatsSlot--summary.homeStatsSlot--right {
 }
 
+.homeStatsSlot--summary.homeStatsSlot--right {
+  left: calc(50% + clamp(195px, 21vw, 360px));
+}
+
 .homeStatsSlot--background {
   left: 50%;
   top: clamp(310px, 34vw, 380px);

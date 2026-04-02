@@ -41,17 +41,16 @@
 .averageDetailModal {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 14px;
+  gap: 34px;
   min-height: 0;
   color: #fff;
 }
 
 .averageDetailTopRow {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: flex-start;
   gap: 16px;
-  flex-wrap: wrap;
 }
 
 .averageDetailSummary {
@@ -64,9 +63,10 @@
 .averageDetailHeaderLine {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 18px;
   min-width: 0;
   flex-wrap: nowrap;
+  justify-content: flex-start;
 }
 
 .averageDetailEventIcon {
@@ -79,7 +79,7 @@
   overflow: visible;
   position: relative;
   box-sizing: border-box;
-  margin-left: -8px;
+  margin-left: -18px;
 }
 
 .averageDetailEventIconStage {
@@ -96,7 +96,7 @@
   align-items: center;
   justify-content: center;
   overflow: visible;
-  transform: translate(-6px, 4px) scale(0.56);
+  transform: translate(-10px, 4px) scale(0.56);
   transform-origin: center;
 }
 
@@ -105,10 +105,10 @@
 }
 
 .averageDetailTitleRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
+  gap: 18px;
   min-width: 0;
   flex: 1;
   min-height: 72px;
@@ -130,15 +130,17 @@
 }
 
 .averageDetailHeroValue {
-  font-size: clamp(2.45rem, 5vw, 3.3rem);
-  line-height: 0.9;
+  font-size: clamp(3.45rem, 6.5vw, 4.75rem);
+  line-height: 0.88;
   font-weight: 900;
   color: #fff;
   white-space: nowrap;
-  flex: 0 0 auto;
-  align-self: center;
-  min-width: 170px;
+  min-width: 0;
+  width: 100%;
   text-align: center;
+  justify-self: stretch;
+  align-self: center;
+  transform: translateX(-10px);
 }
 
 .averageDetailHeroDate {
@@ -148,6 +150,43 @@
   letter-spacing: 0.01em;
 }
 
+.averageDetailTagSummary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  margin-top: 14px;
+}
+
+.averageDetailTagGroup {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  align-content: start;
+}
+
+.averageDetailTagGroupLabel {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.averageDetailTagGroupValues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.averageDetailTagChip.tagHomeChip {
+  width: auto;
+  min-width: 0;
+  opacity: 1;
+}
+
 .averageDetailViewToggle {
   display: inline-flex;
   gap: 6px;
@@ -155,6 +194,7 @@
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.12);
+  justify-self: end;
 }
 
 .averageDetailViewBtn {
@@ -253,6 +293,10 @@
 }
 
 @media (max-width: 720px) {
+  .averageDetailTopRow {
+    grid-template-columns: 1fr;
+  }
+
   .averageDetailOverlay.statFocusOverlay {
     padding: 12px;
   }
@@ -267,6 +311,15 @@
 
   .averageDetailHeaderLine {
     align-items: center;
+  }
+
+  .averageDetailTitleRow {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .averageDetailTitleCopy {
+    text-align: center;
   }
 
   .averageDetailEventIcon {

@@ -5,7 +5,15 @@ import TimeTable from "../Stats/TimeTable";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import { currentEventToString } from "../scrambleUtils";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
+import tagBadge from "../../assets/Tag.svg";
+import {
+  DEFAULT_TAG_CONFIG,
+  getSharedTagFieldMeta,
+  getSolveTagValue,
+  getTagChipStyle,
+} from "../TagBar/tagUtils";
 import "./AverageDetailModal.css";
+import "../TagBar/TagBar.css";
 
 function getSolvePenalty(solve) {
   return String(solve?.penalty ?? solve?.Penalty ?? "").toUpperCase();
@@ -35,6 +43,14 @@ function getSolveEvent(solve) {
 
 function getSolveScramble(solve) {
   return solve?.scramble || solve?.Scramble || "";
+}
+
+function getSolveSessionID(solve) {
+  return solve?.sessionID || solve?.SessionID || solve?.SessionId || solve?.sessionId || "";
+}
+
+function getSolveSessionName(solve) {
+  return solve?.sessionName || solve?.SessionName || solve?.session || solve?.Session || "";
 }
 
 function parseValidDate(dateLike) {
@@ -95,21 +111,76 @@ function formatSolveRangeLabel(items) {
   return `${formatDateOnly(first)} – ${formatDateOnly(last)}`;
 }
 
-function AverageDetailModal({ isOpen, title, subtitle, solves, onClose, onSolveOpen }) {
+function getSolveSessionIndex(solve) {
+  const value = Number(solve?.fullIndex);
+  return Number.isFinite(value) ? value : null;
+}
+
+function formatSessionIndexLabel(items) {
+  const indices = (Array.isArray(items) ? items : [])
+    .map(getSolveSessionIndex)
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+
+  if (!indices.length) return null;
+
+  const firstSolve = Array.isArray(items) ? items.find(Boolean) : null;
+  const explicitSessionName = String(getSolveSessionName(firstSolve) || "").trim();
+  const sessionID = String(getSolveSessionID(firstSolve) || "").trim();
+  const sessionLabel = explicitSessionName || (sessionID === "main" ? "Main" : sessionID) || "Session";
+
+  const display = indices.map((value) => value + 1);
+  const first = display[0];
+  const last = display[display.length - 1];
+  const isContiguous = display.every((value, index) => index === 0 || value === display[index - 1] + 1);
+
+  if (display.length === 1) return `${sessionLabel} ${first}`;
+  if (isContiguous) return `${sessionLabel} ${first}-${last}`;
+  return `${sessionLabel} ${display.join(", ")}`;
+}
+
+function AverageDetailModal({
+  isOpen,
+  title,
+  subtitle,
+  solves,
+  onClose,
+  onSolveOpen,
+  tagConfig = DEFAULT_TAG_CONFIG,
+  tagColors = {},
+  profileColor = "#2EC4B6",
+}) {
   const [displayMode, setDisplayMode] = useState("items");
 
   const detail = useMemo(() => {
     const items = Array.isArray(solves) ? solves.filter(Boolean) : [];
+    const tagFields = getSharedTagFieldMeta(tagConfig);
     if (!items.length) {
       return {
         average: null,
         rows: [],
         solveRangeLabel: null,
+        sessionIndexLabel: null,
+        tagGroups: [],
       };
     }
 
     const values = items.map(getSolveValue);
     const result = calculateAverage(values, true);
+    const tagGroups = tagFields
+      .map((fieldMeta) => {
+        const valuesForField = Array.from(
+          new Set(items.map((solve) => getSolveTagValue(solve, fieldMeta.field)).filter(Boolean))
+        ).sort((a, b) => a.localeCompare(b));
+
+        if (!valuesForField.length) return null;
+
+        return {
+          ...fieldMeta,
+          values: valuesForField,
+        };
+      })
+      .filter(Boolean);
 
     return {
       average: result?.average ?? null,
@@ -120,8 +191,10 @@ function AverageDetailModal({ isOpen, title, subtitle, solves, onClose, onSolveO
       event: getSolveEvent(items[0]),
       scramble: getSolveScramble(items[0]),
       solveRangeLabel: formatSolveRangeLabel(items),
+      sessionIndexLabel: formatSessionIndexLabel(items),
+      tagGroups,
     };
-  }, [solves]);
+  }, [solves, tagConfig]);
 
   const itemRowSize = detail.rows.length <= 5 ? 5 : 12;
 
@@ -157,6 +230,9 @@ function AverageDetailModal({ isOpen, title, subtitle, solves, onClose, onSolveO
                   {detail.solveRangeLabel ? (
                     <div className="averageDetailHeroDate">{detail.solveRangeLabel}</div>
                   ) : null}
+                  {detail.sessionIndexLabel ? (
+                    <div className="averageDetailHeroDate">{detail.sessionIndexLabel}</div>
+                  ) : null}
                 </div>
                 <div className="averageDetailHeroValue">
                   {detail.average === "DNF"
@@ -167,7 +243,32 @@ function AverageDetailModal({ isOpen, title, subtitle, solves, onClose, onSolveO
                 </div>
               </div>
             </div>
-
+            {detail.tagGroups.length ? (
+              <div className="averageDetailTagSummary" aria-label="Tags used in this average">
+                {detail.tagGroups.map((group) => (
+                  <div className="averageDetailTagGroup" key={group.field}>
+                    <div className="averageDetailTagGroupLabel">{group.label}</div>
+                    <div className="averageDetailTagGroupValues">
+                      {group.values.map((value) => (
+                        <div
+                          key={`${group.field}-${value}`}
+                          className="tagHomeChip is-set averageDetailTagChip"
+                          style={getTagChipStyle(group.field, value, tagColors, profileColor)}
+                          title={value}
+                        >
+                          <span className="tagHomeChipIconWrap" aria-hidden="true">
+                            <img src={tagBadge} alt="" className="tagHomeChipIcon" />
+                          </span>
+                          <span className="tagHomeChipText">
+                            <span className="tagHomeChipValue">{value}</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
           <div className="averageDetailViewToggle" role="tablist" aria-label="Average detail view">
             <button
@@ -192,7 +293,13 @@ function AverageDetailModal({ isOpen, title, subtitle, solves, onClose, onSolveO
             key={displayMode}
             solves={detail.rows.map((row, idx) => ({
               ...row.solve,
-              fullIndex: idx,
+              fullIndex:
+                Number.isFinite(Number(row.solve?.fullIndex))
+                  ? Number(row.solve.fullIndex)
+                  : idx,
+              sessionDisplayNumber: Number.isFinite(Number(row.solve?.fullIndex))
+                ? Number(row.solve.fullIndex) + 1
+                : undefined,
               datetime: getSolveDateTime(row.solve),
             }))}
             onSolveOpen={onSolveOpen}
@@ -218,6 +325,9 @@ AverageDetailModal.propTypes = {
   solves: PropTypes.arrayOf(PropTypes.object),
   onClose: PropTypes.func,
   onSolveOpen: PropTypes.func,
+  tagConfig: PropTypes.object,
+  tagColors: PropTypes.object,
+  profileColor: PropTypes.string,
 };
 
 export default AverageDetailModal;

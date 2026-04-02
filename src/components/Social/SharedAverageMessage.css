@@ -101,7 +101,8 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 10px;
+  gap: 6px;
+  padding-bottom: 16px;
 }
 
 .sharedAverageGroupHeader {
@@ -112,40 +113,43 @@
   flex-wrap: wrap;
 }
 
-.sharedAverageGroupRoster {
-  display: grid;
-  grid-template-columns: repeat(var(--shared-group-cols, 3), minmax(0, 1fr));
-  gap: 8px;
+.sharedAverageGroupHeader--row {
+  flex-wrap: nowrap;
+  gap: 16px;
 }
 
-.sharedAverageGroupMember {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
-  color: white;
-  min-width: 0;
-  padding: 10px 12px;
-  text-align: left;
+.sharedAverageGroupTitleRow {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 14px;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
-.sharedAverageGroupMember.isYou {
-  border-color: rgba(var(--youRgb), 0.45);
-  background: rgba(var(--youRgb), 0.10);
-}
-
-.sharedAverageGroupMemberName,
-.sharedAverageGroupHeaderName {
-  font-size: 12px;
+.sharedAverageCenterTitle.sharedAverageCenterTitle--group {
+  font-size: 28px;
   font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-transform: capitalize;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.sharedAverageGroupMemberStatLabel,
+.sharedAverageGroupToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.sharedAverageViewToggle--groupTitle {
+  align-self: center;
+  flex: 0 0 auto;
+}
+
 .sharedAverageGroupHeaderLabel {
   font-size: 10px;
   font-weight: 900;
@@ -153,22 +157,41 @@
   opacity: 0.7;
 }
 
-.sharedAverageGroupMemberAvg,
 .sharedAverageGroupHeaderAvg {
   font-size: 20px;
   font-weight: 900;
   line-height: 1.1;
 }
 
-.sharedAverageGroupMemberMeta,
-.sharedAverageGroupHeaderMeta {
-  font-size: 10px;
-  font-weight: 800;
-  opacity: 0.72;
+.sharedAverageGroupHeaderMetaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .sharedAverageGroupHeaderMeta {
-  line-height: 1.3;
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0.8;
+}
+
+.sharedAverageGroupHeaderMeta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  line-height: 1.2;
+}
+
+.sharedAverageGroupHeaderMeta--best {
+  color: #38d6c9;
+}
+
+.sharedAverageGroupHeaderMeta--worst {
+  color: #ff6078;
 }
 
 .sharedAverageSide {
@@ -458,6 +481,36 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
+.sharedAverageControls--group {
+  display: none;
+}
+
+.sharedAverageActions--group {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1100px) {
+  .sharedAverageGroupHeader--row {
+    flex-wrap: wrap;
+  }
+
+  .sharedAverageGroupTitleRow {
+    flex-wrap: wrap;
+  }
+
+  .sharedAverageCenterTitle.sharedAverageCenterTitle--group {
+    font-size: 24px;
+  }
+
+  .sharedAverageGroupToolbar {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 .sharedAverageViewToggle button {
   min-height: 30px;
   padding: 0 12px;
@@ -550,6 +603,7 @@
 .sharedAverageTable--group thead th {
   padding: 0 8px 10px;
   border: none;
+  vertical-align: top;
 }
 
 .sharedAverageTable--group tbody td {
@@ -566,6 +620,64 @@
   text-align: center;
 }
 
+.sharedAverageGroupNameTag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 72%;
+  min-width: 0;
+  flex: 0 1 auto;
+  border: 2px solid #ffffff;
+  border-radius: 8px;
+  padding: 4px 10px;
+  min-height: 40px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.sharedAverageGroupHeaderTopRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sharedAverageGroupHeaderMetric {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: center;
+  min-width: 0;
+  flex: 0 0 auto;
+  padding-left: 6px;
+  gap: 8px;
+}
+
+.sharedAverageGroupHeaderMetricLabel {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  opacity: 0.72;
+  text-transform: uppercase;
+  order: 2;
+}
+
+.sharedAverageGroupNameTag .nametagCube {
+  margin-right: 18px;
+}
+
+.sharedAverageGroupNameTag .nametagText {
+  min-width: 0;
+}
+
+.sharedAverageGroupNameTag .name-tag-text {
+  display: block;
+  font-size: 10pt;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sharedAverageGroupHeaderBtn {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -573,11 +685,185 @@
   background: rgba(255, 255, 255, 0.04);
   color: white;
   min-width: 0;
-  padding: 10px 8px;
+  min-height: 82px;
+  padding: 8px 12px 8px 14px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  align-items: center;
+  gap: 6px;
+  align-items: stretch;
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+}
+
+.sharedAverageGroupHeaderCell {
+  min-width: 240px;
+}
+
+.sharedAverageGroupHeaderAvg {
+  font-size: 30px;
+  line-height: 1;
+  order: 1;
+}
+
+.sharedAverageGroupHeaderMetaRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.sharedAverageTable--groupCompact .sharedAverageGroupHeaderCell {
+  min-width: 168px;
+}
+
+.sharedAverageTable--groupCompact .sharedAverageGroupHeaderBtn {
+  min-height: 72px;
+  padding: 6px 8px 6px 10px;
+  gap: 5px;
+}
+
+.sharedAverageTable--groupCompact .sharedAverageGroupHeaderTopRow {
+  gap: 6px;
+}
+
+.sharedAverageTable--groupCompact .sharedAverageGroupNameTag {
+  padding: 3px 8px;
+  min-height: 36px;
+  border-radius: 8px;
+  border-width: 2px;
+  max-width: 68%;
+}
+
+.sharedAverageTable--groupCompact .sharedAverageGroupNameTag .nametagCube {
+  margin-right: 16px;
+}
+
+.sharedAverageTable--groupCompact .sharedAverageGroupNameTag .name-tag-text {
+  font-size: 9pt;
+}
+
+.sharedAverageTable--groupCompact .sharedAverageGroupHeaderMetricLabel {
+  font-size: 8px;
+}
+
+.sharedAverageTable--groupCompact .sharedAverageGroupHeaderAvg {
+  font-size: 22px;
+}
+
+.sharedAverageTable--groupCompact .sharedAverageGroupHeaderMetaRow {
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.sharedAverageTable--groupCompact .sharedAverageGroupHeaderMeta {
+  font-size: 10px;
+}
+
+.sharedAverageTable--groupCompact .sharedAverageGroupTimeCell .sharedAverageTimeItem {
+  min-width: 0;
+  width: 100%;
+  padding: 3px 4px;
+  border-radius: 7px;
+}
+
+.sharedAverageTable--groupCompact .sharedAverageTimeItemPending .time-item {
+  min-width: 3.8ch;
+}
+
+.sharedAverageTable--groupCompact .sharedAveragePillWrap > .TimeItem {
+  min-width: 0;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupHeaderCell {
+  min-width: 124px;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupHeaderBtn {
+  min-height: 60px;
+  padding: 4px 6px 4px 8px;
+  gap: 4px;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupHeaderTopRow {
+  gap: 4px;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupNameTag {
+  padding: 2px 6px;
+  min-height: 26px;
+  border-radius: 6px;
+  border-width: 1px;
+  max-width: 64%;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupNameTag .nametagCube {
+  margin-right: 10px;
+  transform: scale(0.7);
+  transform-origin: left center;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupNameTag .name-tag-text {
+  font-size: 7pt;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupHeaderAvg {
+  font-size: 19px;
+  line-height: 1;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupHeaderMetricLabel {
+  font-size: 7px;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupHeaderMetaRow {
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupHeaderMeta {
+  font-size: 9px;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupTableIndex {
+  width: 40px;
+}
+
+.sharedAverageTable--groupDense .sharedAverageIdx {
+  width: 36px;
+  font-size: 12px;
+}
+
+.sharedAverageTable--groupDense .sharedAverageIdxBadge {
+  min-width: 22px;
+  height: 14px;
+  font-size: 8px;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupTimeCell .sharedAverageTimeItem,
+.sharedAverageTable--groupDense .sharedAveragePillWrap > .TimeItem {
+  min-width: 0;
+  width: 100%;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupTimeCell .sharedAverageTimeItem {
+  padding: 2px 2px;
+  border-radius: 6px;
+}
+
+.sharedAverageTable--groupDense .sharedAverageGroupTimeCell .time-item {
+  font-size: 10px;
+}
+
+.sharedAverageTable--groupDense .sharedAverageTimeItemPending .time-item {
+  min-width: 3.2ch;
+}
+
+@media (max-width: 900px) {
+  .sharedAverageGroupHeaderCell {
+    min-width: 160px;
+  }
 }
 
 .sharedAverageIdx {
@@ -710,6 +996,22 @@
 .sharedAverageTimeItemPending {
   opacity: 0.68;
   border-style: dashed;
+}
+
+.sharedAverageTimeItemPending .time-item {
+  position: relative;
+  min-width: 4.5ch;
+  color: transparent;
+}
+
+.sharedAverageTimeItemPending .time-item::after {
+  content: "-";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.68);
 }
 
 .sharedAveragePillWrap > .TimeItem {

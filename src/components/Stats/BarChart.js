@@ -60,10 +60,45 @@ function formatBucketAxisLabel(value) {
   return String(seconds);
 }
 
-function buildHistogramSeries(solves, style = null, fallbackColor = "#2EC4B6") {
-  const times = (Array.isArray(solves) ? solves : []).map(getSolveMs);
-  const numericTimes = times.filter((value) => typeof value === "number" && isFinite(value));
-  const dnfCount = times.filter((value) => value === "DNF").length;
+function buildHistogramSeries(
+  solves,
+  style = null,
+  fallbackColor = "#2EC4B6",
+  histogramCounts = null
+) {
+  const counts = new Map();
+  let numericTimes = [];
+  let dnfCount = 0;
+
+  if (histogramCounts && typeof histogramCounts === "object" && !Array.isArray(histogramCounts)) {
+    for (const [rawKey, rawValue] of Object.entries(histogramCounts)) {
+      const count = Number(rawValue || 0);
+      if (!count) continue;
+      if (String(rawKey).toUpperCase() === "DNF") {
+        dnfCount += count;
+        counts.set("DNF", (counts.get("DNF") || 0) + count);
+        continue;
+      }
+
+      const seconds = Number(rawKey);
+      if (!Number.isFinite(seconds)) continue;
+      counts.set(seconds, (counts.get(seconds) || 0) + count);
+      for (let i = 0; i < count; i += 1) {
+        numericTimes.push(seconds * 1000);
+      }
+    }
+  } else {
+    const times = (Array.isArray(solves) ? solves : []).map(getSolveMs);
+    numericTimes = times.filter((value) => typeof value === "number" && isFinite(value));
+    dnfCount = times.filter((value) => value === "DNF").length;
+
+    numericTimes.forEach((time) => {
+      const bucket = Math.floor(time / 1000);
+      counts.set(bucket, (counts.get(bucket) || 0) + 1);
+    });
+
+    if (dnfCount > 0) counts.set("DNF", dnfCount);
+  }
 
   if (numericTimes.length === 0 && dnfCount === 0) {
     return { minTimeSec: 0, maxTimeSec: 0, buckets: [] };
@@ -71,14 +106,6 @@ function buildHistogramSeries(solves, style = null, fallbackColor = "#2EC4B6") {
 
   const minTimeSec = numericTimes.length ? Math.floor(Math.min(...numericTimes) / 1000) : 0;
   const maxTimeSec = numericTimes.length ? Math.ceil(Math.max(...numericTimes) / 1000) : minTimeSec;
-  const counts = new Map();
-
-  numericTimes.forEach((time) => {
-    const bucket = Math.floor(time / 1000);
-    counts.set(bucket, (counts.get(bucket) || 0) + 1);
-  });
-
-  if (dnfCount > 0) counts.set("DNF", dnfCount);
 
   const orderedKeys = Array.from(counts.keys()).sort((a, b) => {
     if (a === "DNF") return 1;
@@ -112,6 +139,7 @@ function buildHistogramSeries(solves, style = null, fallbackColor = "#2EC4B6") {
 
 function BarChart({
   solves,
+  histogramCounts = null,
   comparisonSeries = [],
   seriesStyle = null,
   legendItems = [],
@@ -153,11 +181,16 @@ function BarChart({
   const hasComparison = Array.isArray(comparisonSeries) && comparisonSeries.length > 0;
 
   const computed = useMemo(() => {
-    const primary = buildHistogramSeries(solves, seriesStyle, "#2EC4B6");
+    const primary = buildHistogramSeries(solves, seriesStyle, "#2EC4B6", histogramCounts);
     const secondary = (comparisonSeries || []).map((series, index) => ({
       id: series?.id || `compare-${index}`,
       label: series?.label || `Compare ${index + 1}`,
-      ...buildHistogramSeries(series?.solves || [], series?.style || null, "#7c8cff"),
+      ...buildHistogramSeries(
+        series?.solves || [],
+        series?.style || null,
+        "#7c8cff",
+        series?.histogramCounts || null
+      ),
     }));
 
     if (!hasComparison) {
@@ -217,7 +250,7 @@ function BarChart({
       groups,
       maxCount,
     };
-  }, [comparisonSeries, hasComparison, legendItems, seriesStyle, solves]);
+  }, [comparisonSeries, hasComparison, histogramCounts, legendItems, seriesStyle, solves]);
 
   if (!computed) {
     return (

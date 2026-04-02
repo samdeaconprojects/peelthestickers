@@ -29,6 +29,11 @@ import TagBar from "./components/TagBar/TagBar";
 import { useSettings } from "./contexts/SettingsContext";
 import { DbStatusProvider } from "./contexts/DbStatusContext";
 import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import {
+  eventMatchesEventBinding,
+  eventMatchesShortcut,
+  isEditableTarget,
+} from "./utils/keybindings";
 import { getUser } from "./services/getUser";
 import { updateUser } from "./services/updateUser";
 import { getSessions } from "./services/getSessions";
@@ -61,11 +66,17 @@ import {
   setGlobalScrambleMode,
 } from "./services/scrambleService";
 
-import { DEFAULT_EVENTS } from "./defaultEvents";
+import {
+  DEFAULT_EVENTS,
+  getRelayEventName,
+  getRelaySessionOptions,
+  isRelayEventId,
+} from "./defaultEvents";
 import {
   addTagCatalogValue,
   collectTagSelectionOptions,
   DEFAULT_TAG_CONFIG,
+  getCubeModelOptionsForEvent as getConfiguredCubeModelOptionsForEvent,
   getTagCatalogOptionsForEvent,
   getTagColorMapForEvent,
   getTagScopeEventKey,
@@ -143,6 +154,7 @@ function tokenProgressToStepProgress(scramble, tokenProgress) {
 
 function getCubeCollectionOptionsForEvent(cubeCollection, eventCode) {
   const ev = String(eventCode || "").trim().toUpperCase();
+  const scopedEvents = new Set([ev, getTagScopeEventKey(ev)].filter(Boolean));
   const globalOptions = new Set();
   const scopedOptions = new Set();
 
@@ -161,7 +173,7 @@ function getCubeCollectionOptionsForEvent(cubeCollection, eventCode) {
     const value = String(rawValue || "").trim();
     if (!value) continue;
 
-    if (scope === ev) scopedOptions.add(value);
+    if (scopedEvents.has(scope)) scopedOptions.add(value);
   }
 
   return Array.from(new Set([...scopedOptions, ...globalOptions])).sort((a, b) =>
@@ -185,6 +197,7 @@ function normalizeSharedEventKey(evt) {
 
 function sharedEventLabel(evt) {
   const key = normalizeSharedEventKey(evt);
+  if (isRelayEventId(key)) return getRelayEventName(key) || "Relay";
   const labels = {
     "222": "2x2",
     "333": "3x3",
@@ -199,9 +212,45 @@ function sharedEventLabel(evt) {
     "SKEWB": "Skewb",
     "SQ1": "Square-1",
     "CLOCK": "Clock",
-    RELAY: "Relay",
   };
   return labels[key] || key;
+}
+
+function getBrowserTimeZone() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return String(tz || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function parseManualSolveTimeToMs(value) {
+  if (value == null) return null;
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  if (text.includes(":")) {
+    const parts = text.split(":").map((part) => Number(part));
+    if (parts.some((part) => !Number.isFinite(part) || part < 0)) return null;
+
+    if (parts.length === 2) {
+      const [minutes, seconds] = parts;
+      return Math.round(minutes * 60000 + seconds * 1000);
+    }
+
+    if (parts.length === 3) {
+      const [hours, minutes, seconds] = parts;
+      return Math.round(hours * 3600000 + minutes * 60000 + seconds * 1000);
+    }
+
+    return null;
+  }
+
+  const seconds = Number(text);
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  return Math.round(seconds * 1000);
 }
 
 function summarizeSharedPlan(events = [], fallbackEvent = "333") {
@@ -538,6 +587,12 @@ function App() {
   const [currentEvent, setCurrentEvent] = useState("333");
   const [sessionStats, setSessionStats] = useState({});
   const [statsMutationTick, setStatsMutationTick] = useState(0);
+  const [sharedStatsUser, setSharedStatsUser] = useState(null);
+  const [sharedStatsSessions, setSharedStatsSessions] = useState({});
+  const [sharedStatsSessionsList, setSharedStatsSessionsList] = useState([]);
+  const [sharedStatsSessionStats, setSharedStatsSessionStats] = useState({});
+  const [sharedStatsLoading, setSharedStatsLoading] = useState(false);
+  const [sharedStatsDeniedReason, setSharedStatsDeniedReason] = useState("");
 
   const [scrambles, setScrambles] = useState({});
   const [sessions, setSessions] = useState(INITIAL_SESSIONS);
@@ -547,19 +602,31 @@ function App() {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [showSignInPopup, setShowSignInPopup] = useState(false);
   const [showSettingsPopup, setShowSettingsPopup] = useState(false);
+  const [showManualSolveModal, setShowManualSolveModal] = useState(false);
+  const [manualSolveTime, setManualSolveTime] = useState("");
+  const [manualSolveScramble, setManualSolveScramble] = useState("");
+  const [manualSolveError, setManualSolveError] = useState("");
+  const [manualSolveSaving, setManualSolveSaving] = useState(false);
+  const [deleteUndoState, setDeleteUndoState] = useState(null);
+  const [showDeleteUndoToast, setShowDeleteUndoToast] = useState(false);
   const [statsSettingsContext, setStatsSettingsContext] = useState({
     eventLabel: currentEvent || "333",
     sessionLabel: currentSession || "main",
     isAllEventsMode: false,
     canRecomputeOverall: false,
     canImport: false,
+    canExport: false,
     loadingOverallStats: false,
     recomputeStatusText: "",
     importBusy: false,
+    exportBusy: false,
     isStatsRouteActive: false,
   });
   const [statsRecomputeRequest, setStatsRecomputeRequest] = useState(0);
   const [statsImportRequest, setStatsImportRequest] = useState(0);
+  const [statsExportRequest, setStatsExportRequest] = useState(0);
+  const [showStatsImportModal, setShowStatsImportModal] = useState(false);
+  const [showStatsExportModal, setShowStatsExportModal] = useState(false);
   const [selectedAverageSolves, setSelectedAverageSolves] = useState([]);
   const [selectedAverageSolve, setSelectedAverageSolve] = useState(null);
   const [sharedSession, setSharedSession] = useState(null);
@@ -592,6 +659,7 @@ function App() {
 
   const [scrambleProgress, setScrambleProgress] = useState(0);
   const [scrambleProgressTotal, setScrambleProgressTotal] = useState(0);
+  const [scrambleCopyFeedback, setScrambleCopyFeedback] = useState("idle");
 
   const [dbStatus, setDbStatus] = useState({
     phase: "idle",
@@ -599,10 +667,19 @@ function App() {
     tick: 0,
   });
 
+  const statsSharedUserID = useMemo(() => {
+    if (location.pathname !== "/stats") return "";
+    const raw = new URLSearchParams(location.search).get("user");
+    return String(raw || "").trim();
+  }, [location.pathname, location.search]);
+
+  const isViewingSharedStats = !!statsSharedUserID && statsSharedUserID !== String(user?.UserID || "").trim();
+
   const sharedReturnTargetRef = useRef(null);
   const currentEventRef = useRef(currentEvent);
   const displayedScrambleRef = useRef("");
   const scrambleModeRef = useRef(settings?.scrambleMode || "random-state");
+  const scrambleCopyTimeoutRef = useRef(null);
 
   const dbSuccessTimeoutRef = useRef(null);
   const dbErrorTimeoutRef = useRef(null);
@@ -611,6 +688,7 @@ function App() {
   const settingsAutosaveTimeoutRef = useRef(null);
   const tagCatalogAutosaveTimeoutRef = useRef(null);
   const tagColorCatalogAutosaveTimeoutRef = useRef(null);
+  const deleteUndoToastTimeoutRef = useRef(null);
   const lastSavedSettingsJsonRef = useRef("");
   const skipNextSettingsAutosaveRef = useRef(false);
 
@@ -678,6 +756,7 @@ function App() {
       if (settingsAutosaveTimeoutRef.current) clearTimeout(settingsAutosaveTimeoutRef.current);
       if (tagCatalogAutosaveTimeoutRef.current) clearTimeout(tagCatalogAutosaveTimeoutRef.current);
       if (tagColorCatalogAutosaveTimeoutRef.current) clearTimeout(tagColorCatalogAutosaveTimeoutRef.current);
+      if (deleteUndoToastTimeoutRef.current) clearTimeout(deleteUndoToastTimeoutRef.current);
     };
   }, []);
 
@@ -723,6 +802,25 @@ function App() {
   useEffect(() => {
     if (!isSignedIn || !user?.UserID) return;
 
+    const browserTimeZone = getBrowserTimeZone();
+    if (!browserTimeZone) return;
+
+    const savedTimeZone = String(
+      settings?.timeZone ||
+        settings?.TimeZone ||
+        settings?.timezone ||
+        settings?.Timezone ||
+        ""
+    ).trim();
+
+    if (savedTimeZone === browserTimeZone) return;
+
+    updateSettings({ timeZone: browserTimeZone });
+  }, [isSignedIn, user?.UserID, settings?.timeZone, settings?.TimeZone, settings?.timezone, settings?.Timezone, updateSettings]);
+
+  useEffect(() => {
+    if (!isSignedIn || !user?.UserID) return;
+
     const settingsJson = JSON.stringify(settings || {});
 
     if (skipNextSettingsAutosaveRef.current) {
@@ -755,12 +853,10 @@ function App() {
     };
   }, [settings, isSignedIn, user?.UserID]);
 
-  const eventKey =
-    String(currentEvent || "").toUpperCase() === "RELAY" ? "RELAY" : currentEvent;
+  const eventKey = currentEvent;
   const tagScopeEventKey = useMemo(() => getTagScopeEventKey(eventKey), [eventKey]);
 
   const isRelayActive =
-    String(currentEvent || "").toUpperCase() === "RELAY" &&
     activeSessionObj?.SessionType === "RELAY" &&
     relayLegs.length > 0;
 
@@ -889,6 +985,20 @@ function App() {
   }, [displayedScramble]);
 
   useEffect(() => {
+    if (!showManualSolveModal) return undefined;
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape" && !manualSolveSaving) {
+        setShowManualSolveModal(false);
+        setManualSolveError("");
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showManualSolveModal, manualSolveSaving]);
+
+  useEffect(() => {
     const onCubeSolve = (e) => {
       console.log("SMART SOLVE", e.detail);
     };
@@ -986,10 +1096,7 @@ function App() {
     if (!String(base.SolveSource || "").trim()) {
       if (practiceMode) base.SolveSource = "Practice";
       else if (sharedSession?.sharedID) base.SolveSource = "Shared";
-      else if (
-        String(currentEvent || "").toUpperCase() === "RELAY" &&
-        activeSessionObj?.SessionType === "RELAY"
-      ) {
+      else if (activeSessionObj?.SessionType === "RELAY") {
         base.SolveSource = "Relay";
       } else if (String(settings?.timerInput || "").trim() === "GAN Cube") {
         base.SolveSource = "SmartCube";
@@ -1005,13 +1112,31 @@ function App() {
     settings?.timerInput,
     practiceMode,
     sharedSession?.sharedID,
-    currentEvent,
     activeSessionObj?.SessionType,
   ]);
 
   const currentTagColors = useMemo(
     () => getTagColorMapForEvent(tagColorCatalog, eventKey),
     [tagColorCatalog, eventKey]
+  );
+
+  const scopedCubeModelConfigOptions = useMemo(
+    () => getConfiguredCubeModelOptionsForEvent(tagConfig, eventKey),
+    [tagConfig, eventKey]
+  );
+
+  const homeTagConfig = useMemo(
+    () => ({
+      ...tagConfig,
+      Fixed: {
+        ...(tagConfig?.Fixed || {}),
+        CubeModel: {
+          ...(tagConfig?.Fixed?.CubeModel || {}),
+          options: scopedCubeModelConfigOptions,
+        },
+      },
+    }),
+    [scopedCubeModelConfigOptions, tagConfig]
   );
 
   useEffect(() => {
@@ -1025,7 +1150,8 @@ function App() {
     if (t.CubeModel) payload.CubeModel = t.CubeModel;
     if (t.CrossColor) payload.CrossColor = t.CrossColor;
 
-    payload.TimerInput = settings.timerInput || "Keyboard";
+    payload.TimerInput =
+      payload.TimerInput || t.TimerInput || settings.timerInput || "Keyboard";
 
     if (t.Custom1) payload.Custom1 = t.Custom1;
     if (t.Custom2) payload.Custom2 = t.Custom2;
@@ -1042,30 +1168,6 @@ function App() {
 
     return payload;
   };
-
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (!e.altKey) return;
-
-      const key = e.key.toUpperCase();
-      const bindings = settings.eventKeyBindings || {};
-
-      for (const [eventCode, combo] of Object.entries(bindings)) {
-        const parts = String(combo || "").split("+");
-        const modifier = parts[0];
-        const boundKey = parts[1] || "";
-        if (modifier === "Alt" && boundKey.toUpperCase() === key) {
-          const savedSession = settings.lastSessionByEvent?.[eventCode] || "main";
-          setCurrentEvent(eventCode);
-          setCurrentSession(savedSession);
-          break;
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [settings.eventKeyBindings, settings.lastSessionByEvent]);
 
   useEffect(() => {
     if (!isSignedIn || !user?.UserID) return;
@@ -1244,9 +1346,7 @@ function App() {
   }, [sharedIndex, sharedSession, user?.UserID, currentEvent]);
 
   useEffect(() => {
-    const isRelay =
-      String(currentEvent || "").toUpperCase() === "RELAY" &&
-      activeSessionObj?.SessionType === "RELAY";
+    const isRelay = activeSessionObj?.SessionType === "RELAY";
 
     if (!isRelay) return;
 
@@ -1458,9 +1558,7 @@ function App() {
   );
 
   const goForwardScramble = useCallback(async () => {
-    const isRelay =
-      String(currentEvent || "").toUpperCase() === "RELAY" &&
-      activeSessionObj?.SessionType === "RELAY";
+    const isRelay = activeSessionObj?.SessionType === "RELAY";
 
     if (isRelay) {
       await resetRelaySet();
@@ -1473,7 +1571,6 @@ function App() {
       await skipToNextScramble();
     }
   }, [
-    currentEvent,
     activeSessionObj,
     resetRelaySet,
     sharedSession,
@@ -1481,9 +1578,7 @@ function App() {
   ]);
 
   const goBackwardScramble = useCallback(async () => {
-    const isRelay =
-      String(currentEvent || "").toUpperCase() === "RELAY" &&
-      activeSessionObj?.SessionType === "RELAY";
+    const isRelay = activeSessionObj?.SessionType === "RELAY";
 
     if (isRelay) {
       await resetRelaySet();
@@ -1553,6 +1648,8 @@ function App() {
     return {
       solveRef: item?.SK || null,
       createdAt: item?.CreatedAt || null,
+      datetime: item?.CreatedAt || item?.createdAt || null,
+      sessionID: item?.SessionID || item?.sessionID || "main",
 
       time: isDNF ? Number.MAX_SAFE_INTEGER : finalTimeMs,
       rawTimeMs,
@@ -1631,8 +1728,41 @@ function App() {
     setPracticeSolves([]);
   };
 
-  const deletePracticeTime = (index) => {
-    setPracticeSolves((prev) => prev.filter((_, i) => i !== index));
+  const queueDeleteUndoToast = useCallback(() => {
+    setShowDeleteUndoToast(true);
+
+    if (deleteUndoToastTimeoutRef.current) {
+      clearTimeout(deleteUndoToastTimeoutRef.current);
+    }
+
+    deleteUndoToastTimeoutRef.current = setTimeout(() => {
+      setShowDeleteUndoToast(false);
+    }, 8000);
+  }, []);
+
+  const deletePracticeTime = (index, options = {}) => {
+    const requireConfirm = options?.requireConfirm === true;
+
+    setPracticeSolves((prev) => {
+      const targetSolve = prev?.[index];
+      if (!targetSolve) return prev;
+
+      if (
+        requireConfirm &&
+        !window.confirm("Delete this solve? You can undo it right after.")
+      ) {
+        return prev;
+      }
+
+      setDeleteUndoState({
+        source: "practice",
+        index,
+        solve: targetSolve,
+      });
+      queueDeleteUndoToast();
+
+      return prev.filter((_, i) => i !== index);
+    });
   };
 
   const startPractice = () => {
@@ -1702,6 +1832,7 @@ function App() {
         [ev]: [...(prev[ev] || []), ...(savedSolves || [])],
       }));
       adjustSessionSolveCount(ev, targetSessionID, savedSolves.length, sessions[ev]?.length || 0);
+      setStatsMutationTick((t) => t + 1);
 
       setShowPracticeExit(false);
       setPracticeMode(false);
@@ -1727,14 +1858,22 @@ function App() {
           headerStats: [],
           wcaid: null,
           cubeCollection: [],
-          settings: {},
+          settings: {
+            timeZone: getBrowserTimeZone(),
+          },
           tagConfig: DEFAULT_TAG_CONFIG,
           tagCatalog: { Global: {}, ByEvent: {} },
           Friends: [],
         });
 
         const createSessionPromises = DEFAULT_EVENTS.map((event) =>
-          createSession(username, event, "main", "Main Session")
+          createSession(
+            username,
+            event,
+            "main",
+            "Main",
+            getRelaySessionOptions(event)
+          )
         );
         await Promise.all(createSessionPromises);
       });
@@ -1843,10 +1982,28 @@ function App() {
           !sessionItems.find((s) => s.Event === event && s.SessionID === "main")
       );
 
-      if (missingEvents.length > 0) {
+      const relayEventsNeedingRepair = DEFAULT_EVENTS.filter((event) => {
+        const relayOpts = getRelaySessionOptions(event);
+        if (relayOpts.sessionType !== "RELAY") return false;
+
+        const session = sessionItems.find((s) => s.Event === event && s.SessionID === "main");
+        if (!session) return true;
+
+        const currentLegs = Array.isArray(session.RelayLegs) ? session.RelayLegs : [];
+        return session.SessionType !== "RELAY" || currentLegs.join("|") !== relayOpts.relayLegs.join("|");
+      });
+
+      if (missingEvents.length > 0 || relayEventsNeedingRepair.length > 0) {
         await runDb("Creating sessions", async () => {
-          const createMissing = missingEvents.map((event) =>
-            createSession(userID, event, "main", "Main Session")
+          const targetEvents = Array.from(new Set([...missingEvents, ...relayEventsNeedingRepair]));
+          const createMissing = targetEvents.map((event) =>
+            createSession(
+              userID,
+              event,
+              "main",
+              "Main",
+              getRelaySessionOptions(event)
+            )
           );
           await Promise.all(createMissing);
         });
@@ -1881,18 +2038,30 @@ function App() {
     }
   };
 
-  const addSolve = async (newTime, smartMeta = null) => {
+  const addSolve = async (newTime, smartMeta = null, options = {}) => {
+    const hasManualScramble = Object.prototype.hasOwnProperty.call(
+      options || {},
+      "scrambleOverride"
+    );
+    const manualTimerInput = String(options?.timerInputOverride || "").trim();
+    const manualScramble = hasManualScramble
+      ? String(options?.scrambleOverride || "").trim()
+      : null;
+
     const createPendingSolve = ({
       createdAt,
       time,
       scramble,
       event,
+      sessionID = currentSession || "main",
       tags,
       note = "",
       penalty = null,
     }) => ({
       solveRef: `PENDING#${createdAt}#${Math.random().toString(36).slice(2, 8)}`,
       createdAt,
+      datetime: createdAt,
+      sessionID,
       time,
       rawTimeMs: time,
       finalTimeMs: time,
@@ -1932,10 +2101,12 @@ function App() {
     if (practiceMode) {
       const practiceEvent = currentEventRef.current;
       const shownScramble = String(displayedScrambleRef.current || "").trim();
-      const scramble = shownScramble || (await getNextScramble(practiceEvent));
+      const scramble = hasManualScramble
+        ? manualScramble
+        : shownScramble || (await getNextScramble(practiceEvent));
       const timestamp = new Date().toISOString();
 
-      if (shownScramble) {
+      if (!hasManualScramble && shownScramble) {
         getNextScramble(practiceEvent).catch((err) => {
           console.error(`Failed to advance scramble queue for ${practiceEvent}:`, err);
         });
@@ -1944,6 +2115,8 @@ function App() {
       const newSolve = {
         solveRef: `LOCAL#${timestamp}`,
         createdAt: timestamp,
+        datetime: timestamp,
+        sessionID: currentSession,
         time: newTime,
         rawTimeMs: newTime,
         finalTimeMs: newTime,
@@ -1960,7 +2133,6 @@ function App() {
     }
 
     const isRelay =
-      String(currentEvent || "").toUpperCase() === "RELAY" &&
       activeSessionObj?.SessionType === "RELAY" &&
       Array.isArray(relayLegs) &&
       relayLegs.length > 0;
@@ -1998,15 +2170,15 @@ function App() {
             createdAt: timestamp,
             time: totalMs,
             scramble: "Relay",
-            event: "RELAY",
+            event: currentEvent,
             tags: fullRelayTags,
           });
-          appendPendingSolve("RELAY", pendingSolve);
+          appendPendingSolve(currentEvent, pendingSolve);
 
           try {
             const res = await runDb("Saving solve", () =>
               addSolveToDB(user.UserID, {
-                event: "RELAY",
+                event: currentEvent,
                 sessionID: currentSession,
                 rawTimeMs: totalMs,
                 penalty: null,
@@ -2018,21 +2190,24 @@ function App() {
             );
 
             const savedSolve = normalizeSolve(res?.item);
-            replacePendingSolve("RELAY", pendingSolve.solveRef, savedSolve);
+            replacePendingSolve(currentEvent, pendingSolve.solveRef, savedSolve);
+            setStatsMutationTick((t) => t + 1);
           } catch (err) {
-            removePendingSolve("RELAY", pendingSolve.solveRef);
+            removePendingSolve(currentEvent, pendingSolve.solveRef);
             console.error("Error adding relay solve:", err);
           }
         } else {
           const localSolve = {
             solveRef: `LOCAL#${timestamp}`,
             createdAt: timestamp,
+            datetime: timestamp,
+            sessionID: currentSession,
             time: totalMs,
             rawTimeMs: totalMs,
             finalTimeMs: totalMs,
             isDNF: false,
             scramble: "Relay",
-            event: "RELAY",
+            event: currentEvent,
             penalty: null,
             note: "",
             tags: fullRelayTags,
@@ -2040,7 +2215,7 @@ function App() {
 
           setSessions((prev) => ({
             ...prev,
-            RELAY: [...(prev.RELAY || []), localSolve],
+            [currentEvent]: [...(prev[currentEvent] || []), localSolve],
           }));
         }
 
@@ -2055,15 +2230,15 @@ function App() {
           createdAt: timestamp,
           time: totalMs,
           scramble: "Relay",
-          event: "RELAY",
+          event: currentEvent,
           tags: relayTags,
         });
-        appendPendingSolve("RELAY", pendingSolve);
+        appendPendingSolve(currentEvent, pendingSolve);
 
         try {
           const res = await runDb("Saving solve", () =>
             addSolveToDB(user.UserID, {
-              event: "RELAY",
+              event: currentEvent,
               sessionID: currentSession,
               rawTimeMs: totalMs,
               penalty: null,
@@ -2075,21 +2250,24 @@ function App() {
           );
 
           const savedSolve = normalizeSolve(res?.item);
-          replacePendingSolve("RELAY", pendingSolve.solveRef, savedSolve);
+          replacePendingSolve(currentEvent, pendingSolve.solveRef, savedSolve);
+          setStatsMutationTick((t) => t + 1);
         } catch (err) {
-          removePendingSolve("RELAY", pendingSolve.solveRef);
+          removePendingSolve(currentEvent, pendingSolve.solveRef);
           console.error("Error adding relay solve:", err);
         }
       } else {
         const localSolve = {
           solveRef: `LOCAL#${timestamp}`,
           createdAt: timestamp,
+          datetime: timestamp,
+          sessionID: currentSession,
           time: totalMs,
           rawTimeMs: totalMs,
           finalTimeMs: totalMs,
           isDNF: false,
           scramble: "Relay",
-          event: "RELAY",
+          event: currentEvent,
           penalty: null,
           note: "",
           tags: relayTags,
@@ -2097,7 +2275,7 @@ function App() {
 
         setSessions((prev) => ({
           ...prev,
-          RELAY: [...(prev.RELAY || []), localSolve],
+          [currentEvent]: [...(prev[currentEvent] || []), localSolve],
         }));
       }
 
@@ -2124,10 +2302,11 @@ function App() {
 
     if (sharedSession) {
       const perspective = getSharedPerspective(sharedSession, user?.UserID, currentEvent);
-      scramble =
-        perspective.yourScrambles?.[sharedIndex] ||
-        sharedSession.scrambles?.[sharedIndex] ||
-        "";
+      scramble = hasManualScramble
+        ? manualScramble
+        : perspective.yourScrambles?.[sharedIndex] ||
+          sharedSession.scrambles?.[sharedIndex] ||
+          "";
       solveIndexForBroadcast = sharedIndex;
       activeSharedID = sharedSession.sharedID;
       sharedConversationID = sharedSession.conversationID || "";
@@ -2142,7 +2321,9 @@ function App() {
       const solveEvent = currentEventRef.current;
       const shownScramble = String(displayedScrambleRef.current || "").trim();
 
-      if (shownScramble) {
+      if (hasManualScramble) {
+        scramble = manualScramble;
+      } else if (shownScramble) {
         scramble = smartMeta?.scramble ? String(smartMeta.scramble).trim() : shownScramble;
 
         getNextScramble(solveEvent).catch((err) => {
@@ -2179,9 +2360,11 @@ function App() {
           SharedID: sharedSession.sharedID,
           SharedIndex: sharedIndex,
           SharedEvent: activeSolveEvent,
+          ...(manualTimerInput ? { TimerInput: manualTimerInput } : {}),
           ...smartTagPayload,
         })
       : buildTagPayload({
+          ...(manualTimerInput ? { TimerInput: manualTimerInput } : {}),
           ...smartTagPayload,
         });
 
@@ -2289,6 +2472,8 @@ function App() {
       const localSolve = {
         solveRef: `LOCAL#${timestamp}`,
         createdAt: timestamp,
+        datetime: timestamp,
+        sessionID: currentSession,
         time: newTime,
         rawTimeMs: newTime,
         finalTimeMs: newTime,
@@ -2314,98 +2499,196 @@ function App() {
     }
   };
 
-  const applyPenalty = async (solveRef, penalty, updatedTime) => {
-    if (practiceMode) {
-      setPracticeSolves((prev) =>
-        (prev || []).map((solve) => {
-          if (solve.solveRef === solveRef) {
-            const raw = solve.rawTimeMs ?? solve.time;
-            return {
-              ...solve,
-              penalty,
-              time: penalty === "DNF" ? Number.MAX_SAFE_INTEGER : updatedTime,
-              rawTimeMs: raw,
-              finalTimeMs: penalty === "DNF" ? null : updatedTime,
-              isDNF: penalty === "DNF",
-            };
-          }
-          return solve;
-        })
-      );
+  const openManualSolveModal = () => {
+    setManualSolveTime("");
+    setManualSolveScramble(displayedScrambleRef.current || "");
+    setManualSolveError("");
+    setShowManualSolveModal(true);
+  };
+
+  const closeManualSolveModal = () => {
+    if (manualSolveSaving) return;
+    setShowManualSolveModal(false);
+    setManualSolveError("");
+  };
+
+  const submitManualSolve = async () => {
+    const parsedTime = parseManualSolveTimeToMs(manualSolveTime);
+    if (!Number.isFinite(parsedTime) || parsedTime < 0) {
+      setManualSolveError("Enter a valid time like 12.34 or 1:02.45.");
       return;
     }
 
-    const updatedSessions = { ...sessions };
-    const eventSolves = updatedSessions[eventKey] || [];
+    setManualSolveSaving(true);
+    setManualSolveError("");
 
-    const targetSolve = eventSolves.find((solve) => solve.solveRef === solveRef);
-    if (!targetSolve) return;
-
-    const rawTimeMs =
-      Number.isFinite(Number(targetSolve?.rawTimeMs))
-        ? Number(targetSolve.rawTimeMs)
-        : Number.isFinite(Number(targetSolve?.finalTimeMs))
-        ? Number(targetSolve.finalTimeMs)
-        : Number.isFinite(Number(targetSolve?.time))
-        ? Number(targetSolve.time)
-        : null;
-
-    const updatedSolves = eventSolves.map((solve) => {
-      if (solve.solveRef === solveRef) {
-        return {
-          ...solve,
-          penalty,
-          time: penalty === "DNF" ? Number.MAX_SAFE_INTEGER : updatedTime,
-          rawTimeMs,
-          finalTimeMs: penalty === "DNF" ? null : updatedTime,
-          isDNF: penalty === "DNF",
-        };
-      }
-      return solve;
-    });
-
-    updatedSessions[eventKey] = updatedSolves;
-    setSessions(updatedSessions);
-
-    if (isSignedIn && user?.UserID) {
-      try {
-        const res = await runDb(
-          "Updating solve",
-          () => updateSolvePenalty(user.UserID, solveRef, rawTimeMs, penalty),
-          { showStatus: false }
-        );
-
-        const savedSolve = normalizeSolve(res?.item);
-
-        setSessions((prev) => ({
-          ...prev,
-          [eventKey]: (prev[eventKey] || []).map((solve) =>
-            solve.solveRef === solveRef ? savedSolve : solve
-          ),
-        }));
-        setStatsMutationTick((t) => t + 1);
-      } catch (err) {
-        console.error("Failed to update DynamoDB penalty:", err);
-      }
+    try {
+      await addSolve(parsedTime, null, {
+        scrambleOverride: manualSolveScramble,
+        timerInputOverride: "Manual",
+      });
+      setShowManualSolveModal(false);
+      setManualSolveTime("");
+      setManualSolveScramble("");
+    } catch (err) {
+      console.error("Failed to add manual solve:", err);
+      setManualSolveError("Could not save that solve. Please try again.");
+    } finally {
+      setManualSolveSaving(false);
     }
   };
 
-  const deleteTime = async (eventKeyParam, solveOrIndex) => {
+  const applyPenalty = useCallback(
+    async (solveRef, penalty, updatedTime) => {
+      if (practiceMode) {
+        setPracticeSolves((prev) =>
+          (prev || []).map((solve) => {
+            if (solve.solveRef === solveRef) {
+              const raw = solve.rawTimeMs ?? solve.time;
+              return {
+                ...solve,
+                penalty,
+                time: penalty === "DNF" ? Number.MAX_SAFE_INTEGER : updatedTime,
+                rawTimeMs: raw,
+                finalTimeMs: penalty === "DNF" ? null : updatedTime,
+                isDNF: penalty === "DNF",
+              };
+            }
+            return solve;
+          })
+        );
+        return;
+      }
+
+      const updatedSessions = { ...sessions };
+      const eventSolves = updatedSessions[eventKey] || [];
+
+      const targetSolve = eventSolves.find((solve) => solve.solveRef === solveRef);
+      if (!targetSolve) return;
+
+      const rawTimeMs =
+        Number.isFinite(Number(targetSolve?.rawTimeMs))
+          ? Number(targetSolve.rawTimeMs)
+          : Number.isFinite(Number(targetSolve?.finalTimeMs))
+          ? Number(targetSolve.finalTimeMs)
+          : Number.isFinite(Number(targetSolve?.time))
+          ? Number(targetSolve.time)
+          : null;
+
+      const updatedSolves = eventSolves.map((solve) => {
+        if (solve.solveRef === solveRef) {
+          return {
+            ...solve,
+            penalty,
+            time: penalty === "DNF" ? Number.MAX_SAFE_INTEGER : updatedTime,
+            rawTimeMs,
+            finalTimeMs: penalty === "DNF" ? null : updatedTime,
+            isDNF: penalty === "DNF",
+          };
+        }
+        return solve;
+      });
+
+      updatedSessions[eventKey] = updatedSolves;
+      setSessions(updatedSessions);
+
+      if (isSignedIn && user?.UserID) {
+        try {
+          const res = await runDb(
+            "Updating solve",
+            () => updateSolvePenalty(user.UserID, solveRef, rawTimeMs, penalty),
+            { showStatus: false }
+          );
+
+          const savedSolve = normalizeSolve(res?.item);
+
+          setSessions((prev) => ({
+            ...prev,
+            [eventKey]: (prev[eventKey] || []).map((solve) =>
+              solve.solveRef === solveRef ? savedSolve : solve
+            ),
+          }));
+          setStatsMutationTick((t) => t + 1);
+        } catch (err) {
+          console.error("Failed to update DynamoDB penalty:", err);
+        }
+      }
+    },
+    [practiceMode, sessions, eventKey, isSignedIn, user?.UserID, runDb]
+  );
+
+  const switchToEvent = useCallback(
+    (nextEvent) => {
+      const normalizedEvent = String(nextEvent || "").trim().toUpperCase();
+      if (!normalizedEvent) return;
+
+      const savedSession =
+        isSignedIn && user?.UserID
+          ? settings.lastSessionByEvent?.[normalizedEvent] || "main"
+          : "main";
+
+      setCurrentEvent(normalizedEvent);
+      setCurrentSession(savedSession);
+      sharedReturnTargetRef.current = null;
+      setSharedSession(null);
+      setSharedIndex(0);
+      setActiveSessionObj(null);
+      setRelayLegIndex(0);
+      setRelayLegTimes([]);
+      setRelayScrambles([]);
+      setRelayLegs([]);
+    },
+    [isSignedIn, user?.UserID, settings.lastSessionByEvent]
+  );
+
+  const deleteTime = async (eventKeyParam, solveOrIndex, options = {}) => {
     const ev = String(eventKeyParam || "").toUpperCase();
     if (!ev) return;
+    const requireConfirm = options?.requireConfirm === true;
 
     let solveRefToDelete = null;
+    let solveIndex = -1;
+    let targetSolve = null;
+    const eventSolves = Array.isArray(sessions?.[ev]) ? sessions[ev] : [];
 
     if (typeof solveOrIndex === "string") {
       solveRefToDelete = solveOrIndex;
+      solveIndex = eventSolves.findIndex((solve) => solve?.solveRef === solveRefToDelete);
+      targetSolve = solveIndex >= 0 ? eventSolves[solveIndex] : null;
     } else if (typeof solveOrIndex === "number") {
-      const s = sessions?.[ev]?.[solveOrIndex];
+      const s = eventSolves[solveOrIndex];
       solveRefToDelete = s?.solveRef || null;
+      solveIndex = solveOrIndex;
+      targetSolve = s || null;
     } else if (solveOrIndex && typeof solveOrIndex === "object") {
       solveRefToDelete = solveOrIndex.solveRef || null;
+      solveIndex = eventSolves.findIndex((solve) => solve?.solveRef === solveRefToDelete);
+      targetSolve = solveIndex >= 0 ? eventSolves[solveIndex] : solveOrIndex;
     }
 
     if (!solveRefToDelete) return;
+    if (
+      requireConfirm &&
+      !window.confirm("Delete this solve? You can undo it right after.")
+    ) {
+      return;
+    }
+
+    if (targetSolve) {
+      setDeleteUndoState({
+        source: "session",
+        eventKey: ev,
+        sessionID: String(targetSolve?.sessionID || targetSolve?.SessionID || currentSession || "main"),
+        index: solveIndex >= 0 ? solveIndex : eventSolves.length - 1,
+        solve: targetSolve,
+        persisted:
+          isSignedIn &&
+          !!user?.UserID &&
+          typeof targetSolve?.solveRef === "string" &&
+          targetSolve.solveRef.startsWith("SOLVE#"),
+      });
+      queueDeleteUndoToast();
+    }
 
     setSessions((prev) => {
       const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
@@ -2414,13 +2697,39 @@ function App() {
         [ev]: arr.filter((s) => s?.solveRef !== solveRefToDelete),
       };
     });
-    adjustSessionSolveCount(ev, currentSession, -1, sessions?.[ev]?.length || 0);
+    adjustSessionSolveCount(
+      ev,
+      String(targetSolve?.sessionID || targetSolve?.SessionID || currentSession || "main"),
+      -1,
+      eventSolves.length || 0
+    );
 
     if (isSignedIn && user) {
       try {
         await runDb("Deleting solve", () => deleteSolve(user.UserID, solveRefToDelete));
         setStatsMutationTick((t) => t + 1);
       } catch (err) {
+        if (targetSolve) {
+          setSessions((prev) => {
+            const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
+            const next = [...arr];
+            const restoreIndex =
+              solveIndex >= 0 ? Math.min(Math.max(solveIndex, 0), next.length) : next.length;
+            next.splice(restoreIndex, 0, targetSolve);
+            return {
+              ...(prev || {}),
+              [ev]: next,
+            };
+          });
+          adjustSessionSolveCount(
+            ev,
+            String(targetSolve?.sessionID || targetSolve?.SessionID || currentSession || "main"),
+            1,
+            Math.max(0, eventSolves.length - 1)
+          );
+          setDeleteUndoState(null);
+          setShowDeleteUndoToast(false);
+        }
         alert("Failed to delete solve");
         console.error(err);
       }
@@ -2536,39 +2845,66 @@ function App() {
   }, [restorePreviousSessionAfterShared]);
 
   const handleEventChange = (event) => {
-    const nextEvent = event.target.value;
-    const savedSession =
-      isSignedIn && user?.UserID
-        ? settings.lastSessionByEvent?.[nextEvent] || "main"
-        : "main";
-
-    setCurrentEvent(nextEvent);
-    setCurrentSession(savedSession);
-    sharedReturnTargetRef.current = null;
-    setSharedSession(null);
-    setSharedIndex(0);
-
-    setActiveSessionObj(null);
-    setRelayLegIndex(0);
-    setRelayLegTimes([]);
-    setRelayScrambles([]);
-    setRelayLegs([]);
+    switchToEvent(event.target.value);
   };
 
-  const onScrambleClick = () => {
+  useEffect(() => {
+    return () => {
+      if (scrambleCopyTimeoutRef.current) {
+        clearTimeout(scrambleCopyTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const showScrambleCopyFeedback = useCallback((status) => {
+    if (scrambleCopyTimeoutRef.current) {
+      clearTimeout(scrambleCopyTimeoutRef.current);
+    }
+
+    setScrambleCopyFeedback(status);
+    scrambleCopyTimeoutRef.current = setTimeout(() => {
+      setScrambleCopyFeedback("idle");
+    }, 1600);
+  }, []);
+
+  const copyTextToClipboard = useCallback(async (text) => {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.setAttribute("readonly", "");
+    textArea.style.position = "fixed";
+    textArea.style.opacity = "0";
+    textArea.style.pointerEvents = "none";
+    document.body.appendChild(textArea);
+    textArea.select();
+
+    try {
+      const success = document.execCommand("copy");
+      if (!success) {
+        throw new Error("execCommand copy failed");
+      }
+    } finally {
+      document.body.removeChild(textArea);
+    }
+  }, []);
+
+  const onScrambleClick = async () => {
     const scrambleText = displayedScramble || "";
-    if (scrambleText) {
-      navigator.clipboard
-        .writeText(scrambleText)
-        .then(() => {
-          alert("Scramble copied to clipboard!");
-        })
-        .catch((error) => {
-          console.error("Failed to copy scramble: ", error);
-          alert("Failed to copy scramble.");
-        });
-    } else {
-      alert("No scramble available to copy.");
+    if (!scrambleText) {
+      showScrambleCopyFeedback("empty");
+      return;
+    }
+
+    try {
+      await copyTextToClipboard(scrambleText);
+      showScrambleCopyFeedback("copied");
+    } catch (error) {
+      console.error("Failed to copy scramble: ", error);
+      showScrambleCopyFeedback("error");
     }
   };
 
@@ -2579,12 +2915,20 @@ function App() {
   const handleSignOut = () => {
     setShowSettingsPopup(false);
     setShowSignInPopup(false);
+    setDeleteUndoState(null);
+    setShowDeleteUndoToast(false);
     navigate("/");
     setIsSignedIn(false);
     setUser(null);
     setSessionsList([]);
     setCustomEvents([]);
     setSessions(INITIAL_SESSIONS);
+    setSharedStatsUser(null);
+    setSharedStatsSessions({});
+    setSharedStatsSessionsList([]);
+    setSharedStatsSessionStats({});
+    setSharedStatsLoading(false);
+    setSharedStatsDeniedReason("");
     setScrambles({});
     clearScrambleQueue();
     setSessionStats({});
@@ -2598,9 +2942,11 @@ function App() {
       isAllEventsMode: false,
       canRecomputeOverall: false,
       canImport: false,
+      canExport: false,
       loadingOverallStats: false,
       recomputeStatusText: "",
       importBusy: false,
+      exportBusy: false,
       isStatsRouteActive: false,
     });
     setSelectedAverageSolves([]);
@@ -2615,6 +2961,90 @@ function App() {
     setRelayScrambles([]);
     setRelayLegs([]);
   };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!isViewingSharedStats) {
+      setSharedStatsUser(null);
+      setSharedStatsSessions({});
+      setSharedStatsSessionsList([]);
+      setSharedStatsSessionStats({});
+      setSharedStatsLoading(false);
+      setSharedStatsDeniedReason("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!user?.UserID) {
+      setSharedStatsDeniedReason("Sign in to view shared stats.");
+      setSharedStatsLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setSharedStatsLoading(true);
+    setSharedStatsDeniedReason("");
+
+    const loadSharedStats = async () => {
+      try {
+        const profile = await getUser(statsSharedUserID);
+        const allowedFriends = Array.isArray(profile?.StatsAllowedFriends)
+          ? profile.StatsAllowedFriends
+          : [];
+
+        if (!allowedFriends.includes(user.UserID)) {
+          if (!cancelled) {
+            setSharedStatsUser(profile || null);
+            setSharedStatsSessions({});
+            setSharedStatsSessionsList([]);
+            setSharedStatsSessionStats({});
+            setSharedStatsDeniedReason(`@${statsSharedUserID} hasn't shared full stats with you.`);
+            setSharedStatsLoading(false);
+          }
+          return;
+        }
+
+        const sessionItems = await getSessions(statsSharedUserID);
+        const statsByEvent = {};
+
+        for (const session of sessionItems) {
+          const ev = String(session?.Event || "").toUpperCase();
+          const sid = String(session?.SessionID || "main");
+          if (!ev) continue;
+          if (!statsByEvent[ev]) statsByEvent[ev] = {};
+          statsByEvent[ev][sid] = session?.Stats || null;
+        }
+
+        if (!cancelled) {
+          setSharedStatsUser({ ...profile, UserID: statsSharedUserID });
+          setSharedStatsSessions({});
+          setSharedStatsSessionsList(sessionItems);
+          setSharedStatsSessionStats(statsByEvent);
+          setSharedStatsDeniedReason("");
+          setSharedStatsLoading(false);
+        }
+      } catch (error) {
+        console.error("Failed to load shared stats view:", error);
+        if (!cancelled) {
+          setSharedStatsUser(null);
+          setSharedStatsSessions({});
+          setSharedStatsSessionsList([]);
+          setSharedStatsSessionStats({});
+          setSharedStatsDeniedReason("Could not load shared stats right now.");
+          setSharedStatsLoading(false);
+        }
+      }
+    };
+
+    loadSharedStats();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isViewingSharedStats, statsSharedUserID, user?.UserID]);
 
   const openEventSelector = () => {
     homeEventSelectorRef.current?.open?.();
@@ -2633,10 +3063,7 @@ function App() {
     });
   }, [navigate, sharedSession]);
 
-  const currentSolves = practiceMode ? practiceSolves || [] : sessions[eventKey] || [];
-  const solvesSourceForDetail = practiceMode
-    ? practiceSolves || []
-    : sessions[eventKey] || [];
+  const baseCurrentSolves = practiceMode ? practiceSolves || [] : sessions[eventKey] || [];
   const currentSessionStatsForEvent =
     sessionStats?.[String(eventKey || "").toUpperCase()]?.[
       String(currentSession || "main")
@@ -2648,6 +3075,274 @@ function App() {
       currentSessionStatsForEvent?.solveCount ??
       0
   );
+  const currentSolves = useMemo(() => {
+    const items = Array.isArray(baseCurrentSolves) ? baseCurrentSolves : [];
+    if (!items.length) return [];
+
+    const hasExplicitIndices = items.every((solve) => Number.isFinite(Number(solve?.fullIndex)));
+    if (hasExplicitIndices) return items;
+
+    const totalCount =
+      Number.isFinite(currentSessionTotalSolveCount) && currentSessionTotalSolveCount > 0
+        ? currentSessionTotalSolveCount
+        : items.length;
+    const startIndex = Math.max(totalCount - items.length, 0);
+
+    return items.map((solve, index) => ({
+      ...solve,
+      fullIndex: startIndex + index,
+    }));
+  }, [baseCurrentSolves, currentSessionTotalSolveCount]);
+  const solvesSourceForDetail = currentSolves;
+  const undoDeletedSolve = useCallback(async () => {
+    const pending = deleteUndoState;
+    if (!pending) return;
+
+    setDeleteUndoState(null);
+    setShowDeleteUndoToast(false);
+
+    if (deleteUndoToastTimeoutRef.current) {
+      clearTimeout(deleteUndoToastTimeoutRef.current);
+      deleteUndoToastTimeoutRef.current = null;
+    }
+
+    if (pending.source === "practice") {
+      setPracticeSolves((prev) => {
+        const next = Array.isArray(prev) ? [...prev] : [];
+        const insertIndex = Math.min(Math.max(Number(pending.index) || 0, 0), next.length);
+        next.splice(insertIndex, 0, pending.solve);
+        return next;
+      });
+      return;
+    }
+
+    const ev = String(pending.eventKey || "").toUpperCase();
+    const sessionID = String(pending.sessionID || "main");
+    const deletedSolve = pending.solve;
+    const insertIndex = Math.min(
+      Math.max(Number(pending.index) || 0, 0),
+      Array.isArray(sessions?.[ev]) ? sessions[ev].length : 0
+    );
+
+    if (!ev || !deletedSolve) return;
+
+    if (pending.persisted) {
+      if (!user?.UserID) {
+        alert("Sign back in to undo that deleted solve.");
+        return;
+      }
+
+      try {
+        const restored = await runDb(
+          "Restoring solve",
+          () =>
+            addSolveToDB(user.UserID, {
+              event: ev,
+              sessionID,
+              rawTimeMs: Number(
+                deletedSolve?.rawTimeMs ??
+                  deletedSolve?.finalTimeMs ??
+                  deletedSolve?.time ??
+                  0
+              ),
+              penalty: deletedSolve?.penalty ?? null,
+              scramble: deletedSolve?.scramble || "",
+              note: deletedSolve?.note || "",
+              createdAt:
+                deletedSolve?.createdAt ||
+                deletedSolve?.datetime ||
+                new Date().toISOString(),
+              tags: deletedSolve?.tags || {},
+            }),
+          { showStatus: false }
+        );
+
+        const restoredSolve = normalizeSolve(restored?.item);
+        setSessions((prev) => {
+          const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
+          const next = [...arr];
+          next.splice(insertIndex, 0, restoredSolve);
+          return {
+            ...(prev || {}),
+            [ev]: next,
+          };
+        });
+        adjustSessionSolveCount(
+          ev,
+          sessionID,
+          1,
+          Array.isArray(sessions?.[ev]) ? sessions[ev].length : 0
+        );
+        setStatsMutationTick((t) => t + 1);
+      } catch (err) {
+        alert("Could not restore that solve.");
+        console.error("Failed to undo deleted solve:", err);
+      }
+      return;
+    }
+
+    setSessions((prev) => {
+      const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
+      const next = [...arr];
+      next.splice(insertIndex, 0, deletedSolve);
+      return {
+        ...(prev || {}),
+        [ev]: next,
+      };
+    });
+    adjustSessionSolveCount(
+      ev,
+      sessionID,
+      1,
+      Array.isArray(sessions?.[ev]) ? sessions[ev].length : 0
+    );
+  }, [deleteUndoState, sessions, user?.UserID, runDb, adjustSessionSolveCount]);
+
+  const deleteLatestSolve = useCallback(() => {
+    if (!isHomePage || sharedSession || isRelayActive) return false;
+
+    const latestSolve = currentSolves[currentSolves.length - 1];
+    if (!latestSolve?.solveRef) return false;
+
+    deleteTime(eventKey, latestSolve.solveRef, { requireConfirm: true });
+    return true;
+  }, [isHomePage, sharedSession, isRelayActive, currentSolves, deleteTime, eventKey]);
+
+  const applyPenaltyToLatestSolve = useCallback(
+    (penalty) => {
+      if (!isHomePage || sharedSession || isRelayActive) return false;
+
+      const latestSolve = currentSolves[currentSolves.length - 1];
+      const solveRef = latestSolve?.solveRef;
+
+      if (!solveRef) return false;
+
+      const rawTimeMs = Number(
+        latestSolve?.rawTimeMs ?? latestSolve?.finalTimeMs ?? latestSolve?.time
+      );
+      if (!Number.isFinite(rawTimeMs)) return false;
+
+      const nextTime = penalty === "+2" ? rawTimeMs + 2000 : rawTimeMs;
+      const normalizedPenalty = penalty === "clear" ? null : penalty;
+
+      applyPenalty(solveRef, normalizedPenalty, nextTime);
+      return true;
+    },
+    [isHomePage, sharedSession, isRelayActive, currentSolves, applyPenalty]
+  );
+
+  useEffect(() => {
+    const pageAllowsPlayerBarToggle =
+      location.pathname === "/stats" ||
+      location.pathname === "/social" ||
+      location.pathname === "/profile" ||
+      location.pathname.startsWith("/profile/");
+
+    const hasBlockingOverlay =
+      showSettingsPopup ||
+      showSignInPopup ||
+      showManualSolveModal ||
+      !!selectedAverageSolve ||
+      selectedAverageSolves.length > 0 ||
+      !!shareComposer.isOpen;
+
+    const handleShortcutKeyDown = (event) => {
+      if (event.repeat) return;
+      if (hasBlockingOverlay || isEditableTarget(event.target)) return;
+
+      const eventBindings = settings.eventKeyBindings || {};
+      for (const [eventCode, combo] of Object.entries(eventBindings)) {
+        if (!eventMatchesEventBinding(event, combo)) continue;
+        event.preventDefault();
+        switchToEvent(eventCode);
+        return;
+      }
+
+      const pageBindings = settings.pageKeyBindings || {};
+      if (eventMatchesShortcut(event, pageBindings.profile)) {
+        event.preventDefault();
+        navigate("/profile");
+        return;
+      }
+
+      if (eventMatchesShortcut(event, pageBindings.stats)) {
+        event.preventDefault();
+        navigate("/stats");
+        return;
+      }
+
+      if (eventMatchesShortcut(event, pageBindings.social)) {
+        event.preventDefault();
+        navigate("/social");
+        return;
+      }
+
+      if (
+        pageAllowsPlayerBarToggle &&
+        eventMatchesShortcut(event, settings.uiKeyBindings?.playerBar)
+      ) {
+        event.preventDefault();
+        setShowPlayerBar((prev) => !prev);
+        return;
+      }
+
+      if (eventMatchesShortcut(event, settings.solveKeyBindings?.clearPenalty)) {
+        event.preventDefault();
+        applyPenaltyToLatestSolve("clear");
+        return;
+      }
+
+      if (eventMatchesShortcut(event, settings.solveKeyBindings?.plus2)) {
+        event.preventDefault();
+        applyPenaltyToLatestSolve("+2");
+        return;
+      }
+
+      if (eventMatchesShortcut(event, settings.solveKeyBindings?.dnf)) {
+        event.preventDefault();
+        applyPenaltyToLatestSolve("DNF");
+        return;
+      }
+
+      if (eventMatchesShortcut(event, settings.solveKeyBindings?.deleteSolve)) {
+        event.preventDefault();
+        deleteLatestSolve();
+        return;
+      }
+
+      if (eventMatchesShortcut(event, settings.solveKeyBindings?.undoDelete)) {
+        event.preventDefault();
+        undoDeletedSolve();
+      }
+    };
+
+    window.addEventListener("keydown", handleShortcutKeyDown);
+    return () => window.removeEventListener("keydown", handleShortcutKeyDown);
+  }, [
+    applyPenaltyToLatestSolve,
+    deleteLatestSolve,
+    undoDeletedSolve,
+    location.pathname,
+    navigate,
+    selectedAverageSolve,
+    selectedAverageSolves.length,
+    settings.eventKeyBindings,
+    settings.pageKeyBindings,
+    settings.solveKeyBindings,
+    settings.uiKeyBindings,
+    shareComposer.isOpen,
+    showManualSolveModal,
+    showSettingsPopup,
+    showSignInPopup,
+    switchToEvent,
+  ]);
+  const relaySelectorMarginTop = useMemo(() => {
+    const ev = String(displayedSvgEvent || currentEvent || "").toUpperCase();
+    if (["555", "666", "777", "MEGAMINX"].includes(ev)) return "88px";
+    if (["333", "333OH", "333BLD"].includes(ev)) return "46px";
+    if (["444", "SQ1", "CLOCK"].includes(ev)) return "62px";
+    return "32px";
+  }, [displayedSvgEvent, currentEvent]);
 
   const activeSharedMeta = useMemo(() => {
     if (!sharedSession) return null;
@@ -2978,27 +3673,33 @@ function App() {
     ]
   );
 
-  const cubeModelHistoryOptions = Array.from(
-    new Set(
-      [
-        ...getCubeCollectionOptionsForEvent(user?.CubeCollection, eventKey),
-        ...Object.values(sessions || {}).flatMap((eventSolves) =>
-          (Array.isArray(eventSolves) ? eventSolves : [])
-            .map((solve) =>
-              String(solve?.tags?.CubeModel || solve?.Tags?.CubeModel || "").trim()
-            )
-            .filter(Boolean)
-        ),
-        ...Object.values(tagsByEvent || {})
-          .map((tagSelection) => String(tagSelection?.CubeModel || "").trim())
-          .filter(Boolean),
-      ].filter(Boolean)
-    )
-  ).sort((a, b) => a.localeCompare(b));
+  const cubeModelHistoryOptions = useMemo(() => {
+    const scopedKeys = Array.from(
+      new Set([String(eventKey || "").trim().toUpperCase(), tagScopeEventKey].filter(Boolean))
+    );
+
+    return Array.from(
+      new Set(
+        [
+          ...getCubeCollectionOptionsForEvent(user?.CubeCollection, eventKey),
+          ...scopedKeys.flatMap((key) =>
+            (Array.isArray(sessions?.[key]) ? sessions[key] : [])
+              .map((solve) =>
+                String(solve?.tags?.CubeModel || solve?.Tags?.CubeModel || "").trim()
+              )
+              .filter(Boolean)
+          ),
+          ...scopedKeys
+            .map((key) => String(tagsByEvent?.[key]?.CubeModel || "").trim())
+            .filter(Boolean),
+        ].filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+  }, [eventKey, sessions, tagScopeEventKey, tagsByEvent, user?.CubeCollection]);
 
   const baseHomeTagOptions = useMemo(
-    () => collectTagSelectionOptions([], tagConfig, cubeModelHistoryOptions),
-    [tagConfig, cubeModelHistoryOptions]
+    () => collectTagSelectionOptions([], homeTagConfig, cubeModelHistoryOptions),
+    [homeTagConfig, cubeModelHistoryOptions]
   );
 
   const catalogHomeTagOptions = useMemo(
@@ -3065,6 +3766,11 @@ function App() {
     }),
     [dbStatus, runDb, setDbPhase]
   );
+  const statsRouteUser = isViewingSharedStats ? sharedStatsUser : user;
+  const statsRouteSessions = isViewingSharedStats ? sharedStatsSessions : sessions;
+  const statsRouteSessionStats = isViewingSharedStats ? sharedStatsSessionStats : sessionStats;
+  const statsRouteSessionsList = isViewingSharedStats ? sharedStatsSessionsList : sessionsList;
+  const statsRouteSetSessions = isViewingSharedStats ? setSharedStatsSessions : setSessions;
 
   return (
     <DbStatusProvider value={dbStatusValue}>
@@ -3107,6 +3813,12 @@ function App() {
                         onScrambleClick={onScrambleClick}
                         onForwardScramble={goForwardScramble}
                         onBackwardScramble={goBackwardScramble}
+                        copyFeedback={scrambleCopyFeedback}
+                        onAddSolveClick={
+                          settings?.showAddSolveButton === false
+                            ? undefined
+                            : openManualSolveModal
+                        }
                         scrambleProgress={scrambleProgress}
                         scrambleProgressTotal={scrambleProgressTotal}
                       />
@@ -3118,7 +3830,7 @@ function App() {
                             justifyContent: "center",
                             alignItems: "center",
                             gap: "8px",
-                            marginTop: "8px",
+                            marginTop: relaySelectorMarginTop,
                             flexWrap: "wrap",
                           }}
                         >
@@ -3304,7 +4016,7 @@ function App() {
                                 }));
                                 queueTagColorCatalogSave(nextCatalog);
                               }}
-                              tagConfig={tagConfig}
+                              tagConfig={homeTagConfig}
                               cubeModelOptions={cubeModelHistoryOptions}
                               discoveredOptions={mergedHomeTagOptions}
                               profileColor={user?.Color || user?.color || "#2EC4B6"}
@@ -3378,9 +4090,31 @@ function App() {
                         currentSession={currentSession}
                         eventKey={eventKey}
                         practiceMode={practiceMode}
-                        tagConfig={tagConfig}
+                        tagConfig={homeTagConfig}
                         cubeModelOptions={cubeModelHistoryOptions}
                         discoveredTagOptions={mergedHomeTagOptions}
+                        tagColors={currentTagColors}
+                        onTagColorsChange={(next) => {
+                          let nextCatalog = tagColorCatalog;
+
+                          Object.entries(next || {}).forEach(([field, valueMap]) => {
+                            Object.entries(valueMap || {}).forEach(([value, color]) => {
+                              nextCatalog = setTagColorCatalogValue(
+                                nextCatalog,
+                                eventKey,
+                                field,
+                                value,
+                                color
+                              );
+                            });
+                          });
+
+                          setUser((prev) => ({
+                            ...(prev || {}),
+                            TagColorCatalog: nextCatalog,
+                          }));
+                          queueTagColorCatalogSave(nextCatalog);
+                        }}
                         totalSolveCount={
                           Number.isFinite(currentSessionTotalSolveCount) &&
                           currentSessionTotalSolveCount >= 0
@@ -3397,6 +4131,9 @@ function App() {
                       title={`Average Detail (${selectedAverageSolves.length})`}
                       subtitle={`${eventKey === "333" ? "3x3" : eventKey} · ${currentSession}`}
                       solves={selectedAverageSolves}
+                      tagConfig={homeTagConfig}
+                      tagColors={currentTagColors}
+                      profileColor={user?.Color || user?.color || "#2EC4B6"}
                       onClose={() => {
                         setSelectedAverageSolves([]);
                       }}
@@ -3431,9 +4168,31 @@ function App() {
                       userID={user?.UserID}
                       setSessions={setSessions}
                       sessionsList={sessionsList}
-                      tagConfig={tagConfig}
+                      tagConfig={homeTagConfig}
                       cubeModelOptions={cubeModelHistoryOptions}
                       discoveredTagOptions={mergedHomeTagOptions}
+                      tagColors={currentTagColors}
+                      onTagColorsChange={(next) => {
+                        let nextCatalog = tagColorCatalog;
+
+                        Object.entries(next || {}).forEach(([field, valueMap]) => {
+                          Object.entries(valueMap || {}).forEach(([value, color]) => {
+                            nextCatalog = setTagColorCatalogValue(
+                              nextCatalog,
+                              eventKey,
+                              field,
+                              value,
+                              color
+                            );
+                          });
+                        });
+
+                        setUser((prev) => ({
+                          ...(prev || {}),
+                          TagColorCatalog: nextCatalog,
+                        }));
+                        queueTagColorCatalogSave(nextCatalog);
+                      }}
                     />
                   )}
                 </div>
@@ -3447,6 +4206,7 @@ function App() {
                   user={user}
                   setUser={setUser}
                   deletePost={deletePost}
+                  showPlayerBar={showPlayerBar}
                   updateComments={handleUpdateComments}
                   sessions={sessions}
                 />
@@ -3460,6 +4220,7 @@ function App() {
                   user={user}
                   setUser={setUser}
                   deletePost={deletePost}
+                  showPlayerBar={showPlayerBar}
                   updateComments={handleUpdateComments}
                   sessions={sessions}
                 />
@@ -3469,49 +4230,74 @@ function App() {
             <Route
               path="/stats"
               element={
-                <Stats
-                  sessions={sessions}
-                  sessionStats={sessionStats}
-                  sessionsList={sessionsList}
-                  tagConfig={tagConfig}
-                  tagCatalog={tagCatalog}
-                  tagColorCatalog={tagColorCatalog}
-                  cubeModelOptions={cubeModelHistoryOptions}
-                  statsMutationTick={statsMutationTick}
-                  setSessions={setSessions}
-                  setUser={setUser}
-                  currentEvent={currentEvent}
-                  currentSession={currentSession}
-                  user={user}
-                  deleteTime={(eventKeyParam, index) =>
-                    deleteTime(eventKeyParam, index)
-                  }
-                  addPost={addPost}
-                  onTagColorsChange={(targetEventKey, next) => {
-                    let nextCatalog = tagColorCatalog;
+                isViewingSharedStats && sharedStatsLoading ? (
+                  <div className="Page">
+                    <div style={{ padding: "24px" }}>Loading shared stats...</div>
+                  </div>
+                ) : isViewingSharedStats && sharedStatsDeniedReason ? (
+                  <div className="Page">
+                    <div style={{ padding: "24px" }}>{sharedStatsDeniedReason}</div>
+                  </div>
+                ) : (
+                  <Stats
+                    sessions={statsRouteSessions}
+                    settings={settings}
+                    sessionStats={statsRouteSessionStats}
+                    sessionsList={statsRouteSessionsList}
+                    tagConfig={tagConfig}
+                    tagCatalog={tagCatalog}
+                    tagColorCatalog={tagColorCatalog}
+                    cubeModelOptions={cubeModelHistoryOptions}
+                    statsMutationTick={statsMutationTick}
+                    setSessions={statsRouteSetSessions}
+                    setUser={isViewingSharedStats ? () => {} : setUser}
+                    currentEvent={currentEvent}
+                    currentSession={currentSession}
+                    user={statsRouteUser}
+                    viewerUser={user}
+                    readOnly={isViewingSharedStats}
+                    deleteTime={
+                      isViewingSharedStats
+                        ? async () => {}
+                        : (eventKeyParam, index) => deleteTime(eventKeyParam, index)
+                    }
+                    addPost={isViewingSharedStats ? null : addPost}
+                    onTagColorsChange={
+                      isViewingSharedStats
+                        ? null
+                        : (targetEventKey, next) => {
+                            let nextCatalog = tagColorCatalog;
 
-                    Object.entries(next || {}).forEach(([field, valueMap]) => {
-                      Object.entries(valueMap || {}).forEach(([value, color]) => {
-                        nextCatalog = setTagColorCatalogValue(
-                          nextCatalog,
-                          targetEventKey,
-                          field,
-                          value,
-                          color
-                        );
-                      });
-                    });
+                            Object.entries(next || {}).forEach(([field, valueMap]) => {
+                              Object.entries(valueMap || {}).forEach(([value, color]) => {
+                                nextCatalog = setTagColorCatalogValue(
+                                  nextCatalog,
+                                  targetEventKey,
+                                  field,
+                                  value,
+                                  color
+                                );
+                              });
+                            });
 
-                    setUser((prev) => ({
-                      ...(prev || {}),
-                      TagColorCatalog: nextCatalog,
-                    }));
-                    queueTagColorCatalogSave(nextCatalog);
-                  }}
-                  onSettingsContextChange={setStatsSettingsContext}
-                  recomputeRequest={statsRecomputeRequest}
-                  importRequest={statsImportRequest}
-                />
+                            setUser((prev) => ({
+                              ...(prev || {}),
+                              TagColorCatalog: nextCatalog,
+                            }));
+                            queueTagColorCatalogSave(nextCatalog);
+                          }
+                    }
+                    onSettingsContextChange={setStatsSettingsContext}
+                    recomputeRequest={isViewingSharedStats ? 0 : statsRecomputeRequest}
+                    importRequest={isViewingSharedStats ? 0 : statsImportRequest}
+                    exportRequest={isViewingSharedStats ? 0 : statsExportRequest}
+                    forceShowImportModal={isViewingSharedStats ? false : showStatsImportModal}
+                    forceShowExportModal={isViewingSharedStats ? false : showStatsExportModal}
+                    onImportModalOpenHandled={() => setShowStatsImportModal(false)}
+                    onExportModalOpenHandled={() => setShowStatsExportModal(false)}
+                    onSessionsListRefresh={isViewingSharedStats ? null : setSessionsList}
+                  />
+                )
               }
             />
 
@@ -3543,7 +4329,7 @@ function App() {
           currentSession={currentSession}
           currentTags={currentTags}
           currentTagColors={currentTagColors}
-          tagConfig={tagConfig}
+          tagConfig={homeTagConfig}
           onTagsChange={(next) => {
             setTagsByEvent((prev) => ({
               ...(prev || {}),
@@ -3639,7 +4425,15 @@ function App() {
           }}
           onStatsImport={() => {
             setShowSettingsPopup(false);
+            if (location.pathname !== "/stats") navigate("/stats");
             setStatsImportRequest((prev) => prev + 1);
+            setShowStatsImportModal(true);
+          }}
+          onStatsExport={() => {
+            setShowSettingsPopup(false);
+            if (location.pathname !== "/stats") navigate("/stats");
+            setStatsExportRequest((prev) => prev + 1);
+            setShowStatsExportModal(true);
           }}
           onProfileUpdate={(fresh) => {
             setUser((prev) => ({ ...prev, ...fresh }));
@@ -3770,6 +4564,88 @@ function App() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {showManualSolveModal && (
+        <div
+          className="manualSolvePopup"
+          onClick={(event) => {
+            if (event.target.className === "manualSolvePopup") {
+              closeManualSolveModal();
+            }
+          }}
+        >
+          <div className="manualSolvePopupContent">
+            <span className="closePopup" onClick={closeManualSolveModal}>
+              x
+            </span>
+            <h2>Add Solve</h2>
+            <p className="manualSolvePopupSubtext">
+              Save a solve to the current event and session with just a time, or add a scramble too.
+            </p>
+
+            <label className="manualSolveFieldLabel" htmlFor="manual-solve-time">
+              Time
+            </label>
+            <input
+              id="manual-solve-time"
+              className="manualSolveInput"
+              type="text"
+              placeholder="12.34 or 1:02.45"
+              value={manualSolveTime}
+              onChange={(event) => setManualSolveTime(event.target.value)}
+              disabled={manualSolveSaving}
+              autoFocus
+            />
+
+            <label className="manualSolveFieldLabel" htmlFor="manual-solve-scramble">
+              Scramble
+            </label>
+            <textarea
+              id="manual-solve-scramble"
+              className="manualSolveTextarea"
+              placeholder="Optional"
+              value={manualSolveScramble}
+              onChange={(event) => setManualSolveScramble(event.target.value)}
+              disabled={manualSolveSaving}
+            />
+
+            {manualSolveError ? (
+              <div className="manualSolveError">{manualSolveError}</div>
+            ) : null}
+
+            <div className="manualSolveActions">
+              <button type="button" onClick={closeManualSolveModal} disabled={manualSolveSaving}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="manualSolvePrimary"
+                onClick={submitManualSolve}
+                disabled={manualSolveSaving}
+              >
+                {manualSolveSaving ? "Saving..." : "Save Solve"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteUndoState && showDeleteUndoToast && (
+        <div className="deleteUndoToast" role="status" aria-live="polite">
+          <div className="deleteUndoToastText">Solve deleted.</div>
+          <button type="button" className="deleteUndoToastAction" onClick={undoDeletedSolve}>
+            Undo
+          </button>
+          <button
+            type="button"
+            className="deleteUndoToastDismiss"
+            onClick={() => setShowDeleteUndoToast(false)}
+            aria-label="Dismiss undo message"
+          >
+            x
+          </button>
         </div>
       )}
 

@@ -6,8 +6,10 @@ import TimeTable from "./TimeTable";
 import PercentBar from "./PercentBar";
 import StatsSummary, { StatsSummaryCurrent, StatsSummaryOverall } from "./StatsSummary";
 import BarChart from "./BarChart";
+import BucketTable from "./BucketTable";
 import PieChart from "./PieChart";
 import StatFocusModal from "./StatFocusModal";
+import AllEventsTimeMatrix from "./AllEventsTimeMatrix";
 import Detail from "../Detail/Detail";
 import AverageDetailModal from "../Detail/AverageDetailModal";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
@@ -15,19 +17,30 @@ import TagBar from "../TagBar/TagBar";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import NameTag from "../Profile/NameTag";
 import PtsLinkStatsIcon from "../../assets/ptsLinkStats.svg";
+import tagBadge from "../../assets/Tag.svg";
 
 import { getSolvesBySession, getSolvesBySessionPage } from "../../services/getSolvesBySession";
 import { getSolvesByTag } from "../../services/getSolvesByTag";
 import { getSessionStats } from "../../services/getSessionStats";
 import { getEventStats } from "../../services/getEventStats";
+import { getDayBuckets } from "../../services/getDayBuckets";
 import { recomputeSessionStats } from "../../services/recomputeSessionStats";
 import { recomputeEventStats } from "../../services/recomputeEventStats";
 import { updateUser } from "../../services/updateUser";
 import { getSolveWindowFromStart } from "../../services/getSolveWindow";
 
 import ImportSolvesModal from "./ImportSolvesModal";
-import { importSolvesBatch } from "../../services/importSolvesBatch";
+import ExportDataModal from "./ExportDataModal";
+import {
+  appendImportJobChunk,
+  createImportJob,
+  finalizeImportJob,
+  getImportJob,
+} from "../../services/importJobs";
 import { createSession } from "../../services/createSession";
+import { getUser } from "../../services/getUser";
+import { getCustomEvents } from "../../services/getCustomEvents";
+import { getSessions as fetchSessionsList } from "../../services/getSessions";
 import { useDbStatus } from "../../contexts/DbStatusContext";
 import { findBestStrictWindow } from "../../utils/strictAverageUtils";
 import { getProfileChartStyle } from "../../utils/profileChartStyle";
@@ -36,6 +49,7 @@ import {
   DEFAULT_TAG_CONFIG,
   getTagColorMapForEvent,
   getTagCatalogOptionsForEvent,
+  getSharedTagLabels,
   hasActiveTagSelection,
   makeEmptyTagSelection,
   normalizeTagConfig,
@@ -50,6 +64,7 @@ import {
 
 const ALL_EVENTS = "__all_events__";
 const ALL_SESSIONS = "__all_sessions__";
+const ALL_TIME_START_DAY = "1900-01-01";
 const DEFAULT_HEATMAP_PALETTE = "default";
 const PROFILE_PALETTE = "profile";
 const COMPARE_PALETTES = {
@@ -89,6 +104,7 @@ const COMPARE_PALETTES = {
 
 const DEFAULT_PRIMARY_PALETTE = DEFAULT_HEATMAP_PALETTE;
 const DEFAULT_COMPARE_PALETTE = DEFAULT_HEATMAP_PALETTE;
+const MAX_RAW_INDEX_RANGE_DAYS = 7;
 const SOLVE_WINDOW_PRESETS = [5, 12, 25, 50, 100];
 const WINDOW_SPECS = {
   mo3: { size: 3, kind: "mo3", label: "MO3", startField: "BestMo3StartSolveSK" },
@@ -128,6 +144,78 @@ function formatShareTime(value) {
 
 function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function buildImportSourceKey({
+  detectedFormat = "unknown",
+  destinationKind = "existing",
+  destinationSessionID = "",
+  destinationSessionName = "",
+  solves = [],
+}) {
+  let hash = 2166136261;
+  const push = (value) => {
+    const text = String(value ?? "");
+    for (let i = 0; i < text.length; i += 1) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+  };
+
+  push(detectedFormat);
+  push(destinationKind);
+  push(destinationSessionID);
+  push(destinationSessionName);
+  push(Array.isArray(solves) ? solves.length : 0);
+
+  for (const solve of Array.isArray(solves) ? solves : []) {
+    push(solve?.event || "");
+    push(solve?.sessionID || solve?._importSessionID || "");
+    push(solve?.datetime || "");
+    push(solve?.time ?? solve?.originalTime ?? "");
+    push(solve?.penalty ?? "");
+    push(solve?.scramble || "");
+    push(solve?.note || "");
+    const tags = solve?.tags && typeof solve.tags === "object" ? solve.tags : {};
+    for (const key of Object.keys(tags).sort((a, b) => a.localeCompare(b))) {
+      push(key);
+      push(tags[key]);
+    }
+  }
+
+  return `src_${String(hash >>> 0).padStart(10, "0")}`;
+}
+
+function stripDbKeys(record) {
+  if (!record || typeof record !== "object") return record;
+  const next = { ...record };
+  delete next.PK;
+  delete next.SK;
+  delete next.GSI1PK;
+  delete next.GSI1SK;
+  delete next.GSI2PK;
+  delete next.GSI2SK;
+  return next;
+}
+
+function normalizeSessionLabel(sessionID, sessionName) {
+  const sid = String(sessionID || "").trim();
+  const label = String(sessionName || "").trim();
+
+  if (sid === "main" && (!label || label === "Main Session")) return "Main";
+  return label || sid || "main";
+}
+
+function resolveHeaderCrossColorTone(value, fallback = "#2EC4B6") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized === "white") return "#f4f1e8";
+  if (normalized === "yellow") return "#f2c94c";
+  if (normalized === "red") return "#eb5757";
+  if (normalized === "orange") return "#f2994a";
+  if (normalized === "blue") return "#4a90e2";
+  if (normalized === "green") return "#27ae60";
+  return fallback;
 }
 
 function getNextSmallerSolveWindow(value) {
@@ -245,7 +333,7 @@ function buildStatCardTitle(eventLabel, sessionLabel) {
 
 function getEventDisplayMeta(eventValue) {
   const eventKey = String(eventValue || "").toUpperCase();
-  if (eventKey === ALL_EVENTS) return { label: "All Events", puzzleEvent: "" };
+  if (eventKey === String(ALL_EVENTS).toUpperCase()) return { label: "All Events", puzzleEvent: "" };
 
   const labelMap = {
     "222": "2x2",
@@ -273,7 +361,52 @@ function getEventDisplayMeta(eventValue) {
   };
 }
 
+const TIME_VIEW_EVENT_MATRIX_ORDER = [
+  "222",
+  "333",
+  "444",
+  "555",
+  "666",
+  "777",
+  "PYRAMINX",
+  "CLOCK",
+  "SKEWB",
+  "SQ1",
+  "MEGAMINX",
+  "333OH",
+  "333FEW",
+  "333BLD",
+  "444BLD",
+  "555BLD",
+  "333MULTIBLD",
+];
+
+const TIME_VIEW_EVENT_MATRIX_ORDER_INDEX = new Map(
+  TIME_VIEW_EVENT_MATRIX_ORDER.map((event, index) => [event, index])
+);
+
+function compareTimeViewEventMatrixItems(a, b) {
+  const aEvent = String(a?.event || "").trim().toUpperCase();
+  const bEvent = String(b?.event || "").trim().toUpperCase();
+  const aRank = TIME_VIEW_EVENT_MATRIX_ORDER_INDEX.get(aEvent);
+  const bRank = TIME_VIEW_EVENT_MATRIX_ORDER_INDEX.get(bEvent);
+
+  if (aRank != null && bRank != null) return aRank - bRank;
+  if (aRank != null) return -1;
+  if (bRank != null) return 1;
+
+  return aEvent.localeCompare(bEvent);
+}
+
+function toFiniteMatrixMetric(value) {
+  if (value == null || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 function formatShortDateRangeLabel(startDay, endDay, fallback = "All Dates") {
+  if (String(startDay || "") === ALL_TIME_START_DAY && !!endDay) return "All Time";
+
   const formatDay = (dayKey) => {
     if (!dayKey) return "";
     const date = new Date(`${dayKey}T12:00:00`);
@@ -359,6 +492,10 @@ function getPresetRange(presetKey) {
     return { start: toIsoDayKey(start), end: toIsoDayKey(current) };
   }
 
+  if (presetKey === "all") {
+    return { start: ALL_TIME_START_DAY, end: toIsoDayKey(current) };
+  }
+
   return { start: "", end: "" };
 }
 
@@ -439,12 +576,13 @@ function StatsDateRangePicker({ startDay, endDay, accentColor = "#2EC4B6", onApp
     <div className="statsScopeDatePicker">
       <div className="statsScopeDatePresetRow">
         {[
-          { key: "today", label: "Today" },
-          { key: "last7", label: "Last 7" },
-          { key: "last30", label: "Last 30" },
-          { key: "month", label: "This Month" },
-          { key: "year", label: "This Year" },
-        ].map((preset) => (
+        { key: "today", label: "Today" },
+        { key: "last7", label: "Last 7" },
+        { key: "last30", label: "Last 30" },
+        { key: "month", label: "This Month" },
+        { key: "year", label: "This Year" },
+        { key: "all", label: "All Time" },
+      ].map((preset) => (
           <button
             key={preset.key}
             type="button"
@@ -803,6 +941,10 @@ function aggregateStatsList(statsList) {
   let bestAo50Ms = null;
   let bestAo100Ms = null;
   let bestAo1000Ms = null;
+  let worstSingleMs = null;
+  let worstMo3Ms = null;
+  let worstAo5Ms = null;
+  let worstAo12Ms = null;
   let bestSingleSolveSK = null;
   let bestMo3StartSolveSK = null;
   let bestAo5StartSolveSK = null;
@@ -811,15 +953,33 @@ function aggregateStatsList(statsList) {
   let bestAo50StartSolveSK = null;
   let bestAo100StartSolveSK = null;
   let bestAo1000StartSolveSK = null;
+  let worstSingleSolveSK = null;
+  let worstMo3StartSolveSK = null;
+  let worstAo5StartSolveSK = null;
+  let worstAo12StartSolveSK = null;
 
   let bestSingleAt = null;
   let lastSolveAt = null;
 
+  const toFiniteMetricOrNull = (value) => {
+    if (value == null || value === "") return null;
+    const next = Number(value);
+    return Number.isFinite(next) ? next : null;
+  };
+
   const updateBestMetric = (currentValue, currentRef, nextValue, nextRef) => {
-    const curr = Number.isFinite(Number(currentValue)) ? Number(currentValue) : null;
-    const next = Number.isFinite(Number(nextValue)) ? Number(nextValue) : null;
+    const curr = toFiniteMetricOrNull(currentValue);
+    const next = toFiniteMetricOrNull(nextValue);
     if (next == null) return { value: curr, ref: currentRef ?? null };
     if (curr == null || next < curr) return { value: next, ref: nextRef ?? null };
+    return { value: curr, ref: currentRef ?? null };
+  };
+
+  const updateWorstMetric = (currentValue, currentRef, nextValue, nextRef) => {
+    const curr = toFiniteMetricOrNull(currentValue);
+    const next = toFiniteMetricOrNull(nextValue);
+    if (next == null) return { value: curr, ref: currentRef ?? null };
+    if (curr == null || next > curr) return { value: next, ref: nextRef ?? null };
     return { value: curr, ref: currentRef ?? null };
   };
 
@@ -878,6 +1038,30 @@ function aggregateStatsList(statsList) {
       s.BestAo1000Ms,
       s.BestAo1000StartSolveSK
     ));
+    ({ value: worstSingleMs, ref: worstSingleSolveSK } = updateWorstMetric(
+      worstSingleMs,
+      worstSingleSolveSK,
+      s.WorstSingleMs,
+      s.WorstSingleSolveSK
+    ));
+    ({ value: worstMo3Ms, ref: worstMo3StartSolveSK } = updateWorstMetric(
+      worstMo3Ms,
+      worstMo3StartSolveSK,
+      s.WorstMo3Ms,
+      s.WorstMo3StartSolveSK
+    ));
+    ({ value: worstAo5Ms, ref: worstAo5StartSolveSK } = updateWorstMetric(
+      worstAo5Ms,
+      worstAo5StartSolveSK,
+      s.WorstAo5Ms,
+      s.WorstAo5StartSolveSK
+    ));
+    ({ value: worstAo12Ms, ref: worstAo12StartSolveSK } = updateWorstMetric(
+      worstAo12Ms,
+      worstAo12StartSolveSK,
+      s.WorstAo12Ms,
+      s.WorstAo12StartSolveSK
+    ));
 
     bestSingleAt = maxIso(bestSingleAt, s.BestSingleAt);
     lastSolveAt = maxIso(lastSolveAt, s.LastSolveAt);
@@ -892,12 +1076,20 @@ function aggregateStatsList(statsList) {
     MeanMs: solveCountIncluded > 0 ? Math.round(sumFinalTimeMs / solveCountIncluded) : null,
     BestSingleMs: bestSingleMs,
     BestSingleSolveSK: bestSingleSolveSK,
+    WorstSingleMs: worstSingleMs,
+    WorstSingleSolveSK: worstSingleSolveSK,
     BestMo3Ms: bestMo3Ms,
     BestMo3StartSolveSK: bestMo3StartSolveSK,
+    WorstMo3Ms: worstMo3Ms,
+    WorstMo3StartSolveSK: worstMo3StartSolveSK,
     BestAo5Ms: bestAo5Ms,
     BestAo5StartSolveSK: bestAo5StartSolveSK,
+    WorstAo5Ms: worstAo5Ms,
+    WorstAo5StartSolveSK: worstAo5StartSolveSK,
     BestAo12Ms: bestAo12Ms,
     BestAo12StartSolveSK: bestAo12StartSolveSK,
+    WorstAo12Ms: worstAo12Ms,
+    WorstAo12StartSolveSK: worstAo12StartSolveSK,
     BestAo25Ms: bestAo25Ms,
     BestAo25StartSolveSK: bestAo25StartSolveSK,
     BestAo50Ms: bestAo50Ms,
@@ -909,6 +1101,80 @@ function aggregateStatsList(statsList) {
     BestSingleAt: bestSingleAt,
     LastSolveAt: lastSolveAt,
   };
+}
+
+function buildEventMatrixStatsFromSolves(solves) {
+  const items = Array.isArray(solves) ? solves : [];
+  const singleBestSolve = findSingleSolve(items, "best");
+  const singleWorstSolve = findSingleSolve(items, "worst");
+  const ao5BestWindow = findWindowForMetric(items, WINDOW_SPECS.ao5, "best");
+  const ao5WorstWindow = findWindowForMetric(items, WINDOW_SPECS.ao5, "worst");
+  const ao12BestWindow = findWindowForMetric(items, WINDOW_SPECS.ao12, "best");
+  const ao12WorstWindow = findWindowForMetric(items, WINDOW_SPECS.ao12, "worst");
+
+  return {
+    SolveCountTotal: items.length,
+    BestSingleMs: getSolveDisplayMs(singleBestSolve),
+    BestSingleSolveSK: singleBestSolve?.solveRef || singleBestSolve?.SK || null,
+    WorstSingleMs: getSolveDisplayMs(singleWorstSolve),
+    WorstSingleSolveSK: singleWorstSolve?.solveRef || singleWorstSolve?.SK || null,
+    BestAo5Ms: computeWindowAverage(ao5BestWindow, WINDOW_SPECS.ao5),
+    BestAo5StartSolveSK: ao5BestWindow?.[0]?.solveRef || ao5BestWindow?.[0]?.SK || null,
+    WorstAo5Ms: computeWindowAverage(ao5WorstWindow, WINDOW_SPECS.ao5),
+    WorstAo5StartSolveSK: ao5WorstWindow?.[0]?.solveRef || ao5WorstWindow?.[0]?.SK || null,
+    BestAo12Ms: computeWindowAverage(ao12BestWindow, WINDOW_SPECS.ao12),
+    BestAo12StartSolveSK: ao12BestWindow?.[0]?.solveRef || ao12BestWindow?.[0]?.SK || null,
+    WorstAo12Ms: computeWindowAverage(ao12WorstWindow, WINDOW_SPECS.ao12),
+    WorstAo12StartSolveSK: ao12WorstWindow?.[0]?.solveRef || ao12WorstWindow?.[0]?.SK || null,
+  };
+}
+
+function canUseDayBucketScope({
+  userID,
+  hasActiveTagFilter,
+  statsViewMode,
+  hasActiveDateFilter,
+  isAllEventsMode,
+  isAllSessionsMode,
+  sessionId,
+}) {
+  if (!userID) return false;
+  if (hasActiveTagFilter) return false;
+  if (statsViewMode !== "time" && !hasActiveDateFilter) return false;
+  return isAllEventsMode || isAllSessionsMode || String(sessionId || "main") === "main";
+}
+
+function buildDayBucketScopeQuery({ isAllEventsMode, isAllSessionsMode, statsEvent, sessionId }) {
+  if (isAllEventsMode) {
+    return { event: "", mainOnly: false, scopeLabel: "all-events" };
+  }
+
+  if (isAllSessionsMode) {
+    return {
+      event: String(statsEvent || "").toUpperCase(),
+      mainOnly: false,
+      scopeLabel: "event",
+    };
+  }
+
+  return {
+    event: String(statsEvent || "").toUpperCase(),
+    mainOnly: String(sessionId || "main") === "main",
+    scopeLabel: "event-main",
+  };
+}
+
+function buildPenaltyPieData(summary) {
+  if (!summary) return [];
+  const total = Number(summary?.SolveCountTotal || 0);
+  const plus2 = Number(summary?.Plus2Count || 0);
+  const dnf = Number(summary?.DNFCount || 0);
+  const clean = Math.max(0, total - plus2 - dnf);
+  return [
+    { label: "Clean", value: clean },
+    { label: "+2", value: plus2 },
+    { label: "DNF", value: dnf },
+  ].filter((entry) => entry.value > 0);
 }
 
 function getSessionStatsFromSessionsList(sessionsList, event, sessionID) {
@@ -952,6 +1218,37 @@ function getAllEventsBreakdownFromSessionsList(sessionsList) {
     });
 }
 
+function estimateSolveCountForScope(sessionsList, { event, sessionID } = {}) {
+  const ev = String(event || "").trim().toUpperCase();
+  const sid = String(sessionID || "").trim() || "main";
+  const items = Array.isArray(sessionsList) ? sessionsList : [];
+
+  return items
+    .filter((session) => {
+      const sessionEvent = String(session?.Event || "").trim().toUpperCase();
+      const sessionKey = String(session?.SessionID || "main");
+      if (ev && ev !== ALL_EVENTS && sessionEvent !== ev) return false;
+      if (sid && sid !== ALL_SESSIONS && sessionKey !== sid) return false;
+      return !!sessionEvent;
+    })
+    .reduce((sum, session) => sum + Number(session?.Stats?.SolveCountTotal || 0), 0);
+}
+
+function describeStatsScope({ event, sessionID } = {}) {
+  const ev = String(event || "").trim().toUpperCase();
+  const sid = String(sessionID || "").trim() || "main";
+
+  if (!ev || ev === ALL_EVENTS) return "all events";
+  if (!sid || sid === ALL_SESSIONS) return `${ev} across all sessions`;
+  if (sid === "main") return `${ev} main session`;
+  return `${ev} ${sid}`;
+}
+
+function formatSolveEstimate(count) {
+  const safe = Number(count || 0);
+  return safe > 0 ? safe.toLocaleString() : "an unknown number of";
+}
+
 function getSolveDate(solve) {
   const raw = solve?.datetime || solve?.createdAt || solve?.DateTime || solve?.dateTime;
   if (!raw) return null;
@@ -971,6 +1268,16 @@ function getTodayLocalDayKey() {
   return getLocalDayKey(new Date());
 }
 
+function getEffectiveTimeZone(user) {
+  return String(
+    user?.Settings?.timeZone ||
+      user?.Settings?.TimeZone ||
+      user?.Settings?.timezone ||
+      user?.Settings?.Timezone ||
+      ""
+  ).trim();
+}
+
 function getDayKeyDate(dayKey) {
   if (!dayKey) return null;
   const date = new Date(`${dayKey}T12:00:00`);
@@ -983,6 +1290,33 @@ function shiftLocalDayKey(dayKey, offsetDays) {
   const next = new Date(base);
   next.setDate(next.getDate() + Number(offsetDays || 0));
   return getLocalDayKey(next);
+}
+
+function getInclusiveDaySpan(startDay, endDay) {
+  const start = getDayKeyDate(startDay);
+  const end = getDayKeyDate(endDay);
+  if (!start || !end) return 0;
+  const diffMs = end.getTime() - start.getTime();
+  return Math.max(0, Math.round(diffMs / 86400000)) + 1;
+}
+
+function clampRangeEndToToday(startDay, endDay) {
+  const today = getTodayLocalDayKey();
+  if (!startDay || !endDay || !today) return { start: startDay, end: endDay };
+  if (String(endDay) <= String(today)) return { start: startDay, end: endDay };
+
+  const span = Math.max(1, getInclusiveDaySpan(startDay, endDay));
+  return {
+    end: today,
+    start: shiftLocalDayKey(today, -(span - 1)),
+  };
+}
+
+function shouldPreferRawRangeView(dayCount, currentlyPreferred = false) {
+  const safeDayCount = Math.max(0, Number(dayCount) || 0);
+  if (safeDayCount <= 1) return true;
+  if (!currentlyPreferred) return false;
+  return safeDayCount <= MAX_RAW_INDEX_RANGE_DAYS;
 }
 
 function getWeekRangeFromDayKey(dayKey) {
@@ -1031,6 +1365,7 @@ function filterSolvesByDateRange(input, startDay, endDay) {
 
 function Stats({
   sessions,
+  settings = {},
   sessionsList = [],
   tagConfig = DEFAULT_TAG_CONFIG,
   tagCatalog = { Global: {}, ByEvent: {} },
@@ -1043,14 +1378,25 @@ function Stats({
   currentEvent,
   currentSession,
   user,
+  viewerUser = null,
+  readOnly = false,
   deleteTime,
   addPost,
   onTagColorsChange = null,
   onSettingsContextChange,
   recomputeRequest = 0,
   importRequest = 0,
+  exportRequest = 0,
+  forceShowImportModal = false,
+  forceShowExportModal = false,
+  onImportModalOpenHandled = null,
+  onExportModalOpenHandled = null,
+  onSessionsListRefresh = null,
 }) {
   const { runDb } = useDbStatus();
+  const profileLinkTarget = user?.UserID ? `/profile/${user.UserID}` : "/profile";
+  const viewerDisplayName = viewerUser?.Name || viewerUser?.UserID || "you";
+  const statsOwnerDisplayName = user?.Name || user?.UserID || "this user";
   const DEFAULT_IN_VIEW = 100;
   const DEFAULT_PAGE_FETCH = 500;
 
@@ -1076,6 +1422,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const compareSessionMenuWrapRef = useRef(null);
 
   const sessionId = useMemo(() => statsSession || "main", [statsSession]);
+  const effectiveTimeZone = useMemo(() => getEffectiveTimeZone(user), [user]);
 
   const isAllEventsMode = statsEvent === ALL_EVENTS;
   const isAllSessionsMode = statsSession === ALL_SESSIONS;
@@ -1091,50 +1438,252 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const [compareCurrentPage, setCompareCurrentPage] = useState(0);
 
   const [overallStatsForEvent, setOverallStatsForEvent] = useState(null);
+  const [cachedEventMatrixStats, setCachedEventMatrixStats] = useState({});
   const [loadingOverallStats, setLoadingOverallStats] = useState(false);
+  const [loadingEventMatrixStats, setLoadingEventMatrixStats] = useState(false);
   const [recomputeStatusText, setRecomputeStatusText] = useState("");
 
   const [loadingInitial, setLoadingInitial] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingAllSolves, setLoadingAllSolves] = useState(false);
   const [loadingTimeScope, setLoadingTimeScope] = useState(false);
+  const [loadingDayBuckets, setLoadingDayBuckets] = useState(false);
+  const [loadingCompareDayBuckets, setLoadingCompareDayBuckets] = useState(false);
   const [loadingTagScope, setLoadingTagScope] = useState(false);
   const [showAllActive, setShowAllActive] = useState(false);
   const [compareShowAllActive, setCompareShowAllActive] = useState(false);
   const [timeScopeSolves, setTimeScopeSolves] = useState([]);
   const [timeScopeCacheKey, setTimeScopeCacheKey] = useState("");
+  const [overallScopeSolves, setOverallScopeSolves] = useState([]);
+  const [overallScopeCacheKey, setOverallScopeCacheKey] = useState("");
   const [tagScopeSolves, setTagScopeSolves] = useState([]);
   const [tagScopeCacheKey, setTagScopeCacheKey] = useState("");
+  const [dateScopedSessionSolves, setDateScopedSessionSolves] = useState([]);
+  const [dateScopedSessionCacheKey, setDateScopedSessionCacheKey] = useState("");
+  const [loadingDateScopedSolves, setLoadingDateScopedSolves] = useState(false);
+  const [dayBucketRangeData, setDayBucketRangeData] = useState({ items: [], aggregateSummary: null, scope: "" });
+  const [dayBucketRangeKey, setDayBucketRangeKey] = useState("");
+  const [compareDayBucketRangeData, setCompareDayBucketRangeData] = useState({
+    items: [],
+    aggregateSummary: null,
+    scope: "",
+  });
+  const [compareDayBucketRangeKey, setCompareDayBucketRangeKey] = useState("");
 
   const [pageCursor, setPageCursor] = useState(null);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
   const [isAllLoaded, setIsAllLoaded] = useState(false);
 
   const requestTokenRef = useRef(0);
+  const previousHasActiveTagFilterRef = useRef(false);
 
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const sessionMenuWrapRef = useRef(null);
 
   const [showImport, setShowImport] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [importProgress, setImportProgress] = useState(null);
-  const recomputeRequestRef = useRef(recomputeRequest);
-  const importRequestRef = useRef(importRequest);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportProgress, setExportProgress] = useState(null);
+  const recomputeRequestRef = useRef(null);
+  const importRequestRef = useRef(null);
+  const exportRequestRef = useRef(null);
   const [statsViewMode, setStatsViewMode] = useState("standard");
+  const [timeViewMainSessionsOnly, setTimeViewMainSessionsOnly] = useState(true);
+  const summaryLayout =
+    String(settings?.statsSummaryLayout || "row").trim().toLowerCase() === "tile"
+      ? "tile"
+      : "row";
   const showSolveCharts = isSolveLevelMode || statsViewMode === "time";
   const [selectedTimeDay, setSelectedTimeDay] = useState("");
   const [dateFilterStart, setDateFilterStart] = useState("");
   const [dateFilterEnd, setDateFilterEnd] = useState("");
+  const [preferRawDateRangeView, setPreferRawDateRangeView] = useState(false);
+  const [compareDateFilterStart, setCompareDateFilterStart] = useState("");
+  const [compareDateFilterEnd, setCompareDateFilterEnd] = useState("");
+  const hasActiveDateFilter = !!dateFilterStart || !!dateFilterEnd;
+  const effectiveCompareDateFilterStart = linkStatsControls ? dateFilterStart : compareDateFilterStart;
+  const effectiveCompareDateFilterEnd = linkStatsControls ? dateFilterEnd : compareDateFilterEnd;
+  const hasActiveCompareDateFilter = !!effectiveCompareDateFilterStart || !!effectiveCompareDateFilterEnd;
+  const dateScopedSessionKey = useMemo(() => {
+    if (!user?.UserID || !isSolveLevelMode) return "";
+    if (!dateFilterStart && !dateFilterEnd) return "";
+    return [
+      user.UserID,
+      String(statsEvent || "").toUpperCase(),
+      String(sessionId || "main"),
+      dateFilterStart || "*",
+      dateFilterEnd || "*",
+      effectiveTimeZone || "*",
+    ].join("::");
+  }, [dateFilterEnd, dateFilterStart, effectiveTimeZone, isSolveLevelMode, sessionId, statsEvent, user?.UserID]);
+  const dateRangeQueryOpts = useMemo(
+    () => ({
+      ...(dateFilterStart ? { startDay: dateFilterStart } : {}),
+      ...(dateFilterEnd ? { endDay: dateFilterEnd } : {}),
+      ...(effectiveTimeZone ? { timeZone: effectiveTimeZone } : {}),
+    }),
+    [dateFilterEnd, dateFilterStart, effectiveTimeZone]
+  );
+  const compareDateRangeQueryOpts = useMemo(
+    () => ({
+      ...(effectiveCompareDateFilterStart ? { startDay: effectiveCompareDateFilterStart } : {}),
+      ...(effectiveCompareDateFilterEnd ? { endDay: effectiveCompareDateFilterEnd } : {}),
+      ...(effectiveTimeZone ? { timeZone: effectiveTimeZone } : {}),
+    }),
+    [effectiveCompareDateFilterEnd, effectiveCompareDateFilterStart, effectiveTimeZone]
+  );
+  const compareEnabled = !!compareSelection;
+  const canUseBucketRange = useMemo(
+    () =>
+      canUseDayBucketScope({
+        userID: user?.UserID,
+        hasActiveTagFilter,
+        statsViewMode,
+        hasActiveDateFilter,
+        isAllEventsMode,
+        isAllSessionsMode,
+        sessionId,
+      }),
+    [
+      hasActiveDateFilter,
+      hasActiveTagFilter,
+      isAllEventsMode,
+      isAllSessionsMode,
+      sessionId,
+      statsViewMode,
+      user?.UserID,
+    ]
+  );
+  const canUseCompareBucketRange = useMemo(
+    () =>
+      compareEnabled &&
+      canUseDayBucketScope({
+        userID: user?.UserID,
+        hasActiveTagFilter: hasActiveTagSelection(
+          sanitizeTagSelection(compareSelection?.tags || makeEmptyTagSelection())
+        ),
+        statsViewMode,
+        hasActiveDateFilter: hasActiveCompareDateFilter,
+        isAllEventsMode: String(compareSelection?.event || "").toUpperCase() === ALL_EVENTS,
+        isAllSessionsMode: String(compareSelection?.session || "main") === ALL_SESSIONS,
+        sessionId: String(compareSelection?.session || "main"),
+      }),
+    [
+      compareEnabled,
+      hasActiveCompareDateFilter,
+      compareSelection?.event,
+      compareSelection?.session,
+      compareSelection?.tags,
+      statsViewMode,
+      user?.UserID,
+    ]
+  );
+  const bucketScopeQuery = useMemo(
+    () => buildDayBucketScopeQuery({ isAllEventsMode, isAllSessionsMode, statsEvent, sessionId }),
+    [isAllEventsMode, isAllSessionsMode, sessionId, statsEvent]
+  );
+  const compareBucketScopeQuery = useMemo(
+    () =>
+      buildDayBucketScopeQuery({
+        isAllEventsMode: String(compareSelection?.event || "").toUpperCase() === ALL_EVENTS,
+        isAllSessionsMode: String(compareSelection?.session || "main") === ALL_SESSIONS,
+        statsEvent: String(compareSelection?.event || "").toUpperCase(),
+        sessionId: String(compareSelection?.session || "main"),
+      }),
+    [compareSelection?.event, compareSelection?.session]
+  );
+  const dayBucketRangeRequestKey = useMemo(() => {
+    if (!canUseBucketRange || !user?.UserID) return "";
+    return [
+      user.UserID,
+      bucketScopeQuery.scopeLabel,
+      bucketScopeQuery.event || "*",
+      bucketScopeQuery.mainOnly ? "main" : "all",
+      dateFilterStart || "*",
+      dateFilterEnd || "*",
+      effectiveTimeZone || "*",
+    ].join("::");
+  }, [
+    bucketScopeQuery.event,
+    bucketScopeQuery.mainOnly,
+    bucketScopeQuery.scopeLabel,
+    canUseBucketRange,
+    dateFilterEnd,
+    dateFilterStart,
+    effectiveTimeZone,
+    user?.UserID,
+  ]);
+  const compareDayBucketRangeRequestKey = useMemo(() => {
+    if (!canUseCompareBucketRange || !user?.UserID) return "";
+    return [
+      user.UserID,
+      compareBucketScopeQuery.scopeLabel,
+      compareBucketScopeQuery.event || "*",
+      compareBucketScopeQuery.mainOnly ? "main" : "all",
+      effectiveCompareDateFilterStart || "*",
+      effectiveCompareDateFilterEnd || "*",
+      effectiveTimeZone || "*",
+    ].join("::");
+  }, [
+    canUseCompareBucketRange,
+    compareBucketScopeQuery.event,
+    compareBucketScopeQuery.mainOnly,
+    compareBucketScopeQuery.scopeLabel,
+    effectiveCompareDateFilterEnd,
+    effectiveCompareDateFilterStart,
+    effectiveTimeZone,
+    user?.UserID,
+  ]);
   const [focusedCardId, setFocusedCardId] = useState("");
   const [focusActionMessage, setFocusActionMessage] = useState("");
   const [focusActionBusy, setFocusActionBusy] = useState("");
+  const [shareIncludeChartControls, setShareIncludeChartControls] = useState(false);
+  const [focusedLineChartControls, setFocusedLineChartControls] = useState(null);
   const [selectedSolve, setSelectedSolve] = useState(null);
   const [selectedAverageDetail, setSelectedAverageDetail] = useState(null);
+  const [expensiveStatsPrompt, setExpensiveStatsPrompt] = useState(null);
   const [tableCompareView, setTableCompareView] = useState("primary");
+  const expensiveStatsPromptResolverRef = useRef(null);
+  const promptedRecomputeScopesRef = useRef(new Set());
   const profileChartStyle = useMemo(() => getProfileChartStyle(user), [user]);
   const safeTagConfig = useMemo(() => normalizeTagConfig(tagConfig || DEFAULT_TAG_CONFIG), [tagConfig]);
   const paletteOptions = useMemo(() => getPaletteOptions(), []);
-  const compareEnabled = !!compareSelection;
+  const resolveExpensiveStatsPrompt = useCallback((approved) => {
+    const resolver = expensiveStatsPromptResolverRef.current;
+    expensiveStatsPromptResolverRef.current = null;
+    setExpensiveStatsPrompt(null);
+    if (typeof resolver === "function") resolver(Boolean(approved));
+  }, []);
+
+  const requestExpensiveStatsPrompt = useCallback(({ title, lines = [], confirmLabel = "Continue" }) => {
+    return new Promise((resolve) => {
+      expensiveStatsPromptResolverRef.current = resolve;
+      setExpensiveStatsPrompt({
+        title,
+        lines: (Array.isArray(lines) ? lines : []).filter(Boolean),
+        confirmLabel,
+      });
+    });
+  }, []);
+
+  const warnBeforeSolveScan = useCallback(
+    async ({ title, intro, event = statsEvent, sessionID = sessionId, extraLines = [], confirmLabel = "Continue" }) => {
+      const solveEstimate = estimateSolveCountForScope(sessionsList, { event, sessionID });
+      return requestExpensiveStatsPrompt({
+        title,
+        confirmLabel,
+        lines: [
+          intro,
+          `Scope: ${describeStatsScope({ event, sessionID })}.`,
+          `Estimated solves touched: ${formatSolveEstimate(solveEstimate)}.`,
+          ...extraLines,
+        ],
+      });
+    },
+    [requestExpensiveStatsPrompt, sessionId, sessionsList, statsEvent]
+  );
 
   useEffect(() => {
     const onDown = (e) => {
@@ -1276,6 +1825,19 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       .join(",");
   }, [solveScopeSessions]);
 
+  const timeScopeCacheIdentity = useMemo(() => {
+    return [
+      solveScopeSessionKey || "*",
+      dateFilterStart || "*",
+      dateFilterEnd || "*",
+      effectiveTimeZone || "*",
+    ].join("::");
+  }, [dateFilterEnd, dateFilterStart, effectiveTimeZone, solveScopeSessionKey]);
+  const overallScopeCacheIdentity = useMemo(
+    () => [solveScopeSessionKey || "*", effectiveTimeZone || "*"].join("::"),
+    [effectiveTimeZone, solveScopeSessionKey]
+  );
+
   const sessionCachedSolves = useMemo(() => {
     const out = [];
     for (const eventSolves of Object.values(sessions || {})) {
@@ -1310,11 +1872,15 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       }));
   }, [sessions, statsEvent, sessionId, statsViewMode]);
 
+  const hasDateScopedSessionCache = useMemo(() => {
+    return !!dateScopedSessionKey && dateScopedSessionCacheKey === dateScopedSessionKey;
+  }, [dateScopedSessionCacheKey, dateScopedSessionKey]);
+
   const hasScopedSolveCache = useMemo(() => {
     if (!user?.UserID) return false;
     if (!solveScopeSessionKey) return false;
-    return timeScopeCacheKey === `${user.UserID}::${solveScopeSessionKey}`;
-  }, [solveScopeSessionKey, timeScopeCacheKey, user?.UserID]);
+    return timeScopeCacheKey === `${user.UserID}::${timeScopeCacheIdentity}`;
+  }, [solveScopeSessionKey, timeScopeCacheIdentity, timeScopeCacheKey, user?.UserID]);
 
   const activeTagEntries = useMemo(() => {
     return Object.entries(sanitizeTagSelection(tagFilterSelection))
@@ -1322,23 +1888,23 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       .filter(([, value]) => value);
   }, [tagFilterSelection]);
 
-  const singleActiveTagFilter = useMemo(() => {
-    if (activeTagEntries.length !== 1) return null;
+  const primaryIndexedTagFilter = useMemo(() => {
+    if (activeTagEntries.length === 0) return null;
     const [field, value] = activeTagEntries[0];
     return { field, value };
   }, [activeTagEntries]);
 
   const indexedTagScope = useMemo(() => {
-    if (!singleActiveTagFilter) return null;
+    if (!primaryIndexedTagFilter) return null;
 
     return {
-      tagKey: singleActiveTagFilter.field,
-      tagValue: singleActiveTagFilter.value,
+      tagKey: primaryIndexedTagFilter.field,
+      tagValue: primaryIndexedTagFilter.value,
       event: isAllEventsMode ? "" : String(statsEvent || "").toUpperCase(),
       sessionID:
         isAllEventsMode || isAllSessionsMode ? "" : String(sessionId || "main"),
     };
-  }, [isAllEventsMode, isAllSessionsMode, sessionId, singleActiveTagFilter, statsEvent]);
+  }, [isAllEventsMode, isAllSessionsMode, primaryIndexedTagFilter, sessionId, statsEvent]);
 
   const indexedTagScopeKey = useMemo(() => {
     if (!user?.UserID || !indexedTagScope) return "";
@@ -1358,7 +1924,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   }, [indexedTagScopeKey, tagScopeCacheKey]);
 
   const scopeSolvesForSelection = useMemo(() => {
-    const base = hasScopedSolveCache ? timeScopeSolves : sessionCachedSolves;
+    const base =
+      hasActiveDateFilter && isSolveLevelMode
+        ? hasDateScopedSessionCache
+          ? dateScopedSessionSolves
+          : []
+        : hasScopedSolveCache
+        ? timeScopeSolves
+        : sessionCachedSolves;
     return (base || []).filter((solve) => {
       const eventMatches =
         isAllEventsMode ||
@@ -1370,8 +1943,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     });
   }, [
     hasScopedSolveCache,
+    hasActiveDateFilter,
+    hasDateScopedSessionCache,
+    dateScopedSessionSolves,
     isAllEventsMode,
     isAllSessionsMode,
+    isSolveLevelMode,
     sessionCachedSolves,
     sessionId,
     statsEvent,
@@ -1379,15 +1956,19 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   ]);
 
   const activeStandardSolves = useMemo(() => {
+    const standardBaseSolves =
+      hasActiveDateFilter && isSolveLevelMode
+        ? hasDateScopedSessionCache
+          ? dateScopedSessionSolves
+          : []
+        : selectedSessionSolves;
     const base = hasActiveTagFilter
       ? canUseIndexedTagScope && hasIndexedTagScopeCache
         ? tagScopeSolves
         : scopeSolvesForSelection
-      : selectedSessionSolves;
+      : standardBaseSolves;
     const filtered = hasActiveTagFilter
-      ? canUseIndexedTagScope && hasIndexedTagScopeCache
-        ? base
-        : base.filter((solve) => solveMatchesTagSelection(solve, tagFilterSelection))
+      ? base.filter((solve) => solveMatchesTagSelection(solve, tagFilterSelection))
       : base;
 
     return filtered.map((solve, index) => ({
@@ -1396,8 +1977,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     }));
   }, [
     canUseIndexedTagScope,
+    dateScopedSessionSolves,
     hasActiveTagFilter,
+    hasActiveDateFilter,
+    hasDateScopedSessionCache,
     hasIndexedTagScopeCache,
+    isSolveLevelMode,
     scopeSolvesForSelection,
     selectedSessionSolves,
     tagFilterSelection,
@@ -1413,7 +1998,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       .filter((s) => String(s.Event || "").toUpperCase() === ev)
       .map((s) => ({
         SessionID: s.SessionID || "main",
-        SessionName: s.SessionName || s.Name || s.SessionID || "main",
+        SessionName: normalizeSessionLabel(
+          s.SessionID || "main",
+          s.SessionName || s.Name || s.SessionID || "main"
+        ),
         Stats: s.Stats || null,
       }));
 
@@ -1457,23 +2045,23 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       .map(([field, value]) => [field, String(value || "").trim()])
       .filter(([, value]) => value);
   }, [compareTagSelection]);
-  const compareSingleActiveTagFilter = useMemo(() => {
-    if (compareActiveTagEntries.length !== 1) return null;
+  const comparePrimaryIndexedTagFilter = useMemo(() => {
+    if (compareActiveTagEntries.length === 0) return null;
     const [field, value] = compareActiveTagEntries[0];
     return { field, value };
   }, [compareActiveTagEntries]);
   const compareIndexedTagScope = useMemo(() => {
-    if (!compareSingleActiveTagFilter) return null;
+    if (!comparePrimaryIndexedTagFilter) return null;
     return {
-      tagKey: compareSingleActiveTagFilter.field,
-      tagValue: compareSingleActiveTagFilter.value,
+      tagKey: comparePrimaryIndexedTagFilter.field,
+      tagValue: comparePrimaryIndexedTagFilter.value,
       event: compareEvent === ALL_EVENTS ? "" : String(compareEvent || "").toUpperCase(),
       sessionID:
         compareEvent === ALL_EVENTS || compareSessionId === ALL_SESSIONS
           ? ""
           : String(compareSessionId || "main"),
     };
-  }, [compareEvent, compareSessionId, compareSingleActiveTagFilter]);
+  }, [compareEvent, comparePrimaryIndexedTagFilter, compareSessionId]);
   const compareIndexedTagScopeKey = useMemo(() => {
     if (!user?.UserID || !compareIndexedTagScope) return "";
     return [
@@ -1514,7 +2102,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       .filter((s) => String(s.Event || "").toUpperCase() === compareEvent)
       .map((s) => ({
         SessionID: s.SessionID || "main",
-        SessionName: s.SessionName || s.Name || s.SessionID || "main",
+        SessionName: normalizeSessionLabel(
+          s.SessionID || "main",
+          s.SessionName || s.Name || s.SessionID || "main"
+        ),
       }));
 
     const seen = new Set();
@@ -1608,7 +2199,25 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     if (isAllSessionsMode) {
       const aggregated = getEventAggregateFromSessionsList(sessionsList, statsEvent);
       setOverallStatsForEvent(aggregated || null);
-      return;
+
+      let cancelled = false;
+
+      (async () => {
+        try {
+          setLoadingOverallStats(true);
+          const item = await getEventStats(userID, statsEvent);
+          if (!cancelled) setOverallStatsForEvent(item || aggregated || null);
+        } catch (e) {
+          console.error("Failed to load EVENTSTATS:", e);
+          if (!cancelled) setOverallStatsForEvent(aggregated || null);
+        } finally {
+          if (!cancelled) setLoadingOverallStats(false);
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
     }
 
     const embedded = getSessionStatsFromSessionsList(sessionsList, statsEvent, sessionId);
@@ -1690,6 +2299,67 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     hasActiveTagFilter,
   ]);
 
+  useEffect(() => {
+    const userID = user?.UserID;
+    if (!userID || statsViewMode !== "time") {
+      setCachedEventMatrixStats({});
+      setLoadingEventMatrixStats(false);
+      return;
+    }
+
+    const filteredSessions = (sessionsList || []).filter((session) => {
+      const event = String(session?.Event || "").trim().toUpperCase();
+      if (!event) return false;
+      if (timeViewMainSessionsOnly) {
+        return String(session?.SessionID || "main") === "main";
+      }
+      return true;
+    });
+    const events = Array.from(
+      new Set(
+        filteredSessions
+          .map((session) => String(session?.Event || "").trim().toUpperCase())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+
+    if (!events.length) {
+      setCachedEventMatrixStats({});
+      setLoadingEventMatrixStats(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        setLoadingEventMatrixStats(true);
+        const items = await Promise.all(
+          events.map(async (event) => {
+            const stats = timeViewMainSessionsOnly
+              ? await getSessionStats(userID, event, "main")
+              : await getEventStats(userID, event);
+            return [event, stats || null];
+          })
+        );
+
+        if (cancelled) return;
+        setCachedEventMatrixStats(Object.fromEntries(items));
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Failed to load cached event matrix stats:", error);
+          setCachedEventMatrixStats({});
+        }
+      } finally {
+        if (!cancelled) setLoadingEventMatrixStats(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.UserID, statsViewMode, sessionsList, timeViewMainSessionsOnly]);
+
   const loadInitialSolves = useCallback(async () => {
     const userID = user?.UserID;
     if (!userID) return;
@@ -1767,6 +2437,218 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     loadInitialSolves();
   }, [user?.UserID, statsEvent, sessionId, loadInitialSolves]);
 
+  const loadDateScopedSessionSolves = useCallback(async () => {
+    const userID = user?.UserID;
+    if (!userID || !dateScopedSessionKey || !isSolveLevelMode) {
+      setDateScopedSessionSolves([]);
+      setDateScopedSessionCacheKey("");
+      return false;
+    }
+
+    if (dateScopedSessionCacheKey === dateScopedSessionKey) {
+      return true;
+    }
+
+    setLoadingDateScopedSolves(true);
+    const myToken = ++requestTokenRef.current;
+
+    try {
+      let cursor = null;
+      let accumulated = [];
+      let pageCount = 0;
+      const seenCursors = new Set();
+
+      setDateScopedSessionSolves([]);
+      setDateScopedSessionCacheKey(dateScopedSessionKey);
+
+      do {
+        const { items, lastKey } = await getSolvesBySessionPage(
+          userID,
+          String(statsEvent || "").toUpperCase(),
+          String(sessionId || "main"),
+          1000,
+          cursor,
+          dateRangeQueryOpts
+        );
+
+        if (requestTokenRef.current !== myToken) return false;
+
+        const pageOldestToNewest = (items || [])
+          .map(normalizeSolve)
+          .filter(Boolean)
+          .reverse();
+
+        accumulated = [...pageOldestToNewest, ...accumulated];
+        setDateScopedSessionSolves(accumulated);
+
+        pageCount += 1;
+        if (pageCount > 100) {
+          console.warn("Aborting date-scoped session load after 100 pages", {
+            userID,
+            statsEvent,
+            sessionId,
+            dateRangeQueryOpts,
+          });
+          break;
+        }
+
+        const nextCursorKey = lastKey ? JSON.stringify(lastKey) : "";
+        if (nextCursorKey && seenCursors.has(nextCursorKey)) {
+          console.warn("Aborting date-scoped session load after repeated cursor", {
+            userID,
+            statsEvent,
+            sessionId,
+            dateRangeQueryOpts,
+          });
+          break;
+        }
+        if (nextCursorKey) seenCursors.add(nextCursorKey);
+        cursor = lastKey || null;
+      } while (cursor);
+
+      return true;
+    } catch (error) {
+      console.error("Failed to load date-scoped session solves:", error);
+      setDateScopedSessionSolves([]);
+      setDateScopedSessionCacheKey("");
+      return false;
+    } finally {
+      if (requestTokenRef.current === myToken) {
+        setLoadingDateScopedSolves(false);
+      }
+    }
+  }, [
+    dateRangeQueryOpts,
+    dateScopedSessionCacheKey,
+    dateScopedSessionKey,
+    isSolveLevelMode,
+    normalizeSolve,
+    sessionId,
+    statsEvent,
+    user?.UserID,
+  ]);
+
+  useEffect(() => {
+    if (!hasActiveDateFilter || statsViewMode !== "standard" || !isSolveLevelMode) {
+      setDateScopedSessionSolves([]);
+      setDateScopedSessionCacheKey("");
+      setLoadingDateScopedSolves(false);
+      return;
+    }
+
+    loadDateScopedSessionSolves();
+  }, [hasActiveDateFilter, isSolveLevelMode, loadDateScopedSessionSolves, statsViewMode]);
+
+  useEffect(() => {
+    if (!canUseBucketRange || !dayBucketRangeRequestKey) {
+      setDayBucketRangeData({ items: [], aggregateSummary: null, scope: "" });
+      setDayBucketRangeKey("");
+      setLoadingDayBuckets(false);
+      return;
+    }
+
+    if (dayBucketRangeKey === dayBucketRangeRequestKey) return;
+
+    let cancelled = false;
+    setLoadingDayBuckets(true);
+
+    (async () => {
+      try {
+        const data = await getDayBuckets(user.UserID, {
+          event: bucketScopeQuery.event,
+          mainOnly: bucketScopeQuery.mainOnly,
+          startDay: dateFilterStart,
+          endDay: dateFilterEnd,
+          timeZone: effectiveTimeZone,
+        });
+        if (cancelled) return;
+        setDayBucketRangeData({
+          items: Array.isArray(data?.items) ? data.items : [],
+          aggregateSummary: data?.aggregateSummary || null,
+          scope: data?.scope || bucketScopeQuery.scopeLabel,
+        });
+        setDayBucketRangeKey(dayBucketRangeRequestKey);
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Failed to load day buckets:", error);
+        setDayBucketRangeData({ items: [], aggregateSummary: null, scope: "" });
+        setDayBucketRangeKey("");
+      } finally {
+        if (!cancelled) setLoadingDayBuckets(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    bucketScopeQuery.event,
+    bucketScopeQuery.mainOnly,
+    bucketScopeQuery.scopeLabel,
+    canUseBucketRange,
+    dateFilterEnd,
+    dateFilterStart,
+    dayBucketRangeKey,
+    dayBucketRangeRequestKey,
+    effectiveTimeZone,
+    user?.UserID,
+  ]);
+
+  useEffect(() => {
+    if (!canUseCompareBucketRange || !compareDayBucketRangeRequestKey) {
+      setCompareDayBucketRangeData({ items: [], aggregateSummary: null, scope: "" });
+      setCompareDayBucketRangeKey("");
+      setLoadingCompareDayBuckets(false);
+      return;
+    }
+
+    if (compareDayBucketRangeKey === compareDayBucketRangeRequestKey) return;
+
+    let cancelled = false;
+    setLoadingCompareDayBuckets(true);
+
+    (async () => {
+      try {
+        const data = await getDayBuckets(user.UserID, {
+          event: compareBucketScopeQuery.event,
+          mainOnly: compareBucketScopeQuery.mainOnly,
+          startDay: effectiveCompareDateFilterStart,
+          endDay: effectiveCompareDateFilterEnd,
+          timeZone: effectiveTimeZone,
+        });
+        if (cancelled) return;
+        setCompareDayBucketRangeData({
+          items: Array.isArray(data?.items) ? data.items : [],
+          aggregateSummary: data?.aggregateSummary || null,
+          scope: data?.scope || compareBucketScopeQuery.scopeLabel,
+        });
+        setCompareDayBucketRangeKey(compareDayBucketRangeRequestKey);
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Failed to load compare day buckets:", error);
+        setCompareDayBucketRangeData({ items: [], aggregateSummary: null, scope: "" });
+        setCompareDayBucketRangeKey("");
+      } finally {
+        if (!cancelled) setLoadingCompareDayBuckets(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    canUseCompareBucketRange,
+    compareBucketScopeQuery.event,
+    compareBucketScopeQuery.mainOnly,
+    compareBucketScopeQuery.scopeLabel,
+    compareDayBucketRangeKey,
+    compareDayBucketRangeRequestKey,
+    effectiveCompareDateFilterEnd,
+    effectiveCompareDateFilterStart,
+    effectiveTimeZone,
+    user?.UserID,
+  ]);
+
   const loadTimeScopeSolves = useCallback(async () => {
     const userID = user?.UserID;
     if (!userID) return false;
@@ -1776,7 +2658,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       return false;
     }
 
-    const cacheKey = `${userID}::${solveScopeSessionKey}`;
+    const cacheKey = `${userID}::${timeScopeCacheIdentity}`;
     if (timeScopeCacheKey === cacheKey && timeScopeSolves.length > 0) return true;
 
     setLoadingTimeScope(true);
@@ -1787,7 +2669,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           const ev = String(session?.Event || "").toUpperCase();
           const sid = String(session?.SessionID || "main");
           if (!ev) return [];
-          const items = await getSolvesBySession(userID, ev, sid);
+          const items = await getSolvesBySession(
+            userID,
+            ev,
+            sid,
+            hasActiveDateFilter ? dateRangeQueryOpts : {}
+          );
           return (items || []).map(normalizeSolve).filter(Boolean);
         })
       );
@@ -1820,8 +2707,67 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     normalizeSolve,
     solveScopeSessionKey,
     solveScopeSessions,
+    timeScopeCacheIdentity,
+    dateRangeQueryOpts,
+    hasActiveDateFilter,
     timeScopeCacheKey,
     timeScopeSolves.length,
+    user?.UserID,
+  ]);
+
+  const loadOverallScopeSolves = useCallback(async () => {
+    const userID = user?.UserID;
+    if (!userID || !solveScopeSessionKey || hasActiveTagFilter) {
+      setOverallScopeSolves([]);
+      setOverallScopeCacheKey("");
+      return false;
+    }
+
+    const cacheKey = `${userID}::${overallScopeCacheIdentity}`;
+    if (overallScopeCacheKey === cacheKey && overallScopeSolves.length > 0) return true;
+
+    try {
+      const results = await Promise.all(
+        solveScopeSessions.map(async (session) => {
+          const ev = String(session?.Event || "").toUpperCase();
+          const sid = String(session?.SessionID || "main");
+          if (!ev) return [];
+          const items = await getSolvesBySession(userID, ev, sid, effectiveTimeZone ? { timeZone: effectiveTimeZone } : {});
+          return (items || []).map(normalizeSolve).filter(Boolean);
+        })
+      );
+
+      const deduped = new Map();
+      results.flat().forEach((solve) => {
+        const key = String(solve?.solveRef || `${solve?.event}|${solve?.sessionID}|${solve?.datetime || ""}`);
+        if (!key) return;
+        deduped.set(key, solve);
+      });
+
+      const merged = Array.from(deduped.values()).sort((a, b) => {
+        const ta = new Date(a?.datetime || "").getTime();
+        const tb = new Date(b?.datetime || "").getTime();
+        return ta - tb;
+      });
+
+      setOverallScopeSolves(merged);
+      setOverallScopeCacheKey(cacheKey);
+      return true;
+    } catch (error) {
+      console.error("Failed to load overall scope solves:", error);
+      setOverallScopeSolves([]);
+      setOverallScopeCacheKey("");
+      return false;
+    }
+  }, [
+    effectiveTimeZone,
+    hasActiveTagFilter,
+    normalizeSolve,
+    overallScopeCacheIdentity,
+    overallScopeCacheKey,
+    overallScopeSolves.length,
+    solveScopeSessionKey,
+    solveScopeSessions,
     user?.UserID,
   ]);
 
@@ -1881,10 +2827,23 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     user?.UserID,
   ]);
 
+  const wantsPeriodAwareEventMatrix =
+    statsViewMode === "time" && isAllEventsMode && hasActiveDateFilter && !compareEnabled;
+  const wantsRawTimeScope =
+    statsViewMode === "time" &&
+    (preferRawDateRangeView || hasActiveTagFilter || wantsPeriodAwareEventMatrix);
+
   useEffect(() => {
-    if (statsViewMode !== "time") return;
+    if (!wantsRawTimeScope) return;
     loadTimeScopeSolves();
-  }, [loadTimeScopeSolves, statsViewMode]);
+  }, [loadTimeScopeSolves, wantsRawTimeScope]);
+
+  useEffect(() => {
+    if (hasActiveTagFilter) {
+      setOverallScopeSolves([]);
+      setOverallScopeCacheKey("");
+    }
+  }, [hasActiveTagFilter]);
 
   useEffect(() => {
     if (!hasActiveTagFilter || !canUseIndexedTagScope) {
@@ -1956,9 +2915,58 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       ),
     [baseTagOptions, compareCatalogTagOptions, compareSessionSolves, cubeModelOptions, safeTagConfig]
   );
+  const selectedSolveDiscoveredTagOptions = useMemo(() => {
+    const selectedSolveEvent = String(
+      selectedSolve?.event || selectedSolve?.Event || statsEvent || ""
+    ).toUpperCase();
+
+    return mergeTagOptionMaps(
+      baseTagOptions,
+      getTagCatalogOptionsForStatsEvent(tagCatalog, selectedSolveEvent || statsEvent),
+      discoveredTagOptions,
+      compareDiscoveredTagOptions,
+      collectTagSelectionOptions(
+        selectedSolve ? [selectedSolve] : [],
+        safeTagConfig,
+        cubeModelOptions
+      )
+    );
+  }, [
+    baseTagOptions,
+    compareDiscoveredTagOptions,
+    cubeModelOptions,
+    discoveredTagOptions,
+    safeTagConfig,
+    selectedSolve,
+    statsEvent,
+    tagCatalog,
+  ]);
+  const selectedSolveTagEvent = useMemo(
+    () => String(selectedSolve?.event || selectedSolve?.Event || statsEvent || "").toUpperCase(),
+    [selectedSolve, statsEvent]
+  );
+  const selectedSolveTagColors = useMemo(
+    () => getTagColorMapForEvent(tagColorCatalog, selectedSolveTagEvent),
+    [selectedSolveTagEvent, tagColorCatalog]
+  );
+  const handleSelectedSolveTagColorsChange = useMemo(
+    () =>
+      typeof onTagColorsChange === "function" && selectedSolveTagEvent
+        ? (next) => onTagColorsChange(selectedSolveTagEvent, next)
+        : null,
+    [onTagColorsChange, selectedSolveTagEvent]
+  );
 
   useEffect(() => {
     if (!compareEnabled || statsViewMode !== "standard" || !showSolveCharts || !user?.UserID) {
+      setCompareSessionSolves([]);
+      setCompareTagScopeSolves([]);
+      setCompareTagScopeCacheKey("");
+      setCompareLoading(false);
+      return;
+    }
+
+    if (canUseCompareBucketRange) {
       setCompareSessionSolves([]);
       setCompareTagScopeSolves([]);
       setCompareTagScopeCacheKey("");
@@ -1992,8 +3000,21 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             if (Array.isArray(out?.items) && out.items.length) items.push(...out.items);
             cursor = out?.lastKey || null;
           } while (cursor);
+        } else if (!hasActiveCompareDateFilter) {
+          const out = await getSolvesBySessionPage(
+            user.UserID,
+            compareEvent,
+            compareSessionId,
+            DEFAULT_IN_VIEW
+          );
+          items = out?.items || [];
         } else {
-          items = await getSolvesBySession(user.UserID, compareEvent, compareSessionId);
+          items = await getSolvesBySession(
+            user.UserID,
+            compareEvent,
+            compareSessionId,
+            hasActiveCompareDateFilter ? compareDateRangeQueryOpts : {}
+          );
         }
         if (!active || compareRequestTokenRef.current !== requestId) return;
 
@@ -2035,7 +3056,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     compareIndexedTagScope,
     compareIndexedTagScopeKey,
     compareSessionId,
+    DEFAULT_IN_VIEW,
     canUseCompareIndexedTagScope,
+    canUseCompareBucketRange,
+    compareDateRangeQueryOpts,
+    hasActiveCompareDateFilter,
     normalizeSolve,
     showSolveCharts,
     statsViewMode,
@@ -2060,8 +3085,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     },
     [hasActiveTagFilter, isSolveLevelMode, statsViewMode, tagFilterSelection]
   );
-
-  const hasActiveDateFilter = !!dateFilterStart || !!dateFilterEnd;
 
   const scopedRawSolves = useMemo(() => {
     let scoped = statsViewMode === "time" ? allLoadedSolves : activeStandardSolves;
@@ -2104,19 +3127,22 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       canUseCompareIndexedTagScope && hasCompareIndexedTagScopeCache
         ? compareTagScopeSolves
         : compareSessionSolves;
-    const dateScoped = filterSolvesByDateRange(compareBaseSolves, dateFilterStart, dateFilterEnd);
+    const dateScoped = filterSolvesByDateRange(
+      compareBaseSolves,
+      effectiveCompareDateFilterStart,
+      effectiveCompareDateFilterEnd
+    );
     if (!hasActiveTagSelection(compareTagSelection)) return dateScoped;
-    if (canUseCompareIndexedTagScope && hasCompareIndexedTagScopeCache) return dateScoped;
     return dateScoped.filter((solve) => solveMatchesTagSelection(solve, compareTagSelection));
   }, [
-    canUseCompareIndexedTagScope,
     compareEnabled,
     compareTagScopeSolves,
     compareSessionSolves,
     compareTagSelection,
-    dateFilterEnd,
-    dateFilterStart,
+    effectiveCompareDateFilterEnd,
+    effectiveCompareDateFilterStart,
     hasCompareIndexedTagScopeCache,
+    canUseCompareIndexedTagScope,
   ]);
 
   const compareStartIndex = useMemo(() => {
@@ -2156,25 +3182,24 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const compareVisiblePageFilteredRawSolves = useMemo(() => {
     if (effectiveCompareShowAllActive) return compareFilteredRawSolves;
     return compareFilteredRawSolves.slice(compareStartIndex, compareEndIndex);
-  }, [compareEndIndex, compareFilteredRawSolves, compareStartIndex, effectiveCompareShowAllActive]);
+  }, [
+    compareEndIndex,
+    compareFilteredRawSolves,
+    compareStartIndex,
+    effectiveCompareShowAllActive,
+  ]);
 
   const visiblePageFilteredRawSolves = useMemo(() => {
     if (statsViewMode === "time") return allLoadedFilteredRawSolves;
-    if (hasActiveDateFilter) return allLoadedFilteredRawSolves;
     return filterRawSolveList(filterSolvesByDateRange(visiblePageRawSolves, dateFilterStart, dateFilterEnd));
   }, [
     allLoadedFilteredRawSolves,
     dateFilterEnd,
     dateFilterStart,
     filterRawSolveList,
-    hasActiveDateFilter,
     statsViewMode,
     visiblePageRawSolves,
   ]);
-
-  const barChartSolves = useMemo(() => {
-    return visiblePageFilteredRawSolves;
-  }, [visiblePageFilteredRawSolves]);
 
   const pieChartSolves = useMemo(() => {
     return allLoadedFilteredRawSolves;
@@ -2185,9 +3210,36 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     return visiblePageFilteredRawSolves;
   }, [allLoadedFilteredRawSolves, statsViewMode, visiblePageFilteredRawSolves]);
 
+  const timeViewFocusedSolves = useMemo(() => {
+    if (statsViewMode !== "time") return chartVisibleSolves;
+    if (hasActiveDateFilter) return allLoadedFilteredRawSolves;
+
+    const latestSolve = allLoadedFilteredRawSolves[allLoadedFilteredRawSolves.length - 1] || null;
+    const focusDay = String(
+      selectedTimeDay || getLocalDayKey(getSolveDate(latestSolve)) || ""
+    ).trim();
+    if (!focusDay) return allLoadedFilteredRawSolves;
+
+    return allLoadedFilteredRawSolves.filter((solve) => {
+      const date = getSolveDate(solve);
+      return getLocalDayKey(date) === focusDay;
+    });
+  }, [
+    allLoadedFilteredRawSolves,
+    chartVisibleSolves,
+    hasActiveDateFilter,
+    selectedTimeDay,
+    statsViewMode,
+  ]);
+
+  const barChartSolves = useMemo(() => {
+    if (statsViewMode === "time") return timeViewFocusedSolves;
+    return visiblePageFilteredRawSolves;
+  }, [statsViewMode, timeViewFocusedSolves, visiblePageFilteredRawSolves]);
+
   const timeViewLineSolves = useMemo(() => {
-    return statsViewMode === "time" ? allLoadedFilteredRawSolves : chartVisibleSolves;
-  }, [allLoadedFilteredRawSolves, chartVisibleSolves, statsViewMode]);
+    return statsViewMode === "time" ? timeViewFocusedSolves : chartVisibleSolves;
+  }, [chartVisibleSolves, statsViewMode, timeViewFocusedSolves]);
 
   const summaryCurrentSolves = useMemo(() => {
     return statsViewMode === "time" ? chartVisibleSolves : visiblePageFilteredRawSolves;
@@ -2340,21 +3392,219 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const allEventsOverall = useMemo(() => {
     return aggregateStatsList(allEventsBreakdown.map((row) => row.stats));
   }, [allEventsBreakdown]);
+  const timeViewEventMatrixItems = useMemo(() => {
+    if (hasActiveDateFilter) {
+      const solvesByEvent = new Map();
+
+      for (const solve of allLoadedFilteredRawSolves || []) {
+        const event = String(solve?.event || solve?.Event || "").trim().toUpperCase();
+        if (!event) continue;
+        if (timeViewMainSessionsOnly && String(solve?.sessionID || solve?.SessionID || "main") !== "main") {
+          continue;
+        }
+        if (!solvesByEvent.has(event)) solvesByEvent.set(event, []);
+        solvesByEvent.get(event).push(solve);
+      }
+
+      return Array.from(solvesByEvent.entries())
+        .map(([event, solves]) => {
+          const aggregate = buildEventMatrixStatsFromSolves(solves);
+          return {
+            event,
+            mainOnly: timeViewMainSessionsOnly,
+            solveCount: Number(aggregate?.SolveCountTotal || 0),
+            singleBest: toFiniteMatrixMetric(aggregate?.BestSingleMs),
+            singleWorst: toFiniteMatrixMetric(aggregate?.WorstSingleMs),
+            ao5Best: toFiniteMatrixMetric(aggregate?.BestAo5Ms),
+            ao5Worst: toFiniteMatrixMetric(aggregate?.WorstAo5Ms),
+            ao12Best: toFiniteMatrixMetric(aggregate?.BestAo12Ms),
+            ao12Worst: toFiniteMatrixMetric(aggregate?.WorstAo12Ms),
+            refs: {
+              singleBest: aggregate?.BestSingleSolveSK || null,
+              singleWorst: aggregate?.WorstSingleSolveSK || null,
+              ao5Best: aggregate?.BestAo5StartSolveSK || null,
+              ao5Worst: aggregate?.WorstAo5StartSolveSK || null,
+              ao12Best: aggregate?.BestAo12StartSolveSK || null,
+              ao12Worst: aggregate?.WorstAo12StartSolveSK || null,
+            },
+          };
+        })
+        .filter((item) => item.solveCount > 0)
+        .sort(compareTimeViewEventMatrixItems);
+    }
+
+    const filteredSessions = (sessionsList || []).filter((session) => {
+      const event = String(session?.Event || "").trim().toUpperCase();
+      if (!event) return false;
+      if (timeViewMainSessionsOnly) {
+        return String(session?.SessionID || "main") === "main";
+      }
+      return true;
+    });
+
+    const statsByEvent = new Map();
+    for (const session of filteredSessions) {
+      const event = String(session?.Event || "").trim().toUpperCase();
+      if (!event) continue;
+      if (!statsByEvent.has(event)) statsByEvent.set(event, []);
+      if (session?.Stats) statsByEvent.get(event).push(session.Stats);
+    }
+
+    return Array.from(statsByEvent.entries())
+      .map(([event, statsList]) => {
+        const fallbackAggregate = aggregateStatsList(statsList);
+        const aggregate = cachedEventMatrixStats[event] || fallbackAggregate;
+        return {
+          event,
+          mainOnly: timeViewMainSessionsOnly,
+          solveCount: Number(aggregate?.SolveCountTotal || 0),
+          singleBest: toFiniteMatrixMetric(aggregate?.BestSingleMs),
+          singleWorst: toFiniteMatrixMetric(aggregate?.WorstSingleMs),
+          ao5Best: toFiniteMatrixMetric(aggregate?.BestAo5Ms),
+          ao5Worst: toFiniteMatrixMetric(aggregate?.WorstAo5Ms),
+          ao12Best: toFiniteMatrixMetric(aggregate?.BestAo12Ms),
+          ao12Worst: toFiniteMatrixMetric(aggregate?.WorstAo12Ms),
+          refs: {
+            singleBest: aggregate?.BestSingleSolveSK || null,
+            singleWorst: aggregate?.WorstSingleSolveSK || null,
+            ao5Best: aggregate?.BestAo5StartSolveSK || null,
+            ao5Worst: aggregate?.WorstAo5StartSolveSK || null,
+            ao12Best: aggregate?.BestAo12StartSolveSK || null,
+            ao12Worst: aggregate?.WorstAo12StartSolveSK || null,
+          },
+        };
+      })
+      .filter((item) => item.solveCount > 0)
+      .sort(compareTimeViewEventMatrixItems);
+  }, [allLoadedFilteredRawSolves, cachedEventMatrixStats, hasActiveDateFilter, sessionsList, timeViewMainSessionsOnly]);
   const useCachedOverallStats = statsViewMode === "standard" && !hasActiveDateFilter && !hasActiveTagFilter;
   const effectiveOverallStats = useCachedOverallStats ? overallStatsForEvent : null;
-  const allowOverallDerivedMetrics =
-    statsViewMode === "time" || !effectiveOverallStats || showAllActive || isAllLoaded;
+  const activeBucketItems = useMemo(
+    () =>
+      canUseBucketRange && dayBucketRangeKey === dayBucketRangeRequestKey
+        ? dayBucketRangeData.items || []
+        : [],
+    [canUseBucketRange, dayBucketRangeData.items, dayBucketRangeKey, dayBucketRangeRequestKey]
+  );
+  const activeBucketSummary = useMemo(
+    () =>
+      canUseBucketRange && dayBucketRangeKey === dayBucketRangeRequestKey
+        ? dayBucketRangeData.aggregateSummary || null
+        : null,
+    [
+      canUseBucketRange,
+      dayBucketRangeData.aggregateSummary,
+      dayBucketRangeKey,
+      dayBucketRangeRequestKey,
+    ]
+  );
+  const timeViewEventBreakdownData = useMemo(() => {
+    if (!isAllEventsMode) return [];
 
-  useEffect(() => {
-    if (!hasActiveDateFilter || statsViewMode !== "standard" || !isSolveLevelMode) return;
-    if (isAllLoaded || loadingAllSolves) return;
-    loadAllSessionSolves();
+    if (!hasActiveDateFilter) {
+      return (allEventsBreakdown || []).map((row) => ({
+        label: String(row?.event || "Unknown"),
+        value: Number(row?.stats?.SolveCountTotal || 0),
+        solves: [],
+      }));
+    }
+
+    if (activeBucketSummary && Array.isArray(activeBucketItems) && activeBucketItems.length > 0) {
+      const grouped = new Map();
+      for (const item of activeBucketItems) {
+        const event = String(item?.Event || "").trim().toUpperCase() || "Unknown";
+        const count = Number(item?.SolveCountTotal || 0);
+        if (count <= 0) continue;
+        grouped.set(event, (grouped.get(event) || 0) + count);
+      }
+      const rows = Array.from(grouped.entries())
+        .map(([label, value]) => ({ label, value, solves: [] }))
+        .sort((a, b) => b.value - a.value || String(a.label).localeCompare(String(b.label)));
+      if (rows.some((row) => row.label !== "Unknown")) return rows;
+    }
+
+    const grouped = new Map();
+    for (const solve of pieChartSolves || []) {
+      const event = String(solve?.event || solve?.Event || "").trim().toUpperCase() || "Unknown";
+      grouped.set(event, (grouped.get(event) || 0) + 1);
+    }
+    return Array.from(grouped.entries())
+      .map(([label, value]) => ({ label, value, solves: [] }))
+      .sort((a, b) => b.value - a.value || String(a.label).localeCompare(String(b.label)));
+  }, [activeBucketItems, activeBucketSummary, allEventsBreakdown, hasActiveDateFilter, isAllEventsMode, pieChartSolves]);
+  const activeCompareBucketItems = useMemo(
+    () =>
+      canUseCompareBucketRange && compareDayBucketRangeKey === compareDayBucketRangeRequestKey
+        ? compareDayBucketRangeData.items || []
+        : [],
+    [
+      canUseCompareBucketRange,
+      compareDayBucketRangeData.items,
+      compareDayBucketRangeKey,
+      compareDayBucketRangeRequestKey,
+    ]
+  );
+  const activeCompareBucketSummary = useMemo(
+    () =>
+      canUseCompareBucketRange && compareDayBucketRangeKey === compareDayBucketRangeRequestKey
+        ? compareDayBucketRangeData.aggregateSummary || null
+        : null,
+    [
+      canUseCompareBucketRange,
+      compareDayBucketRangeData.aggregateSummary,
+      compareDayBucketRangeKey,
+      compareDayBucketRangeRequestKey,
+    ]
+  );
+  const isSingleDayDateFilter = !!dateFilterStart && !!dateFilterEnd && dateFilterStart === dateFilterEnd;
+  const useBucketBackedRange = !!activeBucketSummary && !preferRawDateRangeView;
+  const bucketSourceLabel = useMemo(() => {
+    if (!useBucketBackedRange) return "";
+    if (statsViewMode === "time") return "Aggregated days";
+    return "Bucketed range";
+  }, [statsViewMode, useBucketBackedRange]);
+  const renderedOverallStats = useBucketBackedRange ? activeBucketSummary : effectiveOverallStats;
+  const allowOverallDerivedMetrics =
+    (statsViewMode === "time" && !useBucketBackedRange) || !effectiveOverallStats || showAllActive || isAllLoaded;
+  const stableOverallStats = useMemo(() => {
+    if (hasActiveTagFilter) return null;
+    if (useBucketBackedRange) return activeBucketSummary;
+    if (useCachedOverallStats) {
+      if (isAllEventsMode) return allEventsOverall;
+      return overallStatsForEvent;
+    }
+    return null;
   }, [
-    hasActiveDateFilter,
-    isAllLoaded,
-    isSolveLevelMode,
-    loadAllSessionSolves,
-    loadingAllSolves,
+    activeBucketSummary,
+    allEventsOverall,
+    hasActiveTagFilter,
+    isAllEventsMode,
+    overallStatsForEvent,
+    useBucketBackedRange,
+    useCachedOverallStats,
+  ]);
+  const stableOverallSolves = useMemo(() => {
+    if (statsViewMode === "time") return allLoadedFilteredRawSolves;
+    if (hasActiveTagFilter) return activeStandardSolves || [];
+    if (overallScopeSolves.length > 0) return overallScopeSolves;
+    if (isAllEventsMode) return allLoadedSolves || [];
+    if (isAllSessionsMode) {
+      return (sessionCachedSolves || []).filter(
+        (solve) => String(solve?.event || solve?.Event || "").toUpperCase() === String(statsEvent || "").toUpperCase()
+      );
+    }
+    return selectedSessionSolves || [];
+  }, [
+    activeStandardSolves,
+    allLoadedFilteredRawSolves,
+    allLoadedSolves,
+    hasActiveTagFilter,
+    isAllEventsMode,
+    isAllSessionsMode,
+    overallScopeSolves,
+    selectedSessionSolves,
+    sessionCachedSolves,
+    statsEvent,
     statsViewMode,
   ]);
 
@@ -2365,20 +3615,26 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   }, [canUseIndexedTagScope, hasActiveTagFilter, loadTimeScopeSolves]);
 
   const loadedSolveCountForSummary =
-    statsViewMode === "time" ? summaryCurrentSolves.length : activeStandardSolves.length;
+    useBucketBackedRange
+      ? Number(activeBucketSummary?.SolveCountTotal || 0)
+      : statsViewMode === "time"
+        ? summaryCurrentSolves.length
+        : activeStandardSolves.length;
 
   const overallCount = useMemo(() => {
-    if (statsViewMode === "time") return allLoadedFilteredRawSolves.length;
+    if (stableOverallStats?.SolveCountTotal != null) return stableOverallStats.SolveCountTotal;
+    if (statsViewMode === "time") return stableOverallSolves.length;
     if (isAllEventsMode) return allEventsOverall?.SolveCountTotal ?? null;
-    return effectiveOverallStats?.SolveCountTotal ?? allLoadedFilteredRawSolves.length ?? null;
-  }, [statsViewMode, allLoadedFilteredRawSolves.length, isAllEventsMode, allEventsOverall, effectiveOverallStats]);
+    return stableOverallSolves.length ?? null;
+  }, [allEventsOverall, isAllEventsMode, stableOverallSolves.length, stableOverallStats, statsViewMode]);
 
   const showingCount = useMemo(() => {
+    if (useBucketBackedRange) return activeBucketSummary?.SolveCountTotal ?? 0;
     if (statsViewMode === "time") return visiblePageFilteredRawSolves?.length || 0;
     if (isAllEventsMode) return allEventsOverall?.SolveCountTotal ?? 0;
     if (isAllSessionsMode) return effectiveOverallStats?.SolveCountTotal ?? (visiblePageFilteredRawSolves?.length || 0);
     return visiblePageFilteredRawSolves?.length || 0;
-  }, [statsViewMode, isAllEventsMode, isAllSessionsMode, allEventsOverall, effectiveOverallStats, visiblePageFilteredRawSolves]);
+  }, [activeBucketSummary, allEventsOverall, effectiveOverallStats, isAllEventsMode, isAllSessionsMode, statsViewMode, useBucketBackedRange, visiblePageFilteredRawSolves]);
 
   const dateRangeText = useMemo(() => {
     if (!visiblePageFilteredRawSolves || visiblePageFilteredRawSolves.length === 0) return "";
@@ -2401,6 +3657,27 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     if (!a || !b) return "";
     return `${a} - ${b}`;
   }, [visiblePageFilteredRawSolves]);
+  const compareDateRangeText = useMemo(() => {
+    if (!compareVisiblePageFilteredRawSolves || compareVisiblePageFilteredRawSolves.length === 0) return "";
+    const first = compareVisiblePageFilteredRawSolves[0]?.datetime;
+    const last = compareVisiblePageFilteredRawSolves[compareVisiblePageFilteredRawSolves.length - 1]?.datetime;
+    if (!first || !last) return "";
+
+    const fmt = (iso) => {
+      const d = new Date(iso);
+      if (!isFiniteDate(d)) return "";
+      return d.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    };
+
+    const a = fmt(first);
+    const b = fmt(last);
+    if (!a || !b) return "";
+    return `${a} - ${b}`;
+  }, [compareVisiblePageFilteredRawSolves]);
 
   const dateFilterLabel = useMemo(() => {
     const formatDay = (dayKey) => {
@@ -2414,26 +3691,86 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       });
     };
 
+    if (dateFilterStart === ALL_TIME_START_DAY && !!dateFilterEnd) return "All Time";
     if (!dateFilterStart && !dateFilterEnd) return dateRangeText || "All Dates";
     if (dateFilterStart && dateFilterEnd) return `${formatDay(dateFilterStart)} - ${formatDay(dateFilterEnd)}`;
     if (dateFilterStart) return `${formatDay(dateFilterStart)} onward`;
     return `Through ${formatDay(dateFilterEnd)}`;
   }, [dateFilterEnd, dateFilterStart, dateRangeText]);
+  const compareDateFilterLabel = useMemo(() => {
+    const formatDay = (dayKey) => {
+      if (!dayKey) return "";
+      const date = new Date(`${dayKey}T12:00:00`);
+      if (!isFiniteDate(date)) return dayKey;
+      return date.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    };
+
+    if (effectiveCompareDateFilterStart === ALL_TIME_START_DAY && !!effectiveCompareDateFilterEnd) return "All Time";
+    if (!effectiveCompareDateFilterStart && !effectiveCompareDateFilterEnd) {
+      return linkStatsControls ? dateFilterLabel : compareDateRangeText || "All Dates";
+    }
+    if (effectiveCompareDateFilterStart && effectiveCompareDateFilterEnd) {
+      return `${formatDay(effectiveCompareDateFilterStart)} - ${formatDay(effectiveCompareDateFilterEnd)}`;
+    }
+    if (effectiveCompareDateFilterStart) return `${formatDay(effectiveCompareDateFilterStart)} onward`;
+    return `Through ${formatDay(effectiveCompareDateFilterEnd)}`;
+  }, [
+    compareDateRangeText,
+    dateFilterLabel,
+    effectiveCompareDateFilterEnd,
+    effectiveCompareDateFilterStart,
+    linkStatsControls,
+  ]);
 
   const availableTimeDays = useMemo(() => {
     const set = new Set();
 
-    for (const solve of visiblePageFilteredRawSolves || []) {
-      const date = new Date(solve?.datetime || "");
-      if (!isFiniteDate(date)) continue;
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-        date.getDate()
-      ).padStart(2, "0")}`;
+    const bucketDays = useBucketBackedRange
+      ? activeBucketItems
+          .map((item) => String(item?.BucketDay || "").trim())
+          .filter(Boolean)
+      : [];
+
+    for (const key of bucketDays) {
       set.add(key);
     }
 
+    if (set.size === 0) {
+      for (const solve of visiblePageFilteredRawSolves || []) {
+        const date = new Date(solve?.datetime || "");
+        if (!isFiniteDate(date)) continue;
+        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+          date.getDate()
+        ).padStart(2, "0")}`;
+        set.add(key);
+      }
+    }
+
     return Array.from(set).sort((a, b) => String(b).localeCompare(String(a)));
-  }, [visiblePageFilteredRawSolves]);
+  }, [activeBucketItems, useBucketBackedRange, visiblePageFilteredRawSolves]);
+
+  useEffect(() => {
+    const hadActiveTagFilter = previousHasActiveTagFilterRef.current;
+    previousHasActiveTagFilterRef.current = hasActiveTagFilter;
+
+    if (!hadActiveTagFilter || hasActiveTagFilter) return;
+    if (!canUseBucketRange) return;
+
+    setPreferRawDateRangeView(false);
+    setShowAllActive(false);
+    setCurrentPage(0);
+  }, [canUseBucketRange, hasActiveTagFilter]);
+
+  useEffect(() => {
+    if (!preferRawDateRangeView) return;
+    if (statsViewMode !== "standard" || !hasActiveDateFilter) {
+      setPreferRawDateRangeView(false);
+    }
+  }, [hasActiveDateFilter, preferRawDateRangeView, statsViewMode]);
 
   useEffect(() => {
     if (!availableTimeDays.length) {
@@ -2445,9 +3782,142 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     setSelectedTimeDay(availableTimeDays[0]);
   }, [availableTimeDays, selectedTimeDay]);
 
+  const dateWindowDayCount = useMemo(() => {
+    if (!dateFilterStart || !dateFilterEnd) return 0;
+    return getInclusiveDaySpan(dateFilterStart, dateFilterEnd);
+  }, [dateFilterEnd, dateFilterStart]);
+
+  const applyPrimaryDateRange = useCallback(
+    async (nextStart, nextEnd, options = {}) => {
+      const start = String(nextStart || "").trim();
+      const end = String(nextEnd || "").trim();
+      if (start === String(dateFilterStart || "") && end === String(dateFilterEnd || "")) return true;
+      const requiresRawLoad = options?.requiresRawLoad === true;
+
+      if (statsViewMode === "time" && requiresRawLoad) {
+        const approved = await warnBeforeSolveScan({
+          title: "Reload time range?",
+          intro: "Changing the time-view date range reloads every solve in that time scope for the selected dates.",
+          event: statsEvent,
+          sessionID: statsSession,
+          extraLines: [
+            `Date filter: ${formatShortDateRangeLabel(start, end, start || end ? "" : "All Dates")}.`,
+          ],
+          confirmLabel: "Reload Time Range",
+        });
+        if (!approved) return false;
+      } else if (isSolveLevelMode && (start || end)) {
+        const approved = await warnBeforeSolveScan({
+          title: "Load date-filtered solve scope?",
+          intro: "Applying this index date range loads every matching solve in the selected session so the charts and tables can update.",
+          event: statsEvent,
+          sessionID: sessionId,
+          extraLines: [
+            `Date filter: ${formatShortDateRangeLabel(start, end, start || end ? "" : "All Dates")}.`,
+          ],
+          confirmLabel: "Load Date Range",
+        });
+        if (!approved) return false;
+      }
+
+      setDateFilterStart(start);
+      setDateFilterEnd(end);
+      if (!start && !end) {
+        setPreferRawDateRangeView(false);
+      }
+      return true;
+    },
+    [
+      dateFilterEnd,
+      dateFilterStart,
+      isSolveLevelMode,
+      sessionId,
+      statsEvent,
+      statsSession,
+      statsViewMode,
+      warnBeforeSolveScan,
+    ]
+  );
+
+  const applyPrimaryTagSelection = useCallback(
+    async (nextSelection) => {
+      const sanitized = sanitizeTagSelection(nextSelection);
+      if (!hasActiveTagSelection(sanitized)) {
+        setTagFilterSelection(sanitized);
+        return true;
+      }
+
+      const approved = await warnBeforeSolveScan({
+        title: "Load tagged solve scope?",
+        intro: "Applying this tag filter can page through every matching solve in the selected scope so tagged charts and stats can rebuild.",
+        event: statsEvent,
+        sessionID: isAllEventsMode ? ALL_SESSIONS : sessionId,
+        confirmLabel: "Apply Tag Filter",
+      });
+      if (!approved) return false;
+
+      setTagFilterSelection(sanitized);
+      return true;
+    },
+    [isAllEventsMode, sessionId, statsEvent, warnBeforeSolveScan]
+  );
+
+  const shiftDateWindow = useCallback((offsetDays) => {
+    if (!dateFilterStart || !dateFilterEnd) return;
+    const nextStart = shiftLocalDayKey(dateFilterStart, offsetDays);
+    const nextEnd = shiftLocalDayKey(dateFilterEnd, offsetDays);
+    const clamped = clampRangeEndToToday(nextStart, nextEnd);
+    setPreferRawDateRangeView((prev) =>
+      shouldPreferRawRangeView(getInclusiveDaySpan(clamped.start, clamped.end), prev)
+    );
+    setDateFilterStart(clamped.start);
+    setDateFilterEnd(clamped.end);
+  }, [dateFilterEnd, dateFilterStart]);
+
+  const resizeDateWindow = useCallback((nextDayCount) => {
+    if (!dateFilterEnd) return;
+    const safeCount = Math.max(1, Math.floor(Number(nextDayCount) || 1));
+    setPreferRawDateRangeView((prev) => shouldPreferRawRangeView(safeCount, prev));
+    setDateFilterStart(shiftLocalDayKey(dateFilterEnd, -(safeCount - 1)));
+    setDateFilterEnd(dateFilterEnd);
+  }, [dateFilterEnd]);
+
+  // eslint-disable-next-line no-use-before-define
+  const handleBucketDaySelect = useCallback(async (dayKey) => {
+    const nextDay = String(dayKey || "").trim();
+    if (!nextDay) return;
+
+    setCurrentPage(0);
+
+    if (dateFilterStart === nextDay && dateFilterEnd === nextDay) {
+      setPreferRawDateRangeView(true);
+      return;
+    }
+
+    setPreferRawDateRangeView(true);
+    // eslint-disable-next-line no-use-before-define
+    const applied = await applyPrimaryDateRange(nextDay, nextDay, { requiresRawLoad: true });
+    if (applied) setSelectedTimeDay(nextDay);
+  }, [applyPrimaryDateRange, dateFilterEnd, dateFilterStart]);
+
   const handleEventChange = useCallback(
-    (event) => {
+    async (event) => {
       const next = event.target.value;
+
+      if (statsViewMode === "time" && wantsRawTimeScope) {
+        const approved = await warnBeforeSolveScan({
+          title: "Load new time scope?",
+          intro: "Changing the time-view scope loads every solve in that scope so the time charts can rebuild.",
+          event: next,
+          sessionID: ALL_SESSIONS,
+          extraLines:
+            dateFilterStart || dateFilterEnd
+              ? [`Date filter: ${formatShortDateRangeLabel(dateFilterStart, dateFilterEnd, dateFilterLabel)}.`]
+              : [],
+          confirmLabel: "Load Time Scope",
+        });
+        if (!approved) return;
+      }
 
       setStatsEvent(next);
       setSessionMenuOpen(false);
@@ -2471,11 +3941,26 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         setStandardSelection({ event: next, session: "main" });
       }
     },
-    [DEFAULT_IN_VIEW, statsViewMode]
+    [DEFAULT_IN_VIEW, dateFilterEnd, dateFilterLabel, dateFilterStart, statsViewMode, wantsRawTimeScope, warnBeforeSolveScan]
   );
 
   const handlePickSession = useCallback(
-    (sid) => {
+    async (sid) => {
+      if (statsViewMode === "time" && wantsRawTimeScope) {
+        const approved = await warnBeforeSolveScan({
+          title: "Load new time scope?",
+          intro: "Changing the time-view session loads every solve in that scope so the time charts can rebuild.",
+          event: statsEvent,
+          sessionID: sid,
+          extraLines:
+            dateFilterStart || dateFilterEnd
+              ? [`Date filter: ${formatShortDateRangeLabel(dateFilterStart, dateFilterEnd, dateFilterLabel)}.`]
+              : [],
+          confirmLabel: "Load Time Scope",
+        });
+        if (!approved) return;
+      }
+
       setStatsSession(sid);
       setSessionMenuOpen(false);
 
@@ -2495,19 +3980,22 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         setStandardSelection((prev) => ({ ...prev, session: sid }));
       }
     },
-    [DEFAULT_IN_VIEW, statsViewMode]
+    [DEFAULT_IN_VIEW, dateFilterEnd, dateFilterLabel, dateFilterStart, statsEvent, statsViewMode, wantsRawTimeScope, warnBeforeSolveScan]
   );
 
   const handleAddCompareRow = useCallback(() => {
     setCompareSelection({
       event: statsEvent || currentEvent || "333",
       session: sessionId || "main",
-      tags: sanitizeTagSelection(tagFilterSelection),
+      tags: makeEmptyTagSelection(),
       paletteKey: DEFAULT_COMPARE_PALETTE,
       primaryPaletteKey,
     });
+    setCompareDateFilterStart("");
+    setCompareDateFilterEnd("");
+    setLinkStatsControls(false);
     setCompareSessionMenuOpen(false);
-  }, [currentEvent, primaryPaletteKey, sessionId, statsEvent, tagFilterSelection]);
+  }, [currentEvent, primaryPaletteKey, sessionId, statsEvent]);
 
   const handleRemoveCompareRow = useCallback(() => {
     setCompareSelection(null);
@@ -2515,8 +4003,114 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     setCompareSessionSolves([]);
     setCompareTagScopeSolves([]);
     setCompareTagScopeCacheKey("");
+    setCompareDateFilterStart("");
+    setCompareDateFilterEnd("");
     setCompareLoading(false);
   }, []);
+
+  const handlePromoteCompareRow = useCallback(() => {
+    if (!compareSelection) return;
+
+    const promotedEvent = String(compareEvent || statsEvent || currentEvent || "333");
+    const promotedSession = String(compareSessionId || "main");
+    const promotedTags = sanitizeTagSelection(compareTagSelection);
+    const promotedPaletteKey = compareSelection?.paletteKey || DEFAULT_COMPARE_PALETTE;
+    const promotedDateStart = effectiveCompareDateFilterStart;
+    const promotedDateEnd = effectiveCompareDateFilterEnd;
+    const promotedSolvesPerPage = linkStatsControls ? solvesPerPage : compareSolvesPerPage;
+    const promotedCurrentPage = linkStatsControls ? currentPage : compareCurrentPage;
+    const promotedShowAllActive = linkStatsControls ? showAllActive : compareShowAllActive;
+
+    setStatsEvent(promotedEvent);
+    setStatsSession(promotedSession);
+    setStandardSelection({
+      event: promotedEvent,
+      session: promotedSession,
+    });
+    setTagFilterSelection(promotedTags);
+    setPrimaryPaletteKey(promotedPaletteKey);
+    setDateFilterStart(promotedDateStart);
+    setDateFilterEnd(promotedDateEnd);
+    setSolvesPerPage(promotedSolvesPerPage);
+    setCurrentPage(promotedCurrentPage);
+    setShowAllActive(promotedShowAllActive);
+    setPageCursor(null);
+    setHasMoreOlder(false);
+    setIsAllLoaded(promotedShowAllActive);
+    setTableCompareView("primary");
+
+    setSessions((prev) => {
+      const ev = String(promotedEvent || "").toUpperCase();
+      const existingForEvent = Array.isArray(prev?.[ev]) ? prev[ev] : [];
+      const promotedSessionSolves = Array.isArray(compareSessionSolves) ? compareSessionSolves : [];
+      const otherSessions = existingForEvent.filter(
+        (s) => String(s?.sessionID || s?.SessionID || "main") !== promotedSession
+      );
+
+      return {
+        ...prev,
+        [ev]: [...otherSessions, ...promotedSessionSolves].sort((a, b) => {
+          const ta = new Date(a?.datetime || "").getTime();
+          const tb = new Date(b?.datetime || "").getTime();
+          return ta - tb;
+        }),
+      };
+    });
+
+    if (promotedDateStart || promotedDateEnd) {
+      const promotedDateScopedKey =
+        user?.UserID && promotedEvent
+          ? [
+              user.UserID,
+              String(promotedEvent || "").toUpperCase(),
+              promotedSession,
+              promotedDateStart || "*",
+              promotedDateEnd || "*",
+              effectiveTimeZone || "*",
+            ].join("::")
+          : "";
+      setDateScopedSessionSolves(compareFilteredRawSolves);
+      setDateScopedSessionCacheKey(promotedDateScopedKey);
+    } else {
+      setDateScopedSessionSolves([]);
+      setDateScopedSessionCacheKey("");
+    }
+
+    setCompareSelection(null);
+    setCompareSessionMenuOpen(false);
+    setCompareSessionSolves([]);
+    setCompareTagScopeSolves([]);
+    setCompareTagScopeCacheKey("");
+    setCompareDateFilterStart("");
+    setCompareDateFilterEnd("");
+    setCompareLoading(false);
+    setCompareSolvesPerPage(DEFAULT_IN_VIEW);
+    setCompareCurrentPage(0);
+    setCompareShowAllActive(false);
+    setLinkStatsControls(true);
+  }, [
+    DEFAULT_IN_VIEW,
+    compareCurrentPage,
+    compareEvent,
+    compareFilteredRawSolves,
+    compareSelection,
+    compareSessionId,
+    compareSessionSolves,
+    compareShowAllActive,
+    compareSolvesPerPage,
+    compareTagSelection,
+    currentEvent,
+    currentPage,
+    effectiveCompareDateFilterEnd,
+    effectiveCompareDateFilterStart,
+    effectiveTimeZone,
+    linkStatsControls,
+    setSessions,
+    showAllActive,
+    solvesPerPage,
+    statsEvent,
+    user?.UserID,
+  ]);
 
   const updateCompareSelection = useCallback((patch) => {
     setCompareSelection((prev) => {
@@ -2525,22 +4119,16 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     });
   }, []);
 
-  const handleSetViewMode = useCallback((nextMode) => {
+  const handleSetViewMode = useCallback(async (nextMode) => {
+    if (nextMode === statsViewMode) return;
+
     setStatsViewMode(nextMode);
     setSessionMenuOpen(false);
 
     if (nextMode === "time") {
-      const latestSolve = [...(sessionCachedSolves || [])]
-        .filter(Boolean)
-        .sort((a, b) => {
-          const ta = new Date(a?.datetime || "").getTime();
-          const tb = new Date(b?.datetime || "").getTime();
-          return tb - ta;
-        })[0];
-      const defaultDay = getLocalDayKey(getSolveDate(latestSolve) || new Date()) || getTodayLocalDayKey();
-
-      setDateFilterStart(defaultDay);
-      setDateFilterEnd(defaultDay);
+      setPreferRawDateRangeView(false);
+      setDateFilterStart("");
+      setDateFilterEnd("");
       setTimeSelection({
         event: ALL_EVENTS,
         session: ALL_SESSIONS,
@@ -2548,11 +4136,15 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       return;
     }
 
+    setPreferRawDateRangeView(false);
+    setDateFilterStart("");
+    setDateFilterEnd("");
+    setSelectedTimeDay("");
     setStandardSelection((prev) => ({
       event: prev?.event || currentEvent || "333",
       session: prev?.session || currentSession || "main",
     }));
-  }, [currentEvent, currentSession, sessionCachedSolves]);
+  }, [currentEvent, currentSession, statsViewMode]);
 
   const handleDeleteSolve = useCallback(
     async (solveRefOrIndex) => {
@@ -2702,6 +4294,19 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
   const handleShowAll = useCallback(async () => {
     if (statsViewMode === "time") {
+      const approved = await warnBeforeSolveScan({
+        title: "Load full time scope?",
+        intro: "This loads every solve in the current time-view scope so the full table and charts can render.",
+        event: statsEvent,
+        sessionID: statsSession,
+        extraLines:
+          dateFilterStart || dateFilterEnd
+            ? [`Date filter: ${formatShortDateRangeLabel(dateFilterStart, dateFilterEnd, dateFilterLabel)}.`]
+            : [],
+        confirmLabel: "Load Time Scope",
+      });
+      if (!approved) return;
+
       await loadTimeScopeSolves();
       setCurrentPage(0);
       setShowAllActive(true);
@@ -2717,16 +4322,92 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       return;
     }
 
+    const approved = await warnBeforeSolveScan({
+      title: "Load all solves in session?",
+      intro: "Show All fetches the entire session solve history instead of just the paged subset.",
+      event: statsEvent,
+      sessionID: sessionId,
+      confirmLabel: "Load All Solves",
+    });
+    if (!approved) return;
+
     await loadAllSessionSolves();
   }, [
     DEFAULT_IN_VIEW,
     activeStandardSolves.length,
+    dateFilterEnd,
+    dateFilterLabel,
+    dateFilterStart,
     hasMoreOlder,
     isSolveLevelMode,
     loadTimeScopeSolves,
     loadAllSessionSolves,
+    sessionId,
+    statsEvent,
+    statsSession,
     statsViewMode,
+    warnBeforeSolveScan,
   ]);
+
+  const canUseDateWindowControls =
+    statsViewMode === "standard" && isSolveLevelMode && hasActiveDateFilter && !compareEnabled;
+  const canDateWindowOlder = canUseDateWindowControls && !!dateFilterStart && !!dateFilterEnd;
+  const canDateWindowNewer =
+    canUseDateWindowControls &&
+    !!dateFilterStart &&
+    !!dateFilterEnd &&
+    String(dateFilterEnd) < String(getTodayLocalDayKey());
+  const canDateWindowZoomIn = canUseDateWindowControls && (!!useBucketBackedRange || preferRawDateRangeView);
+  const canDateWindowZoomOut = canUseDateWindowControls;
+  const canDateWindowDecrease = canUseDateWindowControls && dateWindowDayCount > 1;
+  const canDateWindowIncrease = canUseDateWindowControls && !!dateFilterEnd;
+  const canDateWindowShowAll = canUseDateWindowControls;
+
+  const handleDateWindowPrevious = useCallback(() => {
+    if (!canUseDateWindowControls || dateWindowDayCount <= 0) return;
+    shiftDateWindow(-dateWindowDayCount);
+  }, [canUseDateWindowControls, dateWindowDayCount, shiftDateWindow]);
+
+  const handleDateWindowNext = useCallback(() => {
+    if (!canUseDateWindowControls || dateWindowDayCount <= 0) return;
+    shiftDateWindow(dateWindowDayCount);
+  }, [canUseDateWindowControls, dateWindowDayCount, shiftDateWindow]);
+
+  const handleDateWindowZoomIn = useCallback(() => {
+    if (!canUseDateWindowControls) return;
+    if (isSingleDayDateFilter) {
+      setPreferRawDateRangeView(true);
+      return;
+    }
+    resizeDateWindow(Math.max(1, Math.ceil(dateWindowDayCount / 2)));
+  }, [canUseDateWindowControls, dateWindowDayCount, isSingleDayDateFilter, resizeDateWindow]);
+
+  const handleDateWindowZoomOut = useCallback(() => {
+    if (!canUseDateWindowControls) return;
+    if (preferRawDateRangeView) {
+      setPreferRawDateRangeView(false);
+      return;
+    }
+    resizeDateWindow(Math.max(2, dateWindowDayCount * 2));
+  }, [canUseDateWindowControls, dateWindowDayCount, preferRawDateRangeView, resizeDateWindow]);
+
+  const handleDateWindowDecrease = useCallback(() => {
+    if (!canUseDateWindowControls || dateWindowDayCount <= 1) return;
+    resizeDateWindow(dateWindowDayCount - 1);
+  }, [canUseDateWindowControls, dateWindowDayCount, resizeDateWindow]);
+
+  const handleDateWindowIncrease = useCallback(() => {
+    if (!canUseDateWindowControls || !dateFilterEnd) return;
+    resizeDateWindow(dateWindowDayCount + 1);
+  }, [canUseDateWindowControls, dateFilterEnd, dateWindowDayCount, resizeDateWindow]);
+
+  const handleDateWindowShowAll = useCallback(() => {
+    if (!canUseDateWindowControls) return;
+    setPreferRawDateRangeView(false);
+    setDateFilterStart("");
+    setDateFilterEnd("");
+    setCurrentPage(0);
+  }, [canUseDateWindowControls]);
 
   const compareTotalPages = useMemo(() => {
     const per = Math.max(1, compareSolvesPerPage);
@@ -2785,6 +4466,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const timeNavAnchorDay = useMemo(() => {
     if (dateFilterEnd) return dateFilterEnd;
     if (dateFilterStart) return dateFilterStart;
+    if (availableTimeDays.length > 0) return availableTimeDays[0];
 
     const latestSolve = [...(allLoadedSolves || [])]
       .filter(Boolean)
@@ -2795,43 +4477,51 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       })[0];
 
     return getLocalDayKey(getSolveDate(latestSolve) || new Date()) || getTodayLocalDayKey();
-  }, [allLoadedSolves, dateFilterEnd, dateFilterStart]);
+  }, [allLoadedSolves, availableTimeDays, dateFilterEnd, dateFilterStart]);
 
-  const applyTimeRangePreset = useCallback((preset) => {
+  const applyTimeRangePreset = useCallback(async (preset) => {
     if (preset === "all") {
-      setDateFilterStart("");
-      setDateFilterEnd("");
+      await applyPrimaryDateRange("", "");
       return;
     }
 
     if (preset === "day") {
-      setDateFilterStart(timeNavAnchorDay);
-      setDateFilterEnd(timeNavAnchorDay);
+      const applied = await applyPrimaryDateRange(timeNavAnchorDay, timeNavAnchorDay, {
+        requiresRawLoad: true,
+      });
+      if (applied) setSelectedTimeDay(timeNavAnchorDay);
       return;
     }
 
     if (preset === "week") {
       const range = getWeekRangeFromDayKey(timeNavAnchorDay);
-      setDateFilterStart(range.start);
-      setDateFilterEnd(range.end);
+      await applyPrimaryDateRange(range.start, range.end);
       return;
     }
 
     if (preset === "month") {
       const range = getMonthRangeFromDayKey(timeNavAnchorDay);
-      setDateFilterStart(range.start);
-      setDateFilterEnd(range.end);
+      await applyPrimaryDateRange(range.start, range.end);
     }
-  }, [timeNavAnchorDay]);
+  }, [applyPrimaryDateRange, timeNavAnchorDay]);
 
-  const shiftTimeRangeByDay = useCallback((direction) => {
+  const isTimeViewSingleDay = useMemo(() => {
+    return statsViewMode === "time" && !!dateFilterStart && !!dateFilterEnd && dateFilterStart === dateFilterEnd;
+  }, [dateFilterEnd, dateFilterStart, statsViewMode]);
+
+  const canShiftTimeRangeNewer = useMemo(() => {
+    if (!isTimeViewSingleDay) return false;
+    return String(dateFilterEnd || "") < String(getTodayLocalDayKey());
+  }, [dateFilterEnd, isTimeViewSingleDay]);
+
+  const shiftTimeRangeByDay = useCallback(async (direction) => {
     const baseDay = timeNavAnchorDay || getTodayLocalDayKey();
     const nextDay = shiftLocalDayKey(baseDay, direction);
-    setDateFilterStart(nextDay);
-    setDateFilterEnd(nextDay);
-  }, [timeNavAnchorDay]);
+    const applied = await applyPrimaryDateRange(nextDay, nextDay, { requiresRawLoad: true });
+    if (applied) setSelectedTimeDay(nextDay);
+  }, [applyPrimaryDateRange, timeNavAnchorDay]);
 
-  const handleRecomputeOverall = useCallback(async () => {
+  const runOverallRecompute = useCallback(async () => {
     if (!user?.UserID) return;
     if (isAllEventsMode) return;
 
@@ -2884,6 +4574,75 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     runDb,
   ]);
 
+  const handleRecomputeOverall = useCallback(async () => {
+    if (!user?.UserID) return;
+    if (isAllEventsMode) return;
+
+    const approved = await warnBeforeSolveScan({
+      title: "Recompute cached stats?",
+      intro: "Recomputing cached stats rescans every solve in this scope and rewrites the aggregate record.",
+      event: statsEvent,
+      sessionID: isAllSessionsMode ? ALL_SESSIONS : sessionId,
+      confirmLabel: "Recompute Stats",
+    });
+    if (!approved) return;
+
+    await runOverallRecompute();
+  }, [
+    isAllEventsMode,
+    isAllSessionsMode,
+    runOverallRecompute,
+    sessionId,
+    statsEvent,
+    user?.UserID,
+    warnBeforeSolveScan,
+  ]);
+
+  useEffect(() => {
+    if (!overallStatsForEvent?.NeedsRecompute) return;
+    if (hasActiveTagFilter || isAllEventsMode) return;
+
+    const scopeKey = `${statsEvent}::${isAllSessionsMode ? ALL_SESSIONS : sessionId}`;
+    if (promptedRecomputeScopesRef.current.has(scopeKey)) return;
+    promptedRecomputeScopesRef.current.add(scopeKey);
+
+    let cancelled = false;
+
+    (async () => {
+      const approved = await requestExpensiveStatsPrompt({
+        title: "Cached stats need a one-time repair",
+        confirmLabel: "Recompute Stats",
+        lines: [
+          "This scope is missing some cached stats fields, so the displayed overall stats may be incomplete until it is repaired.",
+          `Scope: ${describeStatsScope({ event: statsEvent, sessionID: isAllSessionsMode ? ALL_SESSIONS : sessionId })}.`,
+          `Estimated solves touched: ${formatSolveEstimate(
+            estimateSolveCountForScope(sessionsList, {
+              event: statsEvent,
+              sessionID: isAllSessionsMode ? ALL_SESSIONS : sessionId,
+            })
+          )}.`,
+          "Recomputing will rescan this scope once and refresh the cached stats.",
+        ],
+      });
+      if (!approved || cancelled) return;
+      await runOverallRecompute();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    hasActiveTagFilter,
+    isAllEventsMode,
+    isAllSessionsMode,
+    overallStatsForEvent?.NeedsRecompute,
+    requestExpensiveStatsPrompt,
+    runOverallRecompute,
+    sessionId,
+    sessionsList,
+    statsEvent,
+  ]);
+
   const slugify = (s) =>
     String(s || "")
       .trim()
@@ -2923,7 +4682,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   );
 
   const handleImportSolves = useCallback(
-    async ({ parsedSolves, destination }) => {
+    async ({ parsedSolves, destination, detectedFormat }) => {
       const userID = user?.UserID;
       if (!userID) return;
       if (isAllEventsMode) return;
@@ -2950,17 +4709,39 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               ...(s.tags || {}),
             },
             originalTime: s.originalTime ?? undefined,
+            _importSessionID: s?._importSessionID ? String(s._importSessionID) : undefined,
+            _importSessionName: s?._importSessionName ? String(s._importSessionName) : undefined,
+            _importSessionOpts:
+              s?._importSessionOpts && typeof s._importSessionOpts === "object"
+                ? s._importSessionOpts
+                : undefined,
           };
         })
         .filter(Boolean);
 
       if (normalized.length === 0) return;
 
-      const byEvent = new Map();
+      const isPtsExportImport = detectedFormat === "pts-export";
+      const IMPORT_CHUNK_SIZE = 1500;
+
+      const importGroups = new Map();
       for (const s of normalized) {
         const ev = s.event;
-        if (!byEvent.has(ev)) byEvent.set(ev, []);
-        byEvent.get(ev).push(s);
+        const importSessionID =
+          isPtsExportImport && s._importSessionID ? String(s._importSessionID) : String(sessionId || "main");
+        const importSessionName =
+          isPtsExportImport && s._importSessionName ? String(s._importSessionName) : "";
+        const key = isPtsExportImport ? `${ev}::${importSessionID}` : ev;
+        if (!importGroups.has(key)) {
+          importGroups.set(key, {
+            ev,
+            importSessionID,
+            importSessionName,
+            importSessionOpts: s._importSessionOpts || {},
+            solves: [],
+          });
+        }
+        importGroups.get(key).solves.push(s);
       }
 
       setImportBusy(true);
@@ -2972,71 +4753,162 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       });
       try {
         await runDb("Importing solves", async () => {
-        const results = [];
-        let overallCompleted = 0;
-        const overallTotal = normalized.length;
+          const sourceKey = buildImportSourceKey({
+            detectedFormat: detectedFormat || "unknown",
+            destinationKind: destKind,
+            destinationSessionID: destExistingID || String(sessionId || "main"),
+            destinationSessionName: destNewName || "",
+            solves: normalized,
+          });
 
-        for (const [ev, solvesForEv] of byEvent.entries()) {
-          let destSessionForThisEvent = String(sessionId || "main");
+          const sessionTargetCache = new Map();
+          const preparedGroups = [];
+          const overallTotal = normalized.length;
+          let totalChunks = 0;
 
-          if (destKind === "existing") {
-            destSessionForThisEvent = destExistingID || String(sessionId || "main");
-          } else {
-            destSessionForThisEvent = await createImportSession(ev, destNewName || `Import ${ev}`);
-          }
+          for (const group of importGroups.values()) {
+            const { ev, solves: solvesForEv, importSessionID, importSessionName, importSessionOpts } = group;
+            let destSessionForThisEvent = String(sessionId || "main");
 
-          const completedBeforeEvent = overallCompleted;
-          const eventTotal = solvesForEv.length;
+            if (isPtsExportImport) {
+              const cacheKey = `${ev}::${importSessionID}`;
+              if (!sessionTargetCache.has(cacheKey)) {
+                const existingSession = (sessionsList || []).find(
+                  (session) =>
+                    String(session?.Event || "").toUpperCase() === ev &&
+                    String(session?.SessionID || "main") === importSessionID
+                );
 
-          const res = await importSolvesBatch(
-            userID,
-            ev,
-            destSessionForThisEvent,
-            solvesForEv,
-            {
-              onProgress: (p) => {
-                const done = completedBeforeEvent + Math.min(eventTotal, Number(p?.completedSolves || 0));
-                const phase = String(p?.phase || "writing");
-                const label =
-                  phase === "recompute"
-                    ? `Recomputing stats… (${done}/${overallTotal})`
-                    : `Importing solves… (${done}/${overallTotal})`;
+                if (!existingSession && importSessionID && importSessionName) {
+                  await runDb("Creating import session", () =>
+                    createSession(userID, ev, importSessionID, importSessionName, importSessionOpts || {})
+                  );
+                }
 
-                setImportProgress({
-                  phase,
-                  completed: done,
-                  total: overallTotal,
-                  label,
-                });
-              },
+                sessionTargetCache.set(cacheKey, importSessionID || "main");
+              }
+
+              destSessionForThisEvent = sessionTargetCache.get(cacheKey) || "main";
+            } else if (destKind === "existing") {
+              destSessionForThisEvent = destExistingID || String(sessionId || "main");
+            } else {
+              destSessionForThisEvent = await createImportSession(ev, destNewName || `Import ${ev}`);
             }
-          );
-          results.push({ ev, destSessionForThisEvent, res });
-          overallCompleted += eventTotal;
-        }
 
-        setSessions((prev) => {
-          const next = { ...(prev || {}) };
-
-          for (const { ev, destSessionForThisEvent, res } of results) {
-            const added = (res?.addedSolves || []).map((solve) => ({
-              ...solve,
-              sessionID: solve?.sessionID || solve?.SessionID || destSessionForThisEvent,
-            }));
-            const existing = Array.isArray(next[ev]) ? next[ev] : [];
-            const merged = [...existing, ...added];
-
-            merged.sort((a, b) => {
-              const ta = new Date(a.datetime).getTime();
-              const tb = new Date(b.datetime).getTime();
-              return ta - tb;
+            const cleanSolves = solvesForEv.map((solve, index) => {
+              const clean = { ...solve };
+              delete clean._importSessionID;
+              delete clean._importSessionName;
+              delete clean._importSessionOpts;
+              clean.event = ev;
+              clean.sessionID = destSessionForThisEvent;
+              clean.importOrdinal = index;
+              return clean;
             });
 
-            next[ev] = merged;
+            totalChunks += Math.max(1, Math.ceil(cleanSolves.length / IMPORT_CHUNK_SIZE));
+            preparedGroups.push({
+              ev,
+              destSessionForThisEvent,
+              solves: cleanSolves,
+            });
           }
 
-          return next;
-        });
+          const createRes = await createImportJob({
+            userID,
+            format: detectedFormat || "unknown",
+            sourceKey,
+            totalSolves: overallTotal,
+            totalChunks,
+            label: `Import ${detectedFormat || "solves"}`,
+            metadata: {
+              destinationKind: destKind,
+              sourceFormat: detectedFormat || "unknown",
+              scope: isPtsExportImport ? "pts-export" : "single-target",
+            },
+          });
+
+          const jobID = createRes?.job?.jobID;
+          if (!jobID) throw new Error("Failed to create import job");
+
+          let overallCompleted = 0;
+          for (const group of preparedGroups) {
+            const eventTotal = group.solves.length;
+            for (let i = 0; i < group.solves.length; i += IMPORT_CHUNK_SIZE) {
+              const chunk = group.solves.slice(i, i + IMPORT_CHUNK_SIZE);
+              await appendImportJobChunk(userID, jobID, {
+                sourceKey,
+                solves: chunk,
+              });
+              overallCompleted += chunk.length;
+              setImportProgress({
+                phase: "writing",
+                completed: overallCompleted,
+                total: overallTotal,
+                label: `Importing solves... (${overallCompleted}/${overallTotal})`,
+              });
+            }
+
+            if (eventTotal === 0) {
+              setImportProgress({
+                phase: "writing",
+                completed: overallCompleted,
+                total: overallTotal,
+                label: `Importing solves... (${overallCompleted}/${overallTotal})`,
+              });
+            }
+          }
+
+          setImportProgress({
+            phase: "finalizing",
+            completed: overallCompleted,
+            total: overallTotal,
+            label: `Finalizing import... (${overallCompleted}/${overallTotal})`,
+          });
+
+          await finalizeImportJob(userID, jobID);
+
+          const pollStartedAt = Date.now();
+          while (true) {
+            const statusRes = await getImportJob(userID, jobID);
+            const job = statusRes?.job || null;
+            const status = String(job?.status || "").toUpperCase();
+            const recompute = job?.recompute || {};
+            const recomputeTotal =
+              Number(recompute.totalSessions || 0) + Number(recompute.totalEvents || 0);
+            const recomputeDone =
+              Number(recompute.sessionsCompleted || 0) + Number(recompute.eventsCompleted || 0);
+
+            setImportProgress({
+              phase: status.toLowerCase() || "finalizing",
+              completed: overallCompleted,
+              total: overallTotal,
+              label:
+                status === "COMPLETED"
+                  ? `Import complete (${overallCompleted}/${overallTotal})`
+                  : recomputeTotal > 0
+                    ? `Finalizing import... (${recomputeDone}/${recomputeTotal})`
+                    : `Finalizing import... (${overallCompleted}/${overallTotal})`,
+            });
+
+            if (status === "COMPLETED") break;
+            if (status === "FAILED" || status === "CANCELED") {
+              throw new Error(job?.error || `Import job ${status.toLowerCase()}`);
+            }
+
+            if (Date.now() - pollStartedAt > 30 * 60 * 1000) {
+              throw new Error("Import finalization timed out");
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+          }
+
+          try {
+            const refreshedSessions = await fetchSessionsList(userID);
+            onSessionsListRefresh?.(refreshedSessions);
+          } catch (err) {
+            console.warn("Failed to refresh sessions list after import", err);
+          }
 
           try {
             if (!isAllSessionsMode) {
@@ -3047,11 +4919,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               );
               setOverallStatsForEvent(item || null);
             } else {
-              const aggregated = getEventAggregateFromSessionsList(sessionsList, statsEvent);
+              const refreshedSessions = await fetchSessionsList(userID);
+              onSessionsListRefresh?.(refreshedSessions);
+              const aggregated = getEventAggregateFromSessionsList(refreshedSessions, statsEvent);
               setOverallStatsForEvent(aggregated || null);
             }
           } catch (_) {}
 
+          await loadInitialSolves();
           setShowImport(false);
         });
       } catch (e) {
@@ -3070,9 +4945,188 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       createImportSession,
       isAllEventsMode,
       isAllSessionsMode,
+      loadInitialSolves,
+      onSessionsListRefresh,
       sessionsList,
       runDb,
     ]
+  );
+
+  const downloadJsonFile = useCallback((filename, payload) => {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, []);
+
+  const handleExportData = useCallback(
+    async ({ mode, selectedEvents = [] }) => {
+      const userID = String(user?.UserID || "").trim();
+      if (!userID || exportBusy) return;
+
+      const normalizedMode = mode === "selected" ? "selected" : "whole-user";
+
+      const chosenSessions = (sessionsList || []).filter((session) => {
+        const event = String(session?.Event || "").toUpperCase();
+        const sessionID = String(session?.SessionID || "main");
+
+        if (normalizedMode === "whole-user") return true;
+
+        const selected = selectedEvents.find((item) => String(item?.event || "").toUpperCase() === event);
+        if (!selected) return false;
+        if (selected.includeAllSessions) return true;
+        return Array.isArray(selected.sessionIDs) && selected.sessionIDs.includes(sessionID);
+      });
+
+      if (chosenSessions.length === 0) return;
+
+      setExportBusy(true);
+      setExportProgress({
+        phase: "starting",
+        completed: 0,
+        total: chosenSessions.length,
+        label: `Preparing export (0/${chosenSessions.length} sessions)`,
+        sessionsCompleted: 0,
+        totalSessions: chosenSessions.length,
+        solvesExported: 0,
+      });
+
+      try {
+        const [profile, allCustomEvents] = await Promise.all([
+          getUser(userID),
+          getCustomEvents(userID),
+        ]);
+
+        const customEvents =
+          normalizedMode === "whole-user"
+            ? allCustomEvents
+            : (allCustomEvents || []).filter((item) =>
+                chosenSessions.some(
+                  (session) =>
+                    String(session?.Event || "").toUpperCase() ===
+                    String(
+                      item?.EventID ||
+                        item?.eventID ||
+                        item?.id ||
+                        item?.Event ||
+                        item?.event ||
+                        item?.EventName ||
+                        item?.name ||
+                        ""
+                    ).toUpperCase()
+                )
+              );
+
+        const sessionExports = [];
+        let solvesExported = 0;
+        let sessionsCompleted = 0;
+        for (const session of chosenSessions) {
+          const event = String(session?.Event || "").toUpperCase();
+          const sessionID = String(session?.SessionID || "main");
+          const solves = await getSolvesBySession(userID, event, sessionID);
+          solvesExported += Array.isArray(solves) ? solves.length : 0;
+          sessionsCompleted += 1;
+
+          setExportProgress({
+            phase: "fetching",
+            completed: sessionsCompleted,
+            total: chosenSessions.length,
+            label: `Collecting sessions (${sessionsCompleted}/${chosenSessions.length})`,
+            sessionsCompleted,
+            totalSessions: chosenSessions.length,
+            solvesExported,
+            currentSessionLabel: `${event} / ${sessionID}`,
+          });
+
+          sessionExports.push({
+            session: stripDbKeys(session),
+            solves: (solves || []).map((solve) => stripDbKeys(solve)),
+          });
+        }
+
+        const solveCount = sessionExports.reduce(
+          (total, item) => total + (Array.isArray(item?.solves) ? item.solves.length : 0),
+          0
+        );
+
+        const selectedEventSet = new Set(
+          sessionExports.map((item) => String(item?.session?.Event || "").toUpperCase()).filter(Boolean)
+        );
+
+        const exportedAt = new Date().toISOString();
+        const safeUserName = String(profile?.Username || profile?.Name || userID)
+          .trim()
+          .replace(/[^a-z0-9-_]+/gi, "-")
+          .replace(/^-+|-+$/g, "")
+          .toLowerCase();
+
+        const payload = {
+          format: "pts-export",
+          version: 1,
+          exportedAt,
+          scope: normalizedMode,
+          selection:
+            normalizedMode === "whole-user"
+              ? { type: "whole-user" }
+              : {
+                  type: "selected",
+                  events: selectedEvents.map((item) => ({
+                    event: String(item?.event || "").toUpperCase(),
+                    includeAllSessions: !!item?.includeAllSessions,
+                    sessionIDs: Array.isArray(item?.sessionIDs) ? item.sessionIDs : [],
+                  })),
+                },
+          user: (() => {
+            const clean = stripDbKeys(profile);
+            delete clean.Settings;
+            delete clean.TagConfig;
+            return clean;
+          })(),
+          settings: settings || {},
+          tagConfig: tagConfig || DEFAULT_TAG_CONFIG,
+          customEvents: (customEvents || []).map((item) => stripDbKeys(item)),
+          totals: {
+            events: selectedEventSet.size,
+            sessions: sessionExports.length,
+            solves: solveCount,
+          },
+          data: {
+            sessions: sessionExports,
+          },
+        };
+
+        const filename = `${safeUserName || "pts-user"}-${
+          normalizedMode === "whole-user" ? "full-export" : "selected-export"
+        }-${exportedAt.slice(0, 10)}.json`;
+
+        setExportProgress({
+          phase: "packaging",
+          completed: chosenSessions.length,
+          total: chosenSessions.length,
+          label: `Building download (${solveCount} solves)`,
+          sessionsCompleted: chosenSessions.length,
+          totalSessions: chosenSessions.length,
+          solvesExported: solveCount,
+        });
+
+        downloadJsonFile(filename, payload);
+        setShowExport(false);
+      } catch (e) {
+        console.error("Export failed:", e);
+        alert("Export failed. Check console for details.");
+      } finally {
+        setExportBusy(false);
+        setExportProgress(null);
+      }
+    },
+    [user?.UserID, exportBusy, sessionsList, settings, tagConfig, downloadJsonFile]
   );
 
   const canOlder =
@@ -3100,29 +5154,29 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const canShowAll =
     statsViewMode === "time"
       ? false
-      : isSolveLevelMode && !!user?.UserID && !loadingAllSolves && !showAllActive;
+      : isSolveLevelMode && !!user?.UserID && !hasActiveDateFilter && !loadingAllSolves && !showAllActive;
 
   const compareCanOlder =
     statsViewMode === "standard" &&
     isSolveLevelMode &&
-    !hasActiveDateFilter &&
+    !hasActiveCompareDateFilter &&
     compareCurrentPage < compareMaxPage;
   const compareCanNewer =
-    statsViewMode === "standard" && isSolveLevelMode && !hasActiveDateFilter && compareCurrentPage > 0;
+    statsViewMode === "standard" && isSolveLevelMode && !hasActiveCompareDateFilter && compareCurrentPage > 0;
   const compareCanZoomIn =
-    statsViewMode === "standard" && isSolveLevelMode && !hasActiveDateFilter && compareSolvesPerPage > 5;
+    statsViewMode === "standard" && isSolveLevelMode && !hasActiveCompareDateFilter && compareSolvesPerPage > 5;
   const compareCanZoomOut =
     statsViewMode === "standard" &&
     isSolveLevelMode &&
-    !hasActiveDateFilter &&
+    !hasActiveCompareDateFilter &&
     compareFilteredRawSolves.length > 0 &&
     compareSolvesPerPage < compareFilteredRawSolves.length;
   const compareCanDecreaseSolveCount =
-    statsViewMode === "standard" && isSolveLevelMode && !hasActiveDateFilter && compareSolvesPerPage > 1;
+    statsViewMode === "standard" && isSolveLevelMode && !hasActiveCompareDateFilter && compareSolvesPerPage > 1;
   const compareCanIncreaseSolveCount =
     statsViewMode === "standard" &&
     isSolveLevelMode &&
-    !hasActiveDateFilter &&
+    !hasActiveCompareDateFilter &&
     compareFilteredRawSolves.length > 0 &&
     compareSolvesPerPage < compareFilteredRawSolves.length;
   const compareCanShowAll =
@@ -3130,6 +5184,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       ? false
       : isSolveLevelMode &&
         !!user?.UserID &&
+        !hasActiveCompareDateFilter &&
         !compareLoading &&
         !compareShowAllActive &&
         compareFilteredRawSolves.length > 0;
@@ -3142,23 +5197,46 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     !hasActiveDateFilter &&
     !hasActiveTagFilter;
 
-  const primaryStatsLoading = loadingInitial || loadingTimeScope || loadingTagScope;
-  const primarySummaryLoading = primaryStatsLoading;
-  const primaryOverallSummaryLoading = primaryStatsLoading || loadingOverallStats;
-  const compareSummaryLoading = compareEnabled && compareLoading;
+  const primaryStatsLoading =
+    loadingInitial ||
+    (wantsRawTimeScope ? loadingTimeScope : false) ||
+    loadingTagScope ||
+    loadingDateScopedSolves ||
+    loadingDayBuckets;
+  const primarySummaryLoading =
+    statsViewMode === "time" && useBucketBackedRange
+      ? loadingDayBuckets || loadingTagScope || loadingDateScopedSolves
+      : primaryStatsLoading;
+  const primaryOverallSummaryLoading =
+    statsViewMode === "time" && isAllEventsMode
+      ? primarySummaryLoading
+      : primaryStatsLoading || loadingOverallStats;
+  const compareSummaryLoading = compareEnabled && (compareLoading || loadingCompareDayBuckets);
   const chartCardsLoading = primaryStatsLoading || compareSummaryLoading;
 
   const headerStatusText = useMemo(() => {
     if (compareEnabled && statsViewMode === "standard") {
+      if (loadingCompareDayBuckets) return "Loading compare bucketed stats…";
       if (compareLoading) return "Loading compare solves…";
       return "";
     }
+    if (statsViewMode === "time" && !wantsRawTimeScope && canUseBucketRange) {
+      if (loadingDayBuckets) return "Loading bucketed stats for time view…";
+      return "Showing aggregated day buckets across the selected scope";
+    }
+    if (useBucketBackedRange && statsViewMode === "time") {
+      return "Showing aggregated day buckets across the selected scope";
+    }
     if (statsViewMode === "time") {
       if (loadingTimeScope) return "Loading solves for time view…";
+      if (loadingDayBuckets) return "Loading bucketed stats for time view…";
       return hasActiveDateFilter
         ? `Showing all ${allLoadedFilteredRawSolves.length} solves in the selected date range`
         : `Showing all ${allLoadedFilteredRawSolves.length} solves across all dates`;
     }
+    if (useBucketBackedRange) return "Showing aggregated day buckets for the selected date range";
+    if (loadingDayBuckets) return "Loading bucketed stats for selected date range…";
+    if (loadingDateScopedSolves) return "Loading solves for selected date range…";
     if (loadingTagScope) return "Loading solves for selected tag…";
     if (loadingInitial) return "Loading solves…";
     if (loadingAllSolves) return "Loading ALL solves…";
@@ -3171,7 +5249,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     if (isAllLoaded) return "Loaded solves currently in memory for this session";
     if (hasMoreOlder) return "";
     return "";
-  }, [compareEnabled, compareLoading, statsViewMode, loadingTimeScope, loadingTagScope, allLoadedFilteredRawSolves.length, hasActiveTagFilter, hasActiveDateFilter, loadingInitial, loadingAllSolves, loadingMore, isAllEventsMode, isAllSessionsMode, statsEvent, showAllActive, isAllLoaded, hasMoreOlder]);
+  }, [canUseBucketRange, compareEnabled, compareLoading, loadingCompareDayBuckets, statsViewMode, useBucketBackedRange, loadingTimeScope, loadingDayBuckets, loadingDateScopedSolves, loadingTagScope, allLoadedFilteredRawSolves.length, hasActiveTagFilter, hasActiveDateFilter, loadingInitial, loadingAllSolves, loadingMore, isAllEventsMode, isAllSessionsMode, statsEvent, showAllActive, isAllLoaded, hasMoreOlder, wantsRawTimeScope]);
 
   const eventSelectLabel = useMemo(() => {
     if (statsEvent === ALL_EVENTS) return "All Events";
@@ -3182,16 +5260,33 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const selectedSessionDisplay = useMemo(() => {
     if (statsSession === ALL_SESSIONS) return "All Sessions";
     const found = sessionsForEvent.find((s) => s.SessionID === statsSession);
-    return found?.SessionName || statsSession || "main";
+    return normalizeSessionLabel(statsSession, found?.SessionName || statsSession || "main");
   }, [statsSession, sessionsForEvent]);
 
   const selectedTagLabel = useMemo(() => {
     return hasActiveTagFilter ? summarizeTagSelection(tagFilterSelection, safeTagConfig) : "";
   }, [hasActiveTagFilter, safeTagConfig, tagFilterSelection]);
+  const selectedTagPills = useMemo(() => {
+    const tagLabels = getSharedTagLabels(safeTagConfig);
+    const tagColors = getTagColorMapForEvent(tagColorCatalog, statsEvent === ALL_EVENTS ? "" : statsEvent);
+    return activeTagEntries.map(([field, value]) => ({
+      field,
+      value,
+      label: tagLabels?.[field] || field,
+      color:
+        tagColors?.[field]?.[value] ||
+        (field === "CrossColor"
+          ? resolveHeaderCrossColorTone(value, user?.Color || user?.color || "#2EC4B6")
+          : user?.Color || user?.color || "#2EC4B6"),
+    }));
+  }, [activeTagEntries, safeTagConfig, tagColorCatalog, statsEvent, user]);
 
   const compareSessionDisplay = useMemo(() => {
     const found = compareSessionsForEvent.find((s) => s.SessionID === compareSessionId);
-    return found?.SessionName || compareSessionId || "main";
+    return normalizeSessionLabel(
+      compareSessionId,
+      found?.SessionName || compareSessionId || "main"
+    );
   }, [compareSessionId, compareSessionsForEvent]);
 
   const compareEventLabel = useMemo(() => {
@@ -3240,6 +5335,20 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     if (!compareSelection || !hasActiveTagSelection(compareTagSelection)) return "";
     return compareTagLabel;
   }, [compareSelection, compareTagLabel, compareTagSelection]);
+  const compareSelectedTagPills = useMemo(() => {
+    const tagLabels = getSharedTagLabels(safeTagConfig);
+    const tagColors = getTagColorMapForEvent(tagColorCatalog, compareEvent === ALL_EVENTS ? "" : compareEvent);
+    return compareActiveTagEntries.map(([field, value]) => ({
+      field,
+      value,
+      label: tagLabels?.[field] || field,
+      color:
+        tagColors?.[field]?.[value] ||
+        (field === "CrossColor"
+          ? resolveHeaderCrossColorTone(value, compareAccentColor || user?.Color || user?.color || "#2EC4B6")
+          : compareAccentColor || user?.Color || user?.color || "#2EC4B6"),
+    }));
+  }, [compareActiveTagEntries, safeTagConfig, tagColorCatalog, compareEvent, compareAccentColor, user]);
 
   const primaryPaletteLabel = useMemo(() => {
     return paletteOptions.find((option) => option.value === primaryPaletteKey)?.label || "Default";
@@ -3253,6 +5362,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   }, [compareSelection?.paletteKey, paletteOptions]);
 
   const showEventBreakdownCard = statsViewMode === "time" && isAllEventsMode;
+  const showAllEventsTimeMatrixCard = statsViewMode === "time" && isAllEventsMode && !compareEnabled;
+  const percentCardLoading =
+    compareSummaryLoading ||
+    (showEventBreakdownCard
+      ? (useBucketBackedRange ? loadingDayBuckets : false)
+      : primaryStatsLoading);
 
   const summaryMode =
     statsViewMode === "time"
@@ -3298,8 +5413,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
   const overallSummaryStatShare = useMemo(() => {
     const bestOverallSingle =
-      effectiveOverallStats?.BestSingleMs ??
-      allLoadedFilteredRawSolves
+      stableOverallStats?.BestSingleMs ??
+      stableOverallSolves
         ?.map((solve) => Number(solve?.time))
         .filter((value) => Number.isFinite(value) && value >= 0)
         .sort((a, b) => a - b)?.[0] ??
@@ -3318,12 +5433,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       ].filter(Boolean),
     };
   }, [
-    allLoadedFilteredRawSolves,
     eventSelectLabel,
     headerStatusText,
     isAllSessionsMode,
     overallCount,
-    effectiveOverallStats,
+    stableOverallSolves,
+    stableOverallStats,
     selectedSessionDisplay,
   ]);
 
@@ -3331,8 +5446,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     const sharedScope = isAllEventsMode ? "all-events" : isAllSessionsMode ? "all-sessions" : "session";
     const baseSummaryRender = {
       solves: serializeSharedSolves(visiblePageFilteredRawSolves, 500),
-      overallSolves: serializeSharedSolves(allLoadedFilteredRawSolves, 1000),
-      overallStats: effectiveOverallStats || null,
+      overallSolves: serializeSharedSolves(stableOverallSolves, 1000),
+      overallStats: stableOverallStats || null,
+      bucketSummary: useBucketBackedRange ? activeBucketSummary : null,
+      bucketItems: useBucketBackedRange ? activeBucketItems : [],
       allEventsBreakdown: statsViewMode === "time" ? null : isAllEventsMode ? allEventsBreakdown : null,
       mode: summaryMode,
       selectedEvent: eventSelectLabel,
@@ -3346,6 +5463,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       solves: serializeSharedSolves(compareVisiblePageFilteredRawSolves, 500),
       overallSolves: serializeSharedSolves(compareFilteredRawSolves, 1000),
       overallStats: null,
+      bucketSummary: useBucketBackedRange ? activeCompareBucketSummary : null,
+      bucketItems: useBucketBackedRange ? activeCompareBucketItems : [],
       allEventsBreakdown: null,
       mode: "session",
       selectedEvent: compareEventLabel,
@@ -3721,6 +5840,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     showEventBreakdownCard,
     showingCount,
     loadedSolveCountForSummary,
+    stableOverallSolves,
+    stableOverallStats,
     summaryMode,
     statsEvent,
     statsViewMode,
@@ -3733,6 +5854,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     selectedTimeDay,
     currentSummaryStatShare,
     overallSummaryStatShare,
+    activeBucketItems,
+    activeBucketSummary,
+    activeCompareBucketItems,
+    activeCompareBucketSummary,
+    useBucketBackedRange,
   ]);
 
   const focusedCard = useMemo(
@@ -3747,36 +5873,185 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
   const isFocusedCardFavorited = focusedCard ? favoriteKeys.has(focusedCard.id) : false;
 
+  const updateFocusedLineChartControls = useCallback((nextValue) => {
+    setFocusedLineChartControls((current) => {
+      const prev = current || {};
+      const next = nextValue || {};
+      const keys = [
+        "showAo5",
+        "showAo12",
+        "showMean",
+        "showGrid",
+        "groupMode",
+        "xScaleMode",
+        "dotSize",
+        "useTightAutoScale",
+        "yMinInput",
+        "yMaxInput",
+      ];
+
+      if (keys.every((key) => prev[key] === next[key])) return current;
+      return nextValue;
+    });
+  }, []);
+
   const openCardFocus = useCallback((cardId) => {
+    const nextCard = cardDefinitions.find((item) => item.id === cardId) || null;
     setFocusedCardId(cardId);
     setFocusActionMessage("");
-  }, []);
+    setShareIncludeChartControls(Boolean(nextCard?.statShare?.render?.showControls));
+    setFocusedLineChartControls(nextCard?.statShare?.render?.chartControls || null);
+  }, [cardDefinitions]);
 
   const closeCardFocus = useCallback(() => {
     setFocusedCardId("");
     setFocusActionMessage("");
     setFocusActionBusy("");
+    setShareIncludeChartControls(false);
+    setFocusedLineChartControls(null);
   }, []);
 
   const openSolveDetail = useCallback(
     (solve) => {
       if (!solve) return;
-      setSelectedSolve({ ...solve, userID: user?.UserID });
+      setSelectedSolve({ ...solve, userID: user?.UserID, __readOnly: readOnly });
     },
-    [user?.UserID]
+    [readOnly, user?.UserID]
+  );
+
+  const handleEventMatrixStatSelect = useCallback(
+    async (selection) => {
+      if (!selection || !user?.UserID) return;
+
+      const event = String(selection?.event || "").trim().toUpperCase();
+      const variant = String(selection?.variant || "").trim().toLowerCase();
+      const metricKey = String(selection?.metricKey || "").trim().toLowerCase();
+      const mainOnly = selection?.mainOnly !== false;
+      if (!event || !["best", "worst"].includes(variant)) return;
+
+      const sourceItem =
+        timeViewEventMatrixItems.find((item) => String(item?.event || "").trim().toUpperCase() === event) || null;
+      const refKey = `${metricKey}${variant === "best" ? "Best" : "Worst"}`;
+      const startSolveRef = sourceItem?.refs?.[refKey] || null;
+      const scopeSessions = (sessionsList || [])
+        .filter((session) => String(session?.Event || "").trim().toUpperCase() === event)
+        .filter((session) => (mainOnly ? String(session?.SessionID || "main") === "main" : true))
+        .map((session) => String(session?.SessionID || "main"));
+
+      if (!scopeSessions.length) return;
+
+      const results = await Promise.all(
+        scopeSessions.map(async (scopeSessionID) => {
+          const items = await getSolvesBySession(
+            user.UserID,
+            event,
+            scopeSessionID,
+            effectiveTimeZone ? { timeZone: effectiveTimeZone } : {}
+          );
+          return (items || []).map(normalizeSolve).filter(Boolean);
+        })
+      );
+
+      const deduped = new Map();
+      results.flat().forEach((solve) => {
+        const key = String(solve?.solveRef || `${solve?.event}|${solve?.sessionID}|${solve?.datetime || ""}`);
+        if (!key) return;
+        deduped.set(key, solve);
+      });
+
+      const mergedSolves = Array.from(deduped.values()).sort((a, b) => {
+        const ta = new Date(a?.datetime || "").getTime();
+        const tb = new Date(b?.datetime || "").getTime();
+        return ta - tb;
+      });
+
+      if (!mergedSolves.length) return;
+
+      const eventLabel = getEventDisplayMeta(event)?.label || event;
+      const scopeLabel = mainOnly ? "Main Sessions" : "All Sessions";
+
+      if (metricKey === "single") {
+        const solve =
+          (startSolveRef
+            ? mergedSolves.find((item) => String(item?.solveRef || "") === String(startSolveRef))
+            : null) || findSingleSolve(mergedSolves, variant);
+        if (solve) openSolveDetail(solve);
+        return;
+      }
+
+      const spec = WINDOW_SPECS[metricKey];
+      if (!spec) return;
+
+      const solvesForWindow =
+        (startSolveRef ? findWindowByStartRef(mergedSolves, startSolveRef, spec.size) : null) ||
+        findWindowForMetric(mergedSolves, spec, variant);
+
+      if (!solvesForWindow?.length) return;
+
+      setSelectedAverageDetail({
+        title: `${spec.label} ${variant}`,
+        subtitle: `${eventLabel} · ${scopeLabel}`,
+        solves: solvesForWindow,
+      });
+    },
+    [
+      effectiveTimeZone,
+      normalizeSolve,
+      openSolveDetail,
+      sessionsList,
+      timeViewEventMatrixItems,
+      user?.UserID,
+    ]
   );
 
   const handleSummaryStatSelect = useCallback(
     async (selection) => {
       if (!selection) return;
+      const isCompareSource = selection.source === "compare";
+      const canUseCachedOverallRefs =
+        selection.scope === "overall" &&
+        !isCompareSource &&
+        useCachedOverallStats &&
+        !!overallStatsForEvent;
+
+      if (
+        selection.scope === "overall" &&
+        !isCompareSource &&
+        statsViewMode === "standard" &&
+        !hasActiveDateFilter &&
+        !hasActiveTagFilter &&
+        !overallScopeSolves.length &&
+        !canUseCachedOverallRefs
+      ) {
+        const approved = await warnBeforeSolveScan({
+          title: "Load full overall solve scope?",
+          intro: "This action needs the full overall solve history to locate the exact stat window.",
+          event: statsEvent,
+          sessionID: isAllSessionsMode ? ALL_SESSIONS : sessionId,
+          confirmLabel: "Load Solve Scope",
+        });
+        if (!approved) return;
+
+        const loaded = await loadOverallScopeSolves();
+        if (!loaded) return;
+      }
 
       if (selection.kind === "single") {
         const sourceSolves =
-          selection.scope === "overall" ? allLoadedFilteredRawSolves : summaryCurrentSolves;
+          selection.scope === "overall"
+            ? isCompareSource
+              ? compareFilteredRawSolves
+              : stableOverallSolves
+            : isCompareSource
+              ? compareVisiblePageFilteredRawSolves
+              : summaryCurrentSolves;
         let solve = null;
 
-        if (selection.scope === "overall" && selection.variant === "best") {
-          const bestSolveRef = overallStatsForEvent?.BestSingleSolveSK || null;
+        if ((selection.variant === "best" || selection.variant === "worst") && canUseCachedOverallRefs) {
+          const bestSolveRef =
+            selection.variant === "worst"
+              ? overallStatsForEvent?.WorstSingleSolveSK || null
+              : overallStatsForEvent?.BestSingleSolveSK || null;
           solve =
             sourceSolves.find(
               (item) => String(item?.solveRef ?? item?.SK ?? "") === String(bestSolveRef)
@@ -3793,7 +6068,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               );
               solve = normalizeSolve((items || [])[0]);
             } catch (error) {
-              console.warn("Failed to load exact best single:", error);
+              console.warn(`Failed to load exact ${selection.variant} single:`, error);
             }
           }
 
@@ -3816,16 +6091,26 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       if (!spec) return;
 
       const sourceSolves =
-        selection.scope === "overall" ? allLoadedFilteredRawSolves : summaryCurrentSolves;
+        selection.scope === "overall"
+          ? isCompareSource
+            ? compareFilteredRawSolves
+            : stableOverallSolves
+          : isCompareSource
+            ? compareVisiblePageFilteredRawSolves
+            : summaryCurrentSolves;
 
       let solvesForWindow = null;
       const startSolveRef =
-        selection.scope === "overall" &&
-        (selection.variant === "best" || selection.variant === "strict-best")
+        canUseCachedOverallRefs &&
+        (selection.variant === "best" ||
+          selection.variant === "strict-best" ||
+          selection.variant === "worst")
           ? overallStatsForEvent?.[
               selection.variant === "strict-best"
                 ? `${spec.startField.replace("StartSolveSK", "StrictStartSolveSK")}`
-                : spec.startField
+                : selection.variant === "worst"
+                  ? spec.startField.replace("Best", "Worst")
+                  : spec.startField
             ] ?? null
           : null;
 
@@ -3841,8 +6126,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         try {
           const items = await getSolveWindowFromStart(
             user.UserID,
-            String(statsEvent || "").toUpperCase(),
-            String(sessionId || "main"),
+            String(isCompareSource ? compareEvent : statsEvent || "").toUpperCase(),
+            String(isCompareSource ? compareSessionId : sessionId || "main"),
             startSolveRef,
             spec.size
           );
@@ -3869,22 +6154,40 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         title: `${selection.label} ${selection.variant}`,
         subtitle:
           selection.scope === "overall"
-            ? `${eventSelectLabel} · ${selectedSessionDisplay} · overall`
-            : `${eventSelectLabel} · ${selectedSessionDisplay}`,
+            ? isCompareSource
+              ? `${compareEventLabel} · ${compareSessionDisplay} · overall`
+              : `${eventSelectLabel} · ${selectedSessionDisplay} · overall`
+            : isCompareSource
+              ? `${compareEventLabel} · ${compareSessionDisplay}`
+              : `${eventSelectLabel} · ${selectedSessionDisplay}`,
         solves: solvesForWindow,
       });
     },
     [
-      allLoadedFilteredRawSolves,
+      compareEvent,
+      compareEventLabel,
+      compareFilteredRawSolves,
+      compareSessionDisplay,
+      compareSessionId,
+      compareVisiblePageFilteredRawSolves,
       eventSelectLabel,
+      hasActiveDateFilter,
+      hasActiveTagFilter,
+      isAllSessionsMode,
+      useCachedOverallStats,
+      loadOverallScopeSolves,
       normalizeSolve,
       openSolveDetail,
+      overallScopeSolves.length,
       overallStatsForEvent,
+      stableOverallSolves,
       selectedSessionDisplay,
       sessionId,
       statsEvent,
       user?.UserID,
       summaryCurrentSolves,
+      statsViewMode,
+      warnBeforeSolveScan,
     ]
   );
 
@@ -3906,13 +6209,26 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     setFocusActionMessage("");
 
     try {
+      const nextStatShare =
+        focusedCard?.key === "line"
+          ? {
+              ...focusedCard.statShare,
+              render: {
+                ...(focusedCard.statShare?.render || {}),
+                showControls: shareIncludeChartControls,
+                chartControls:
+                  focusedLineChartControls || focusedCard.statShare?.render?.chartControls || null,
+              },
+            }
+          : focusedCard.statShare;
+
       const shared = await addPost({
         note: "",
         event: statsEvent === ALL_EVENTS ? "333" : statsEvent,
         solveList: [],
         comments: [],
         postType: "stat-share",
-        statShare: focusedCard.statShare,
+        statShare: nextStatShare,
       });
       setFocusActionMessage(shared ? "Shared to social." : "");
     } catch (error) {
@@ -3921,7 +6237,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     } finally {
       setFocusActionBusy("");
     }
-  }, [addPost, focusedCard, statsEvent]);
+  }, [addPost, focusedCard, focusedLineChartControls, shareIncludeChartControls, statsEvent]);
 
   const handleShareFocusedCardToProfile = useCallback(async () => {
     if (!focusedCard?.profileConfig || !user?.UserID) return;
@@ -3982,8 +6298,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         return (
           <StatsSummaryCurrent
             solves={visiblePageFilteredRawSolves}
-            overallStats={effectiveOverallStats}
+            overallStats={renderedOverallStats}
+            bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
+            bucketItems={useBucketBackedRange ? activeBucketItems : []}
             allEventsBreakdown={statsViewMode === "time" ? null : isAllEventsMode ? allEventsBreakdown : null}
+            eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
             mode={summaryMode}
             loadedSolveCount={loadedSolveCountForSummary}
             showCurrentMetrics={currentPage === 0}
@@ -3999,13 +6318,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         return (
           <StatsSummaryOverall
             solves={visiblePageFilteredRawSolves}
-            overallSolves={allLoadedFilteredRawSolves}
-            overallStats={effectiveOverallStats}
+            overallSolves={stableOverallSolves}
+            overallStats={stableOverallStats}
             allowOverallDerived={allowOverallDerivedMetrics}
             mode={summaryMode}
             selectedEvent={eventSelectLabel}
             selectedSession={selectedSessionDisplay}
             selectedTagLabel={selectedTagLabel}
+            selectedTagPills={selectedTagPills}
             loadedSolveCount={loadedSolveCountForSummary}
             onStatSelect={handleSummaryStatSelect}
             profileColor={user?.Color || user?.color || "#50B6FF"}
@@ -4016,12 +6336,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
       if (card.key === "summary-compare-secondary-current") {
         return (
-          <StatsSummaryCurrent
-            solves={compareVisiblePageFilteredRawSolves}
-            overallStats={null}
-            allEventsBreakdown={null}
-            mode="session"
-            loadedSolveCount={compareFilteredRawSolves.length}
+                      <StatsSummaryCurrent
+                        solves={compareVisiblePageFilteredRawSolves}
+                        overallStats={useBucketBackedRange ? activeCompareBucketSummary : null}
+                        bucketSummary={useBucketBackedRange ? activeCompareBucketSummary : null}
+                        bucketItems={useBucketBackedRange ? activeCompareBucketItems : []}
+                        allEventsBreakdown={null}
+                        mode="session"
+                        loadedSolveCount={compareFilteredRawSolves.length}
             showCurrentMetrics={currentPage === 0}
             viewMode="standard"
             selectedDay=""
@@ -4033,15 +6355,16 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
       if (card.key === "summary-compare-secondary-overall") {
         return (
-          <StatsSummaryOverall
-            solves={compareVisiblePageFilteredRawSolves}
-            overallSolves={compareFilteredRawSolves}
-            overallStats={null}
-            allowOverallDerived={true}
-            mode="session"
+                      <StatsSummaryOverall
+                        solves={compareVisiblePageFilteredRawSolves}
+                        overallSolves={compareFilteredRawSolves}
+                        overallStats={useBucketBackedRange ? activeCompareBucketSummary : null}
+                        allowOverallDerived={true}
+                        mode="session"
             selectedEvent={compareEventLabel}
             selectedSession={compareSessionDisplay}
             selectedTagLabel={compareSelectedTagSummaryLabel}
+            selectedTagPills={compareSelectedTagPills}
             loadedSolveCount={compareFilteredRawSolves.length}
             onStatSelect={null}
             profileColor={compareStyle?.primary || "#7c8cff"}
@@ -4055,13 +6378,15 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           <LineChart
             user={user}
             solves={compareEnabled ? comparisonPrimarySolves : timeViewLineSolves}
+            bucketItems={useBucketBackedRange ? activeBucketItems : []}
             comparisonSeries={
               compareEnabled
                 ? [
                     {
                       id: "compare",
                       label: compareLegendItems[1]?.label || "Compare",
-                      solves: compareVisiblePageFilteredRawSolves,
+                      solves: useBucketBackedRange ? [] : compareVisiblePageFilteredRawSolves,
+                      bucketItems: useBucketBackedRange ? activeCompareBucketItems : [],
                       style: compareStyle,
                     },
                   ]
@@ -4078,36 +6403,47 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             currentSession={sessionId}
             eventKey={statsEvent}
             practiceMode={false}
+            controlsSyncKey={focusedCardId || card.id}
+            initialControlState={focusedLineChartControls || card.statShare?.render?.chartControls || null}
             viewMode={statsViewMode}
             selectedDay={selectedTimeDay}
             onSelectedDayChange={setSelectedTimeDay}
             onSolveOpen={openSolveDetail}
+            onControlsChange={updateFocusedLineChartControls}
+            onBucketSelect={handleBucketDaySelect}
           />
         );
       }
 
       if (card.key === "percent") {
         return showEventBreakdownCard
-          ? <PieChart solves={pieChartSolves} title="Event Breakdown" />
+          ? <PieChart data={timeViewEventBreakdownData} title="Event Breakdown" />
           : (
-            <PercentBar
-              solves={compareEnabled ? comparisonPrimarySolves : chartVisibleSolves}
-              seriesStyle={primaryCompareStyle}
-              comparisonSeries={
-                compareEnabled
-                  ? [
-                      {
-                        id: "compare",
-                        label: compareLegendItems[1]?.label || "Compare",
-                        solves: compareVisiblePageFilteredRawSolves,
-                        style: compareStyle,
-                      },
-                    ]
-                  : []
-              }
-              legendItems={compareLegendItems}
-              title="Solves Distribution by Time"
-            />
+            useBucketBackedRange ? (
+              <PieChart
+                data={buildPenaltyPieData(activeBucketSummary)}
+                title="Penalty Breakdown"
+              />
+            ) : (
+              <PercentBar
+                solves={compareEnabled ? comparisonPrimarySolves : chartVisibleSolves}
+                seriesStyle={primaryCompareStyle}
+                comparisonSeries={
+                  compareEnabled
+                    ? [
+                        {
+                          id: "compare",
+                          label: compareLegendItems[1]?.label || "Compare",
+                          solves: compareVisiblePageFilteredRawSolves,
+                          style: compareStyle,
+                        },
+                      ]
+                    : []
+                }
+                legendItems={compareLegendItems}
+                title="Solves Distribution by Time"
+              />
+            )
           );
       }
 
@@ -4115,13 +6451,17 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         return (
           <BarChart
             solves={compareEnabled ? comparisonPrimarySolves : barChartSolves}
+            histogramCounts={compareEnabled ? null : activeBucketSummary?.HistogramBySecond || null}
             comparisonSeries={
               compareEnabled
                 ? [
                     {
                       id: "compare",
                       label: compareLegendItems[1]?.label || "Compare",
-                      solves: compareVisiblePageFilteredRawSolves,
+                      solves: useBucketBackedRange ? [] : compareVisiblePageFilteredRawSolves,
+                      histogramCounts: useBucketBackedRange
+                        ? activeCompareBucketSummary?.HistogramBySecond || null
+                        : null,
                       style: compareStyle,
                     },
                   ]
@@ -4134,6 +6474,25 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       }
 
       if (card.key === "table") {
+        if (useBucketBackedRange) {
+          return (
+            <BucketTable
+              bucketItems={
+                compareEnabled && tableCompareView === "compare"
+                  ? activeCompareBucketItems
+                  : activeBucketItems
+              }
+              selectedDay={
+                compareEnabled && tableCompareView === "compare"
+                  ? (effectiveCompareDateFilterStart === effectiveCompareDateFilterEnd
+                      ? effectiveCompareDateFilterStart
+                      : "")
+                  : (dateFilterStart === dateFilterEnd ? dateFilterStart : "")
+              }
+              onBucketSelect={handleBucketDaySelect}
+            />
+          );
+        }
         return (
           <TimeTable
             user={user}
@@ -4155,6 +6514,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     },
     [
       addPost,
+      activeBucketItems,
+      activeBucketSummary,
+      activeCompareBucketItems,
+      activeCompareBucketSummary,
       allEventsBreakdown,
       allLoadedFilteredRawSolves,
       barChartSolves,
@@ -4164,6 +6527,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       compareEventLabel,
       compareLegendItems,
       compareFilteredRawSolves,
+      compareSelectedTagPills,
       compareSelectedTagSummaryLabel,
       compareSessionDisplay,
       compareStyle,
@@ -4171,18 +6535,26 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       compareEvent,
       comparisonPrimarySolves,
       currentPage,
+      dateFilterEnd,
+      dateFilterStart,
       eventSelectLabel,
+      focusedCardId,
+      focusedLineChartControls,
       handleDeleteSolve,
+      handleBucketDaySelect,
+      updateFocusedLineChartControls,
       allowOverallDerivedMetrics,
       isAllEventsMode,
       summaryMode,
       effectiveOverallStats,
+      renderedOverallStats,
       handleSummaryStatSelect,
       pieChartSolves,
       primaryCompareStyle,
       primaryOverallSummaryLoading,
       primarySummaryLoading,
       showEventBreakdownCard,
+      useBucketBackedRange,
       selectedSessionDisplay,
       selectedTagLabel,
       selectedTimeDay,
@@ -4190,6 +6562,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       sessionsList,
       setSessions,
       loadedSolveCountForSummary,
+      stableOverallSolves,
+      stableOverallStats,
       statsEvent,
       statsViewMode,
       tableCompareView,
@@ -4198,8 +6572,36 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       user,
       visiblePageFilteredRawSolves,
       compareSummaryLoading,
+      effectiveCompareDateFilterEnd,
+      effectiveCompareDateFilterStart,
+      selectedTagPills,
+      timeViewEventBreakdownData,
     ]
   );
+
+  const focusedCardBody = useMemo(() => {
+    return renderFocusedCardBody(focusedCard);
+  }, [focusedCard, renderFocusedCardBody]);
+
+  const focusOptionsContent = useMemo(() => {
+    if (focusedCard?.key !== "line") return null;
+
+    return (
+      <label className="statFocusOptionCard">
+        <input
+          type="checkbox"
+          checked={shareIncludeChartControls}
+          onChange={(event) => setShareIncludeChartControls(event.target.checked)}
+        />
+        <span className="statFocusOptionText">
+          <span className="statFocusOptionTitle">Let viewers use chart controls</span>
+          <span className="statFocusOptionHint">
+            Shared charts stay clickable either way. This only shows or hides the graph buttons.
+          </span>
+        </span>
+      </label>
+    );
+  }, [focusedCard?.key, shareIncludeChartControls]);
 
   const isInteractiveTarget = (target) =>
     !!target?.closest?.(
@@ -4211,11 +6613,13 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       eventLabel: eventSelectLabel,
       sessionLabel: isAllEventsMode ? "Pick a specific event first" : selectedSessionDisplay,
       isAllEventsMode,
-      canRecomputeOverall,
-      canImport: !!user?.UserID && !importBusy && !isAllEventsMode,
+      canRecomputeOverall: readOnly ? false : canRecomputeOverall,
+      canImport: !readOnly && !!user?.UserID && !importBusy && !isAllEventsMode,
+      canExport: !readOnly && !!user?.UserID && !exportBusy,
       loadingOverallStats,
       recomputeStatusText,
       importBusy,
+      exportBusy,
       isStatsRouteActive: true,
     });
 
@@ -4231,24 +6635,61 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     selectedSessionDisplay,
     isAllEventsMode,
     canRecomputeOverall,
+    readOnly,
     user?.UserID,
     importBusy,
+    exportBusy,
     loadingOverallStats,
     recomputeStatusText,
   ]);
 
   useEffect(() => {
+    if (!(Number(recomputeRequest) > 0)) return;
     if (recomputeRequest === recomputeRequestRef.current) return;
     recomputeRequestRef.current = recomputeRequest;
     handleRecomputeOverall();
   }, [recomputeRequest, handleRecomputeOverall]);
 
   useEffect(() => {
+    if (!(Number(importRequest) > 0)) return;
     if (importRequest === importRequestRef.current) return;
     importRequestRef.current = importRequest;
     if (!user?.UserID || importBusy || isAllEventsMode) return;
     setShowImport(true);
   }, [importRequest, user?.UserID, importBusy, isAllEventsMode]);
+
+  useEffect(() => {
+    if (!forceShowImportModal) return;
+    if (!user?.UserID || importBusy || isAllEventsMode) return;
+    setShowImport(true);
+    onImportModalOpenHandled?.();
+  }, [
+    forceShowImportModal,
+    user?.UserID,
+    importBusy,
+    isAllEventsMode,
+    onImportModalOpenHandled,
+  ]);
+
+  useEffect(() => {
+    if (!(Number(exportRequest) > 0)) return;
+    if (exportRequest === exportRequestRef.current) return;
+    exportRequestRef.current = exportRequest;
+    if (!user?.UserID || exportBusy) return;
+    setShowExport(true);
+  }, [exportRequest, user?.UserID, exportBusy]);
+
+  useEffect(() => {
+    if (!forceShowExportModal) return;
+    if (!user?.UserID || exportBusy) return;
+    setShowExport(true);
+    onExportModalOpenHandled?.();
+  }, [
+    forceShowExportModal,
+    user?.UserID,
+    exportBusy,
+    onExportModalOpenHandled,
+  ]);
 
   const bindCardFocus = (cardId) => ({
     role: "button",
@@ -4293,7 +6734,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     return () => document.removeEventListener("keydown", onKeyDown, { capture: true });
   }, [closeScopeModal, scopeModalState]);
 
-    const renderTagScopeModal = ({
+  const renderTagScopeModal = ({
     isOpen,
     title,
     subtitle,
@@ -4312,6 +6753,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     onPaletteChange,
     accentColor,
     dateLabel,
+    dateStartDay,
+    dateEndDay,
+    onDateApply,
   }) => {
     if (!isOpen) return null;
 
@@ -4415,7 +6859,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               <span>
                 {sessionValue === ALL_SESSIONS
                   ? "All Sessions"
-                  : sessionItems.find((s) => s.SessionID === sessionValue)?.SessionName || sessionValue}
+                  : normalizeSessionLabel(
+                      sessionValue,
+                      sessionItems.find((s) => s.SessionID === sessionValue)?.SessionName || sessionValue
+                    )}
               </span>
             </button>
 
@@ -4423,7 +6870,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               <div className="statsScopeChipGrid">
                 {sessionItems.map((s) => {
                   const sid = s.SessionID || "main";
-                  const label = s.SessionName || sid;
+                  const label = normalizeSessionLabel(sid, s.SessionName || sid);
                   const active = sid === sessionValue;
 
                   return (
@@ -4579,13 +7026,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
             {scopeModalSection === "date" && (
               <StatsDateRangePicker
-                startDay={dateFilterStart}
-                endDay={dateFilterEnd}
+                startDay={dateStartDay}
+                endDay={dateEndDay}
                 accentColor={accentColor}
-                onApply={(nextStart, nextEnd) => {
-                  setDateFilterStart(nextStart);
-                  setDateFilterEnd(nextEnd);
-                }}
+                onApply={onDateApply}
               />
             )}
           </div>
@@ -4597,7 +7041,26 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const renderViewportControls = (scopeKey = "primary") => {
     const useCompareControls =
       scopeKey === "compare" && compareEnabled && statsViewMode === "standard" && !linkStatsControls;
-    const controls = useCompareControls
+    const controls = !useCompareControls && canUseDateWindowControls
+      ? {
+          previous: handleDateWindowPrevious,
+          next: handleDateWindowNext,
+          zoomIn: handleDateWindowZoomIn,
+          zoomOut: handleDateWindowZoomOut,
+          decrease: handleDateWindowDecrease,
+          increase: handleDateWindowIncrease,
+          showAll: handleDateWindowShowAll,
+          canOlder: canDateWindowOlder,
+          canNewer: canDateWindowNewer,
+          canZoomIn: canDateWindowZoomIn,
+          canZoomOut: canDateWindowZoomOut,
+          canDecreaseSolveCount: canDateWindowDecrease,
+          canIncreaseSolveCount: canDateWindowIncrease,
+          canShowAll: canDateWindowShowAll,
+          loadingShowAll: false,
+          showAllActive: false,
+        }
+      : useCompareControls
       ? {
           previous: handleComparePreviousPage,
           next: handleCompareNextPage,
@@ -4636,26 +7099,58 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         };
 
     return (
-      <div className="statsScopeControls" onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`statsScopeControls ${statsViewMode === "time" ? "statsScopeControls--time" : ""}`}
+        onClick={(e) => e.stopPropagation()}
+      >
       {statsViewMode === "time" ? (
         <>
-          <button type="button" onClick={() => shiftTimeRangeByDay(-1)} title="Previous day">
-            Day -
-          </button>
+          {isTimeViewSingleDay ? (
+            <>
+              <button type="button" onClick={() => shiftTimeRangeByDay(-1)} title="Previous day">
+                Day -
+              </button>
 
-          <button type="button" onClick={() => shiftTimeRangeByDay(1)} title="Next day">
-            Day +
-          </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void applyTimeRangePreset("day");
+                }}
+                title="Jump to today"
+              >
+                Today
+              </button>
 
-          <button type="button" onClick={() => applyTimeRangePreset("week")} title="Show week range">
+              <button
+                type="button"
+                onClick={() => shiftTimeRangeByDay(1)}
+                title="Next day"
+                disabled={!canShiftTimeRangeNewer}
+              >
+                Day +
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                void applyTimeRangePreset("day");
+              }}
+              title="Show today"
+            >
+              Today
+            </button>
+          )}
+
+          <button type="button" onClick={() => void applyTimeRangePreset("week")} title="Show week range">
             Week
           </button>
 
-          <button type="button" onClick={() => applyTimeRangePreset("month")} title="Show month range">
+          <button type="button" onClick={() => void applyTimeRangePreset("month")} title="Show month range">
             Month
           </button>
 
-          <button type="button" onClick={() => applyTimeRangePreset("all")} title="Show all dates">
+          <button type="button" onClick={() => void applyTimeRangePreset("all")} title="Show all dates">
             All
           </button>
         </>
@@ -4705,22 +7200,53 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   };
 
   const renderScopeRow = ({
-    rowLabel,
     rowAccentColor = "rgba(255,255,255,0.22)",
     eventValue,
     sessionValue,
     sessionDisplay,
-    tagSummary,
+    tagSelection,
+    dateSummary,
     loading = false,
     scopeModalKey,
+    leadContent = null,
+    sourceSummary = "",
   }) => {
     const { label: eventLabel, puzzleEvent } = getEventDisplayMeta(eventValue);
+    const resolvedTagEvent = eventValue === ALL_EVENTS ? "" : eventValue;
+    const scopeTagColors = getTagColorMapForEvent(tagColorCatalog, resolvedTagEvent);
+    const tagLabels = getSharedTagLabels(safeTagConfig);
+    const activeTagPills = Object.entries(sanitizeTagSelection(tagSelection))
+      .map(([field, value]) => [field, String(value || "").trim()])
+      .filter(([, value]) => value)
+      .map(([field, value]) => {
+        const tone =
+          scopeTagColors?.[field]?.[value] ||
+          (field === "CrossColor"
+            ? resolveHeaderCrossColorTone(value, user?.Color || user?.color || "#2EC4B6")
+            : user?.Color || user?.color || "#2EC4B6");
+        return {
+          field,
+          value,
+          label: tagLabels?.[field] || field,
+          style: {
+            "--tag-chip-color": tone,
+            "--tag-chip-border": tone,
+            "--tag-chip-bg": `${tone}22`,
+          },
+        };
+      });
 
     return (
       <div
-        className={`statsScopeRow statsScopeRow--clickable ${loading ? "is-loading" : ""}`}
+        className={`statsScopeRow statsScopeRow--clickable ${
+          statsViewMode === "time" ? "statsScopeRow--time" : ""
+        } ${loading ? "is-loading" : ""}`}
         role="button"
         tabIndex={0}
+        style={{
+          borderColor: loading ? undefined : `${rowAccentColor}66`,
+          boxShadow: loading ? undefined : `inset 0 0 0 1px ${rowAccentColor}22`,
+        }}
         onClick={() => openScopeModal(scopeModalKey, "event")}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
@@ -4729,20 +7255,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           }
         }}
       >
-        <button
-          type="button"
-          className="statsScopeLabel statsScopeLabelBtn"
-          style={{
-            borderColor: rowAccentColor,
-            boxShadow: `inset 0 0 0 1px ${rowAccentColor}33`,
-          }}
-          onClick={(e) => {
-            e.stopPropagation();
-            openScopeModal(scopeModalKey, "color");
-          }}
-        >
-          {rowLabel}
-        </button>
+        <div className="statsScopeLead">
+          {leadContent}
+        </div>
 
         <div className="statsScopeSummary">
           {puzzleEvent ? (
@@ -4776,7 +7291,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
           <button
             type="button"
-            className="statsScopeSummaryChip"
+            className="statsScopeSummaryChip statsScopeSummaryChip--session"
             onClick={(e) => {
               e.stopPropagation();
               openScopeModal(scopeModalKey, "session");
@@ -4789,25 +7304,55 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
           <button
             type="button"
-            className="statsScopeSummaryChip"
-            onClick={(e) => {
-              e.stopPropagation();
-              openScopeModal(scopeModalKey, "tags");
-            }}
-          >
-            <span className="statsScopeSummaryChipValue">{tagSummary}</span>
-          </button>
-
-          <button
-            type="button"
-            className="statsScopeSummaryChip"
+            className="statsScopeSummaryChip statsScopeSummaryChip--date"
             onClick={(e) => {
               e.stopPropagation();
               openScopeModal(scopeModalKey, "date");
             }}
           >
-            <span className="statsScopeSummaryChipValue">{dateFilterLabel}</span>
+            <span className="statsScopeSummaryChipValue">{dateSummary}</span>
           </button>
+
+          <button
+            type="button"
+            className="statsScopeSummaryChip statsScopeSummaryChip--tags"
+            onClick={(e) => {
+              e.stopPropagation();
+              openScopeModal(scopeModalKey, "tags");
+            }}
+          >
+            <span className="statsScopeTagList">
+              {activeTagPills.length ? (
+                activeTagPills.map((tag) => (
+                  <span
+                    key={`${scopeModalKey}-${tag.field}-${tag.value}`}
+                    className="statsScopeTagPill"
+                    style={tag.style}
+                    title={`${tag.label}: ${tag.value}`}
+                  >
+                    <span className="statsScopeTagPillIconWrap" aria-hidden="true">
+                      <img src={tagBadge} alt="" className="statsScopeTagPillIcon" />
+                    </span>
+                    <span className="statsScopeTagPillText">{tag.value}</span>
+                  </span>
+                ))
+              ) : (
+                <span className="statsScopeTagPill statsScopeTagPill--any" title="Add tag filter">
+                  <span className="statsScopeTagPillText">+ tag</span>
+                </span>
+              )}
+            </span>
+          </button>
+
+          {sourceSummary ? (
+            <div
+              className="statsScopeSummaryChip statsScopeSummaryChip--source"
+              aria-label={`Data source: ${sourceSummary}`}
+            >
+              <span className="statsScopeSummaryChipLabel">Source</span>
+              <span className="statsScopeSummaryChipValue">{sourceSummary}</span>
+            </div>
+          ) : null}
         </div>
 
         <div className="statsScopeRowActions">
@@ -4828,22 +7373,24 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         "--stats-profile-accent-strong": `${profileChartStyle?.primary || "#2EC4B6"}7a`,
       }}
     >
+      {readOnly ? (
+        <div className="statsSharedBanner">
+          Viewing {statsOwnerDisplayName}'s shared stats. Editing is disabled for this view.
+          {viewerUser?.UserID ? ` Shared with ${viewerDisplayName}.` : ""}
+        </div>
+      ) : null}
       <div className={`statsTopBar ${statsViewMode === "standard" ? "statsTopBar--standard" : ""}`}>
-        <div className={`statsTopLeft ${statsViewMode === "standard" ? "statsTopLeft--standard" : ""}`}>
+        <div
+          className={`statsTopLeft ${statsViewMode === "standard" ? "statsTopLeft--standard" : "statsTopLeft--time"}`}
+        >
           <div className="statsTopIdentity">
-            <NameTag
-              isSignedIn={!!user}
-              user={user}
-              to="/profile"
-            />
-
             <div className="statsViewToggle" role="group" aria-label="Stats view">
               <button
                 type="button"
                 className={`statsToggleBtn ${statsViewMode === "standard" ? "is-active" : ""}`}
                 onClick={() => handleSetViewMode("standard")}
               >
-                Index
+                Event
               </button>
               <span className="statsViewToggleDivider" aria-hidden="true">|</span>
               <button
@@ -4856,29 +7403,52 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             </div>
           </div>
 
-          <div className={`statsCompareShell ${useSharedCompareRail ? "statsCompareShell--linked" : ""}`}>
+          <div
+            className={`statsCompareShell ${
+              useSharedCompareRail ? "statsCompareShell--linked" : ""
+            } ${statsViewMode === "time" ? "statsCompareShell--time" : ""}`}
+          >
             <div
-              className={`statsCompareControls ${statsViewMode === "standard" ? "statsCompareControls--standard" : ""}`}
+              className={`statsCompareControls ${
+                statsViewMode === "standard" ? "statsCompareControls--standard" : "statsCompareControls--time"
+              }`}
               aria-label="Stats settings"
             >
               {renderScopeRow({
-                rowLabel: compareEnabled ? "A" : "Scope",
                 rowAccentColor: primaryAccentColor,
                 eventValue: statsEvent,
                 sessionValue: statsSession,
                 sessionDisplay: selectedSessionDisplay,
-                tagSummary: summarizeTagSelection(tagFilterSelection, safeTagConfig),
+                tagSelection: tagFilterSelection,
+                dateSummary: dateFilterLabel,
+                leadContent: (
+                  <NameTag
+                    isSignedIn={!!user}
+                    user={user}
+                    to={profileLinkTarget}
+                    size="xs"
+                  />
+                ),
+                sourceSummary: !compareEnabled && useBucketBackedRange ? bucketSourceLabel : "",
                 scopeModalKey: "primary",
               })}
 
               {compareEnabled &&
                 renderScopeRow({
-                  rowLabel: "B",
                   rowAccentColor: compareAccentColor,
                   eventValue: compareEvent,
                   sessionValue: compareSessionId,
                   sessionDisplay: compareSessionDisplay,
-                  tagSummary: summarizeTagSelection(compareTagSelection, safeTagConfig),
+                  tagSelection: compareTagSelection,
+                  dateSummary: compareDateFilterLabel,
+                  leadContent: (
+                    <NameTag
+                      isSignedIn={!!user}
+                      user={user}
+                      to={profileLinkTarget}
+                      size="xs"
+                    />
+                  ),
                   loading: compareLoading,
                   scopeModalKey: "compare",
                 })}
@@ -4900,7 +7470,16 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             </div>
 
             {useSharedCompareRail ? (
-              <div className="statsCompareSharedRail" aria-label="Shared comparison controls">
+              <div className="statsCompareSharedRail" aria-label="Comparison controls">
+                <button
+                  type="button"
+                  className="statsMiniBtn statsCompareRemoveBtn statsCompareRemoveBtn--outside"
+                  onClick={handlePromoteCompareRow}
+                  aria-label="Remove stat group A and promote stat group B"
+                  title="Remove stat group A and promote stat group B"
+                >
+                  x
+                </button>
                 <button
                   type="button"
                   className={`statsCompareLinkBtn ${linkStatsControls ? "is-active" : ""}`}
@@ -4910,17 +7489,15 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                 >
                   <img src={PtsLinkStatsIcon} alt="" className="statsCompareLinkIcon" />
                 </button>
-                <div className="statsCompareSharedRemove">
-                  <button
-                    type="button"
-                    className="statsMiniBtn statsCompareRemoveBtn statsCompareRemoveBtn--outside"
-                    onClick={handleRemoveCompareRow}
-                    aria-label="Remove stat group B"
-                    title="Remove stat group B"
-                  >
-                    x
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className="statsMiniBtn statsCompareRemoveBtn statsCompareRemoveBtn--outside"
+                  onClick={handleRemoveCompareRow}
+                  aria-label="Remove stat group B"
+                  title="Remove stat group B"
+                >
+                  x
+                </button>
               </div>
             ) : null}
           </div>
@@ -4943,7 +7520,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         sessionItems: sessionsForEvent,
         onPickSession: handlePickSession,
         tagSelection: tagFilterSelection,
-        onTagSelectionChange: (next) => setTagFilterSelection(sanitizeTagSelection(next)),
+        onTagSelectionChange: (next) => {
+          void applyPrimaryTagSelection(next);
+        },
         discoveredOptions: discoveredTagOptions,
         paletteValue: compareSelection?.primaryPaletteKey ?? primaryPaletteKey,
         paletteLabel: primaryPaletteLabel,
@@ -4957,6 +7536,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           : null,
         accentColor: primaryAccentColor,
         dateLabel: formatShortDateRangeLabel(dateFilterStart, dateFilterEnd, dateFilterLabel),
+        dateStartDay: dateFilterStart,
+        dateEndDay: dateFilterEnd,
+        onDateApply: (nextStart, nextEnd) => {
+          void applyPrimaryDateRange(nextStart, nextEnd);
+        },
       })}
 
             {renderTagScopeModal({
@@ -4986,18 +7570,54 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           ? (value) => updateCompareSelection({ paletteKey: value })
           : null,
         accentColor: compareAccentColor,
-        dateLabel: formatShortDateRangeLabel(dateFilterStart, dateFilterEnd, dateFilterLabel),
+        dateLabel: compareDateFilterLabel,
+        dateStartDay: effectiveCompareDateFilterStart,
+        dateEndDay: effectiveCompareDateFilterEnd,
+        onDateApply: (nextStart, nextEnd) => {
+          if (linkStatsControls) {
+            setDateFilterStart(nextStart);
+            setDateFilterEnd(nextEnd);
+            return;
+          }
+          setCompareDateFilterStart(nextStart);
+          setCompareDateFilterEnd(nextEnd);
+        },
       })}
 
       <div className="stats-page">
-        <div className="stats-grid stats-grid--figma">
+        <div className={`stats-grid stats-grid--figma ${statsViewMode === "time" ? "stats-grid--time" : ""}`}>
           <div
             className={`stats-item stats-item--header stats-item--minh stats-item--headerSplit${
               isAllEventsMode ? " stats-item--headerSplitSingle" : ""
             }${compareEnabled ? " stats-item--headerSplitSingle" : ""}`}
           >
             {!compareEnabled ? (
-              isAllEventsMode ? (
+              statsViewMode === "time" ? (
+                <div
+                  className={`statsSummaryPanel statsCardShell ${primarySummaryLoading ? "is-loading" : ""}`}
+                  aria-busy={primarySummaryLoading}
+                  {...bindCardFocus(cardDefinitions[0]?.id)}
+                >
+                  <StatsSummaryCurrent
+                    solves={summaryCurrentSolves}
+                    overallStats={renderedOverallStats}
+                    bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
+                    bucketItems={useBucketBackedRange ? activeBucketItems : []}
+                    allEventsBreakdown={null}
+                    eventBreakdownData={timeViewEventBreakdownData}
+                    mode={summaryMode}
+                    loadedSolveCount={loadedSolveCountForSummary}
+                    showCurrentMetrics={currentPage === 0}
+                    viewMode={statsViewMode}
+                    summaryLayout={summaryLayout}
+                    selectedDay={selectedTimeDay}
+                    selectedTagPills={selectedTagPills}
+                    summarySource="primary"
+                    onStatSelect={handleSummaryStatSelect}
+                    loading={primarySummaryLoading}
+                  />
+                </div>
+              ) : isAllEventsMode ? (
                 <div
                   className={`statsSummaryPanel statsCardShell ${primaryOverallSummaryLoading ? "is-loading" : ""}`}
                   aria-busy={primaryOverallSummaryLoading}
@@ -5005,17 +7625,22 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                 >
                   <StatsSummary
                     solves={summaryCurrentSolves}
-                    overallSolves={allLoadedFilteredRawSolves}
-                    overallStats={effectiveOverallStats}
+                    overallSolves={stableOverallSolves}
+                    overallStats={stableOverallStats}
+                    bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
+                    bucketItems={useBucketBackedRange ? activeBucketItems : []}
                     allEventsBreakdown={statsViewMode === "time" ? null : isAllEventsMode ? allEventsBreakdown : null}
+                    eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
                     allowOverallDerived={allowOverallDerivedMetrics}
                     mode={summaryMode}
                     selectedEvent={eventSelectLabel}
                     selectedSession={selectedSessionDisplay}
                     selectedTagLabel={selectedTagLabel}
+                    selectedTagPills={selectedTagPills}
                     loadedSolveCount={loadedSolveCountForSummary}
                     showCurrentMetrics={currentPage === 0}
                     viewMode={statsViewMode}
+                    summaryLayout={summaryLayout}
                     selectedDay={selectedTimeDay}
                     onStatSelect={handleSummaryStatSelect}
                     loading={primaryOverallSummaryLoading}
@@ -5028,36 +7653,44 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     aria-busy={primarySummaryLoading}
                     {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-current")?.id)}
                   >
-                    <StatsSummaryCurrent
-                      solves={summaryCurrentSolves}
-                      overallStats={effectiveOverallStats}
+          <StatsSummaryCurrent
+            solves={summaryCurrentSolves}
+            overallStats={renderedOverallStats}
+            bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
+            bucketItems={useBucketBackedRange ? activeBucketItems : []}
                       allEventsBreakdown={null}
+                      eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
                       mode={summaryMode}
-                      loadedSolveCount={loadedSolveCountForSummary}
-                      showCurrentMetrics={currentPage === 0}
-                      viewMode={statsViewMode}
-                      selectedDay={selectedTimeDay}
-                      onStatSelect={handleSummaryStatSelect}
-                      loading={primarySummaryLoading}
-                    />
+            loadedSolveCount={loadedSolveCountForSummary}
+            showCurrentMetrics={currentPage === 0}
+            viewMode={statsViewMode}
+            summaryLayout={summaryLayout}
+            selectedDay={selectedTimeDay}
+            selectedTagPills={selectedTagPills}
+            summarySource="primary"
+            onStatSelect={handleSummaryStatSelect}
+            loading={primarySummaryLoading}
+          />
                   </div>
                   <div
                     className={`statsSummaryPanel statsCardShell ${primaryOverallSummaryLoading ? "is-loading" : ""}`}
                     aria-busy={primaryOverallSummaryLoading}
                     {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-overall")?.id)}
                   >
-                    <StatsSummaryOverall
-                      solves={summaryCurrentSolves}
-                      overallSolves={allLoadedFilteredRawSolves}
-                      overallStats={effectiveOverallStats}
+          <StatsSummaryOverall
+            solves={summaryCurrentSolves}
+            overallSolves={stableOverallSolves}
+            overallStats={stableOverallStats}
                       allowOverallDerived={allowOverallDerivedMetrics}
                       mode={summaryMode}
                       selectedEvent={eventSelectLabel}
                       selectedSession={selectedSessionDisplay}
-                      selectedTagLabel={selectedTagLabel}
-                      loadedSolveCount={loadedSolveCountForSummary}
-                      onStatSelect={handleSummaryStatSelect}
-                      profileColor={user?.Color || user?.color || "#50B6FF"}
+            selectedTagLabel={selectedTagLabel}
+            selectedTagPills={selectedTagPills}
+            summarySource="primary"
+            loadedSolveCount={loadedSolveCountForSummary}
+            onStatSelect={handleSummaryStatSelect}
+            profileColor={user?.Color || user?.color || "#50B6FF"}
                       loading={primaryOverallSummaryLoading}
                     />
                   </div>
@@ -5083,16 +7716,21 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     >
                       <StatsSummaryCurrent
                         solves={summaryCurrentSolves}
-                        overallStats={effectiveOverallStats}
+                        overallStats={renderedOverallStats}
+                        bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
+                        bucketItems={useBucketBackedRange ? activeBucketItems : []}
                         allEventsBreakdown={null}
+                        eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
                         mode={summaryMode}
-                        loadedSolveCount={loadedSolveCountForSummary}
-                        showCurrentMetrics={currentPage === 0}
-                        viewMode={statsViewMode}
-                        selectedDay={selectedTimeDay}
-                        onStatSelect={handleSummaryStatSelect}
-                        loading={primarySummaryLoading}
-                      />
+                      loadedSolveCount={loadedSolveCountForSummary}
+                      showCurrentMetrics={currentPage === 0}
+                      viewMode={statsViewMode}
+                      summaryLayout={summaryLayout}
+                      selectedDay={selectedTimeDay}
+                      selectedTagPills={selectedTagPills}
+                      onStatSelect={handleSummaryStatSelect}
+                      loading={primarySummaryLoading}
+                    />
                     </div>
                     <div
                       className={`statsSummaryPanel statsCardShell ${primaryOverallSummaryLoading ? "is-loading" : ""}`}
@@ -5101,13 +7739,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     >
                       <StatsSummaryOverall
                         solves={summaryCurrentSolves}
-                        overallSolves={allLoadedFilteredRawSolves}
-                        overallStats={effectiveOverallStats}
+                        overallSolves={stableOverallSolves}
+                        overallStats={useBucketBackedRange ? activeBucketSummary : stableOverallStats}
                         allowOverallDerived={allowOverallDerivedMetrics}
                         mode={summaryMode}
                         selectedEvent={eventSelectLabel}
                         selectedSession={selectedSessionDisplay}
                         selectedTagLabel={selectedTagLabel}
+                        selectedTagPills={selectedTagPills}
                         loadedSolveCount={loadedSolveCountForSummary}
                         onStatSelect={handleSummaryStatSelect}
                         profileColor={user?.Color || user?.color || "#50B6FF"}
@@ -5136,14 +7775,19 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                       >
                         <StatsSummaryCurrent
                           solves={compareVisiblePageFilteredRawSolves}
-                          overallStats={null}
+                          overallStats={useBucketBackedRange ? activeCompareBucketSummary : null}
+                          bucketSummary={useBucketBackedRange ? activeCompareBucketSummary : null}
+                          bucketItems={useBucketBackedRange ? activeCompareBucketItems : []}
                           allEventsBreakdown={null}
                           mode="session"
                           loadedSolveCount={compareFilteredRawSolves.length}
                           showCurrentMetrics={currentPage === 0}
                           viewMode="standard"
+                          summaryLayout={summaryLayout}
                           selectedDay=""
-                          onStatSelect={null}
+                          selectedTagPills={compareSelectedTagPills}
+                          summarySource="compare"
+                          onStatSelect={handleSummaryStatSelect}
                           loading={compareSummaryLoading}
                         />
                       </div>
@@ -5155,14 +7799,16 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         <StatsSummaryOverall
                           solves={compareVisiblePageFilteredRawSolves}
                           overallSolves={compareFilteredRawSolves}
-                          overallStats={null}
+                          overallStats={useBucketBackedRange ? activeCompareBucketSummary : null}
                           allowOverallDerived={true}
                           mode="session"
                           selectedEvent={compareEventLabel}
                           selectedSession={compareSessionDisplay}
                           selectedTagLabel={compareSelectedTagSummaryLabel}
+                          selectedTagPills={compareSelectedTagPills}
+                          summarySource="compare"
                           loadedSolveCount={compareFilteredRawSolves.length}
-                          onStatSelect={null}
+                          onStatSelect={handleSummaryStatSelect}
                           profileColor={compareStyle?.primary || "#7c8cff"}
                           loading={compareSummaryLoading}
                         />
@@ -5174,23 +7820,41 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             )}
           </div>
 
+          {showAllEventsTimeMatrixCard && (
+            <div className="stats-item stats-item--eventMatrix statsCardShell">
+              <AllEventsTimeMatrix
+                items={timeViewEventMatrixItems}
+                loading={
+                  hasActiveDateFilter
+                    ? loadingTimeScope
+                    : loadingEventMatrixStats
+                }
+                mainOnly={timeViewMainSessionsOnly}
+                onToggleMainOnly={setTimeViewMainSessionsOnly}
+                onStatSelect={handleEventMatrixStatSelect}
+              />
+            </div>
+          )}
+
           {showSolveCharts && (
             <>
               <div
-                className={`stats-item stats-item--line stats-item--minh statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
+                className={`stats-item stats-item--line stats-item--minh statsCardShell ${statsViewMode === "time" ? "stats-item--lineWide" : ""} ${chartCardsLoading ? "is-loading" : ""}`}
                 aria-busy={chartCardsLoading}
                 {...bindCardFocus(cardDefinitions.find((item) => item.key === "line")?.id)}
               >
                 <LineChart
                   user={user}
                   solves={compareEnabled ? comparisonPrimarySolves : timeViewLineSolves}
+                  bucketItems={useBucketBackedRange ? activeBucketItems : []}
                   comparisonSeries={
                     compareEnabled
                       ? [
                           {
                             id: "compare",
                             label: compareLegendItems[1]?.label || "Compare",
-                            solves: compareVisiblePageFilteredRawSolves,
+                            solves: useBucketBackedRange ? [] : compareVisiblePageFilteredRawSolves,
+                            bucketItems: useBucketBackedRange ? activeCompareBucketItems : [],
                             style: compareStyle,
                           },
                         ]
@@ -5211,61 +7875,70 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   selectedDay={selectedTimeDay}
                   onSelectedDayChange={setSelectedTimeDay}
                   onSolveOpen={openSolveDetail}
+                  onBucketSelect={handleBucketDaySelect}
                 />
               </div>
 
-              <div
-                className={`stats-item stats-item--percent stats-item--minh statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
-                aria-busy={chartCardsLoading}
-                {...bindCardFocus(cardDefinitions.find((item) => item.key === "percent")?.id)}
-              >
-                {showEventBreakdownCard ? (
-                  <PieChart solves={pieChartSolves} title="Event Breakdown" />
-                ) : (
-                  <PercentBar
-                    solves={compareEnabled ? comparisonPrimarySolves : chartVisibleSolves}
-                    seriesStyle={primaryCompareStyle}
+              {!showEventBreakdownCard && (
+                <div
+                  className={`stats-item stats-item--percent stats-item--minh statsCardShell ${percentCardLoading ? "is-loading" : ""}`}
+                  aria-busy={percentCardLoading}
+                  {...bindCardFocus(cardDefinitions.find((item) => item.key === "percent")?.id)}
+                >
+                  {useBucketBackedRange ? (
+                    <PieChart data={buildPenaltyPieData(activeBucketSummary)} title="Penalty Breakdown" />
+                  ) : (
+                    <PercentBar
+                      solves={compareEnabled ? comparisonPrimarySolves : chartVisibleSolves}
+                      seriesStyle={primaryCompareStyle}
+                      comparisonSeries={
+                        compareEnabled
+                          ? [
+                              {
+                                id: "compare",
+                                label: compareLegendItems[1]?.label || "Compare",
+                                solves: compareVisiblePageFilteredRawSolves,
+                                style: compareStyle,
+                              },
+                            ]
+                          : []
+                      }
+                      legendItems={compareLegendItems}
+                      title="Solves Distribution by Time"
+                    />
+                  )}
+                </div>
+              )}
+
+              {statsViewMode !== "time" && (
+                <div
+                  className={`stats-item stats-item--bar stats-item--minh statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
+                  aria-busy={chartCardsLoading}
+                  {...bindCardFocus(cardDefinitions.find((item) => item.key === "bar")?.id)}
+                >
+                  <BarChart
+                    solves={compareEnabled ? comparisonPrimarySolves : barChartSolves}
+                    histogramCounts={compareEnabled ? null : activeBucketSummary?.HistogramBySecond || null}
                     comparisonSeries={
                       compareEnabled
                         ? [
                             {
                               id: "compare",
                               label: compareLegendItems[1]?.label || "Compare",
-                              solves: compareVisiblePageFilteredRawSolves,
+                              solves: useBucketBackedRange ? [] : compareVisiblePageFilteredRawSolves,
+                              histogramCounts: useBucketBackedRange
+                                ? activeCompareBucketSummary?.HistogramBySecond || null
+                                : null,
                               style: compareStyle,
                             },
                           ]
                         : []
                     }
+                    seriesStyle={primaryCompareStyle}
                     legendItems={compareLegendItems}
-                    title="Solves Distribution by Time"
                   />
-                )}
-              </div>
-
-              <div
-                className={`stats-item stats-item--bar stats-item--minh statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
-                aria-busy={chartCardsLoading}
-                {...bindCardFocus(cardDefinitions.find((item) => item.key === "bar")?.id)}
-              >
-                <BarChart
-                  solves={compareEnabled ? comparisonPrimarySolves : barChartSolves}
-                  comparisonSeries={
-                    compareEnabled
-                      ? [
-                          {
-                            id: "compare",
-                            label: compareLegendItems[1]?.label || "Compare",
-                            solves: compareVisiblePageFilteredRawSolves,
-                            style: compareStyle,
-                          },
-                        ]
-                      : []
-                  }
-                  seriesStyle={primaryCompareStyle}
-                  legendItems={compareLegendItems}
-                />
-              </div>
+                </div>
+              )}
 
               <div
                 className={`stats-item stats-item--table statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
@@ -5290,19 +7963,43 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     </button>
                   </div>
                 )}
-                <TimeTable
-                  user={user}
-                  solves={compareEnabled && tableCompareView === "compare" ? compareVisiblePageFilteredRawSolves : chartVisibleSolves}
-                  seriesStyle={compareEnabled && tableCompareView === "compare" ? compareStyle : primaryCompareStyle}
-                  deleteTime={handleDeleteSolve}
-                  addPost={addPost}
-                  setSessions={setSessions}
-                  sessionsList={sessionsList}
-                  currentEvent={compareEnabled && tableCompareView === "compare" ? compareEvent : statsEvent}
-                  currentSession={compareEnabled && tableCompareView === "compare" ? compareSessionId : sessionId}
-                  eventKey={compareEnabled && tableCompareView === "compare" ? compareEvent : statsEvent}
-                  practiceMode={false}
-                />
+                {useBucketBackedRange ? (
+                  <BucketTable
+                    bucketItems={
+                      compareEnabled && tableCompareView === "compare"
+                        ? activeCompareBucketItems
+                        : activeBucketItems
+                    }
+                    selectedDay={
+                      compareEnabled && tableCompareView === "compare"
+                        ? (effectiveCompareDateFilterStart === effectiveCompareDateFilterEnd
+                            ? effectiveCompareDateFilterStart
+                            : "")
+                        : (dateFilterStart === dateFilterEnd ? dateFilterStart : "")
+                    }
+                    onBucketSelect={handleBucketDaySelect}
+                  />
+                ) : (
+                  <TimeTable
+                    user={user}
+                    solves={
+                      compareEnabled && tableCompareView === "compare"
+                        ? compareVisiblePageFilteredRawSolves
+                        : statsViewMode === "time"
+                          ? timeViewFocusedSolves
+                          : chartVisibleSolves
+                    }
+                    seriesStyle={compareEnabled && tableCompareView === "compare" ? compareStyle : primaryCompareStyle}
+                    deleteTime={handleDeleteSolve}
+                    addPost={addPost}
+                    setSessions={setSessions}
+                    sessionsList={sessionsList}
+                    currentEvent={compareEnabled && tableCompareView === "compare" ? compareEvent : statsEvent}
+                    currentSession={compareEnabled && tableCompareView === "compare" ? compareSessionId : sessionId}
+                    eventKey={compareEnabled && tableCompareView === "compare" ? compareEvent : statsEvent}
+                    practiceMode={false}
+                  />
+                )}
               </div>
             </>
           )}
@@ -5330,6 +8027,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           addPost={addPost}
           setSessions={setSessions}
           sessionsList={sessionsList}
+          tagConfig={safeTagConfig}
+          cubeModelOptions={cubeModelOptions}
+          discoveredTagOptions={selectedSolveDiscoveredTagOptions}
+          tagColors={selectedSolveTagColors}
+          onTagColorsChange={handleSelectedSolveTagColorsChange}
         />
       )}
 
@@ -5338,28 +8040,60 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         title={selectedAverageDetail?.title || ""}
         subtitle={selectedAverageDetail?.subtitle || ""}
         solves={selectedAverageDetail?.solves || []}
+        tagConfig={safeTagConfig}
+        tagColors={selectedSolveTagColors}
+        profileColor={user?.Color || user?.color || "#2EC4B6"}
         onClose={() => setSelectedAverageDetail(null)}
         onSolveOpen={openSolveDetail}
       />
+
+      <StatFocusModal
+        isOpen={!!expensiveStatsPrompt}
+        title={expensiveStatsPrompt?.title || "Heavy Stats Action"}
+        subtitle="This action can scan or recompute a large solve scope."
+        onClose={() => resolveExpensiveStatsPrompt(false)}
+        actionButtons={[
+          {
+            key: "cancel",
+            label: "Cancel",
+            onClick: () => resolveExpensiveStatsPrompt(false),
+          },
+          {
+            key: "confirm",
+            label: expensiveStatsPrompt?.confirmLabel || "Continue",
+            onClick: () => resolveExpensiveStatsPrompt(true),
+            tone: "active",
+          },
+        ]}
+      >
+        <div className="statsWarningPrompt">
+          {(expensiveStatsPrompt?.lines || []).map((line, index) => (
+            <p key={`stats-warning-${index}`} className="statsWarningPromptLine">
+              {line}
+            </p>
+          ))}
+        </div>
+      </StatFocusModal>
 
       <StatFocusModal
         isOpen={!!focusedCard}
         title={focusedCard?.title}
         subtitle={focusedCard?.subtitle}
         actionMessage={focusActionMessage}
+        optionsContent={focusOptionsContent}
         onClose={closeCardFocus}
         actionButtons={[
           {
             key: "share-social",
             label: focusActionBusy === "share" ? "Sharing..." : "Share to Social",
             onClick: handleShareFocusedCard,
-            disabled: !focusedCard || focusActionBusy !== "",
+            disabled: !focusedCard || focusActionBusy !== "" || typeof addPost !== "function",
           },
           {
             key: "share-profile",
             label: focusActionBusy === "profile" ? "Saving..." : "Share to Profile",
             onClick: handleShareFocusedCardToProfile,
-            disabled: !focusedCard?.profileConfig || !user?.UserID || focusActionBusy !== "",
+            disabled: readOnly || !focusedCard?.profileConfig || !user?.UserID || focusActionBusy !== "",
           },
           {
             key: "favorite",
@@ -5370,7 +8104,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   ? "Unfavorite"
                   : "Favorite",
             onClick: handleToggleFocusedFavorite,
-            disabled: !focusedCard?.profileConfig || !user?.UserID || focusActionBusy !== "",
+            disabled: readOnly || !focusedCard?.profileConfig || !user?.UserID || focusActionBusy !== "",
             tone: isFocusedCardFavorited ? "active" : "",
           },
         ]}
@@ -5380,7 +8114,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             focusedCard?.key === "line" ? "is-line" : ""
           }`}
         >
-          {renderFocusedCardBody(focusedCard)}
+          {focusedCardBody}
         </div>
       </StatFocusModal>
 
@@ -5394,6 +8128,18 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           importProgress={importProgress}
           sessionsForEvent={sessionsForEvent.filter((s) => s.SessionID !== ALL_SESSIONS)}
           defaultDestination={{ kind: "new", sessionName: "" }}
+        />
+      )}
+
+      {showExport && (
+        <ExportDataModal
+          sessionsList={sessionsList}
+          defaultEvent={String(statsEvent || "").toUpperCase()}
+          defaultSessionID={String(sessionId || "main")}
+          busy={exportBusy}
+          exportProgress={exportProgress}
+          onClose={() => setShowExport(false)}
+          onExport={handleExportData}
         />
       )}
     </div>

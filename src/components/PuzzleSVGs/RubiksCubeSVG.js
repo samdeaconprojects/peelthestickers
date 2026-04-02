@@ -9,6 +9,7 @@ const RubiksCubeSVG = ({
   isTimerCube,
   isNameTagCube,
   isProfileCube,
+  showFront = true,
 }) => {
   // console.log(faces);
 
@@ -114,13 +115,36 @@ const RubiksCubeSVG = ({
   else if (isMusicPlayer) cubeClassName = "nonTimerCube";
   else if (isNameTagCube) cubeClassName = "nametagCube";
 
+  const rotate180 = (face) =>
+    face.map((_, rowIndex) =>
+      face[face.length - 1 - rowIndex].slice().reverse()
+    );
+
+  const rotateCounterClockwise = (face) =>
+    face[0].map((_, colIndex) =>
+      face.map((row) => row[face.length - 1 - colIndex])
+    );
+
+  const visibleFaces = showFront
+    ? {
+        top: faces[0],
+        left: faces[1],
+        right: faces[2],
+      }
+    : {
+        top: rotateCounterClockwise(faces[5]),
+        left: rotate180(faces[4]),
+        right: rotate180(faces[3]),
+      };
+
   const drawFace = (n, currFace) => {
     const stickers = [];
     let stickerColor = "";
+    const face = currFace;
 
     for (let row = 0; row < n; row++) {
       for (let col = 0; col < n; col++) {
-        switch (faces[currFace][row][col]) {
+        switch (face[row][col]) {
           case "yellow": stickerColor = "#FFFF00"; break;
           case "white": stickerColor = "#FFFFFF"; break;
           case "red": stickerColor = "#F64258"; break;
@@ -183,18 +207,18 @@ const RubiksCubeSVG = ({
           className="face topFace"
           style={{ top: `${topFaceTop}px`, left: `${topFaceLeft}px` }}
         >
-          <svg>{drawFace(n, 0)}</svg>
+          <svg>{drawFace(n, visibleFaces.top)}</svg>
         </div>
 
         <div className="face leftFace">
-          <svg>{drawFace(n, 1)}</svg>
+          <svg>{drawFace(n, visibleFaces.left)}</svg>
         </div>
 
         <div
           className="face rightFace"
           style={{ top: `${rightFaceTop}px`, left: `${rightFaceLeft}px` }}
         >
-          <svg>{drawFace(n, 2)}</svg>
+          <svg>{drawFace(n, visibleFaces.right)}</svg>
         </div>
       </div>
     </div>

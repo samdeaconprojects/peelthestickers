@@ -2,16 +2,14 @@
 
 .importPopup {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  inset: 0;
   background: rgba(8, 12, 16, 0.62);
   backdrop-filter: blur(4px);
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 12;
+  padding: 20px;
+  z-index: 1500;
 }
 
 .importPopupContent {
@@ -22,6 +20,8 @@
   border-radius: 12px;
   max-width: 900px;
   width: 85%;
+  max-height: min(88vh, 900px);
+  overflow-y: auto;
   text-align: left;
 }
 
@@ -82,6 +82,48 @@
   margin-bottom: 10px;
 }
 
+.importFileRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.importFileButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 120px;
+  background: transparent;
+  border: 2px solid #b4b4b4;
+  color: white;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.importFileButton input {
+  display: none;
+}
+
+.importFileMeta {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+}
+
+.importWarning {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(246, 198, 81, 0.12);
+  border: 1px solid rgba(246, 198, 81, 0.3);
+  color: #ffe2a6;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .importTextarea {
   width: 100%;
   height: 140px;
@@ -121,6 +163,26 @@
 .importActions button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.importConfirmBox {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.importConfirmTitle {
+  color: white;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.importConfirmText {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .importProgressWrap {

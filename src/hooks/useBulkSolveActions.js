@@ -16,6 +16,8 @@ function safeMergeCanonicalTags(existingTags, patch, mode = "merge") {
   const allowed = [
     "CubeModel",
     "CrossColor",
+    "TimerInput",
+    "SolveSource",
     "Custom1",
     "Custom2",
     "Custom3",
@@ -31,7 +33,6 @@ function safeMergeCanonicalTags(existingTags, patch, mode = "merge") {
   }
 
   delete next.Custom;
-  delete next.SolveSource;
 
   return next;
 }
@@ -67,6 +68,8 @@ export default function useBulkSolveActions({
   const [bulkTagMode, setBulkTagMode] = useState("merge");
   const [bulkCubeModel, setBulkCubeModel] = useState("");
   const [bulkCrossColor, setBulkCrossColor] = useState("");
+  const [bulkTimerInput, setBulkTimerInput] = useState("");
+  const [bulkSolveSource, setBulkSolveSource] = useState("");
   const [bulkCustom1, setBulkCustom1] = useState("");
   const [bulkCustom2, setBulkCustom2] = useState("");
   const [bulkCustom3, setBulkCustom3] = useState("");
@@ -136,6 +139,8 @@ export default function useBulkSolveActions({
 
     if (String(bulkCubeModel || "").trim()) patch.CubeModel = String(bulkCubeModel).trim();
     if (String(bulkCrossColor || "").trim()) patch.CrossColor = String(bulkCrossColor).trim();
+    if (String(bulkTimerInput || "").trim()) patch.TimerInput = String(bulkTimerInput).trim();
+    if (String(bulkSolveSource || "").trim()) patch.SolveSource = String(bulkSolveSource).trim();
     if (String(bulkCustom1 || "").trim()) patch.Custom1 = String(bulkCustom1).trim();
     if (String(bulkCustom2 || "").trim()) patch.Custom2 = String(bulkCustom2).trim();
     if (String(bulkCustom3 || "").trim()) patch.Custom3 = String(bulkCustom3).trim();
@@ -232,6 +237,8 @@ export default function useBulkSolveActions({
   }, [
     bulkCubeModel,
     bulkCrossColor,
+    bulkTimerInput,
+    bulkSolveSource,
     bulkCustom1,
     bulkCustom2,
     bulkCustom3,
@@ -411,15 +418,16 @@ export default function useBulkSolveActions({
       return;
     }
 
-    try {
-      for (const s of targets) {
-        await deleteTime(s.solveRef);
-      }
-    } catch (e) {
-      console.error("Bulk delete failed:", e);
-    }
-
     clearSelection();
+
+    const results = await Promise.allSettled(
+      targets.map((s) => deleteTime(s.solveRef))
+    );
+
+    const failures = results.filter((result) => result.status === "rejected");
+    if (failures.length > 0) {
+      console.error("Bulk delete failed:", failures);
+    }
   }, [
     selectionCount,
     selectedSolvesByIndex,
@@ -473,6 +481,10 @@ export default function useBulkSolveActions({
     setBulkCubeModel,
     bulkCrossColor,
     setBulkCrossColor,
+    bulkTimerInput,
+    setBulkTimerInput,
+    bulkSolveSource,
+    setBulkSolveSource,
     bulkCustom1,
     setBulkCustom1,
     bulkCustom2,

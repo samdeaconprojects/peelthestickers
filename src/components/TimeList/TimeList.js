@@ -151,6 +151,8 @@ function TimeList({
   tagConfig,
   cubeModelOptions = [],
   discoveredTagOptions = {},
+  tagColors = {},
+  onTagColorsChange = null,
   onAverageClick,
   onLoadMore,
   canLoadMore = true,
@@ -221,6 +223,26 @@ function TimeList({
       ? 12
       : 5;
 
+  const nonRollingColsSetting = String(
+    settings?.nonRollingTimeListCols || "auto"
+  ).toLowerCase();
+  const nonRollingColsPerRow =
+    nonRollingColsSetting === "12"
+      ? 12
+      : nonRollingColsSetting === "5"
+      ? 5
+      : windowWidth > 1100
+      ? 12
+      : 5;
+
+  const nonRollingMaxRowsSetting = Number(settings?.nonRollingTimeListMaxRows);
+  const nonRollingRowsToDisplay =
+    nonRollingMaxRowsSetting === 1 ||
+    nonRollingMaxRowsSetting === 2 ||
+    nonRollingMaxRowsSetting === 3
+      ? nonRollingMaxRowsSetting
+      : rowsToShow;
+
   const horizontalMaxWidthPx = useMemo(() => {
     const cols = horizontalCount + 1;
     return cols * COL_STEP + 10;
@@ -230,12 +252,20 @@ function TimeList({
     const handleResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener("resize", handleResize);
 
-    const colsPerRow = window.innerWidth > 1100 ? 12 : 5;
-    const totalRows = Math.ceil(solvesSafe.length / colsPerRow);
-    setCurrentPage(Math.max(0, totalRows - rowsToShow));
+    const resolvedColsPerRow =
+      nonRollingColsSetting === "12"
+        ? 12
+        : nonRollingColsSetting === "5"
+        ? 5
+        : window.innerWidth > 1100
+        ? 12
+        : 5;
+    const resolvedRowsToDisplay = inPlayerBar ? 1 : nonRollingRowsToDisplay;
+    const totalRows = Math.ceil(solvesSafe.length / resolvedColsPerRow);
+    setCurrentPage(Math.max(0, totalRows - resolvedRowsToDisplay));
 
     return () => window.removeEventListener("resize", handleResize);
-  }, [solvesSafe.length, rowsToShow]);
+  }, [inPlayerBar, nonRollingColsSetting, nonRollingRowsToDisplay, solvesSafe.length]);
 
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -312,8 +342,28 @@ function TimeList({
   const overallMinValue = overallCalc.minVal;
   const overallMaxValue = overallCalc.maxVal;
 
-  const colsPerRow = windowWidth > 1100 ? 12 : 5;
-  const rowsToDisplay = inPlayerBar ? 1 : rowsToShow;
+  const sessionSingleBeatByIndex = useMemo(() => {
+    const beatMap = {};
+    let bestSoFar = null;
+
+    for (let i = 0; i < times.length; i++) {
+      const value = times[i];
+      if (typeof value !== "number" || !isFinite(value)) continue;
+
+      if (bestSoFar != null && value < bestSoFar) {
+        beatMap[i] = true;
+      }
+
+      if (bestSoFar == null || value < bestSoFar) {
+        bestSoFar = value;
+      }
+    }
+
+    return beatMap;
+  }, [times]);
+
+  const colsPerRow = isHorizontal ? (windowWidth > 1100 ? 12 : 5) : nonRollingColsPerRow;
+  const rowsToDisplay = inPlayerBar ? 1 : isHorizontal ? rowsToShow : nonRollingRowsToDisplay;
 
   const maxPage = useMemo(() => {
     const denom = colsPerRow * rowsToDisplay;
@@ -680,6 +730,25 @@ function TimeList({
   for (let i = 0; i < visibleSolves.length; i += colsPerRow) {
     const timesRow = visibleSolves.slice(i, i + colsPerRow);
     const averageData = calculateAverage(timesRow.map((solve) => solve.time), true);
+    const rowNumericTimes = timesRow
+      .map((solve, index) => ({
+        index,
+        time: solve?.time,
+      }))
+      .filter((entry) => typeof entry.time === "number" && isFinite(entry.time));
+
+    const rowBestLocalIndex = rowNumericTimes.length
+      ? rowNumericTimes.reduce(
+          (best, entry) => (best == null || entry.time < best.time ? entry : best),
+          null
+        )?.index ?? null
+      : null;
+    const rowWorstLocalIndex = rowNumericTimes.length
+      ? rowNumericTimes.reduce(
+          (worst, entry) => (worst == null || entry.time > worst.time ? entry : worst),
+          null
+        )?.index ?? null
+      : null;
 
     rows.push(
       <tr key={i}>
@@ -687,7 +756,10 @@ function TimeList({
           const solveIndex = startIndex + i + index;
           const isBest = solveIndex === overallMin;
           const isWorst = solveIndex === overallMax;
+          const isRowBest = index === rowBestLocalIndex;
+          const isRowWorst = index === rowWorstLocalIndex;
           const isCurrentFive = currentFiveIndices.includes(solveIndex);
+          const beatSessionSingle = !!sessionSingleBeatByIndex[solveIndex];
 
           const rank01 =
             timeColorMode === "index" ? visibleRank01ByGlobalIndex[solveIndex] ?? 0 : 0;
@@ -711,7 +783,12 @@ function TimeList({
             <td
               className={`TimeItem ${perfClass} ${isBest ? "overall-border-min" : ""} ${
                 isWorst ? "overall-border-max" : ""
-              } ${isCurrentFive ? "current-five" : ""}`}
+              } ${isRowBest ? "row-border-min" : ""} ${
+                isRowWorst ? "row-border-max" : ""
+              } ${isCurrentFive ? "current-five" : ""} ${
+                beatSessionSingle ? "session-single-beaten" : ""
+              }`}
+              data-bulk-select-item="true"
               style={{ ...(perfStyle || {}), ...(selectStyleInline || {}) }}
               key={index}
               onClick={(e) => onSolveClick(e, solve, solveIndex)}
@@ -742,7 +819,10 @@ function TimeList({
               &nbsp;
             </td>
           ))}
-        <td className="TimeItem current-five" onClick={() => openAverageWindow(timesRow)}>
+        <td
+          className="TimeItem current-five averageCell nonRollingAverageCell"
+          onClick={() => openAverageWindow(timesRow)}
+        >
           {formatTime(averageData.average)}
         </td>
       </tr>
@@ -807,8 +887,20 @@ function TimeList({
         setBulkCubeModel={bulkActions.setBulkCubeModel}
         bulkCrossColor={bulkActions.bulkCrossColor}
         setBulkCrossColor={bulkActions.setBulkCrossColor}
-        bulkCustomLines={bulkActions.bulkCustomLines}
-        setBulkCustomLines={bulkActions.setBulkCustomLines}
+        bulkTimerInput={bulkActions.bulkTimerInput}
+        setBulkTimerInput={bulkActions.setBulkTimerInput}
+        bulkSolveSource={bulkActions.bulkSolveSource}
+        setBulkSolveSource={bulkActions.setBulkSolveSource}
+        bulkCustom1={bulkActions.bulkCustom1}
+        setBulkCustom1={bulkActions.setBulkCustom1}
+        bulkCustom2={bulkActions.bulkCustom2}
+        setBulkCustom2={bulkActions.setBulkCustom2}
+        bulkCustom3={bulkActions.bulkCustom3}
+        setBulkCustom3={bulkActions.setBulkCustom3}
+        bulkCustom4={bulkActions.bulkCustom4}
+        setBulkCustom4={bulkActions.setBulkCustom4}
+        bulkCustom5={bulkActions.bulkCustom5}
+        setBulkCustom5={bulkActions.setBulkCustom5}
         bulkMoveEvent={bulkActions.bulkMoveEvent}
         setBulkMoveEvent={bulkActions.setBulkMoveEvent}
         bulkMoveSession={bulkActions.bulkMoveSession}
@@ -816,6 +908,12 @@ function TimeList({
         bulkShareNote={bulkActions.bulkShareNote}
         setBulkShareNote={bulkActions.setBulkShareNote}
         getSessionsForEvent={bulkActions.getSessionsForEvent}
+        tagConfig={tagConfig}
+        cubeModelOptions={cubeModelOptions}
+        discoveredTagOptions={discoveredTagOptions}
+        tagColors={tagColors}
+        onTagColorsChange={onTagColorsChange}
+        profileColor={user?.Color || user?.color || "#2EC4B6"}
         applyBulkTags={bulkActions.applyBulkTags}
         applyBulkMove={bulkActions.applyBulkMove}
         applyBulkDelete={bulkActions.applyBulkDelete}
@@ -931,6 +1029,7 @@ function TimeList({
                 const tval = solve?.time;
                 const isBest = bestTime != null && tval === bestTime;
                 const isWorst = worstTime != null && tval === worstTime;
+                const beatSessionSingle = !!sessionSingleBeatByIndex[globalIdx];
 
                 const rank01 = timeColorMode === "index" ? horizontalRank01ByKey[key] ?? 0 : 0;
 
@@ -953,7 +1052,8 @@ function TimeList({
                     key={index}
                     className={`TimeItem ${perfClass} ${isBest ? "dashed-border-min" : ""} ${
                       isWorst ? "dashed-border-max" : ""
-                    }`}
+                    } ${beatSessionSingle ? "session-single-beaten" : ""}`}
+                    data-bulk-select-item="true"
                     style={{ ...(perfStyle || {}), ...(selectStyleInline || {}) }}
                     onClick={(e) => onSolveClick(e, solve, globalIdx)}
                     onMouseDown={(e) => {
@@ -1008,6 +1108,8 @@ function TimeList({
                 tagConfig={tagConfig}
                 cubeModelOptions={cubeModelOptions}
                 discoveredTagOptions={discoveredTagOptions}
+                tagColors={tagColors}
+                onTagColorsChange={onTagColorsChange}
               />
             )}
 
@@ -1032,6 +1134,8 @@ function TimeList({
                 tagConfig={tagConfig}
                 cubeModelOptions={cubeModelOptions}
                 discoveredTagOptions={discoveredTagOptions}
+                tagColors={tagColors}
+                onTagColorsChange={onTagColorsChange}
               />
             )}
           </div>
@@ -1086,7 +1190,10 @@ function TimeList({
                 )}
               </div>
 
-              <table className="TimeList TimeList--sharedMirror">
+              <table
+                className="TimeList TimeList--sharedMirror"
+                style={{ "--timelist-cols": colsPerRow }}
+              >
                 <tbody>
                   {sharedMirrorRows.map((rowGroup, rowIdx) => (
                     <tr key={`shared-${rowIdx}`}>
@@ -1116,7 +1223,7 @@ function TimeList({
                             &nbsp;
                           </td>
                         ))}
-                      <td className="TimeItem current-five">
+                      <td className="TimeItem current-five averageCell">
                         {sharedAverageMeta?.theirLabel || "Them"}
                       </td>
                     </tr>
@@ -1126,7 +1233,10 @@ function TimeList({
             </div>
           )}
 
-          <table className="TimeList">
+          <table
+            className="TimeList TimeList--nonRolling"
+            style={{ "--timelist-cols": colsPerRow }}
+          >
             <tbody>{rows}</tbody>
           </table>
 
@@ -1146,6 +1256,8 @@ function TimeList({
               tagConfig={tagConfig}
               cubeModelOptions={cubeModelOptions}
               discoveredTagOptions={discoveredTagOptions}
+              tagColors={tagColors}
+              onTagColorsChange={onTagColorsChange}
             />
           )}
 
@@ -1170,6 +1282,8 @@ function TimeList({
               tagConfig={tagConfig}
               cubeModelOptions={cubeModelOptions}
               discoveredTagOptions={discoveredTagOptions}
+              tagColors={tagColors}
+              onTagColorsChange={onTagColorsChange}
             />
           )}
         </div>

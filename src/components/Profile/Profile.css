@@ -1,8 +1,7 @@
 .profilePage {
-    min-height: 100%;
     display: flex;
     flex-direction: column;
-    flex-shrink: 0;
+    flex: 1 1 auto;
     min-height: 0;
 }
 
@@ -38,6 +37,7 @@
     width: 100%;
     box-sizing: border-box;
     overflow: hidden;
+    flex: 1 1 auto;
     min-height: 0;
 }
 
@@ -46,6 +46,7 @@
     margin-top: 0;
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
     row-gap: 30px;
     min-height: 0;
     overflow: hidden;
@@ -53,17 +54,25 @@
 
 .profileStatsPage {
   width: 100%;
+  flex: 1 1 auto;
   min-height: 0;
-  max-height: calc(100vh - 260px);
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0 4px 110px 0;
+  padding: 0 4px 0 0;
   padding-right: 4px;
   box-sizing: border-box;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 32px);
   mask-image: linear-gradient(to bottom, transparent 0px, black 32px);
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+.profileStatsPage--withPlayerBar {
+  padding-bottom: 110px;
+}
+
+.profileStatsPage--noPlayerBar {
+  padding-bottom: 12px;
 }
 
 .profileStatsPage::before {
@@ -477,8 +486,11 @@
 }
 
 .sharedStatExact {
-  width: min(980px, 100%);
-  margin: 14px 14px 0;
+  width: calc(100% - 28px);
+  max-width: 980px;
+  min-width: 0;
+  margin: 14px auto 0;
+  box-sizing: border-box;
   cursor: default;
 }
 
@@ -826,9 +838,10 @@
 .profileContent {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
     gap: 15px;
     width: 100%;
-    height: auto;
+    height: 100%;
     min-height: 0;
 }
 
@@ -943,8 +956,111 @@
     width: calc(100% - 32px);
   }
 
-  .friendsList a {
-    color: white;
+  .widgetDetail--friends {
+    max-width: 320px;
+    max-height: min(60vh, 520px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .friendsList {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .friendListRow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .friendListRow--managed {
+    align-items: stretch;
+  }
+
+  .friendsList .name-tag {
+    margin-top: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .friendsList .name-tag-link {
+    width: 100%;
+    max-width: 240px;
+    box-sizing: border-box;
+    min-height: 44px;
+    height: 44px;
+    padding: 6px 10px;
+    border-radius: 10px;
+  }
+
+  .friendsList .nametagCube {
+    margin-right: 10px;
+  }
+
+  .friendsList .nametagText {
+    max-width: 150px;
+  }
+
+  .friendsList .name-tag-text {
+    font-size: 9pt;
+  }
+
+  .friendListActions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+
+  .friendStatsSwitch {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.72rem;
+  }
+
+  .friendStatsSwitch input {
+    margin: 0;
+  }
+
+  .friendStatsSwitchLabel {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .friendStatsButton,
+  .friendRemoveButton {
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    border-radius: 8px;
+    min-height: 36px;
+    padding: 0 10px;
+    cursor: pointer;
+    font-size: 0.82rem;
+  }
+
+  .friendStatsButton:disabled,
+  .friendRemoveButton:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .friendRemoveButton {
+    min-width: 36px;
+    padding: 0;
+    text-transform: uppercase;
+  }
+
+  .friendsListStatus {
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 0.95rem;
   }
   
 

@@ -1,4 +1,5 @@
 const express = require("express");
+const crypto = require("crypto");
 require("dotenv").config();
 
 const app = express();
@@ -23,13 +24,19 @@ const {
   nowIso,
   normalizeEvent,
   normalizeSessionID,
+  getDayKey,
+  getDayBucketTimeZone,
   normalizePenalty,
   STRICT_WINDOW_VERSION,
+  DAY_BUCKET_VERSION,
   CACHED_WINDOW_CONFIGS,
   parseSolveSK,
   normalizeTagIndexValue,
   getRawTimeMs,
   getFinalTimeMs,
+  buildDayBucketSK,
+  buildDayBucketItem,
+  mergeDayBucketSummaries,
   buildTagStatsSK,
   buildSolveItem,
   getSolveTagPairsFromItem,
@@ -59,6 +66,29 @@ const BEST_CANDIDATES_K = Math.max(
   10,
   Math.min(500, Number(process.env.PTS_BEST_CANDIDATES_K || 100))
 );
+const CORE_EVENT_IDS = new Set([
+  "222",
+  "333",
+  "444",
+  "555",
+  "666",
+  "777",
+  "333OH",
+  "333BLD",
+  "444BLD",
+  "555BLD",
+  "MBLD",
+  "CLOCK",
+  "MEGAMINX",
+  "PYRAMINX",
+  "SKEWB",
+  "SQ1",
+  "FMC",
+  "RELAY_2X2-4X4_222_333_444",
+  "RELAY_2X2-7X7_222_333_444_555_666_777",
+  "RELAY_MINIGUILDFORD_222_333_333OH_444_555_SKEWB_PYRAMINX_SQ1_CLOCK_MEGAMINX",
+  "RELAY",
+]);
 
 function requirePkSk(res) {
   if (!USE_PK_SK) {
@@ -70,8 +100,24 @@ function requirePkSk(res) {
   return true;
 }
 
+function isCoreEvent(event) {
+  return CORE_EVENT_IDS.has(normalizeEvent(event));
+}
+
 function hasCurrentStrictWindowVersion(item) {
   return Number(item?.StrictWindowVersion || 0) === STRICT_WINDOW_VERSION;
+}
+
+function hasCachedWorstMetrics(item) {
+  if (!item) return false;
+
+  const hasSingle =
+    Number(item?.SolveCountIncluded || 0) === 0 || item?.WorstSingleMs !== undefined;
+  const hasMo3 = Number(item?.SolveCountTotal || 0) < 3 || item?.WorstMo3Ms !== undefined;
+  const hasAo5 = Number(item?.SolveCountTotal || 0) < 5 || item?.WorstAo5Ms !== undefined;
+  const hasAo12 = Number(item?.SolveCountTotal || 0) < 12 || item?.WorstAo12Ms !== undefined;
+
+  return hasSingle && hasMo3 && hasAo5 && hasAo12;
 }
 
 const ALLOWED_TAG_KEYS = new Set([
@@ -172,6 +218,154 @@ function titleizeSessionID(sessionID) {
     .join(" ");
 }
 
+function createImportJobID() {
+  return `impjob_${Date.now().toString(36)}_${crypto.randomBytes(6).toString("hex")}`;
+}
+
+function buildImportJobSK(jobID) {
+  return `IMPORTJOB#${String(jobID || "").trim()}`;
+}
+
+function normalizeImportJobStatus(value) {
+  const status = String(value || "").trim().toUpperCase();
+  if (["PENDING", "RUNNING", "FINALIZING", "COMPLETED", "FAILED", "CANCELED"].includes(status)) {
+    return status;
+  }
+  return "PENDING";
+}
+
+function normalizeImportSourceKey(value) {
+  return String(value || "")
+    .trim()
+    .slice(0, 240);
+}
+
+function stableJsonValue(value) {
+  if (Array.isArray(value)) return value.map((item) => stableJsonValue(item));
+  if (value && typeof value === "object") {
+    return Object.keys(value)
+      .sort((a, b) => a.localeCompare(b))
+      .reduce((acc, key) => {
+        acc[key] = stableJsonValue(value[key]);
+        return acc;
+      }, {});
+  }
+  return value ?? null;
+}
+
+function stableJsonStringify(value) {
+  return JSON.stringify(stableJsonValue(value));
+}
+
+function buildImportSessionScopeKey(event, sessionID) {
+  const ev = normalizeEvent(event);
+  const sid = normalizeSessionID(sessionID);
+  if (!ev) return "";
+  return `${ev}|${sid}`;
+}
+
+function parseImportSessionScopeKey(value) {
+  const [event = "", sessionID = "main"] = String(value || "").split("|");
+  const ev = normalizeEvent(event);
+  const sid = normalizeSessionID(sessionID || "main");
+  if (!ev) return null;
+  return { event: ev, sessionID: sid };
+}
+
+function buildDeterministicImportedSolveID({
+  userID,
+  sourceKey = "",
+  event,
+  sessionID,
+  solve = {},
+  importOrdinal = 0,
+}) {
+  const payload = stableJsonStringify({
+    userID: String(userID || "").trim(),
+    sourceKey: normalizeImportSourceKey(sourceKey),
+    event: normalizeEvent(event),
+    sessionID: normalizeSessionID(sessionID),
+    importOrdinal: Number.isFinite(Number(importOrdinal)) ? Number(importOrdinal) : 0,
+    createdAt: String(solve?.datetime || solve?.createdAt || solve?.CreatedAt || "").trim(),
+    rawTimeMs: Number(
+      solve?.rawTimeMs ??
+        solve?.RawTimeMs ??
+        solve?.originalTime ??
+        solve?.OriginalTime ??
+        solve?.time ??
+        solve?.Time
+    ),
+    penalty: normalizePenalty(solve?.penalty ?? solve?.Penalty ?? null),
+    scramble: String(solve?.scramble ?? solve?.Scramble ?? "").trim(),
+    note: String(solve?.note ?? solve?.Note ?? "").trim(),
+    tags: solve?.tags ?? solve?.Tags ?? {},
+  });
+
+  return `imp_${crypto.createHash("sha256").update(payload).digest("hex").slice(0, 24)}`;
+}
+
+async function getImportJobItem(userID, jobID) {
+  if (!userID || !jobID) return null;
+  const out = await ddb.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: {
+        PK: `USER#${userID}`,
+        SK: buildImportJobSK(jobID),
+      },
+    })
+  );
+  return out.Item || null;
+}
+
+async function listImportJobs(userID, limit = 20) {
+  const out = await ddb.send(
+    new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
+      ExpressionAttributeValues: {
+        ":pk": `USER#${userID}`,
+        ":pfx": "IMPORTJOB#",
+      },
+      ScanIndexForward: false,
+      Limit: Math.max(1, Math.min(100, Number(limit) || 20)),
+    })
+  );
+  return Array.isArray(out?.Items) ? out.Items : [];
+}
+
+async function putImportJobItem(item) {
+  if (!item?.PK || !item?.SK) throw new Error("Import job item missing PK/SK");
+  await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+  return item;
+}
+
+function publicImportJob(job) {
+  if (!job) return null;
+  return {
+    jobID: String(job.JobID || ""),
+    status: normalizeImportJobStatus(job.Status),
+    format: String(job.Format || "").trim() || "unknown",
+    sourceKey: String(job.SourceKey || "").trim() || "",
+    totalSolves: Number(job.TotalSolves || 0),
+    processedSolves: Number(job.ProcessedSolves || 0),
+    totalChunks: Number(job.TotalChunks || 0),
+    receivedChunks: Number(job.ReceivedChunks || 0),
+    finalizedAt: job.FinalizedAt || null,
+    createdAt: job.CreatedAt || null,
+    updatedAt: job.UpdatedAt || null,
+    startedAt: job.StartedAt || null,
+    completedAt: job.CompletedAt || null,
+    failedAt: job.FailedAt || null,
+    error: job.Error || null,
+    label: job.Label || "",
+    metadata: job.Metadata && typeof job.Metadata === "object" ? job.Metadata : {},
+    affectedEvents: Array.isArray(job.AffectedEvents) ? job.AffectedEvents : [],
+    affectedSessionCount: Array.isArray(job.AffectedSessions) ? job.AffectedSessions.length : 0,
+    recompute: job.Recompute && typeof job.Recompute === "object" ? job.Recompute : {},
+  };
+}
+
 async function ensureSessionRecordExists(userID, event, sessionID, sessionName = null) {
   const ev = normalizeEvent(event);
   const sid = normalizeSessionID(sessionID);
@@ -253,6 +447,490 @@ async function getAllSolvesForEvent(userID, event) {
   } while (cursor);
 
   return items;
+}
+
+async function listUserEvents(userID) {
+  const [sessionOut, statsOut] = await Promise.all([
+    ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
+        ExpressionAttributeValues: {
+          ":pk": `USER#${userID}`,
+          ":pfx": "SESSION#",
+        },
+      })
+    ),
+    ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
+        ExpressionAttributeValues: {
+          ":pk": `USER#${userID}`,
+          ":pfx": "EVENTSTATS#",
+        },
+      })
+    ),
+  ]);
+
+  return Array.from(
+    new Set(
+      [...(sessionOut.Items || []), ...(statsOut.Items || [])]
+        .map((item) => normalizeEvent(item?.Event))
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+function hasCurrentDayBucketVersion(item) {
+  return Number(item?.DayBucketVersion || 0) === DAY_BUCKET_VERSION;
+}
+
+async function getUserDayBucketTimeZone(userID) {
+  const out = await ddb.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: { PK: `USER#${userID}`, SK: "PROFILE" },
+      ConsistentRead: true,
+    })
+  );
+
+  const profile = out.Item || {};
+  const settings = profile?.Settings && typeof profile.Settings === "object" ? profile.Settings : {};
+
+  return getDayBucketTimeZone(
+    settings?.timeZone ||
+      settings?.TimeZone ||
+      settings?.timezone ||
+      settings?.Timezone ||
+      profile?.timeZone ||
+      profile?.TimeZone ||
+      profile?.timezone ||
+      profile?.Timezone
+  );
+}
+
+function getTimeZoneParts(date, timeZone) {
+  const resolvedTimeZone = getDayBucketTimeZone(timeZone);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: resolvedTimeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    year: Number(byType.year || 0),
+    month: Number(byType.month || 0),
+    day: Number(byType.day || 0),
+    hour: Number(byType.hour || 0),
+    minute: Number(byType.minute || 0),
+    second: Number(byType.second || 0),
+  };
+}
+
+function getUtcMsForTimeZoneLocalParts(timeZone, year, month, day, hour = 0, minute = 0, second = 0) {
+  let guess = Date.UTC(year, month - 1, day, hour, minute, second, 0);
+  const target = Date.UTC(year, month - 1, day, hour, minute, second, 0);
+
+  for (let i = 0; i < 4; i += 1) {
+    const actual = getTimeZoneParts(new Date(guess), timeZone);
+    const actualUtc = Date.UTC(
+      actual.year,
+      Math.max(0, actual.month - 1),
+      actual.day,
+      actual.hour,
+      actual.minute,
+      actual.second,
+      0
+    );
+    const diff = target - actualUtc;
+    if (diff === 0) break;
+    guess += diff;
+  }
+
+  return guess;
+}
+
+function shiftIsoDay(dayKey, offsetDays) {
+  const match = String(dayKey || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+
+  const next = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + Number(offsetDays || 0), 12, 0, 0, 0));
+  const year = next.getUTCFullYear();
+  const month = String(next.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(next.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getCreatedAtRangeForLocalDays({ startDay = "", endDay = "", timeZone = "" } = {}) {
+  const resolvedTimeZone = getDayBucketTimeZone(timeZone);
+  const startKey = String(startDay || "").trim();
+  const endKey = String(endDay || "").trim();
+  const startMatch = startKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const endMatch = endKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  const startIso = startMatch
+    ? new Date(
+        getUtcMsForTimeZoneLocalParts(
+          resolvedTimeZone,
+          Number(startMatch[1]),
+          Number(startMatch[2]),
+          Number(startMatch[3]),
+          0,
+          0,
+          0
+        )
+      ).toISOString()
+    : "";
+
+  const exclusiveEndKey = endMatch ? shiftIsoDay(endKey, 1) : "";
+  const exclusiveEndMatch = exclusiveEndKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const endExclusiveIso = exclusiveEndMatch
+    ? new Date(
+        getUtcMsForTimeZoneLocalParts(
+          resolvedTimeZone,
+          Number(exclusiveEndMatch[1]),
+          Number(exclusiveEndMatch[2]),
+          Number(exclusiveEndMatch[3]),
+          0,
+          0,
+          0
+        )
+      ).toISOString()
+    : "";
+
+  return {
+    timeZone: resolvedTimeZone,
+    startIso,
+    endExclusiveIso,
+  };
+}
+
+function filterSolvesToDay(solves, dayKey, timeZone) {
+  const day = String(dayKey || "").trim();
+  return (Array.isArray(solves) ? solves : []).filter(
+    (solve) => getDayKey(solve?.CreatedAt, { timeZone }) === day
+  );
+}
+
+async function getEventSolvesForLocalDay(userID, event, dayKey, timeZone) {
+  const ev = normalizeEvent(event);
+  const day = String(dayKey || "").trim();
+  if (!userID || !ev || !day) return [];
+
+  const { startIso, endExclusiveIso } = getCreatedAtRangeForLocalDays({
+    startDay: day,
+    endDay: day,
+    timeZone,
+  });
+
+  if (!startIso || !endExclusiveIso) return [];
+
+  let cursor = undefined;
+  const all = [];
+
+  do {
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        IndexName: "GSI2",
+        KeyConditionExpression: "GSI2PK = :pk AND GSI2SK BETWEEN :startSk AND :endSk",
+        ExpressionAttributeValues: {
+          ":pk": `EVENT#${userID}#${ev}`,
+          ":startSk": startIso,
+          ":endSk": endExclusiveIso,
+        },
+        ScanIndexForward: true,
+        ExclusiveStartKey: cursor,
+        Limit: 1000,
+      })
+    );
+
+    if (Array.isArray(out.Items) && out.Items.length) all.push(...out.Items);
+    cursor = out.LastEvaluatedKey || null;
+  } while (cursor);
+
+  return all;
+}
+
+async function writeDayBucketItem(item) {
+  if (!item) return null;
+  await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+  return item;
+}
+
+async function deleteDayBucketItem(userID, dayKey, event = "", mainOnly = false) {
+  await ddb.send(
+    new DeleteCommand({
+      TableName: TABLE,
+      Key: {
+        PK: `USER#${userID}`,
+        SK: buildDayBucketSK({ dayKey, event, mainOnly }),
+      },
+    })
+  );
+  return null;
+}
+
+async function recomputeEventDayBucket(userID, event, dayKey, { mainOnly = false } = {}) {
+  const ev = normalizeEvent(event);
+  const day = String(dayKey || "").trim();
+  if (!ev || !day) return null;
+
+  const timeZone = await getUserDayBucketTimeZone(userID);
+  const solves = await getEventSolvesForLocalDay(userID, ev, day, timeZone);
+  const filtered = solves.filter((solve) =>
+    mainOnly ? normalizeSessionID(solve?.SessionID) === "main" : true
+  );
+
+  if (!filtered.length) {
+    return deleteDayBucketItem(userID, day, ev, mainOnly);
+  }
+
+  return writeDayBucketItem(
+    buildDayBucketItem({
+      userID,
+      dayKey: day,
+      event: ev,
+      mainOnly,
+      timeZone,
+      solves: filtered,
+    })
+  );
+}
+
+async function recomputeAllEventsDayBucket(userID, dayKey) {
+  const day = String(dayKey || "").trim();
+  if (!day) return null;
+
+  const timeZone = await getUserDayBucketTimeZone(userID);
+  const events = await listUserEvents(userID);
+  if (!events.length) {
+    return deleteDayBucketItem(userID, day);
+  }
+
+  const eventItems = await batchGetItems(
+    events.map((event) => ({
+      PK: `USER#${userID}`,
+      SK: buildDayBucketSK({ dayKey: day, event }),
+    }))
+  );
+  const summaries = (eventItems || []).filter((item) => Number(item?.SolveCountTotal || 0) > 0);
+
+  if (!summaries.length) {
+    return deleteDayBucketItem(userID, day);
+  }
+
+  return writeDayBucketItem(
+    buildDayBucketItem({
+      userID,
+      dayKey: day,
+      timeZone,
+      sourceBuckets: summaries,
+    })
+  );
+}
+
+async function recomputeDayBucketsForSolveMutation({ userID, oldSolve = null, newSolve = null }) {
+  const timeZone = await getUserDayBucketTimeZone(userID);
+  const scopes = new Map();
+  const addScope = (solve) => {
+    if (!solve) return;
+    const event = normalizeEvent(solve?.Event);
+    const dayKey = getDayKey(solve?.CreatedAt, { timeZone });
+    if (!event || !dayKey) return;
+    scopes.set(`${event}|${dayKey}`, { event, dayKey });
+  };
+
+  addScope(oldSolve);
+  addScope(newSolve);
+
+  if (!scopes.size) return [];
+
+  const results = [];
+  for (const scope of scopes.values()) {
+    const daySolves = await getEventSolvesForLocalDay(userID, scope.event, scope.dayKey, timeZone);
+    const mainDaySolves = daySolves.filter(
+      (solve) => normalizeSessionID(solve?.SessionID) === "main"
+    );
+
+    const eventBucket = daySolves.length
+      ? await writeDayBucketItem(
+          buildDayBucketItem({
+            userID,
+            dayKey: scope.dayKey,
+            event: scope.event,
+            timeZone,
+            solves: daySolves,
+          })
+        )
+      : await deleteDayBucketItem(userID, scope.dayKey, scope.event, false);
+
+    const mainBucket = mainDaySolves.length
+      ? await writeDayBucketItem(
+          buildDayBucketItem({
+            userID,
+            dayKey: scope.dayKey,
+            event: scope.event,
+            mainOnly: true,
+            timeZone,
+            solves: mainDaySolves,
+          })
+        )
+      : await deleteDayBucketItem(userID, scope.dayKey, scope.event, true);
+
+    const allEventsBucket = await recomputeAllEventsDayBucket(userID, scope.dayKey);
+    results.push({
+      dayKey: scope.dayKey,
+      event: scope.event,
+      eventBucket,
+      mainBucket,
+      allEventsBucket,
+    });
+  }
+
+  return results;
+}
+
+async function queryDayBucketItemsByPrefix(userID, prefix) {
+  const items = [];
+  let cursor = null;
+
+  do {
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
+        ExpressionAttributeValues: {
+          ":pk": `USER#${userID}`,
+          ":pfx": prefix,
+        },
+        ExclusiveStartKey: cursor || undefined,
+      })
+    );
+
+    if (Array.isArray(out.Items) && out.Items.length) items.push(...out.Items);
+    cursor = out.LastEvaluatedKey || null;
+  } while (cursor);
+
+  return items;
+}
+
+async function queryUserItemsByPrefix(userID, prefix) {
+  const items = [];
+  let cursor = null;
+
+  do {
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
+        ExpressionAttributeValues: {
+          ":pk": `USER#${userID}`,
+          ":pfx": prefix,
+        },
+        ExclusiveStartKey: cursor || undefined,
+      })
+    );
+
+    if (Array.isArray(out.Items) && out.Items.length) items.push(...out.Items);
+    cursor = out.LastEvaluatedKey || null;
+  } while (cursor);
+
+  return items;
+}
+
+async function recomputeAllDayBucketsForEvent(userID, event) {
+  const ev = normalizeEvent(event);
+  if (!ev) return { event: null, daysAffected: [] };
+
+  const timeZone = await getUserDayBucketTimeZone(userID);
+  const solves = await getAllSolvesByEvent(ddb, TABLE, userID, ev);
+  const groupedAll = new Map();
+  const groupedMain = new Map();
+
+  for (const solve of solves) {
+    const dayKey = getDayKey(solve?.CreatedAt, { timeZone });
+    if (!dayKey) continue;
+
+    const bucket = groupedAll.get(dayKey) || [];
+    bucket.push(solve);
+    groupedAll.set(dayKey, bucket);
+
+    if (normalizeSessionID(solve?.SessionID) === "main") {
+      const mainBucket = groupedMain.get(dayKey) || [];
+      mainBucket.push(solve);
+      groupedMain.set(dayKey, mainBucket);
+    }
+  }
+
+  const [existingAll, existingMain] = await Promise.all([
+    queryDayBucketItemsByPrefix(userID, `DAYBUCKET#EVENT#${ev}#`),
+    queryDayBucketItemsByPrefix(userID, `DAYBUCKET#EVENT#${ev}#MAIN#`),
+  ]);
+
+  const allDaysAffected = new Set();
+
+  for (const dayKey of groupedAll.keys()) {
+    allDaysAffected.add(dayKey);
+    await writeDayBucketItem(
+      buildDayBucketItem({
+        userID,
+        dayKey,
+        event: ev,
+        timeZone,
+        solves: groupedAll.get(dayKey),
+      })
+    );
+  }
+
+  for (const item of existingAll) {
+    if (String(item?.ScopeVariant || "") === "MAIN") continue;
+    const dayKey = String(item?.BucketDay || "");
+    if (!dayKey) continue;
+    allDaysAffected.add(dayKey);
+    if (!groupedAll.has(dayKey)) {
+      await deleteDayBucketItem(userID, dayKey, ev);
+    }
+  }
+
+  for (const dayKey of groupedMain.keys()) {
+    allDaysAffected.add(dayKey);
+    await writeDayBucketItem(
+      buildDayBucketItem({
+        userID,
+        dayKey,
+        event: ev,
+        mainOnly: true,
+        timeZone,
+        solves: groupedMain.get(dayKey),
+      })
+    );
+  }
+
+  for (const item of existingMain) {
+    const dayKey = String(item?.BucketDay || "");
+    if (!dayKey) continue;
+    allDaysAffected.add(dayKey);
+    if (!groupedMain.has(dayKey)) {
+      await deleteDayBucketItem(userID, dayKey, ev, true);
+    }
+  }
+
+  for (const dayKey of Array.from(allDaysAffected).sort()) {
+    await recomputeAllEventsDayBucket(userID, dayKey);
+  }
+
+  return {
+    event: ev,
+    daysAffected: Array.from(allDaysAffected).sort(),
+  };
 }
 
 async function fetchJsonWithTimeout(url, timeoutMs = 12000) {
@@ -1489,6 +2167,7 @@ async function applySolveMutationStats({ userID, oldSolve = null, newSolve = nul
   }
 
   await Promise.all(jobs);
+  await recomputeDayBucketsForSolveMutation({ userID, oldSolve, newSolve });
 }
 
 function runInBackground(label, fn) {
@@ -1501,6 +2180,83 @@ function runInBackground(label, fn) {
       console.error(`${label} failed:`, err);
     }
   });
+}
+
+async function finalizeImportJobInBackground(userID, jobID) {
+  const current = await getImportJobItem(userID, jobID);
+  if (!current) throw new Error("Import job not found");
+
+  const affectedSessions = Array.isArray(current.AffectedSessions) ? current.AffectedSessions : [];
+  const affectedEvents = Array.isArray(current.AffectedEvents) ? current.AffectedEvents : [];
+
+  const recomputeState = {
+    sessionsCompleted: 0,
+    totalSessions: affectedSessions.length,
+    eventsCompleted: 0,
+    totalEvents: affectedEvents.length,
+  };
+
+  const started = {
+    ...current,
+    Status: "FINALIZING",
+    Error: null,
+    FinalizedAt: nowIso(),
+    UpdatedAt: nowIso(),
+    Recompute: recomputeState,
+  };
+  await putImportJobItem(started);
+
+  try {
+    for (const rawScope of affectedSessions) {
+      const latest = await getImportJobItem(userID, jobID);
+      if (normalizeImportJobStatus(latest?.Status) === "CANCELED") return;
+      const scope = parseImportSessionScopeKey(rawScope);
+      if (!scope) continue;
+      await recomputeSessionStats(ddb, TABLE, userID, scope.event, scope.sessionID);
+      recomputeState.sessionsCompleted += 1;
+      await putImportJobItem({
+        ...(await getImportJobItem(userID, jobID)),
+        Recompute: { ...recomputeState },
+        UpdatedAt: nowIso(),
+      });
+    }
+
+    for (const event of affectedEvents) {
+      const latest = await getImportJobItem(userID, jobID);
+      if (normalizeImportJobStatus(latest?.Status) === "CANCELED") return;
+      const ev = normalizeEvent(event);
+      if (!ev) continue;
+      await recomputeEventStats(ddb, TABLE, userID, ev);
+      await recomputeAllDayBucketsForEvent(userID, ev);
+      recomputeState.eventsCompleted += 1;
+      await putImportJobItem({
+        ...(await getImportJobItem(userID, jobID)),
+        Recompute: { ...recomputeState },
+        UpdatedAt: nowIso(),
+      });
+    }
+
+    const finished = await getImportJobItem(userID, jobID);
+    await putImportJobItem({
+      ...(finished || started),
+      Status: "COMPLETED",
+      Error: null,
+      CompletedAt: nowIso(),
+      UpdatedAt: nowIso(),
+      Recompute: { ...recomputeState },
+    });
+  } catch (err) {
+    const failed = await getImportJobItem(userID, jobID);
+    await putImportJobItem({
+      ...(failed || started),
+      Status: "FAILED",
+      Error: err?.message || "Import finalize failed",
+      FailedAt: nowIso(),
+      UpdatedAt: nowIso(),
+      Recompute: { ...recomputeState },
+    });
+    throw err;
+  }
 }
 
 async function batchGetItems(keys) {
@@ -1581,6 +2337,40 @@ async function batchWriteRequestsWithRetry(requests) {
   }
 
   return wrote;
+}
+
+async function deleteItemsByKey(keys) {
+  const unique = new Map();
+
+  for (const key of keys || []) {
+    const pk = String(key?.PK || "").trim();
+    const sk = String(key?.SK || "").trim();
+    if (!pk || !sk) continue;
+    unique.set(`${pk}|${sk}`, { PK: pk, SK: sk });
+  }
+
+  const requests = Array.from(unique.values()).map((key) => ({
+    DeleteRequest: {
+      Key: key,
+    },
+  }));
+
+  return batchWriteRequestsWithRetry(requests);
+}
+
+async function getCustomEventItem(userID, event) {
+  const ev = normalizeEvent(event);
+  if (!userID || !ev) return null;
+
+  const out = await ddb.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: { PK: `USER#${userID}`, SK: `CUSTOMEVENT#${ev}` },
+      ConsistentRead: true,
+    })
+  );
+
+  return out.Item || null;
 }
 
 function buildEmptySessionStatsItem(userID, event, sessionID) {
@@ -2850,6 +3640,185 @@ app.post("/api/session", async (req, res) => {
   }
 });
 
+app.delete("/api/session/:userID/:event/:sessionID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const userID = String(req.params.userID || "").trim();
+  const event = normalizeEvent(req.params.event);
+  const sessionID = normalizeSessionID(req.params.sessionID || "main");
+
+  if (!userID) return res.status(400).json({ error: "Missing userID" });
+  if (!event) return res.status(400).json({ error: "Missing event" });
+  if (!sessionID) return res.status(400).json({ error: "Missing sessionID" });
+
+  try {
+    const customEventItem = await getCustomEventItem(userID, event);
+    const isCustomEvent = !!customEventItem;
+    const isMainSession = sessionID === "main";
+    const deleteWholeEvent = isMainSession && isCustomEvent;
+
+    if (isMainSession && !isCustomEvent) {
+      return res.status(403).json({
+        error: isCoreEvent(event)
+          ? "Main session for core events cannot be deleted."
+          : "Main session can only be deleted for custom events and custom relays.",
+      });
+    }
+
+    const sessionItem = await ddb.send(
+      new GetCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${userID}`, SK: `SESSION#${event}#${sessionID}` },
+        ConsistentRead: true,
+      })
+    );
+
+    if (!deleteWholeEvent && !sessionItem.Item) {
+      return res.json({ ok: true, skipped: true, deletedEvent: false });
+    }
+
+    const solves = deleteWholeEvent
+      ? await getAllSolvesForEvent(userID, event)
+      : await getAllSolvesForSession(userID, event, sessionID);
+
+    for (const solve of solves) {
+      await deleteSolveAndTagItems(ddb, TABLE, solve);
+    }
+
+    if (solves.length === 0) {
+      if (deleteWholeEvent) {
+        const [sessionItems, sessionStatsItems] = await Promise.all([
+          queryUserItemsByPrefix(userID, `SESSION#${event}#`),
+          queryUserItemsByPrefix(userID, `SESSIONSTATS#${event}#`),
+        ]);
+
+        await deleteItemsByKey([
+          { PK: `USER#${userID}`, SK: `CUSTOMEVENT#${event}` },
+          { PK: `USER#${userID}`, SK: `EVENTSTATS#${event}` },
+          ...sessionItems.map((item) => ({ PK: item?.PK, SK: item?.SK })),
+          ...sessionStatsItems.map((item) => ({ PK: item?.PK, SK: item?.SK })),
+        ]);
+      } else {
+        await deleteItemsByKey([
+          { PK: `USER#${userID}`, SK: `SESSION#${event}#${sessionID}` },
+          { PK: `USER#${userID}`, SK: `SESSIONSTATS#${event}#${sessionID}` },
+        ]);
+      }
+    } else if (deleteWholeEvent) {
+      const prefixDeletes = [
+        `SESSION#${event}#`,
+        `SESSIONSTATS#${event}#`,
+        `EVENTSTATS#${event}`,
+        `TAGSTATS#${event}#`,
+        `SINGLERANK#EVENT#${event}#`,
+        `SINGLERANK#SESSION#${event}#`,
+        `DAYBUCKET#EVENT#${event}#`,
+        `CUSTOMEVENT#${event}`,
+      ];
+
+      const prefixItems = await Promise.all(
+        prefixDeletes.map((prefix) => queryUserItemsByPrefix(userID, prefix))
+      );
+
+      await deleteItemsByKey(prefixItems.flat().map((item) => ({ PK: item?.PK, SK: item?.SK })));
+      runInBackground(`sessionDelete:eventCleanup:${userID}:${event}`, () =>
+        recomputeAllDayBucketsForEvent(userID, event)
+      );
+    } else {
+      const sessionTagStatsItems = await queryUserItemsByPrefix(
+        userID,
+        `TAGSTATS#${event}#${sessionID}#`
+      );
+
+      const deleteRequests = [];
+      const affectedEventTagScopes = new Map();
+      const affectedDayKeys = new Set();
+      const dayBucketTimeZone = await getUserDayBucketTimeZone(userID);
+
+      for (const solve of solves) {
+        deleteRequests.push({
+          DeleteRequest: {
+            Key: { PK: solve.PK, SK: solve.SK },
+          },
+        });
+
+        for (const tagItem of buildSolveTagItems(solve)) {
+          deleteRequests.push({
+            DeleteRequest: {
+              Key: { PK: tagItem.PK, SK: tagItem.SK },
+            },
+          });
+        }
+
+        for (const rankItem of buildSingleRankItemsForSolve(userID, solve)) {
+          deleteRequests.push({
+            DeleteRequest: {
+              Key: { PK: rankItem.PK, SK: rankItem.SK },
+            },
+          });
+        }
+
+        for (const pair of getSolveTagPairsFromItem(solve)) {
+          const tagKey = String(pair?.key || "").trim();
+          const tagValue = String(pair?.value || "").trim();
+          if (!tagKey || !tagValue) continue;
+          affectedEventTagScopes.set(`${tagKey}|${tagValue}`, { tagKey, tagValue });
+        }
+
+        const dayKey = getDayKey(solve?.CreatedAt, { timeZone: dayBucketTimeZone });
+        if (dayKey) affectedDayKeys.add(dayKey);
+      }
+
+      for (const item of sessionTagStatsItems) {
+        deleteRequests.push({
+          DeleteRequest: {
+            Key: { PK: item.PK, SK: item.SK },
+          },
+        });
+      }
+
+      deleteRequests.push(
+        {
+          DeleteRequest: {
+            Key: { PK: `USER#${userID}`, SK: `SESSION#${event}#${sessionID}` },
+          },
+        },
+        {
+          DeleteRequest: {
+            Key: { PK: `USER#${userID}`, SK: `SESSIONSTATS#${event}#${sessionID}` },
+          },
+        }
+      );
+
+      await batchWriteRequestsWithRetry(deleteRequests);
+
+      runInBackground(`sessionDelete:cleanup:${userID}:${event}:${sessionID}`, () =>
+        Promise.all([
+          recomputeEventStats(ddb, TABLE, userID, event),
+          ...Array.from(affectedEventTagScopes.values()).map(({ tagKey, tagValue }) =>
+            recomputeTagStats(ddb, TABLE, userID, event, null, tagKey, tagValue)
+          ),
+          ...Array.from(affectedDayKeys).flatMap((dayKey) => [
+            recomputeEventDayBucket(userID, event, dayKey, { mainOnly: false }),
+            recomputeEventDayBucket(userID, event, dayKey, { mainOnly: true }),
+            recomputeAllEventsDayBucket(userID, dayKey),
+          ]),
+        ])
+      );
+    }
+
+    return res.json({
+      ok: true,
+      deletedEvent: deleteWholeEvent,
+      deletedSessionID: sessionID,
+      deletedSolveCount: solves.length,
+    });
+  } catch (e) {
+    console.error("DELETE /api/session error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
 // -------------------- SESSIONSTATS --------------------
 app.get("/api/sessionStats/:userID", async (req, res) => {
   if (!requirePkSk(res)) return;
@@ -2870,10 +3839,8 @@ app.get("/api/sessionStats/:userID", async (req, res) => {
       })
     );
     let item = out.Item || null;
-
-    if (item && !hasCurrentStrictWindowVersion(item)) {
-      item = await recomputeSessionStats(ddb, TABLE, userID, event, sessionID);
-    }
+    const needsRecompute =
+      !!item && (!hasCurrentStrictWindowVersion(item) || !hasCachedWorstMetrics(item));
 
     if (
       item &&
@@ -2894,6 +3861,13 @@ app.get("/api/sessionStats/:userID", async (req, res) => {
         await ddb.send(new PutCommand({ TableName: TABLE, Item: next }));
         item = next;
       }
+    }
+
+    if (item) {
+      item = {
+        ...item,
+        NeedsRecompute: needsRecompute,
+      };
     }
 
     return res.json({ ok: true, item });
@@ -2922,10 +3896,8 @@ app.get("/api/eventStats/:userID", async (req, res) => {
       })
     );
     let item = out.Item || null;
-
-    if (item && !hasCurrentStrictWindowVersion(item)) {
-      item = await recomputeEventStats(ddb, TABLE, userID, event);
-    }
+    const needsRecompute =
+      !!item && (!hasCurrentStrictWindowVersion(item) || !hasCachedWorstMetrics(item));
 
     if (
       item &&
@@ -2946,6 +3918,13 @@ app.get("/api/eventStats/:userID", async (req, res) => {
         await ddb.send(new PutCommand({ TableName: TABLE, Item: next }));
         item = next;
       }
+    }
+
+    if (item) {
+      item = {
+        ...item,
+        NeedsRecompute: needsRecompute,
+      };
     }
 
     return res.json({ ok: true, item });
@@ -3058,6 +4037,9 @@ app.get("/api/solves/:userID", async (req, res) => {
   const sessionID = normalizeSessionID(req.query?.sessionID || "main");
   const limit = Math.max(1, Math.min(2000, Number(req.query?.limit || 200)));
   const cursorRaw = req.query?.cursor ? String(req.query.cursor) : null;
+  const startDay = String(req.query?.startDay || "").trim();
+  const endDay = String(req.query?.endDay || "").trim();
+  const requestedTimeZone = String(req.query?.timeZone || "").trim();
 
   if (!userID) return res.status(400).json({ error: "Missing userID" });
   if (!event) return res.status(400).json({ error: "Missing event" });
@@ -3072,14 +4054,36 @@ app.get("/api/solves/:userID", async (req, res) => {
   }
 
   try {
+    const fallbackTimeZone = await getUserDayBucketTimeZone(userID);
+    const { timeZone, startIso, endExclusiveIso } = getCreatedAtRangeForLocalDays({
+      startDay,
+      endDay,
+      timeZone: requestedTimeZone || fallbackTimeZone,
+    });
+
+    let keyConditionExpression = "GSI1PK = :pk";
+    const expressionAttributeValues = {
+      ":pk": `SESSION#${userID}#${event}#${sessionID}`,
+    };
+
+    if (startIso && endExclusiveIso) {
+      keyConditionExpression += " AND GSI1SK BETWEEN :startSk AND :endSk";
+      expressionAttributeValues[":startSk"] = startIso;
+      expressionAttributeValues[":endSk"] = endExclusiveIso;
+    } else if (startIso) {
+      keyConditionExpression += " AND GSI1SK >= :startSk";
+      expressionAttributeValues[":startSk"] = startIso;
+    } else if (endExclusiveIso) {
+      keyConditionExpression += " AND GSI1SK <= :endSk";
+      expressionAttributeValues[":endSk"] = endExclusiveIso;
+    }
+
     const out = await ddb.send(
       new QueryCommand({
         TableName: TABLE,
         IndexName: "GSI1",
-        KeyConditionExpression: "GSI1PK = :pk",
-        ExpressionAttributeValues: {
-          ":pk": `SESSION#${userID}#${event}#${sessionID}`,
-        },
+        KeyConditionExpression: keyConditionExpression,
+        ExpressionAttributeValues: expressionAttributeValues,
         ScanIndexForward: false,
         Limit: limit,
         ExclusiveStartKey: cursor,
@@ -3090,6 +4094,7 @@ app.get("/api/solves/:userID", async (req, res) => {
       ok: true,
       items: out.Items || [],
       lastKey: out.LastEvaluatedKey || null,
+      timeZone,
     });
   } catch (e) {
     console.error("GET /api/solves error:", e);
@@ -3327,15 +4332,342 @@ app.post("/api/solve", async (req, res) => {
         addSolve: solveItem,
       }),
     ]);
+    runInBackground(`dayBuckets:add:${userID}:${solveItem.Event}`, () =>
+      recomputeDayBucketsForSolveMutation({
+        userID,
+        newSolve: solveItem,
+      })
+    );
 
     return res.json({
       ok: true,
       item: solveItem,
       sessionStats,
       eventStats,
+      dayBuckets: { queued: true },
     });
   } catch (e) {
     console.error("POST /api/solve error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.post("/api/importJobs", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const userID = String(req.body?.userID || "").trim();
+    const format = String(req.body?.format || "unknown").trim() || "unknown";
+    const sourceKey = normalizeImportSourceKey(req.body?.sourceKey || "");
+    const totalSolves = Math.max(0, Number(req.body?.totalSolves || 0));
+    const totalChunks = Math.max(0, Number(req.body?.totalChunks || 0));
+    const label = String(req.body?.label || "").trim().slice(0, 160);
+    const metadata =
+      req.body?.metadata && typeof req.body.metadata === "object" ? req.body.metadata : {};
+
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+
+    const jobID = createImportJobID();
+    const ts = nowIso();
+    const item = {
+      PK: `USER#${userID}`,
+      SK: buildImportJobSK(jobID),
+      ItemType: "IMPORTJOB",
+      JobID: jobID,
+      UserID: userID,
+      Status: "PENDING",
+      Format: format,
+      SourceKey: sourceKey,
+      Label: label,
+      Metadata: metadata,
+      TotalSolves: totalSolves,
+      ProcessedSolves: 0,
+      TotalChunks: totalChunks,
+      ReceivedChunks: 0,
+      AffectedEvents: [],
+      AffectedSessions: [],
+      Recompute: {
+        sessionsCompleted: 0,
+        totalSessions: 0,
+        eventsCompleted: 0,
+        totalEvents: 0,
+      },
+      CreatedAt: ts,
+      UpdatedAt: ts,
+      StartedAt: null,
+      FinalizedAt: null,
+      CompletedAt: null,
+      FailedAt: null,
+      Error: null,
+    };
+
+    await putImportJobItem(item);
+    return res.json({ ok: true, job: publicImportJob(item) });
+  } catch (e) {
+    console.error("POST /api/importJobs error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.get("/api/importJobs/:userID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const userID = String(req.params.userID || "").trim();
+    const limit = Number(req.query?.limit || 20);
+
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+
+    const items = await listImportJobs(userID, limit);
+    return res.json({ ok: true, items: items.map((item) => publicImportJob(item)) });
+  } catch (e) {
+    console.error("GET /api/importJobs/:userID error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.get("/api/importJobs/:userID/:jobID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const userID = String(req.params.userID || "").trim();
+    const jobID = String(req.params.jobID || "").trim();
+
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+    if (!jobID) return res.status(400).json({ error: "Missing jobID" });
+
+    const item = await getImportJobItem(userID, jobID);
+    if (!item) return res.status(404).json({ error: "Import job not found" });
+    return res.json({ ok: true, job: publicImportJob(item) });
+  } catch (e) {
+    console.error("GET /api/importJobs/:userID/:jobID error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.post("/api/importJobs/:userID/:jobID/cancel", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const userID = String(req.params.userID || "").trim();
+    const jobID = String(req.params.jobID || "").trim();
+
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+    if (!jobID) return res.status(400).json({ error: "Missing jobID" });
+
+    const item = await getImportJobItem(userID, jobID);
+    if (!item) return res.status(404).json({ error: "Import job not found" });
+
+    const status = normalizeImportJobStatus(item.Status);
+    if (status === "COMPLETED") {
+      return res.status(409).json({ error: "Completed jobs cannot be canceled" });
+    }
+    if (status === "FAILED") {
+      return res.status(409).json({ error: "Failed jobs cannot be canceled" });
+    }
+
+    const next = {
+      ...item,
+      Status: "CANCELED",
+      Error: null,
+      UpdatedAt: nowIso(),
+    };
+    await putImportJobItem(next);
+    return res.json({ ok: true, job: publicImportJob(next) });
+  } catch (e) {
+    console.error("POST /api/importJobs/:userID/:jobID/cancel error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.post("/api/importJobs/:userID/:jobID/chunk", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const userID = String(req.params.userID || "").trim();
+    const jobID = String(req.params.jobID || "").trim();
+    const solves = Array.isArray(req.body?.solves) ? req.body.solves : [];
+    const sourceKey = normalizeImportSourceKey(req.body?.sourceKey || "");
+
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+    if (!jobID) return res.status(400).json({ error: "Missing jobID" });
+    if (solves.length === 0) return res.json({ ok: true, wrote: 0, accepted: 0, skipped: 0 });
+    if (solves.length > 5000) {
+      return res.status(400).json({ error: "Too many solves in one chunk (max 5000)" });
+    }
+
+    const job = await getImportJobItem(userID, jobID);
+    if (!job) return res.status(404).json({ error: "Import job not found" });
+
+    const status = normalizeImportJobStatus(job.Status);
+    if (["FINALIZING", "COMPLETED", "FAILED", "CANCELED"].includes(status)) {
+      return res.status(409).json({ error: `Import job is ${status.toLowerCase()}` });
+    }
+
+    const requests = [];
+    const solveItems = [];
+    const sessionScopeKeys = new Set(Array.isArray(job.AffectedSessions) ? job.AffectedSessions : []);
+    const eventSet = new Set(Array.isArray(job.AffectedEvents) ? job.AffectedEvents : []);
+    const ensuredSessions = new Set();
+    let validSolves = 0;
+
+    for (const rawSolve of solves) {
+      const event = normalizeEvent(rawSolve?.event || rawSolve?.Event);
+      const sessionID = normalizeSessionID(
+        rawSolve?.sessionID || rawSolve?.SessionID || rawSolve?._importSessionID || "main"
+      );
+
+      if (!event) continue;
+
+      const sessionScopeKey = buildImportSessionScopeKey(event, sessionID);
+      if (!sessionScopeKey) continue;
+
+      if (!ensuredSessions.has(sessionScopeKey)) {
+        await ensureSessionRecordExists(
+          userID,
+          event,
+          sessionID,
+          rawSolve?._importSessionName || rawSolve?.sessionName || rawSolve?.SessionName || null
+        );
+        ensuredSessions.add(sessionScopeKey);
+      }
+
+      let rawTimeMs = Number(
+        rawSolve?.rawTimeMs ??
+          rawSolve?.RawTimeMs ??
+          rawSolve?.originalTime ??
+          rawSolve?.OriginalTime ??
+          rawSolve?.time ??
+          rawSolve?.Time
+      );
+      if (!Number.isFinite(rawTimeMs) || rawTimeMs < 0) continue;
+
+      const penalty = normalizePenalty(rawSolve?.penalty ?? rawSolve?.Penalty ?? null);
+      if (
+        penalty === "+2" &&
+        typeof rawSolve?.originalTime === "undefined" &&
+        typeof rawSolve?.OriginalTime === "undefined" &&
+        typeof rawSolve?.rawTimeMs === "undefined" &&
+        typeof rawSolve?.RawTimeMs === "undefined"
+      ) {
+        rawTimeMs = Math.max(0, rawTimeMs - 2000);
+      }
+
+      const createdAt = resolveImportedCreatedAt(rawSolve, Date.now() + validSolves);
+      const solveID = buildDeterministicImportedSolveID({
+        userID,
+        sourceKey: sourceKey || job.SourceKey || job.JobID,
+        event,
+        sessionID,
+        solve: { ...rawSolve, datetime: createdAt },
+        importOrdinal: rawSolve?.importOrdinal ?? rawSolve?._importOrdinal ?? validSolves,
+      });
+
+      const solveItem = buildSolveItem({
+        userID,
+        event,
+        sessionID,
+        rawTimeMs,
+        penalty,
+        scramble: rawSolve?.scramble ?? rawSolve?.Scramble ?? "",
+        note: rawSolve?.note ?? rawSolve?.Note ?? "",
+        tags: rawSolve?.tags ?? rawSolve?.Tags ?? {},
+        createdAt,
+        solveID,
+      });
+
+      solveItems.push(solveItem);
+      requests.push({ PutRequest: { Item: solveItem } });
+      for (const tagItem of buildSolveTagItems(solveItem)) {
+        requests.push({ PutRequest: { Item: tagItem } });
+      }
+      for (const rankItem of buildSingleRankItemsForSolve(userID, solveItem)) {
+        requests.push({ PutRequest: { Item: rankItem } });
+      }
+
+      sessionScopeKeys.add(sessionScopeKey);
+      eventSet.add(event);
+      validSolves += 1;
+    }
+
+    const existingSolveItems = await batchGetItems(
+      solveItems.map((item) => ({ PK: item.PK, SK: item.SK }))
+    );
+    const existingSolveKeys = new Set(existingSolveItems.map((item) => `${item?.PK}|${item?.SK}`));
+    const accepted = solveItems.reduce(
+      (count, item) => count + (existingSolveKeys.has(`${item.PK}|${item.SK}`) ? 0 : 1),
+      0
+    );
+
+    const wrote = await batchWriteRequestsWithRetry(requests);
+    const ts = nowIso();
+    const next = {
+      ...job,
+      Status: "RUNNING",
+      StartedAt: job.StartedAt || ts,
+      UpdatedAt: ts,
+      Error: null,
+      ProcessedSolves: Number(job.ProcessedSolves || 0) + accepted,
+      ReceivedChunks: Number(job.ReceivedChunks || 0) + 1,
+      AffectedEvents: Array.from(eventSet).sort((a, b) => a.localeCompare(b)),
+      AffectedSessions: Array.from(sessionScopeKeys).sort((a, b) => a.localeCompare(b)),
+    };
+    await putImportJobItem(next);
+
+    return res.json({
+      ok: true,
+      wrote,
+      accepted,
+      skipped: Math.max(0, solves.length - accepted),
+      job: publicImportJob(next),
+    });
+  } catch (e) {
+    console.error("POST /api/importJobs/:userID/:jobID/chunk error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.post("/api/importJobs/:userID/:jobID/finalize", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const userID = String(req.params.userID || "").trim();
+    const jobID = String(req.params.jobID || "").trim();
+
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+    if (!jobID) return res.status(400).json({ error: "Missing jobID" });
+
+    const job = await getImportJobItem(userID, jobID);
+    if (!job) return res.status(404).json({ error: "Import job not found" });
+
+    const status = normalizeImportJobStatus(job.Status);
+    if (status === "COMPLETED") return res.json({ ok: true, job: publicImportJob(job) });
+    if (status === "FINALIZING") return res.json({ ok: true, job: publicImportJob(job) });
+    if (status === "FAILED") return res.status(409).json({ error: "Import job failed" });
+    if (status === "CANCELED") return res.status(409).json({ error: "Import job canceled" });
+
+    const prepared = {
+      ...job,
+      Status: "FINALIZING",
+      Error: null,
+      FinalizedAt: nowIso(),
+      UpdatedAt: nowIso(),
+      Recompute: {
+        sessionsCompleted: 0,
+        totalSessions: Array.isArray(job.AffectedSessions) ? job.AffectedSessions.length : 0,
+        eventsCompleted: 0,
+        totalEvents: Array.isArray(job.AffectedEvents) ? job.AffectedEvents.length : 0,
+      },
+    };
+    await putImportJobItem(prepared);
+
+    runInBackground(`importJob:finalize:${userID}:${jobID}`, () =>
+      finalizeImportJobInBackground(userID, jobID)
+    );
+
+    return res.json({ ok: true, job: publicImportJob(prepared) });
+  } catch (e) {
+    console.error("POST /api/importJobs/:userID/:jobID/finalize error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
   }
 });
@@ -3348,6 +4680,7 @@ app.post("/api/importSolvesBatch", async (req, res) => {
     const event = normalizeEvent(req.body?.event);
     const sessionID = normalizeSessionID(req.body?.sessionID || "main");
     const solves = Array.isArray(req.body?.solves) ? req.body.solves : [];
+    const skipPostWriteRecompute = !!req.body?.skipPostWriteRecompute;
 
     if (!userID) return res.status(400).json({ error: "Missing userID" });
     if (!event) return res.status(400).json({ error: "Missing event" });
@@ -3355,6 +4688,13 @@ app.post("/api/importSolvesBatch", async (req, res) => {
     if (solves.length > 5000) {
       return res.status(400).json({ error: "Too many solves in one batch (max 5000)" });
     }
+
+    await ensureSessionRecordExists(
+      userID,
+      event,
+      sessionID,
+      sessionID === "main" ? "Main" : null
+    );
 
     const requests = [];
     const addedSolves = [];
@@ -3417,7 +4757,19 @@ app.post("/api/importSolvesBatch", async (req, res) => {
     }
 
     const wrote = await batchWriteRequestsWithRetry(requests);
-    return res.json({ ok: true, addedSolves, wrote });
+    let sessionStats = null;
+    let eventStats = null;
+    let dayBuckets = { event, daysAffected: [] };
+
+    if (addedSolves.length > 0 && !skipPostWriteRecompute) {
+      [sessionStats, eventStats, dayBuckets] = await Promise.all([
+        recomputeSessionStats(ddb, TABLE, userID, event, sessionID),
+        recomputeEventStats(ddb, TABLE, userID, event),
+        recomputeAllDayBucketsForEvent(userID, event),
+      ]);
+    }
+
+    return res.json({ ok: true, addedSolves, wrote, sessionStats, eventStats, dayBuckets });
   } catch (e) {
     console.error("POST /api/importSolvesBatch error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
@@ -3519,9 +4871,17 @@ app.post("/api/wca/import", async (req, res) => {
     if (requests.length) {
       await batchWriteRequestsWithRetry(requests);
 
+      const affectedEvents = new Set();
       for (const group of groups) {
         if (!Array.isArray(group.solves) || !group.solves.length) continue;
         await recomputeSessionStats(ddb, TABLE, userID, group.event, group.sessionID);
+        affectedEvents.add(normalizeEvent(group.event));
+      }
+
+      for (const event of affectedEvents) {
+        if (!event) continue;
+        await recomputeEventStats(ddb, TABLE, userID, event);
+        await recomputeAllDayBucketsForEvent(userID, event);
       }
     }
 
@@ -3832,6 +5192,14 @@ app.put("/api/solve/:userID/:solveRef", async (req, res) => {
       newSolve: rebuilt,
     });
 
+    runInBackground(`dayBuckets:edit:${userID}:${rebuilt.Event}`, () =>
+      recomputeDayBucketsForSolveMutation({
+        userID,
+        oldSolve: existing,
+        newSolve: rebuilt,
+      })
+    );
+
     return res.json({ ok: true, item: rebuilt });
   } catch (e) {
     console.error("PUT /api/solve error:", e);
@@ -3885,6 +5253,14 @@ app.put("/api/solvePenalty/:userID/:solveRef", async (req, res) => {
       newSolve: updated,
     });
 
+    runInBackground(`dayBuckets:penalty:${userID}:${updated.Event}`, () =>
+      recomputeDayBucketsForSolveMutation({
+        userID,
+        oldSolve: existing,
+        newSolve: updated,
+      })
+    );
+
     return res.json({ ok: true, item: updated });
   } catch (e) {
     console.error("PUT /api/solvePenalty error:", e);
@@ -3913,6 +5289,14 @@ app.delete("/api/solve/:userID/:solveRef", async (req, res) => {
       oldSolve: existing,
       newSolve: null,
     });
+
+    runInBackground(`dayBuckets:delete:${userID}:${existing.Event}`, () =>
+      recomputeDayBucketsForSolveMutation({
+        userID,
+        oldSolve: existing,
+        newSolve: null,
+      })
+    );
 
     return res.json({ ok: true });
   } catch (e) {
@@ -4006,10 +5390,65 @@ app.post("/api/recomputeEventStats", async (req, res) => {
     if (!event) return res.status(400).json({ error: "Missing event" });
 
     const item = await recomputeEventStats(ddb, TABLE, userID, event);
-    return res.json({ ok: true, item });
+    const dayBuckets = await recomputeAllDayBucketsForEvent(userID, event);
+    return res.json({ ok: true, item, dayBuckets });
   } catch (e) {
     console.error("POST /api/recomputeEventStats error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.get("/api/dayBuckets/:userID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const userID = String(req.params.userID || "").trim();
+  const event = normalizeEvent(req.query?.event);
+  const mainOnly = String(req.query?.mainOnly || "false").toLowerCase() === "true";
+  const startDay = String(req.query?.startDay || "").trim();
+  const endDay = String(req.query?.endDay || "").trim();
+
+  if (!userID) return res.status(400).json({ error: "Missing userID" });
+  if (mainOnly && !event) {
+    return res.status(400).json({ error: "mainOnly requires event" });
+  }
+
+  try {
+    const timeZone = await getUserDayBucketTimeZone(userID);
+    const prefix = event
+      ? mainOnly
+        ? `DAYBUCKET#EVENT#${event}#MAIN`
+        : `DAYBUCKET#EVENT#${event}`
+      : "DAYBUCKET#ALL";
+
+    const rangeStart = `${prefix}#${startDay || "0000-00-00"}`;
+    const rangeEnd = `${prefix}#${endDay || "9999-99-99"}`;
+
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
+        ExpressionAttributeValues: {
+          ":pk": `USER#${userID}`,
+          ":start": rangeStart,
+          ":end": rangeEnd,
+        },
+        ScanIndexForward: true,
+      })
+    );
+
+    const items = (out.Items || []).filter((item) => hasCurrentDayBucketVersion(item));
+    const aggregateSummary = items.length ? mergeDayBucketSummaries(items) : null;
+    return res.json({
+      ok: true,
+      items,
+      aggregateSummary,
+      scope: event ? (mainOnly ? "event-main" : "event") : "all-events",
+      event: event || null,
+      timeZone,
+    });
+  } catch (e) {
+    console.error("GET /api/dayBuckets error:", e);
+    return res.status(500).json({ error: "Server error" });
   }
 });
 
@@ -4194,6 +5633,7 @@ app.post("/api/customEvent", async (req, res) => {
 
   const userID = String(req.body?.userID || "").trim();
   const eventName = String(req.body?.eventName || "").trim();
+  const opts = req.body?.opts || {};
 
   if (!userID) return res.status(400).json({ error: "Missing userID" });
   if (!eventName) return res.status(400).json({ error: "Missing eventName" });
@@ -4210,6 +5650,11 @@ app.post("/api/customEvent", async (req, res) => {
     CreatedAt: ts,
     UpdatedAt: ts,
   };
+
+  if (opts?.isRelayEvent) {
+    item.IsRelayEvent = true;
+    item.RelayLegs = Array.isArray(opts.relayLegs) ? opts.relayLegs : [];
+  }
 
   try {
     await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
@@ -4241,6 +5686,8 @@ app.get("/api/customEvents/:userID", async (req, res) => {
     const items = (out.Items || []).map((it) => ({
       id: it.EventID,
       name: it.EventName,
+      isRelayEvent: it.IsRelayEvent === true,
+      relayLegs: Array.isArray(it.RelayLegs) ? it.RelayLegs : [],
     }));
 
     return res.json({ ok: true, items });

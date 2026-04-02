@@ -1,3 +1,5 @@
+import { getRelayEventName, isRelayEventId } from "../defaultEvents";
+
 export function getRandomInt(min, max) {
     min = Math.ceil(min);
     max = Math.floor(max);
@@ -48,6 +50,10 @@ export function currentEventToN(currentEvent) {
 
 export function currentEventToString(currentEvent) {
   const e = String(currentEvent || '').toUpperCase();
+
+  if (isRelayEventId(e)) {
+    return getRelayEventName(e) || "Relay";
+  }
 
   let n;
   switch (e) {
@@ -679,7 +685,10 @@ export function rotateFaceCounterClockwise(matrix) {
   }
 
 export function parseAlgorithm(alg, faces, n) {
-    const moves = alg.split(' ');
+    const moves = String(alg || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
   
     moves.forEach(move => {
   

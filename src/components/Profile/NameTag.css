@@ -80,11 +80,11 @@
 }
 
 /* Scale only the inner SVG/component */
-.nametagCube--pyraminx > * { transform: scale(0.30); transform-origin: center; }
-.nametagCube--megaminx > * { transform: scale(0.25) translate(6px, 0px); transform-origin: center; }
-.nametagCube--skewb > *    { transform: scale(0.40) translate(16px, 26px); transform-origin: center; }
-.nametagCube--clock > *    { transform: scale(0.30) translate(18px, 20px); transform-origin: center; }
-.nametagCube--sq1 > *      { transform: scale(0.40); transform-origin: center; }
+.nametagCube--pyraminx > * { transform: scale(0.26) translate(1px, -1px); transform-origin: center; }
+.nametagCube--megaminx > * { transform: scale(0.22) translate(4px, -1px); transform-origin: center; }
+.nametagCube--skewb > *    { transform: scale(0.34) translate(10px, 16px); transform-origin: center; }
+.nametagCube--clock > *    { transform: scale(0.26) translate(14px, 15px); transform-origin: center; }
+.nametagCube--sq1 > *      { transform: scale(0.34) translate(0px, -1px); transform-origin: center; }
 
 .nametagText {
   flex: 0 1 auto;               /* text can shrink if needed */

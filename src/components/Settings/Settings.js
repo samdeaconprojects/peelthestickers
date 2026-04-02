@@ -23,6 +23,14 @@ import {
   getTagColorMapForEvent,
   normalizeTagColorCatalog,
 } from "../TagBar/tagUtils";
+import {
+  EVENT_KEYBINDING_LABELS,
+  PAGE_KEYBINDING_LABELS,
+  SOLVE_KEYBINDING_LABELS,
+  UI_KEYBINDING_LABELS,
+  formatShortcutForDisplay,
+  getPrimaryModifierLabel,
+} from "../../utils/keybindings";
 
 const WCA_IMPORT_EVENT_OPTIONS = [
   { code: "222", label: "2x2" },
@@ -338,6 +346,11 @@ function normalizeNavigationArrowStyleForUi(rawValue) {
   return raw === "classic" ? "classic" : "scramble";
 }
 
+function normalizeStatsSummaryLayoutForUi(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+  return raw === "tile" ? "tile" : "row";
+}
+
 function Settings({
   userID,
   onClose,
@@ -346,6 +359,7 @@ function Settings({
   statsContext = null,
   onStatsRecompute,
   onStatsImport,
+  onStatsExport,
   onSessionsRefresh,
 }) {
   const { settings, updateSettings, setAllSettings } = useSettings();
@@ -396,6 +410,9 @@ function Settings({
             scrambleMode: normalizeScrambleModeForUi(user.Settings.scrambleMode),
             navigationArrowStyle: normalizeNavigationArrowStyleForUi(
               user.Settings.navigationArrowStyle
+            ),
+            statsSummaryLayout: normalizeStatsSummaryLayoutForUi(
+              user.Settings.statsSummaryLayout
             ),
           };
           setAllSettings(normalizedSettings);
@@ -668,6 +685,7 @@ function Settings({
     : "Never";
   const wcaButtonLabel = settings?.wcaImportLastSyncAt ? "Refresh WCA Import" : "Connect WCA";
   const defaultWcaSolveSource = String(settings?.wcaImportSolveSource || "WCA").trim() || "WCA";
+  const primaryModifierLabel = getPrimaryModifierLabel();
 
   const sessionOptionsByEvent = useMemo(() => {
     const grouped = {};
@@ -1037,6 +1055,15 @@ function Settings({
           </div>
 
           <div className="setting-item">
+            <label>Show Add Solve Button</label>
+            <input
+              type="checkbox"
+              checked={settings.showAddSolveButton !== false}
+              onChange={(e) => updateSettings({ showAddSolveButton: e.target.checked })}
+            />
+          </div>
+
+          <div className="setting-item">
             <label>Time Color Mode</label>
             <select
               value={settings.timeColorMode || "binary"}
@@ -1075,7 +1102,18 @@ function Settings({
           </div>
 
           <div className="setting-item">
-            <label>Strict Timer Mode</label>
+            <label>Stats Summary Layout</label>
+            <select
+              value={settings.statsSummaryLayout || "row"}
+              onChange={(e) => updateSettings({ statsSummaryLayout: e.target.value })}
+            >
+              <option value="row">Row view</option>
+              <option value="tile">Tile view</option>
+            </select>
+          </div>
+
+          <div className="setting-item">
+            <label>Non-Rolling Time List</label>
             <input
               type="checkbox"
               checked={!settings.horizontalTimeList}
@@ -1105,6 +1143,34 @@ function Settings({
               <option value="auto">Auto (12 desktop, 5 small)</option>
               <option value="12">Force 12</option>
               <option value="5">Force 5</option>
+            </select>
+          </div>
+
+          <div className="setting-item">
+            <label>Non-Rolling Columns</label>
+            <select
+              value={settings.nonRollingTimeListCols || "auto"}
+              onChange={(e) => updateSettings({ nonRollingTimeListCols: e.target.value })}
+              disabled={!!settings.horizontalTimeList}
+            >
+              <option value="auto">Auto (12 desktop, 5 small)</option>
+              <option value="12">Always 12</option>
+              <option value="5">Always 5</option>
+            </select>
+          </div>
+
+          <div className="setting-item">
+            <label>Non-Rolling Max Rows</label>
+            <select
+              value={String(settings.nonRollingTimeListMaxRows || 3)}
+              onChange={(e) =>
+                updateSettings({ nonRollingTimeListMaxRows: Number(e.target.value) })
+              }
+              disabled={!!settings.horizontalTimeList}
+            >
+              <option value="3">3 rows</option>
+              <option value="2">2 rows</option>
+              <option value="1">1 row</option>
             </select>
           </div>
 
@@ -1354,16 +1420,83 @@ function Settings({
 
           <h2>Key Bindings</h2>
           <div className="settings-container">
+            <div className="setting-item">
+              <label>Primary Modifier</label>
+              <div>{primaryModifierLabel} on this device</div>
+            </div>
+            <div className="setting-item">
+              <label>Shortcut Rule</label>
+              <div>
+                Navigation uses <strong>{primaryModifierLabel}</strong>. Solve edits use
+                <strong> Ctrl+Shift</strong>.
+              </div>
+            </div>
+
             {Object.entries(settings.eventKeyBindings || {}).map(([event, combo]) => (
-              <div className="setting-item" key={event}>
-                <label>{event}:</label>
+              <div className="setting-item" key={`event-${event}`}>
+                <label>{EVENT_KEYBINDING_LABELS[event] || event}</label>
                 <input
                   value={combo}
+                  placeholder={formatShortcutForDisplay(combo)}
                   onChange={(e) =>
                     updateSettings({
                       eventKeyBindings: {
                         ...(settings.eventKeyBindings || {}),
                         [event]: e.target.value,
+                      },
+                    })
+                  }
+                />
+              </div>
+            ))}
+
+            {Object.entries(settings.pageKeyBindings || {}).map(([page, combo]) => (
+              <div className="setting-item" key={`page-${page}`}>
+                <label>{PAGE_KEYBINDING_LABELS[page] || page}</label>
+                <input
+                  value={combo}
+                  placeholder={formatShortcutForDisplay(combo)}
+                  onChange={(e) =>
+                    updateSettings({
+                      pageKeyBindings: {
+                        ...(settings.pageKeyBindings || {}),
+                        [page]: e.target.value,
+                      },
+                    })
+                  }
+                />
+              </div>
+            ))}
+
+            {Object.entries(settings.uiKeyBindings || {}).map(([action, combo]) => (
+              <div className="setting-item" key={`ui-${action}`}>
+                <label>{UI_KEYBINDING_LABELS[action] || action}</label>
+                <input
+                  value={combo}
+                  placeholder={formatShortcutForDisplay(combo)}
+                  onChange={(e) =>
+                    updateSettings({
+                      uiKeyBindings: {
+                        ...(settings.uiKeyBindings || {}),
+                        [action]: e.target.value,
+                      },
+                    })
+                  }
+                />
+              </div>
+            ))}
+
+            {Object.entries(settings.solveKeyBindings || {}).map(([action, combo]) => (
+              <div className="setting-item" key={`solve-${action}`}>
+                <label>{SOLVE_KEYBINDING_LABELS[action] || action}</label>
+                <input
+                  value={combo}
+                  placeholder={formatShortcutForDisplay(combo)}
+                  onChange={(e) =>
+                    updateSettings({
+                      solveKeyBindings: {
+                        ...(settings.solveKeyBindings || {}),
+                        [action]: e.target.value,
                       },
                     })
                   }
@@ -1686,6 +1819,17 @@ function Settings({
                       disabled={!!statsContext?.importBusy}
                     >
                       {statsContext?.importBusy ? "Importing..." : "Open Import"}
+                    </button>
+                  ) : null}
+
+                  {onStatsExport ? (
+                    <button
+                      type="button"
+                      className="settingsActionButton settingsActionButtonSecondary"
+                      onClick={onStatsExport}
+                      disabled={!statsContext?.canExport || !!statsContext?.exportBusy}
+                    >
+                      {statsContext?.exportBusy ? "Exporting..." : "Open Export"}
                     </button>
                   ) : null}
 
