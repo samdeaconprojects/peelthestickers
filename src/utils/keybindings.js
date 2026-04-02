@@ -34,12 +34,14 @@ export const defaultEventBindings = {
 };
 
 export const PAGE_KEYBINDING_LABELS = {
+  home: "Home",
   profile: "Profile",
   stats: "Stats",
   social: "Social",
 };
 
 export const defaultPageBindings = {
+  home: "Primary+H",
   profile: "Primary+U",
   stats: "Primary+Y",
   social: "Primary+G",

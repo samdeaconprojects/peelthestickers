@@ -3259,6 +3259,12 @@ function App() {
       }
 
       const pageBindings = settings.pageKeyBindings || {};
+      if (eventMatchesShortcut(event, pageBindings.home)) {
+        event.preventDefault();
+        navigate("/");
+        return;
+      }
+
       if (eventMatchesShortcut(event, pageBindings.profile)) {
         event.preventDefault();
         navigate("/profile");
