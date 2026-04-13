@@ -1,26 +1,42 @@
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import "./SignInPopup.css";
-//import ptsLogo from '../../assets/ptslongoneline.svg'; 300px width?
-//import ptsLogo from '../../assets/ptsyrg.svg';
-import ptsLogo from '../../assets/LogoStrokeWide.svg';
-
-
+import PTSLongStatusLogo from "./PTSLongStatusLogo";
 
 function SignInPopup({ onSignIn, onSignUp, onClose }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSignIn = () => {
-    onSignIn(username, password);
-  };
+  const handleSignIn = useCallback(async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await onSignIn(username, password);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [isSubmitting, onSignIn, password, username]);
 
-  const handleSignUp = () => {
-    onSignUp(username, password);
-  };
+  const handleSignUp = useCallback(async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await onSignUp(username, password);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [isSubmitting, onSignUp, password, username]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
+      if (isSubmitting) return;
+
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+
       if (e.key === "Enter") {
         isSignUp ? handleSignUp() : handleSignIn();
       }
@@ -30,14 +46,16 @@ function SignInPopup({ onSignIn, onSignUp, onClose }) {
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [username, password, isSignUp]);
+  }, [handleSignIn, handleSignUp, isSubmitting, isSignUp, onClose]);
 
   return (
-    <div className="signInPopup">
-      <div className="signInPopupContent">
-        <span className="closePopup" onClick={onClose}>x</span>
-        <div>
-          <img src={ptsLogo} alt="signInLogo" className="signInLogo" style={{ width: '100px', height: 'auto', padding: '10px' }}/>
+    <div className="signInPopup" onClick={isSubmitting ? undefined : onClose}>
+      <div className="signInPopupContent" onClick={(e) => e.stopPropagation()}>
+        <div className="signInLogoWrap">
+          <PTSLongStatusLogo
+            status={{ phase: isSubmitting ? "loading" : "idle" }}
+            label={isSignUp ? "Creating account" : "Signing in"}
+          />
         </div>
         <input
           type="text"
@@ -45,6 +63,7 @@ function SignInPopup({ onSignIn, onSignUp, onClose }) {
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           className="signInInput"
+          disabled={isSubmitting}
         />
         <input
           type="password"
@@ -52,17 +71,25 @@ function SignInPopup({ onSignIn, onSignUp, onClose }) {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           className="signInInput"
+          disabled={isSubmitting}
         />
         <div>
           {isSignUp ? (
-            <button onClick={handleSignUp} className="signInButton">Sign Up</button>
+            <button onClick={handleSignUp} className="signInButton" disabled={isSubmitting}>
+              {isSubmitting ? "Signing Up..." : "Sign Up"}
+            </button>
           ) : (
-            <button onClick={handleSignIn} className="signInButton">Sign In</button>
+            <button onClick={handleSignIn} className="signInButton" disabled={isSubmitting}>
+              {isSubmitting ? "Signing In..." : "Sign In"}
+            </button>
           )}
         </div>
         <p
           className="toggleOption"
-          onClick={() => setIsSignUp(!isSignUp)}
+          aria-disabled={isSubmitting}
+          onClick={() => {
+            if (!isSubmitting) setIsSignUp(!isSignUp);
+          }}
         >
           {isSignUp ? "Already have an account? Sign In" : "Don't have an account? Sign Up"}
         </p>

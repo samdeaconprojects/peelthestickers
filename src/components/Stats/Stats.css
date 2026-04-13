@@ -112,6 +112,41 @@ td:nth-child(13) {
   gap: 8px;
   flex: 0 0 auto;
   min-width: 0;
+  width: max-content;
+  max-width: 100%;
+}
+
+.statsTopIdentity .name-tag {
+  margin-top: 0;
+  width: 100%;
+  opacity: 0.7;
+  transition: opacity 0.16s ease;
+}
+
+.statsTopIdentity .name-tag-link {
+  display: inline-flex;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.statsTopIdentity .name-tag--xs .name-tag-link {
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  padding: 6px 10px;
+  border-radius: 10px;
+}
+
+.statsTopIdentity .name-tag--xs .nametagCube {
+  margin-right: 10px;
+}
+
+.statsTopIdentity .name-tag--xs .name-tag-text {
+  font-size: 9pt;
+}
+
+.statsTopIdentity .name-tag:hover {
+  opacity: 1;
 }
 
 .statsSettingsGroup{
@@ -176,7 +211,7 @@ td:nth-child(13) {
 
 .statsCompareControls--standard .statsScopeRow {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -969,23 +1004,32 @@ td:nth-child(13) {
 
 .statsViewToggle {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
   gap: 6px;
-  width: 100%;
+  width: auto;
   flex: 0 0 auto;
-  align-items: stretch;
   justify-content: flex-start;
 }
 
 .statsViewToggle .statsToggleBtn {
   flex: 0 0 auto;
-  width: 100%;
+  width: auto;
   min-width: 0;
   padding: 0 8px;
+  opacity: 0.7;
+  transition: opacity 0.16s ease, background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.statsViewToggle .statsToggleBtn:hover {
+  opacity: 1;
 }
 
 .statsViewToggleDivider {
-  display: none;
+  display: inline-flex;
+  align-items: center;
+  color: rgba(255,255,255,0.7);
+  font-weight: 900;
 }
 
 .lineChartControls > .statsToggleBtn {
@@ -1437,7 +1481,7 @@ td:nth-child(13) {
 
 .stats-item--eventMatrix {
   padding: 10px 12px 12px;
-  min-height: 166px;
+  min-height: 128px;
 }
 
 .statsEventMatrix {
@@ -1469,11 +1513,16 @@ td:nth-child(13) {
   width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
-  padding-bottom: 4px;
+  position: relative;
+  isolation: isolate;
+  margin-left: -12px;
+  width: calc(100% + 24px);
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 .statsEventMatrixScroller::-webkit-scrollbar {
-  height: 8px;
+  display: none;
 }
 
 .statsEventMatrixScroller::-webkit-scrollbar-thumb {
@@ -1487,15 +1536,21 @@ td:nth-child(13) {
   align-items: stretch;
   width: max-content;
   min-width: 100%;
+  position: relative;
+  isolation: isolate;
+  padding-right: 12px;
+  box-sizing: border-box;
 }
 
 .statsEventMatrixMetricHead,
 .statsEventMatrixEventHead,
 .statsEventMatrixCell {
+  position: relative;
+  z-index: 1;
   border-radius: 10px;
   border: 1px solid rgba(255,255,255,0.08);
   background: rgba(255,255,255,0.04);
-  min-height: 38px;
+  min-height: 24px;
 }
 
 .statsEventMatrixMetricHead {
@@ -1508,21 +1563,66 @@ td:nth-child(13) {
   font-size: 0.72rem;
 }
 
-.statsEventMatrixToggle.statsEventMatrixMetricHead {
-  padding: 4px 5px;
-  min-height: 38px;
-  line-height: 1.05;
+.statsEventMatrixMetricHead--centered {
   justify-content: center;
+  text-align: center;
+}
+
+.statsEventMatrixFirstCol {
+  --stats-event-matrix-sticky-bg: rgb(24, 28, 34);
+  position: sticky;
+  left: 0;
+  z-index: 100;
+  isolation: isolate;
+  overflow: visible;
+  background: var(--stats-event-matrix-sticky-bg);
+  opacity: 1 !important;
+  border-color: rgb(52, 58, 68);
+  box-shadow:
+    1px 0 0 rgba(255,255,255,0.08),
+    10px 0 18px rgba(0, 0, 0, 0.22);
+}
+
+.statsEventMatrixFirstCol::before {
+  content: "";
+  position: absolute;
+  inset: -1px -6px -1px -1px;
+  border-radius: inherit;
+  background: var(--stats-event-matrix-sticky-bg);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.statsEventMatrixFirstColContent,
+.statsEventMatrixToggleLabel {
+  position: relative;
+  z-index: 2;
+}
+
+.statsEventMatrixToggle.statsEventMatrixMetricHead {
+  padding: 1px 5px;
+  min-height: 24px;
+  line-height: 0.94;
+  justify-content: center;
+  z-index: 101;
 }
 
 .statsEventMatrixToggle.statsEventMatrixMetricHead.is-active {
+  --stats-event-matrix-sticky-bg: rgb(25, 40, 42);
   border-color: rgba(56, 214, 201, 0.34);
-  background: rgba(56, 214, 201, 0.12);
+  background: var(--stats-event-matrix-sticky-bg);
 }
 
 .statsEventMatrixToggle.statsEventMatrixMetricHead:hover,
 .statsEventMatrixToggle.statsEventMatrixMetricHead:focus-within {
-  background: rgba(255,255,255,0.08);
+  --stats-event-matrix-sticky-bg: rgb(31, 35, 41);
+  background: var(--stats-event-matrix-sticky-bg);
+}
+
+.statsEventMatrixToggle.statsEventMatrixMetricHead.is-active:hover,
+.statsEventMatrixToggle.statsEventMatrixMetricHead.is-active:focus-within {
+  --stats-event-matrix-sticky-bg: rgb(27, 44, 46);
+  background: var(--stats-event-matrix-sticky-bg);
 }
 
 .statsEventMatrixToggleLabel {
@@ -1541,11 +1641,20 @@ td:nth-child(13) {
   line-height: 1.1;
 }
 
+.statsEventMatrixEventHead--vertical {
+  align-items: flex-start;
+  justify-content: center;
+}
+
 .statsEventMatrixEventTitle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
+  min-width: 0;
+}
+
+.statsEventMatrixEventLabel {
   min-width: 0;
 }
 
@@ -1580,8 +1689,8 @@ td:nth-child(13) {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 1px;
-  padding: 4px 7px;
+  gap: 0;
+  padding: 0 7px;
 }
 
 .statsEventMatrixValueBtn {
@@ -1607,7 +1716,7 @@ td:nth-child(13) {
   font-size: 0.84rem;
   font-weight: 800;
   letter-spacing: 0.01em;
-  line-height: 1.05;
+  line-height: 0.74;
   opacity: 0.9;
   transition: opacity 120ms ease, transform 120ms ease;
 }
@@ -1621,12 +1730,82 @@ td:nth-child(13) {
 .statsEventMatrixValue--best {
   color: #38d6c9;
   font-size: 1.12rem;
-  line-height: 0.98;
+  line-height: 0.72;
 }
 
 .statsEventMatrixValue--worst {
   color: #ff6078;
   font-size: 0.8rem;
+  line-height: 0.72;
+  margin-top: -4px;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixScroller {
+  margin-left: 0;
+  width: 100%;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixGrid {
+  width: 100%;
+  padding-right: 0;
+  min-width: 0;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixFirstCol {
+  position: relative;
+  left: auto;
+  box-shadow: none;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixEventHead {
+  white-space: normal;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixFirstCol::before {
+  display: none;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixEventTitle {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixCell {
+  padding: 4px 6px;
+  min-width: 0;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixMetricHead,
+.statsEventMatrix--vertical .statsEventMatrixEventHead,
+.statsEventMatrix--vertical .statsEventMatrixCell {
+  min-width: 0;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixMetricHead {
+  padding: 0 4px;
+  font-size: 0.7rem;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixEventHead {
+  padding: 4px 6px;
+  font-size: 0.72rem;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixEventHead small {
+  margin-left: 18px;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixValue {
+  font-size: 0.74rem;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixValue--best {
+  font-size: 0.92rem;
+}
+
+.statsEventMatrix--vertical .statsEventMatrixValue--worst {
+  font-size: 0.64rem;
+  margin-top: -2px;
 }
 
 /* ✅ Line chart fill fix */
@@ -1880,17 +2059,30 @@ td:nth-child(13) {
   overflow: hidden;
 }
 
+.statsWarningModal {
+  width: min(680px, calc(100vw - 56px));
+}
+
 .statsWarningPrompt {
   display: grid;
-  gap: 10px;
-  padding: 8px 4px 4px;
+  gap: 12px;
+  padding: 8px 2px 4px;
+}
+
+.statsWarningPromptBody {
+  max-width: 680px;
 }
 
 .statsWarningPromptLine {
   margin: 0;
-  color: rgba(255,255,255,0.84);
-  font-size: 14px;
+  color: rgba(255,255,255,0.88);
+  font-size: 16px;
   line-height: 1.5;
+}
+
+.statsWarningPromptLine:first-child {
+  color: rgba(255,255,255,0.96);
+  font-weight: 700;
 }
 
 .statsScopeRow--clickable {
@@ -2705,6 +2897,10 @@ input {
     width: calc(100vw - 28px);
     max-height: calc(100vh - 28px);
     padding: 14px;
+  }
+
+  .statsWarningModal {
+    width: calc(100vw - 28px);
   }
 
   .statFocusTitle {

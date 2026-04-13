@@ -146,9 +146,11 @@ function AverageDetailModal({
   solves,
   onClose,
   onSolveOpen,
+  addPost,
   tagConfig = DEFAULT_TAG_CONFIG,
   tagColors = {},
   profileColor = "#2EC4B6",
+  embedded = false,
 }) {
   const [displayMode, setDisplayMode] = useState("items");
 
@@ -197,6 +199,19 @@ function AverageDetailModal({
   }, [solves, tagConfig]);
 
   const itemRowSize = detail.rows.length <= 5 ? 5 : 12;
+  const canShare = !embedded && typeof addPost === "function" && detail.rows.length > 0;
+
+  const handleShare = () => {
+    if (!canShare) return;
+
+    addPost({
+      note: "",
+      event: detail.event || "333",
+      solveList: detail.rows.map((row) => row.solve),
+      comments: [],
+    });
+    onClose?.();
+  };
 
   return (
     <StatFocusModal
@@ -208,11 +223,19 @@ function AverageDetailModal({
       overlayClassName="averageDetailOverlay"
       modalClassName="averageDetailFrame"
       bodyClassName="averageDetailBody"
+      embedded={embedded}
     >
       <div className="averageDetailModal">
         <div className="averageDetailTopRow">
           <div className="averageDetailSummary">
             <div className="averageDetailHeaderLine">
+              <div className="averageDetailHeroValue">
+                {detail.average === "DNF"
+                  ? "DNF"
+                  : detail.average == null
+                    ? "—"
+                    : formatTime(detail.average, true)}
+              </div>
               <div className="averageDetailEventIcon" aria-hidden="true">
                 <div className="averageDetailEventIconStage">
                   <PuzzleSVG
@@ -233,13 +256,6 @@ function AverageDetailModal({
                   {detail.sessionIndexLabel ? (
                     <div className="averageDetailHeroDate">{detail.sessionIndexLabel}</div>
                   ) : null}
-                </div>
-                <div className="averageDetailHeroValue">
-                  {detail.average === "DNF"
-                    ? "DNF"
-                    : detail.average == null
-                      ? "—"
-                      : formatTime(detail.average, true)}
                 </div>
               </div>
             </div>
@@ -270,21 +286,28 @@ function AverageDetailModal({
               </div>
             ) : null}
           </div>
-          <div className="averageDetailViewToggle" role="tablist" aria-label="Average detail view">
-            <button
-              type="button"
-              className={`averageDetailViewBtn ${displayMode === "items" ? "is-active" : ""}`}
-              onClick={() => setDisplayMode("items")}
-            >
-              Time Items
-            </button>
-            <button
-              type="button"
-              className={`averageDetailViewBtn ${displayMode === "table" ? "is-active" : ""}`}
-              onClick={() => setDisplayMode("table")}
-            >
-              Table
-            </button>
+          <div className="averageDetailToolbar">
+            <div className="averageDetailViewToggle" role="tablist" aria-label="Average detail view">
+              <button
+                type="button"
+                className={`averageDetailViewBtn ${displayMode === "items" ? "is-active" : ""}`}
+                onClick={() => setDisplayMode("items")}
+              >
+                Time Items
+              </button>
+              <button
+                type="button"
+                className={`averageDetailViewBtn ${displayMode === "table" ? "is-active" : ""}`}
+                onClick={() => setDisplayMode("table")}
+              >
+                Table
+              </button>
+            </div>
+            {canShare ? (
+              <button type="button" className="averageDetailShareButton" onClick={handleShare}>
+                Share
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -325,9 +348,11 @@ AverageDetailModal.propTypes = {
   solves: PropTypes.arrayOf(PropTypes.object),
   onClose: PropTypes.func,
   onSolveOpen: PropTypes.func,
+  addPost: PropTypes.func,
   tagConfig: PropTypes.object,
   tagColors: PropTypes.object,
   profileColor: PropTypes.string,
+  embedded: PropTypes.bool,
 };
 
 export default AverageDetailModal;

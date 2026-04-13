@@ -17,6 +17,10 @@
   box-shadow: 0 24px 80px rgba(0,0,0,0.45);
 }
 
+.postDetailSolveSection .averageDetailFrame.statFocusModal {
+  width: 100%;
+}
+
 .averageDetailFrame .statFocusHeader {
   justify-content: flex-end;
   min-height: 0;
@@ -38,6 +42,10 @@
   overflow: hidden;
 }
 
+.postDetailSolveSection .averageDetailBody.statFocusBody {
+  min-height: 0;
+}
+
 .averageDetailModal {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -53,6 +61,13 @@
   gap: 16px;
 }
 
+.averageDetailToolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
 .averageDetailSummary {
   display: grid;
   gap: 8px;
@@ -61,12 +76,11 @@
 }
 
 .averageDetailHeaderLine {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(180px, auto) 96px minmax(0, 1fr);
   align-items: center;
   gap: 18px;
   min-width: 0;
-  flex-wrap: nowrap;
-  justify-content: flex-start;
 }
 
 .averageDetailEventIcon {
@@ -105,12 +119,9 @@
 }
 
 .averageDetailTitleRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
+  display: flex;
   align-items: center;
-  gap: 18px;
   min-width: 0;
-  flex: 1;
   min-height: 72px;
 }
 
@@ -136,11 +147,8 @@
   color: #fff;
   white-space: nowrap;
   min-width: 0;
-  width: 100%;
-  text-align: center;
-  justify-self: stretch;
+  text-align: left;
   align-self: center;
-  transform: translateX(-10px);
 }
 
 .averageDetailHeroDate {
@@ -195,6 +203,23 @@
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.12);
   justify-self: end;
+}
+
+.averageDetailShareButton {
+  min-width: 96px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.averageDetailShareButton:hover {
+  background: rgba(255,255,255,0.14);
 }
 
 .averageDetailViewBtn {

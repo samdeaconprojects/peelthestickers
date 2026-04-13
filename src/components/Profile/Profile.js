@@ -12,6 +12,7 @@ import BarChart from "../Stats/BarChart";
 import TimeTable from "../Stats/TimeTable";
 import PercentBar from "../Stats/PercentBar";
 import StatsSummary from "../Stats/StatsSummary";
+import AllEventsTimeMatrix from "../Stats/AllEventsTimeMatrix";
 import { getPosts } from "../../services/getPosts";
 import { getUser } from "../../services/getUser";
 import { updateUser } from "../../services/updateUser";
@@ -134,6 +135,28 @@ const DEFAULT_VISIBLE_STATS = [
 ];
 
 const DEFAULT_STAT_EVENT = "333";
+const PROFILE_TIME_MATRIX_ORDER = [
+  "222",
+  "333",
+  "444",
+  "555",
+  "666",
+  "777",
+  "333OH",
+  "CLOCK",
+  "MEGAMINX",
+  "PYRAMINX",
+  "SKEWB",
+  "SQ1",
+  "333BLD",
+  "444BLD",
+  "555BLD",
+  "333MULTIBLD",
+  "333FEW",
+];
+const PROFILE_TIME_MATRIX_ORDER_INDEX = new Map(
+  PROFILE_TIME_MATRIX_ORDER.map((event, index) => [event, index])
+);
 
 function chartNeedsEventSession(item) {
   return item && item.chart !== "pieChart" && item.chart !== "statsSummary" && item.scope !== "all-events";
@@ -160,6 +183,62 @@ function createStatConfig(type, fallbackEvent = DEFAULT_STAT_EVENT) {
     default:
       return { chart: "lineChart", event: fallbackEvent, session: "all", viewMode: "standard" };
   }
+}
+
+function finiteMetric(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function aggregateProfileMatrixStats(sessionMap = {}) {
+  let solveCount = 0;
+  let singleBest = null;
+  let singleWorst = null;
+  let ao5Best = null;
+  let ao5Worst = null;
+  let ao12Best = null;
+  let ao12Worst = null;
+
+  for (const stats of Object.values(sessionMap || {})) {
+    if (!stats || typeof stats !== "object") continue;
+    solveCount += Number(stats.SolveCountTotal || 0);
+
+    const nextSingleBest = finiteMetric(stats.BestSingleMs);
+    const nextSingleWorst = finiteMetric(stats.WorstSingleMs);
+    const nextAo5Best = finiteMetric(stats.BestAo5Ms);
+    const nextAo5Worst = finiteMetric(stats.WorstAo5Ms);
+    const nextAo12Best = finiteMetric(stats.BestAo12Ms);
+    const nextAo12Worst = finiteMetric(stats.WorstAo12Ms);
+
+    if (nextSingleBest != null) singleBest = singleBest == null ? nextSingleBest : Math.min(singleBest, nextSingleBest);
+    if (nextSingleWorst != null) singleWorst = singleWorst == null ? nextSingleWorst : Math.max(singleWorst, nextSingleWorst);
+    if (nextAo5Best != null) ao5Best = ao5Best == null ? nextAo5Best : Math.min(ao5Best, nextAo5Best);
+    if (nextAo5Worst != null) ao5Worst = ao5Worst == null ? nextAo5Worst : Math.max(ao5Worst, nextAo5Worst);
+    if (nextAo12Best != null) ao12Best = ao12Best == null ? nextAo12Best : Math.min(ao12Best, nextAo12Best);
+    if (nextAo12Worst != null) ao12Worst = ao12Worst == null ? nextAo12Worst : Math.max(ao12Worst, nextAo12Worst);
+  }
+
+  return {
+    solveCount,
+    singleBest,
+    singleWorst,
+    ao5Best,
+    ao5Worst,
+    ao12Best,
+    ao12Worst,
+  };
+}
+
+function compareProfileMatrixItems(a, b) {
+  const aEvent = String(a?.event || "").trim().toUpperCase();
+  const bEvent = String(b?.event || "").trim().toUpperCase();
+  const aRank = PROFILE_TIME_MATRIX_ORDER_INDEX.get(aEvent);
+  const bRank = PROFILE_TIME_MATRIX_ORDER_INDEX.get(bEvent);
+
+  if (aRank != null && bRank != null) return aRank - bRank;
+  if (aRank != null) return -1;
+  if (bRank != null) return 1;
+  return aEvent.localeCompare(bEvent);
 }
 
 const STAT_LIBRARY = [
@@ -399,7 +478,18 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
   const handleAddComment = async (comment) => {
     if (!selectedPost) return;
     const ts = selectedPost.DateTime || selectedPost.date;
-    const updatedComments = [...(selectedPost.Comments || []), comment];
+    const newComment = {
+      text: comment,
+      author:
+        user?.Username ||
+        user?.Name ||
+        user?.username ||
+        user?.name ||
+        "You",
+      userID: user?.UserID || "",
+      createdAt: new Date().toISOString(),
+    };
+    const updatedComments = [...(selectedPost.Comments || []), newComment];
     const updated = { ...selectedPost, Comments: updatedComments };
 
     setPosts((pl) => pl.map((p) => (p === selectedPost ? updated : p)));
@@ -463,6 +553,26 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
 
   const allEventsBreakdown = useMemo(
     () => buildAllEventsBreakdown(viewedSessionStats),
+    [viewedSessionStats]
+  );
+  const profileTimeMatrixItems = useMemo(
+    () =>
+      Object.entries(viewedSessionStats || {})
+        .map(([event, sessionMap]) => {
+          const aggregate = aggregateProfileMatrixStats(sessionMap || {});
+          return {
+            event,
+            solveCount: aggregate.solveCount,
+            singleBest: aggregate.singleBest,
+            singleWorst: aggregate.singleWorst,
+            ao5Best: aggregate.ao5Best,
+            ao5Worst: aggregate.ao5Worst,
+            ao12Best: aggregate.ao12Best,
+            ao12Worst: aggregate.ao12Worst,
+          };
+        })
+        .filter((item) => Number(item.solveCount || 0) > 0)
+        .sort(compareProfileMatrixItems),
     [viewedSessionStats]
   );
   const availableEvents = useMemo(
@@ -717,108 +827,132 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
         {activeTab === 0 && (
           <div className="tabPanel">
             <div className={`profileStatsPage ${showPlayerBar ? "profileStatsPage--withPlayerBar" : "profileStatsPage--noPlayerBar"}`}>
-              <div className="profileStatsGrid">
-                {visibleStats.map((item, idx) => {
-                  const cardClassName = getProfileStatItemClass(item.chart);
+              <div className="profileStatsLayout">
+                <div className="profileStatsMain">
+                  <div className="profileStatsGrid">
+                    {visibleStats.map((item, idx) => {
+                      const cardClassName = getProfileStatItemClass(item.chart);
 
-                  if (item.chart === "statsSummary") {
-                    const solves =
-                      item.scope === "all-events"
-                        ? []
-                        : solvesForConfig(item);
-                    const overallStats =
-                      item.scope === "all-events"
-                        ? null
-                        : item.session === "all"
-                          ? aggregateProfileStats(viewedSessionStats[item.event] || {})
-                          : viewedSessionStats[item.event]?.[item.session] || null;
+                      if (item.chart === "statsSummary") {
+                        const solves =
+                          item.scope === "all-events"
+                            ? []
+                            : solvesForConfig(item);
+                        const overallStats =
+                          item.scope === "all-events"
+                            ? null
+                            : item.session === "all"
+                              ? aggregateProfileStats(viewedSessionStats[item.event] || {})
+                              : viewedSessionStats[item.event]?.[item.session] || null;
 
-                    return (
-                      <div key={idx} className={cardClassName}>
-                        <StatsSummary
-                          solves={solves}
-                          overallSolves={solves}
-                          overallStats={overallStats}
-                          allEventsBreakdown={item.scope === "all-events" ? allEventsBreakdown : null}
-                          mode={item.scope === "all-events" ? "all-events" : item.session === "all" ? "event-overall" : "session"}
-                          selectedEvent={item.event || "All Events"}
-                          selectedSession={item.session || "all"}
-                          loadedSolveCount={solves.length}
-                          showCurrentMetrics={true}
-                          viewMode={item.viewMode || "standard"}
-                          selectedDay=""
-                        />
+                        return (
+                          <div key={idx} className={cardClassName}>
+                            <StatsSummary
+                              solves={solves}
+                              overallSolves={solves}
+                              overallStats={overallStats}
+                              allEventsBreakdown={item.scope === "all-events" ? allEventsBreakdown : null}
+                              mode={item.scope === "all-events" ? "all-events" : item.session === "all" ? "event-overall" : "session"}
+                              selectedEvent={item.event || "All Events"}
+                              selectedSession={item.session || "all"}
+                              loadedSolveCount={solves.length}
+                              showCurrentMetrics={true}
+                              viewMode={item.viewMode || "standard"}
+                              selectedDay=""
+                            />
+                          </div>
+                        );
+                      }
+
+                      if (item.chart === "percentBar") {
+                        const solves = solvesForConfig(item);
+                        return (
+                          <div key={idx} className={cardClassName}>
+                            <PercentBar
+                              solves={solves.slice(-200)}
+                              legendItems={item.legendItems || []}
+                              title={item.subtitle || "Solves Distribution by Time"}
+                            />
+                          </div>
+                        );
+                      }
+
+                      if (item.chart === "lineChart") {
+                        const solves = solvesForConfig(item);
+                        return (
+                          <div key={idx} className={cardClassName}>
+                            <LineChart
+                              solves={solves}
+                              title={item.title || `${item.event} (${item.session || "all"})`}
+                              defaultViewMode="last100"
+                              allowViewPicker={true}
+                              seriesStyle={item.seriesStyle || null}
+                              legendItems={item.legendItems || []}
+                              viewMode={item.viewMode || "standard"}
+                            />
+                          </div>
+                        );
+                      }
+
+                      if (item.chart === "pieChart") {
+                        return (
+                          <div key={idx} className={cardClassName}>
+                            <EventCountPieChart
+                              sessionStats={viewedSessionStats}
+                            />
+                          </div>
+                        );
+                      }
+
+                      if (item.chart === "barChart") {
+                        const solves = solvesForConfig(item);
+                        return (
+                          <div key={idx} className={cardClassName}>
+                            <BarChart
+                              solves={solves.slice(-200)}
+                              seriesStyle={item.seriesStyle || null}
+                              legendItems={item.legendItems || []}
+                            />
+                          </div>
+                        );
+                      }
+
+                      if (item.chart === "timeTable") {
+                        const solves = solvesForConfig(item);
+                        return (
+                          <div key={idx} className={cardClassName}>
+                            <TimeTable
+                              solves={solves.slice(-200)}
+                              seriesStyle={item.seriesStyle || null}
+                            />
+                          </div>
+                        );
+                      }
+
+                      return null;
+                    })}
+                  </div>
+                </div>
+
+                <aside className="profileStatsRail">
+                  <div className="profileStatsMatrixCard">
+                    <div className="profileStatsMatrixCardHeader">
+                      <div>
+                        <h3>Best Time Matrix</h3>
+                        <p>Single, AO5, and AO12 across profile events.</p>
                       </div>
-                    );
-                  }
-
-                  if (item.chart === "percentBar") {
-                    const solves = solvesForConfig(item);
-                    return (
-                      <div key={idx} className={cardClassName}>
-                        <PercentBar
-                          solves={solves.slice(-200)}
-                          legendItems={item.legendItems || []}
-                          title={item.subtitle || "Solves Distribution by Time"}
-                        />
-                      </div>
-                    );
-                  }
-
-                  if (item.chart === "lineChart") {
-                    const solves = solvesForConfig(item);
-                    return (
-                      <div key={idx} className={cardClassName}>
-                        <LineChart
-                          solves={solves}
-                          title={item.title || `${item.event} (${item.session || "all"})`}
-                          defaultViewMode="last100"
-                          allowViewPicker={true}
-                          seriesStyle={item.seriesStyle || null}
-                          legendItems={item.legendItems || []}
-                          viewMode={item.viewMode || "standard"}
-                        />
-                      </div>
-                    );
-                  }
-
-                  if (item.chart === "pieChart") {
-                    return (
-                      <div key={idx} className={cardClassName}>
-                        <EventCountPieChart
-                          sessionStats={viewedSessionStats}
-                        />
-                      </div>
-                    );
-                  }
-
-                  if (item.chart === "barChart") {
-                    const solves = solvesForConfig(item);
-                    return (
-                      <div key={idx} className={cardClassName}>
-                        <BarChart
-                          solves={solves.slice(-200)}
-                          seriesStyle={item.seriesStyle || null}
-                          legendItems={item.legendItems || []}
-                        />
-                      </div>
-                    );
-                  }
-
-                  if (item.chart === "timeTable") {
-                    const solves = solvesForConfig(item);
-                    return (
-                      <div key={idx} className={cardClassName}>
-                        <TimeTable
-                          solves={solves.slice(-200)}
-                          seriesStyle={item.seriesStyle || null}
-                        />
-                      </div>
-                    );
-                  }
-
-                  return null;
-                })}
+                    </div>
+                    {profileTimeMatrixItems.length > 0 ? (
+                      <AllEventsTimeMatrix
+                        items={profileTimeMatrixItems}
+                        orientation="vertical"
+                        showSessionToggle={false}
+                      />
+                    ) : (
+                      <div className="profileStatsMatrixEmpty">No event stats yet.</div>
+                    )}
+                  </div>
+                </aside>
               </div>
             </div>
           </div>

@@ -87,7 +87,8 @@ const getEventIconClassKey = (eventId) => {
 
 function EventOptionVisual({ eventId, eventName }) {
   const iconEvent = getPuzzleIconEvent(eventId);
-  const canRenderPuzzle = !["RELAY"].includes(iconEvent) && !!iconEvent;
+  const visualEvent = normalizeEventId(eventId) === "333OH" ? "333OH" : iconEvent;
+  const canRenderPuzzle = !["RELAY"].includes(visualEvent) && !!visualEvent;
   const iconClass = `event-chip-icon event-chip-icon--${getEventIconClassKey(eventId)}`;
 
   return (
@@ -99,7 +100,7 @@ function EventOptionVisual({ eventId, eventName }) {
       >
         {canRenderPuzzle ? (
           <div className="event-chip-puzzle-scale">
-            <PuzzleSVG event={iconEvent} scramble="" isNameTagCube={true} />
+            <PuzzleSVG event={visualEvent} scramble="" isNameTagCube={true} />
           </div>
         ) : (
           <div className="event-chip-fallback-mark">
@@ -162,17 +163,17 @@ const EventSelector = forwardRef(function EventSelector(
       { id: "555", name: "5x5" },
       { id: "666", name: "6x6" },
       { id: "777", name: "7x7" },
-      { id: "333OH", name: "3x3 OH" },
+      { id: "333OH", name: "OH" },
       { id: "PYRAMINX", name: "Pyraminx" },
       { id: "SKEWB", name: "Skewb" },
       { id: "SQ1", name: "Square-1" },
       { id: "MEGAMINX", name: "Megaminx" },
       { id: "CLOCK", name: "Clock" },
-      { id: "333BLD", name: "3x3 BLD" },
-      { id: "444BLD", name: "4x4 BLD" },
-      { id: "555BLD", name: "5x5 BLD" },
-      { id: "333MULTIBLD", name: "3x3 Multi-BLD" },
-      { id: "333FEW", name: "Fewest Moves" },
+      { id: "333BLD", name: "3BLD" },
+      { id: "444BLD", name: "4BLD" },
+      { id: "555BLD", name: "5BLD" },
+      { id: "333MULTIBLD", name: "MBLD" },
+      { id: "333FEW", name: "Fewest" },
     ],
     []
   );
@@ -307,16 +308,16 @@ const EventSelector = forwardRef(function EventSelector(
             events: ["222", "333", "444", "555", "666", "777"].map(getEvent).filter(Boolean),
           },
           {
-            key: "other",
-            className: "event-gallery--five",
-            events: ["PYRAMINX", "SKEWB", "SQ1", "MEGAMINX", "CLOCK"].map(getEvent).filter(Boolean),
-          },
-          {
             key: "variants",
             className: "event-gallery--six",
             events: ["333OH", "333FEW", "333BLD", "444BLD", "555BLD", "333MULTIBLD"]
               .map(getEvent)
               .filter(Boolean),
+          },
+          {
+            key: "other",
+            className: "event-gallery--five",
+            events: ["PYRAMINX", "SKEWB", "SQ1", "MEGAMINX", "CLOCK"].map(getEvent).filter(Boolean),
           },
         ],
       },
@@ -858,38 +859,59 @@ const EventSelector = forwardRef(function EventSelector(
                   )}
                 </div>
 
-                {curatedEventSections.map((group) => (
-                  <div key={group.label} className="event-group">
-                    <h4>{group.label}</h4>
-                    {group.rows.map((row) => (
-                      <div
-                        key={row.key}
-                        className={`event-gallery ${row.className} event-gallery-row`}
-                      >
-                        {row.events.map((event) => (
-                          <button
-                            key={event.id}
-                            type="button"
-                            className={`event-card ${activeEvent === event.id ? "active" : ""}`}
-                            onClick={() => handleSelectEvent(event.id)}
-                            style={{ "--event-accent": getEventAccent(event.id) }}
+                <div className="event-selector-layout">
+                  <div className="event-selector-main">
+                    {curatedEventSections.map((group) => (
+                      <div key={group.label} className="event-group">
+                        <h4>{group.label}</h4>
+                        {group.rows.map((row) => (
+                          <div
+                            key={row.key}
+                            className={`event-gallery ${row.className} event-gallery-row`}
                           >
-                            <EventOptionVisual eventId={event.id} eventName={event.name} />
-                          </button>
+                            {row.events.map((event) => (
+                              <button
+                                key={event.id}
+                                type="button"
+                                className={`event-card ${activeEvent === event.id ? "active" : ""}`}
+                                onClick={() => handleSelectEvent(event.id)}
+                                style={{ "--event-accent": getEventAccent(event.id) }}
+                              >
+                                <EventOptionVisual eventId={event.id} eventName={event.name} />
+                              </button>
+                            ))}
+                          </div>
                         ))}
                       </div>
                     ))}
                   </div>
-                ))}
 
-                {userID && (
-                  <div className="event-group event-group--sessions">
-                    {/* ✅ NEW: Imports section */}
-                    {importSessionsForEvent.length > 0 && (
-                      <>
-                        <h4>Imports</h4>
-                        <div className="event-list">
-                          {importSessionsForEvent.map((s) => (
+                  {userID && (
+                    <aside className="event-group event-group--sessions">
+                      <div className="event-group--sessions-scroll">
+                        {importSessionsForEvent.length > 0 && (
+                          <>
+                            <h4>Imports</h4>
+                            <div className="event-list event-list--stacked">
+                              {importSessionsForEvent.map((s) => (
+                                <div
+                                  key={s.id}
+                                  className={`event-item ${activeSession === s.id ? "active" : ""}`}
+                                  onClick={() => handleSelectSession(s.id)}
+                                >
+                                  {s.name}
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+
+                        <h4 style={{ marginTop: importSessionsForEvent.length > 0 ? 10 : 0 }}>
+                          Sessions
+                        </h4>
+
+                        <div className="event-list event-list--stacked">
+                          {regularSessionsForEvent.map((s) => (
                             <div
                               key={s.id}
                               className={`event-item ${activeSession === s.id ? "active" : ""}`}
@@ -899,33 +921,16 @@ const EventSelector = forwardRef(function EventSelector(
                             </div>
                           ))}
                         </div>
-                      </>
-                    )}
 
-                    <h4 style={{ marginTop: importSessionsForEvent.length > 0 ? 10 : 0 }}>
-                      Sessions
-                    </h4>
-
-                    <div className="event-list">
-                      {regularSessionsForEvent.map((s) => (
-                        <div
-                          key={s.id}
-                          className={`event-item ${activeSession === s.id ? "active" : ""}`}
-                          onClick={() => handleSelectSession(s.id)}
-                        >
-                          {s.name}
-                        </div>
-                      ))}
-                    </div>
-
-                    {regularSessionsForEvent.length === 0 && importSessionsForEvent.length === 0 && (
-                      <div className="event-selector-empty-state">
-                        No local sessions yet for {eventName}. Start with one clean practice session.
+                        {regularSessionsForEvent.length === 0 && importSessionsForEvent.length === 0 && (
+                          <div className="event-selector-empty-state">
+                            No local sessions yet for {eventName}. Start with one clean practice session.
+                          </div>
+                        )}
                       </div>
-                    )}
-
-                  </div>
-                )}
+                    </aside>
+                  )}
+                </div>
               </div>
             )}
 

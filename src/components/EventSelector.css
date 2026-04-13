@@ -74,7 +74,7 @@
 
 /* === Modal overrides (uses your Detail.css) === */
 .eventSelectorContent {
-  width: min(900px, 92vw);
+  width: min(980px, 95vw);
   height: auto;
   max-height: 78vh;
   display: flex;
@@ -88,6 +88,7 @@
   overflow: auto;
   padding-right: 4px;
   max-height: calc(78vh - 44px);
+  min-height: 0;
 
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -136,6 +137,19 @@
 }
 
 /* === Groups & chips === */
+.event-selector-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px;
+  gap: 16px;
+  align-items: start;
+  min-height: 0;
+  max-height: calc(78vh - 170px);
+}
+
+.event-selector-main {
+  min-width: 0;
+}
+
 .event-group {
   padding: 10px 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -172,21 +186,22 @@
 }
 
 .event-gallery--relay {
-  grid-template-columns: repeat(auto-fit, minmax(140px, 180px));
-  justify-content: start;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .event-gallery--auto {
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .event-card {
   background: #20242a;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
-  padding: 6px 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
   color: white;
-  min-height: 42px;
+  min-height: 50px;
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -220,7 +235,7 @@
 }
 
 .event-card-title {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   line-height: 1.15;
   text-align: left;
@@ -281,6 +296,11 @@
   transform-origin: left center;
 }
 
+.event-chip-icon--333oh > * {
+  transform: scale(0.78) translate(-1px, -1px);
+  transform-origin: left center;
+}
+
 .event-chip-icon--pyraminx > *,
 .event-chip-icon--pryaminx > * {
   transform: scale(0.26) translate(1px, -1px);
@@ -293,7 +313,7 @@
 }
 
 .event-chip-icon--skewb > * {
-  transform: scale(0.34) translate(10px, 16px);
+  transform: scale(0.31) translate(10px, 6px);
   transform-origin: center;
 }
 
@@ -323,6 +343,11 @@
   gap: 8px;
 }
 
+.event-list--stacked {
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
 .event-item {
   background: rgba(61, 61, 61, 0.8);
   color: white;
@@ -334,6 +359,13 @@
   cursor: pointer;
   text-align: left;
 }
+
+.event-list--stacked .event-item {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 12px;
+}
+
 .event-item:hover {
   background: rgba(255, 255, 255, 0.9);
   color: black;
@@ -344,9 +376,25 @@
 }
 
 .event-group--sessions {
-  margin-top: 6px;
+  margin-top: 0;
   background: #1b1e23;
   border-radius: 20px;
+  border-top: none;
+  position: sticky;
+  top: 0;
+  max-height: calc(78vh - 170px);
+  height: calc(78vh - 170px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.event-group--sessions-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 /* === Add buttons === */
@@ -457,6 +505,22 @@
     align-items: stretch;
   }
 
+  .event-selector-layout {
+    grid-template-columns: 1fr;
+    max-height: none;
+  }
+
+  .event-group--sessions {
+    position: static;
+    margin-top: 6px;
+    max-height: none;
+    height: auto;
+  }
+
+  .event-group--sessions-scroll {
+    overflow-y: visible;
+  }
+
   .event-selector-actions {
     justify-content: flex-start;
   }
@@ -470,7 +534,7 @@
   }
 
   .event-card-title {
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .event-chip-icon {

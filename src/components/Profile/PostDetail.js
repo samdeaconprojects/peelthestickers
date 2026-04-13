@@ -1,10 +1,19 @@
-// src/components/Profile/PostDetail.js
-import React, { useState } from 'react';
-import '../Detail/Detail.css';            // reuse your popup styles
-import PuzzleSVG from '../PuzzleSVGs/PuzzleSVG';
-import { calculateAverage, formatTime } from '../TimeList/TimeUtils';
+import React, { useEffect, useMemo, useState } from "react";
+import "../Detail/Detail.css";
+import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
+import { formatTime } from "../TimeList/TimeUtils";
 import { currentEventToString } from "../../components/scrambleUtils";
-import StatSharePost from './StatSharePost';
+import StatSharePost from "./StatSharePost";
+
+const getDetailComponent = () => {
+  const mod = require("../Detail/Detail");
+  return mod?.default || mod;
+};
+
+const getAverageDetailComponent = () => {
+  const mod = require("../Detail/AverageDetailModal");
+  return mod?.default || mod;
+};
 
 function PostDetail({
   author,
@@ -19,95 +28,246 @@ function PostDetail({
   onDelete,
   onAddComment
 }) {
-  const [newComment, setNewComment] = useState('');
-  // compute numeric times array
-  const times = solveList.map(s => s.time);
-  const avg = times.length
-    ? calculateAverage(times, true).average
-    : null;
+  const [newComment, setNewComment] = useState("");
+  const [selectedAverageSolve, setSelectedAverageSolve] = useState(null);
   const trimmedNote = String(note || "").trim();
   const resolvedPostType = statShare ? "stat-share" : postType;
+  const isAveragePost = solveList.length > 1;
+  const statShareCardKey =
+    statShare?.render?.cardKey || statShare?.cardKey || statShare?.kind || "summary";
+  const isWideStatShare = ["line", "percent", "bar", "table"].includes(String(statShareCardKey));
+  const popupWidthClass =
+    resolvedPostType === "stat-share"
+      ? isWideStatShare
+        ? "postDetailPopupContent--statShareWide"
+        : "postDetailPopupContent--statShare"
+      : isAveragePost
+        ? "postDetailPopupContent--average"
+        : "postDetailPopupContent--single";
+  const DetailComponent = getDetailComponent();
+  const AverageDetailComponent = getAverageDetailComponent();
+  const detailSolveList = useMemo(
+    () =>
+      (Array.isArray(solveList) ? solveList : []).map((solve) => ({
+        ...solve,
+        __readOnly: true,
+      })),
+    [solveList]
+  );
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") onClose?.();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   const handleAdd = () => {
     if (!newComment.trim()) return;
     onAddComment(newComment.trim());
-    setNewComment('');
+    setNewComment("");
   };
 
-  return (
-    <div className="detailPopup" onClick={e=> e.target.className==='detailPopup' && onClose()}>
-      <div className="detailPopupContent" style={{ maxHeight:'80vh', overflowY:'auto' }}>
-        <span className="closePopup" onClick={onClose}>×</span>
-        {(author || date) ? (
-          <div style={{ marginBottom: '1em' }}>
-            {author ? (
-              <div style={{ color: 'white', fontWeight: 700, marginBottom: '0.25em' }}>
-                @{author}
+  const formatDateTime = (value) => {
+    if (!value) return "";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return parsed.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
+  const getScrambleFontSize = (event) => {
+    switch (event) {
+      case "222":
+        return "24px";
+      case "333":
+        return "22px";
+      case "444":
+        return "18px";
+      case "555":
+        return "15px";
+      case "666":
+      case "777":
+        return "12px";
+      default:
+        return "16px";
+    }
+  };
+
+  const renderFallbackSolveBlock = (solve, index = null) => {
+    const eventLabel = currentEventToString(solve?.event || "333");
+
+    return (
+      <div
+        key={index ?? "single"}
+        className={isAveragePost ? "detailSolveCard postDetailSolveCard" : "postDetailSolveSingle"}
+      >
+        <div className="detailBottomRow postDetailSolveLayout">
+          <div className="postDetailMainColumn">
+            <div className="detailTimeWrap">
+              <div className="detailTime">{formatTime(solve?.time, false, solve?.penalty)}</div>
+              <div className="detailMetaLine">
+                {eventLabel}
+                {isAveragePost && Number.isFinite(index) ? ` · Solve #${index + 1}` : ""}
               </div>
-            ) : null}
-            {date ? <div className="postDate" style={{ marginLeft: 0, padding: 0 }}>{date}</div> : null}
+            </div>
+
+            <div className="detailCube postDetailCube">
+              <PuzzleSVG event={solve?.event} scramble={solve?.scramble} />
+            </div>
           </div>
-        ) : null}
+
+          <div
+            className="detailScramble postDetailScramble"
+            style={{ fontSize: getScrambleFontSize(solve?.event) }}
+          >
+            {solve?.scramble || ""}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const normalizedComments = comments.map((comment, index) => {
+    if (comment && typeof comment === "object") {
+      return {
+        id: comment.id || comment.createdAt || comment.DateTime || `comment-${index}`,
+        author:
+          comment.author ||
+          comment.Author ||
+          comment.username ||
+          comment.Username ||
+          comment.name ||
+          comment.Name ||
+          "Unknown",
+        text: comment.text || comment.Text || comment.comment || comment.Comment || "",
+        createdAt: comment.createdAt || comment.CreatedAt || comment.DateTime || comment.date || "",
+      };
+    }
+
+    return {
+      id: `comment-${index}`,
+      author: "Comment",
+      text: String(comment || ""),
+      createdAt: "",
+    };
+  });
+
+  return (
+    <div
+      className="detailPopup"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        className={`detailPopupContent postDetailPopupContent ${popupWidthClass}`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {(author || date || trimmedNote) && (
+          <div className="postDetailHeader">
+            {author ? <div className="postDetailAuthor">@{author}</div> : null}
+            {date ? <div className="detailDateRow postDetailDate">{formatDateTime(date)}</div> : null}
+            {trimmedNote ? <div className="postDetailCaption">{trimmedNote}</div> : null}
+          </div>
+        )}
 
         {resolvedPostType === "stat-share" ? (
-          <div style={{ marginBottom: "1em", color: "white" }}>
+          <div className="postDetailStatShare">
             <StatSharePost note={trimmedNote} statShare={statShare} shareColor={postColor} />
           </div>
         ) : (
-          <>
-            {trimmedNote ? <div className="postDetailCaption">{trimmedNote}</div> : null}
-            <h2>{currentEventToString(solveList[0]?.event)} {solveList.length>1?'Average':'Single'}</h2>
-            {avg != null && (
-              <div style={{ marginBottom: '1em' }}>
-                <strong>{formatTime(avg)}</strong> 
-              </div>
-            )}
-
-            <div className="solvesList" style={{ marginBottom:'1em' }}>
-              {solveList.map((s, i) => (
-                <div key={i} style={{ display:'flex', alignItems:'center', marginBottom:'0.5em', border: '2px solid #fff', borderRadius: '8px' }}>
-                  <div style={{ width: '40px', height: '40px', marginRight: '0.5em', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <PuzzleSVG
-                      event={s.event}
-                      scramble={s.scramble}
-                      isMusicPlayer={true}
-                      isTimerCube={false}
-                    />
-                  </div>
-                  <div style={{ width: '4em' }}> <strong>{formatTime(s.time)}</strong> </div>
-
-                  <code style={{ fontSize: '0.8em', wordBreak:'break-all' }}>
-                    {s.scramble}
-                  </code>
+          <div className={`postDetailSolveSection ${isAveragePost ? "postDetailSolveSection--average" : ""}`}>
+            {isAveragePost ? (
+              typeof AverageDetailComponent === "function" ? (
+                <AverageDetailComponent
+                  isOpen={true}
+                  solves={detailSolveList}
+                  onClose={() => {}}
+                  onSolveOpen={(solve) =>
+                    setSelectedAverageSolve(solve ? { ...solve, __readOnly: true } : null)
+                  }
+                  embedded={true}
+                />
+              ) : (
+                <div className="detailFlexCol detailScrollList">
+                  {detailSolveList.map((solve, index) => renderFallbackSolveBlock(solve, index))}
                 </div>
-              ))}
-            </div>
-          </>
+              )
+            ) : detailSolveList[0] ? (
+              typeof DetailComponent === "function" ? (
+                <DetailComponent
+                  solve={detailSolveList[0]}
+                  onClose={() => {}}
+                  embedded={true}
+                  showActions={false}
+                />
+              ) : (
+                renderFallbackSolveBlock(detailSolveList[0])
+              )
+            ) : null}
+          </div>
         )}
 
-        <div className="commentsSection" style={{ marginBottom:'1em' }}>
-          <h3>Comments</h3>
-          {comments.length === 0 && <p>No comments yet.</p>}
-          {comments.map((c,i)=>(
-            <div key={i} className="postComment" style={{ marginBottom:'0.5em' }}>{c}</div>
-          ))}
+        <div className="postDetailCommentsSection">
+          <h3 className="postDetailCommentsTitle">Comments</h3>
+          <div className="postDetailCommentsList">
+            {normalizedComments.length === 0 ? (
+              <div className="postDetailEmptyComments">No comments yet.</div>
+            ) : (
+              normalizedComments.map((comment) => (
+                <div key={comment.id} className="postDetailComment">
+                  <div className="postDetailCommentAuthorRow">
+                    <span className="postDetailCommentAuthor">{comment.author}</span>
+                    {comment.createdAt ? (
+                      <span className="postDetailCommentDate">
+                        {formatDateTime(comment.createdAt)}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="postDetailCommentBody">{comment.text}</div>
+                </div>
+              ))
+            )}
+          </div>
 
-          <div style={{ display:'flex', marginTop:'0.5em' }}>
+          <div className="postDetailCommentComposer">
             <input
               type="text"
               value={newComment}
-              onChange={e=>setNewComment(e.target.value)}
+              onChange={(e) => setNewComment(e.target.value)}
               placeholder="Add a comment…"
-              style={{ flex:1, marginRight:'0.5em' }}
+              className="postDetailCommentInput"
             />
             <button onClick={handleAdd}>Post</button>
           </div>
         </div>
 
-        <div style={{ textAlign:'right' }}>
-          <button className="delete-button" onClick={onDelete}>Delete Post</button>
-        </div>
+        {typeof onDelete === "function" ? (
+          <div className="postDetailFooter">
+            <button className="delete-button" onClick={onDelete}>
+              Delete Post
+            </button>
+          </div>
+        ) : null}
       </div>
+
+      {selectedAverageSolve ? (
+        typeof DetailComponent === "function" ? (
+          <DetailComponent
+            solve={selectedAverageSolve}
+            onClose={() => setSelectedAverageSolve(null)}
+            showActions={false}
+          />
+        ) : null
+      ) : null}
     </div>
   );
 }

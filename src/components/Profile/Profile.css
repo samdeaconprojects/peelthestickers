@@ -94,6 +94,63 @@
   align-items: flex-start;
 }
 
+.profileStatsLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: start;
+}
+
+.profileStatsMain {
+  min-width: 0;
+}
+
+.profileStatsRail {
+  position: sticky;
+  top: 12px;
+  min-width: 0;
+}
+
+.profileStatsMatrixCard {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(100, 100, 100, 0.1);
+  border: 2px solid rgba(200, 200, 200, 0.3);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.profileStatsMatrixCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.profileStatsMatrixCardHeader h3 {
+  margin: 0;
+  color: white;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.profileStatsMatrixCardHeader p {
+  margin: 4px 0 0;
+  color: rgba(255,255,255,0.62);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.profileStatsMatrixEmpty {
+  padding: 18px 10px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.62);
+  text-align: center;
+  font-size: 0.88rem;
+}
+
 .profileStatsItem {
   width: 100%;
   min-height: 240px;
@@ -383,6 +440,14 @@
     grid-template-columns: 1fr;
   }
 
+  .profileStatsLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .profileStatsRail {
+    position: static;
+  }
+
   .profileStatsItem--line {
     height: 320px;
   }
@@ -410,6 +475,59 @@
 .titleAndContent {
     display: flex;
     flex-direction: column;
+}
+
+.postAverageSnapshot {
+  width: min(360px, 100%);
+  align-self: center;
+  margin: 0 10px;
+  flex: 0 0 auto;
+}
+
+.postAverageSnapshotGrid {
+  display: grid;
+  gap: 8px;
+}
+
+.postAverageSnapshotGrid--5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.postAverageSnapshotGrid--12 {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.postAverageSnapshotCell {
+  min-width: 0;
+}
+
+.postAverageSnapshotSummary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.postAverageSnapshotSummaryItem {
+  min-width: 0;
+  display: grid;
+}
+
+.postAverageSnapshotTime.time-item {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  min-height: 36px;
+  height: 36px;
+  margin: 0;
+  padding: 0 4px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  font-size: 12px;
+  font-weight: 800;
+  background: rgba(255,255,255,0.04);
 }
 
 .postCaption,
@@ -553,7 +671,27 @@
     width: 100%;
     font-size: 18pt;
     font-weight: 500;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    flex-wrap: nowrap;
+    line-height: 1.15;
     white-space: nowrap;
+}
+
+.titleTextLabel {
+    color: rgba(255, 255, 255, 0.78);
+}
+
+.titleTextSeparator {
+    color: rgba(255, 255, 255, 0.48);
+}
+
+.titleTextValue {
+    color: #ffffff;
+    font-weight: 800;
+    font-size: 1.18em;
+    letter-spacing: 0;
 }
 
 .postTitleCube {
@@ -1131,5 +1269,14 @@
 
   .widgetBar {
     min-width: 100%;
+  }
+
+  .postAverageSnapshotGrid--5,
+  .postAverageSnapshotGrid--12 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .postAverageSnapshot {
+    width: min(220px, 100%);
   }
 }

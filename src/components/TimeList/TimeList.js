@@ -106,6 +106,11 @@ function hasRealSolveRef(solve) {
   return typeof ref === "string" && ref.startsWith("SOLVE#");
 }
 
+function hasMutableSolveRef(solve) {
+  const ref = solve?.solveRef;
+  return typeof ref === "string" && (ref.startsWith("SOLVE#") || ref.startsWith("LOCAL#"));
+}
+
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -343,24 +348,9 @@ function TimeList({
   const overallMaxValue = overallCalc.maxVal;
 
   const sessionSingleBeatByIndex = useMemo(() => {
-    const beatMap = {};
-    let bestSoFar = null;
-
-    for (let i = 0; i < times.length; i++) {
-      const value = times[i];
-      if (typeof value !== "number" || !isFinite(value)) continue;
-
-      if (bestSoFar != null && value < bestSoFar) {
-        beatMap[i] = true;
-      }
-
-      if (bestSoFar == null || value < bestSoFar) {
-        bestSoFar = value;
-      }
-    }
-
-    return beatMap;
-  }, [times]);
+    if (overallMin < 0) return {};
+    return { [overallMin]: true };
+  }, [overallMin]);
 
   const colsPerRow = isHorizontal ? (windowWidth > 1100 ? 12 : 5) : nonRollingColsPerRow;
   const rowsToDisplay = inPlayerBar ? 1 : isHorizontal ? rowsToShow : nonRollingRowsToDisplay;
@@ -803,8 +793,8 @@ function TimeList({
                 className="delete-icon"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (hasRealSolveRef(solve)) {
-                    deleteTime(solve.solveRef);
+                  if (canMutateSolve(solve)) {
+                    deleteTime(practiceMode ? solveIndex : solve.solveRef);
                   }
                 }}
               >
@@ -863,6 +853,9 @@ function TimeList({
     const globalIdx = horizontalScrollEnabled ? localIndex : pagedWindow.start + localIndex;
     return globalBaseIndex + globalIdx + 1;
   };
+
+  const canMutateSolve = (solve) =>
+    practiceMode ? hasMutableSolveRef(solve) : hasRealSolveRef(solve);
 
   const selectedSolveListIsMutable =
     Array.isArray(selectedSolveList) && selectedSolveList.every((s) => hasRealSolveRef(s));
@@ -1067,8 +1060,8 @@ function TimeList({
                       className="delete-icon"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (hasRealSolveRef(solve)) {
-                          deleteTime(solve.solveRef);
+                        if (canMutateSolve(solve)) {
+                          deleteTime(practiceMode ? globalIdx : solve.solveRef);
                         }
                       }}
                     >
@@ -1099,10 +1092,16 @@ function TimeList({
                 profileColor={user?.Color || user?.color || "#2EC4B6"}
                 onClose={() => setSelectedSolve(null)}
                 deleteTime={() => {
-                  if (hasRealSolveRef(selectedSolve)) deleteTime(selectedSolve.solveRef);
+                  if (canMutateSolve(selectedSolve)) {
+                    deleteTime(
+                      practiceMode
+                        ? solvesSafe.findIndex((solve) => solve?.solveRef === selectedSolve?.solveRef)
+                        : selectedSolve.solveRef
+                    );
+                  }
                 }}
                 addPost={addPost}
-                applyPenalty={hasRealSolveRef(selectedSolve) ? applyPenalty : null}
+                applyPenalty={canMutateSolve(selectedSolve) ? applyPenalty : null}
                 setSessions={setSessions}
                 sessionsList={sessionsList}
                 tagConfig={tagConfig}
@@ -1247,10 +1246,16 @@ function TimeList({
               profileColor={user?.Color || user?.color || "#2EC4B6"}
               onClose={() => setSelectedSolve(null)}
               deleteTime={() => {
-                if (hasRealSolveRef(selectedSolve)) deleteTime(selectedSolve.solveRef);
+                if (canMutateSolve(selectedSolve)) {
+                  deleteTime(
+                    practiceMode
+                      ? solvesSafe.findIndex((solve) => solve?.solveRef === selectedSolve?.solveRef)
+                      : selectedSolve.solveRef
+                  );
+                }
               }}
               addPost={addPost}
-              applyPenalty={hasRealSolveRef(selectedSolve) ? applyPenalty : null}
+              applyPenalty={canMutateSolve(selectedSolve) ? applyPenalty : null}
               setSessions={setSessions}
               sessionsList={sessionsList}
               tagConfig={tagConfig}

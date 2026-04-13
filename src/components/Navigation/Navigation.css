@@ -42,6 +42,7 @@
 .nav-item-current {
   --nav-active-dot-color: rgba(255, 255, 255, 0.95);
   --nav-active-shadow-color: rgba(255, 255, 255, 0.35);
+  --nav-active-dot-glow-color: rgba(255, 255, 255, 0.55);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -322,7 +323,9 @@
   margin-top: 8px;
   border-radius: 999px;
   background: var(--nav-active-dot-color);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--nav-active-dot-color) 50%, transparent);
+  box-shadow:
+    0 0 10px var(--nav-active-dot-glow-color),
+    0 0 18px var(--nav-active-dot-glow-color);
 }
 
 .nav-item-current--stats {

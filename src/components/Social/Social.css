@@ -482,6 +482,16 @@
   flex-shrink: 0;
 }
 
+.messagesHistoryStatus {
+  align-self: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+}
+
 .chatMessage {
   max-width: 60%;
   padding: 8px 12px;

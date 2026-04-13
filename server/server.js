@@ -5290,6 +5290,14 @@ app.delete("/api/solve/:userID/:solveRef", async (req, res) => {
       newSolve: null,
     });
 
+    // Deletes can invalidate cached best-window references far away from the
+    // deleted solve after a series of edits. Recompute the canonical stats so
+    // detail views and home-summary drilldowns keep pointing at the right solves.
+    await Promise.all([
+      recomputeSessionStats(ddb, TABLE, userID, existing.Event, existing.SessionID),
+      recomputeEventStats(ddb, TABLE, userID, existing.Event),
+    ]);
+
     runInBackground(`dayBuckets:delete:${userID}:${existing.Event}`, () =>
       recomputeDayBucketsForSolveMutation({
         userID,
@@ -5952,6 +5960,16 @@ app.get("/api/messages/:conversationID", async (req, res) => {
   try {
     const limitRaw = Number(req.query?.limit);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 100;
+    let cursor = null;
+
+    if (req.query?.cursor) {
+      try {
+        cursor = JSON.parse(Buffer.from(String(req.query.cursor), "base64url").toString("utf8"));
+      } catch (err) {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+    }
+
     let meta = await getConversationMeta(conversationID);
     let members = [];
 
@@ -5981,6 +5999,7 @@ app.get("/api/messages/:conversationID", async (req, res) => {
         ConsistentRead: true,
         ScanIndexForward: false,
         Limit: limit,
+        ExclusiveStartKey: cursor || undefined,
       })
     );
 
@@ -5993,7 +6012,17 @@ app.get("/api/messages/:conversationID", async (req, res) => {
       timestamp: it.CreatedAt,
     }));
 
-    return res.json({ ok: true, items, conversation: meta });
+    const nextCursor = out.LastEvaluatedKey
+      ? Buffer.from(JSON.stringify(out.LastEvaluatedKey), "utf8").toString("base64url")
+      : null;
+
+    return res.json({
+      ok: true,
+      items,
+      conversation: meta,
+      nextCursor,
+      hasMore: !!out.LastEvaluatedKey,
+    });
   } catch (e) {
     console.error("GET /api/messages error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });

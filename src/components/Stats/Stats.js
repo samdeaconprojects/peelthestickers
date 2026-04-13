@@ -1249,6 +1249,11 @@ function formatSolveEstimate(count) {
   return safe > 0 ? safe.toLocaleString() : "an unknown number of";
 }
 
+function formatDayEstimate(count) {
+  const safe = Number(count || 0);
+  return safe > 0 ? safe.toLocaleString() : "an unknown number of";
+}
+
 function getSolveDate(solve) {
   const raw = solve?.datetime || solve?.createdAt || solve?.DateTime || solve?.dateTime;
   if (!raw) return null;
@@ -1657,11 +1662,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     if (typeof resolver === "function") resolver(Boolean(approved));
   }, []);
 
-  const requestExpensiveStatsPrompt = useCallback(({ title, lines = [], confirmLabel = "Continue" }) => {
+  const requestExpensiveStatsPrompt = useCallback(({ title, subtitle = "", lines = [], confirmLabel = "Continue" }) => {
     return new Promise((resolve) => {
       expensiveStatsPromptResolverRef.current = resolve;
       setExpensiveStatsPrompt({
         title,
+        subtitle,
         lines: (Array.isArray(lines) ? lines : []).filter(Boolean),
         confirmLabel,
       });
@@ -1669,15 +1675,29 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   }, []);
 
   const warnBeforeSolveScan = useCallback(
-    async ({ title, intro, event = statsEvent, sessionID = sessionId, extraLines = [], confirmLabel = "Continue" }) => {
-      const solveEstimate = estimateSolveCountForScope(sessionsList, { event, sessionID });
+    async ({
+      title,
+      intro,
+      event = statsEvent,
+      sessionID = sessionId,
+      extraLines = [],
+      confirmLabel = "Continue",
+      estimateLabel = "Estimated solves touched",
+      subtitle = "",
+      estimateValue,
+    }) => {
+      const resolvedEstimate =
+        estimateValue == null
+          ? formatSolveEstimate(estimateSolveCountForScope(sessionsList, { event, sessionID }))
+          : String(estimateValue || "").trim() || "an unknown number of";
       return requestExpensiveStatsPrompt({
         title,
+        subtitle,
         confirmLabel,
         lines: [
           intro,
           `Scope: ${describeStatsScope({ event, sessionID })}.`,
-          `Estimated solves touched: ${formatSolveEstimate(solveEstimate)}.`,
+          `${estimateLabel}: ${resolvedEstimate}.`,
           ...extraLines,
         ],
       });
@@ -1917,7 +1937,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     ].join("::");
   }, [indexedTagScope, user?.UserID]);
 
-  const canUseIndexedTagScope = !!indexedTagScope;
+  const canUseIndexedTagScope = !!indexedTagScope && !hasActiveDateFilter;
 
   const hasIndexedTagScopeCache = useMemo(() => {
     return !!indexedTagScopeKey && tagScopeCacheKey === indexedTagScopeKey;
@@ -2072,7 +2092,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       compareIndexedTagScope.sessionID || "*",
     ].join("::");
   }, [compareIndexedTagScope, user?.UserID]);
-  const canUseCompareIndexedTagScope = !!compareIndexedTagScope;
+  const canUseCompareIndexedTagScope = !!compareIndexedTagScope && !hasActiveCompareDateFilter;
   const hasCompareIndexedTagScopeCache = useMemo(() => {
     return !!compareIndexedTagScopeKey && compareTagScopeCacheKey === compareIndexedTagScopeKey;
   }, [compareIndexedTagScopeKey, compareTagScopeCacheKey]);
@@ -3793,6 +3813,16 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       const end = String(nextEnd || "").trim();
       if (start === String(dateFilterStart || "") && end === String(dateFilterEnd || "")) return true;
       const requiresRawLoad = options?.requiresRawLoad === true;
+      const bucketBackedDateRange = canUseDayBucketScope({
+        userID: user?.UserID,
+        hasActiveTagFilter,
+        statsViewMode,
+        hasActiveDateFilter: !!(start || end),
+        isAllEventsMode,
+        isAllSessionsMode,
+        sessionId,
+      });
+      const dayEstimate = start && end ? formatDayEstimate(getInclusiveDaySpan(start, end)) : "";
 
       if (statsViewMode === "time" && requiresRawLoad) {
         const approved = await warnBeforeSolveScan({
@@ -3809,9 +3839,15 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       } else if (isSolveLevelMode && (start || end)) {
         const approved = await warnBeforeSolveScan({
           title: "Load date-filtered solve scope?",
-          intro: "Applying this index date range loads every matching solve in the selected session so the charts and tables can update.",
+          intro: bucketBackedDateRange
+            ? "Applying this date range loads aggregated day summaries for the selected scope so the stats can update."
+            : "Applying this index date range loads every matching solve in the selected session so the charts and tables can update.",
           event: statsEvent,
           sessionID: sessionId,
+          estimateLabel: bucketBackedDateRange
+            ? "Estimated day summaries touched"
+            : "Estimated solves touched",
+          estimateValue: bucketBackedDateRange ? dayEstimate : undefined,
           extraLines: [
             `Date filter: ${formatShortDateRangeLabel(start, end, start || end ? "" : "All Dates")}.`,
           ],
@@ -3830,11 +3866,15 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     [
       dateFilterEnd,
       dateFilterStart,
+      hasActiveTagFilter,
+      isAllEventsMode,
+      isAllSessionsMode,
       isSolveLevelMode,
       sessionId,
       statsEvent,
       statsSession,
       statsViewMode,
+      user?.UserID,
       warnBeforeSolveScan,
     ]
   );
@@ -3847,11 +3887,24 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         return true;
       }
 
+      const isDateScopedTagLoad = hasActiveDateFilter;
+      const scopedSolveEstimate = hasActiveDateFilter
+        ? formatSolveEstimate(scopeSolvesForSelection.length)
+        : undefined;
+
       const approved = await warnBeforeSolveScan({
-        title: "Load tagged solve scope?",
-        intro: "Applying this tag filter can page through every matching solve in the selected scope so tagged charts and stats can rebuild.",
+        title: "Load solves with this tag?",
+        subtitle: "",
+        intro: isDateScopedTagLoad
+          ? "We'll filter the solves already loaded for this date range to the selected tag."
+          : "We'll load the solves in this scope that match this tag.",
         event: statsEvent,
         sessionID: isAllEventsMode ? ALL_SESSIONS : sessionId,
+        estimateLabel: isDateScopedTagLoad ? "Solves in selected date range" : "Solves in this scope",
+        estimateValue: scopedSolveEstimate,
+        extraLines: [
+          isDateScopedTagLoad ? "Only the current date-range scope is scanned." : "Only matching solves are loaded.",
+        ],
         confirmLabel: "Apply Tag Filter",
       });
       if (!approved) return false;
@@ -3859,7 +3912,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       setTagFilterSelection(sanitized);
       return true;
     },
-    [isAllEventsMode, sessionId, statsEvent, warnBeforeSolveScan]
+    [hasActiveDateFilter, isAllEventsMode, scopeSolvesForSelection.length, sessionId, statsEvent, warnBeforeSolveScan]
   );
 
   const shiftDateWindow = useCallback((offsetDays) => {
@@ -7255,9 +7308,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           }
         }}
       >
-        <div className="statsScopeLead">
-          {leadContent}
-        </div>
+        {leadContent ? <div className="statsScopeLead">{leadContent}</div> : null}
 
         <div className="statsScopeSummary">
           {puzzleEvent ? (
@@ -7384,6 +7435,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           className={`statsTopLeft ${statsViewMode === "standard" ? "statsTopLeft--standard" : "statsTopLeft--time"}`}
         >
           <div className="statsTopIdentity">
+            <NameTag
+              isSignedIn={!!user}
+              user={user}
+              to={profileLinkTarget}
+              size="xs"
+            />
             <div className="statsViewToggle" role="group" aria-label="Stats view">
               <button
                 type="button"
@@ -7421,14 +7478,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                 sessionDisplay: selectedSessionDisplay,
                 tagSelection: tagFilterSelection,
                 dateSummary: dateFilterLabel,
-                leadContent: (
-                  <NameTag
-                    isSignedIn={!!user}
-                    user={user}
-                    to={profileLinkTarget}
-                    size="xs"
-                  />
-                ),
                 sourceSummary: !compareEnabled && useBucketBackedRange ? bucketSourceLabel : "",
                 scopeModalKey: "primary",
               })}
@@ -7441,14 +7490,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   sessionDisplay: compareSessionDisplay,
                   tagSelection: compareTagSelection,
                   dateSummary: compareDateFilterLabel,
-                  leadContent: (
-                    <NameTag
-                      isSignedIn={!!user}
-                      user={user}
-                      to={profileLinkTarget}
-                      size="xs"
-                    />
-                  ),
                   loading: compareLoading,
                   scopeModalKey: "compare",
                 })}
@@ -8040,6 +8081,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         title={selectedAverageDetail?.title || ""}
         subtitle={selectedAverageDetail?.subtitle || ""}
         solves={selectedAverageDetail?.solves || []}
+        addPost={addPost}
         tagConfig={safeTagConfig}
         tagColors={selectedSolveTagColors}
         profileColor={user?.Color || user?.color || "#2EC4B6"}
@@ -8050,7 +8092,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       <StatFocusModal
         isOpen={!!expensiveStatsPrompt}
         title={expensiveStatsPrompt?.title || "Heavy Stats Action"}
-        subtitle="This action can scan or recompute a large solve scope."
+        subtitle={
+          expensiveStatsPrompt?.subtitle || "This action can scan or recompute a large solve scope."
+        }
+        modalClassName="statsWarningModal"
+        bodyClassName="statsWarningPromptBody"
         onClose={() => resolveExpensiveStatsPrompt(false)}
         actionButtons={[
           {

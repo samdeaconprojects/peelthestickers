@@ -37,8 +37,9 @@ import {
 import { getUser } from "./services/getUser";
 import { updateUser } from "./services/updateUser";
 import { getSessions } from "./services/getSessions";
-import { getLastNSolvesBySession } from "./services/getSolvesBySession";
+import { getLastNSolvesBySession, getSolvesBySession } from "./services/getSolvesBySession";
 import { getSessionStats } from "./services/getSessionStats";
+import { recomputeSessionStats as recomputeSessionStatsService } from "./services/recomputeSessionStats";
 import { getCustomEvents } from "./services/getCustomEvents";
 import { addSolve as addSolveToDB } from "./services/addSolve";
 import { deleteSolve } from "./services/deleteSolve";
@@ -573,6 +574,167 @@ function shouldCompleteSharedSessionNow(session, nextIndex, currentUserID) {
 
   const total = getSharedSolveCount(session);
   return nextIndex >= total;
+}
+
+function assignExplicitSolveIndices(solves, totalCount) {
+  const items = Array.isArray(solves) ? solves : [];
+  if (!items.length) return [];
+
+  const count = Number(totalCount);
+  if (!Number.isFinite(count) || count < items.length) return items;
+
+  const startIndex = Math.max(count - items.length, 0);
+  return items.map((solve, index) => ({
+    ...solve,
+    fullIndex: startIndex + index,
+  }));
+}
+
+function removeSolveAndShiftIndices(solves, solveRefToDelete, deletedSolve = null) {
+  const items = Array.isArray(solves) ? solves : [];
+  const deletedFullIndex = Number(deletedSolve?.fullIndex);
+  const hasExplicitIndices = items.every((solve) => Number.isFinite(Number(solve?.fullIndex)));
+
+  const filtered = items.filter((solve) => solve?.solveRef !== solveRefToDelete);
+  if (!hasExplicitIndices || !Number.isFinite(deletedFullIndex)) return filtered;
+
+  return filtered.map((solve) => {
+    const fullIndex = Number(solve?.fullIndex);
+    if (!Number.isFinite(fullIndex) || fullIndex < deletedFullIndex) return solve;
+    return {
+      ...solve,
+      fullIndex: fullIndex - 1,
+    };
+  });
+}
+
+function insertSolveAndShiftIndices(solves, insertIndex, solveToInsert) {
+  const items = Array.isArray(solves) ? solves : [];
+  const next = [...items];
+  const boundedInsertIndex = Math.min(Math.max(Number(insertIndex) || 0, 0), next.length);
+  const hasExplicitIndices = next.every((solve) => Number.isFinite(Number(solve?.fullIndex)));
+
+  if (!hasExplicitIndices) {
+    next.splice(boundedInsertIndex, 0, solveToInsert);
+    return next;
+  }
+
+  let insertFullIndex = Number(solveToInsert?.fullIndex);
+  if (!Number.isFinite(insertFullIndex)) {
+    const nextSolve = next[boundedInsertIndex] || null;
+    const prevSolve = next[boundedInsertIndex - 1] || null;
+    const nextFullIndex = Number(nextSolve?.fullIndex);
+    const prevFullIndex = Number(prevSolve?.fullIndex);
+
+    if (Number.isFinite(nextFullIndex)) {
+      insertFullIndex = nextFullIndex;
+    } else if (Number.isFinite(prevFullIndex)) {
+      insertFullIndex = prevFullIndex + 1;
+    } else {
+      insertFullIndex = boundedInsertIndex;
+    }
+  }
+
+  const shifted = next.map((solve) => {
+    const fullIndex = Number(solve?.fullIndex);
+    if (!Number.isFinite(fullIndex) || fullIndex < insertFullIndex) return solve;
+    return {
+      ...solve,
+      fullIndex: fullIndex + 1,
+    };
+  });
+
+  shifted.splice(boundedInsertIndex, 0, {
+    ...solveToInsert,
+    fullIndex: insertFullIndex,
+  });
+  return shifted;
+}
+
+function findSingleByTime(solves, targetTimeMs) {
+  const target = Number(targetTimeMs);
+  if (!Number.isFinite(target)) return null;
+
+  const matches = (Array.isArray(solves) ? solves : []).filter((solve) => {
+    const time = Number(solve?.time ?? solve?.finalTimeMs);
+    return Number.isFinite(time) && Math.round(time) === Math.round(target);
+  });
+
+  if (!matches.length) return null;
+
+  return matches.sort((a, b) => {
+    const aTime = Number(a?.time ?? a?.finalTimeMs) || Number.MAX_SAFE_INTEGER;
+    const bTime = Number(b?.time ?? b?.finalTimeMs) || Number.MAX_SAFE_INTEGER;
+    if (aTime !== bTime) return aTime - bTime;
+    return String(a?.createdAt || a?.datetime || "").localeCompare(
+      String(b?.createdAt || b?.datetime || "")
+    );
+  })[0];
+}
+
+function findAverageWindowByValue(solves, count, targetAvg) {
+  const items = Array.isArray(solves) ? solves : [];
+  const size = Number(count);
+  const target = Number(targetAvg);
+  if (!Number.isFinite(size) || size <= 0 || !Number.isFinite(target) || items.length < size) {
+    return [];
+  }
+
+  for (let i = 0; i <= items.length - size; i += 1) {
+    const slice = items.slice(i, i + size);
+    const avg = calculateAverage(
+      slice.map((solve) => solve?.time),
+      true
+    )?.average;
+    if (typeof avg === "number" && Math.round(avg) === Math.round(target)) {
+      return slice;
+    }
+  }
+
+  return [];
+}
+
+function findBestSingleSolve(solves) {
+  const items = (Array.isArray(solves) ? solves : []).filter((solve) =>
+    Number.isFinite(Number(solve?.time ?? solve?.finalTimeMs))
+  );
+  if (!items.length) return null;
+
+  return items.reduce((best, solve) => {
+    if (!best) return solve;
+    const bestTime = Number(best?.time ?? best?.finalTimeMs);
+    const solveTime = Number(solve?.time ?? solve?.finalTimeMs);
+    if (solveTime < bestTime) return solve;
+    if (solveTime > bestTime) return best;
+    return String(solve?.createdAt || solve?.datetime || "").localeCompare(
+      String(best?.createdAt || best?.datetime || "")
+    ) < 0
+      ? solve
+      : best;
+  }, null);
+}
+
+function findBestAverageWindow(solves, count) {
+  const items = Array.isArray(solves) ? solves : [];
+  const size = Number(count);
+  if (!Number.isFinite(size) || size <= 0 || items.length < size) return [];
+
+  let bestWindow = [];
+  let bestValue = Infinity;
+
+  for (let i = 0; i <= items.length - size; i += 1) {
+    const slice = items.slice(i, i + size);
+    const avg = calculateAverage(
+      slice.map((solve) => solve?.time),
+      true
+    )?.average;
+    if (typeof avg === "number" && Number.isFinite(avg) && avg < bestValue) {
+      bestValue = avg;
+      bestWindow = slice;
+    }
+  }
+
+  return bestWindow;
 }
 
 function App() {
@@ -1184,10 +1346,16 @@ function App() {
           200
         );
         const normalizedSolves = solves.map(normalizeSolve);
+        const existingTotalCount =
+          sessionStats?.[normalizedEvent]?.[sessionId]?.SolveCountTotal ??
+          sessionStats?.[normalizedEvent]?.[sessionId]?.solveCountTotal ??
+          sessionStats?.[normalizedEvent]?.[sessionId]?.SolveCount ??
+          sessionStats?.[normalizedEvent]?.[sessionId]?.solveCount ??
+          null;
 
         setSessions((prev) => ({
           ...prev,
-          [eventKey]: normalizedSolves,
+          [eventKey]: assignExplicitSolveIndices(normalizedSolves, existingTotalCount),
         }));
       } catch (err) {
         console.error("Error loading solves for current event/session:", err);
@@ -1195,7 +1363,7 @@ function App() {
     };
 
     loadSolvesForCurrent();
-  }, [isSignedIn, user?.UserID, eventKey, currentSession]);
+  }, [eventKey, isSignedIn, normalizeSolve, sessionStats, currentSession, user?.UserID]);
 
   useEffect(() => {
     if (!isSignedIn || !user?.UserID || practiceMode) return;
@@ -1602,7 +1770,7 @@ function App() {
     return Number.isFinite(n) ? n : null;
   };
 
-  const normalizeSolve = (item) => {
+  function normalizeSolve(item) {
     const baseTags = item?.Tags || {};
 
     const relayLegsLocal = item?.RelayLegs || baseTags?.RelayLegs || null;
@@ -1666,7 +1834,7 @@ function App() {
       relayScrambles: relayScramblesLocal,
       relayLegTimes: relayLegTimesLocal,
     };
-  };
+  }
 
   const mergeSharedSession = (session) => {
     console.log("Merging shared session:", session);
@@ -2074,10 +2242,21 @@ function App() {
     });
 
     const appendPendingSolve = (ev, pendingSolve) => {
-      setSessions((prev) => ({
-        ...prev,
-        [ev]: [...(prev[ev] || []), pendingSolve],
-      }));
+      setSessions((prev) => {
+        const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
+        const hasExplicitIndices = arr.every((solve) =>
+          Number.isFinite(Number(solve?.fullIndex))
+        );
+        const nextSolve =
+          hasExplicitIndices && arr.length
+            ? { ...pendingSolve, fullIndex: Number(arr[arr.length - 1]?.fullIndex) + 1 }
+            : pendingSolve;
+
+        return {
+          ...prev,
+          [ev]: [...arr, nextSolve],
+        };
+      });
       adjustSessionSolveCount(ev, currentSession, 1, sessions[ev]?.length || 0);
     };
 
@@ -2085,7 +2264,14 @@ function App() {
       setSessions((prev) => ({
         ...prev,
         [ev]: (prev[ev] || []).map((s) =>
-          s.solveRef === pendingRef ? savedSolve : s
+          s.solveRef === pendingRef
+            ? {
+                ...savedSolve,
+                ...(Number.isFinite(Number(s?.fullIndex))
+                  ? { fullIndex: Number(s.fullIndex) }
+                  : {}),
+              }
+            : s
         ),
       }));
     };
@@ -2642,6 +2828,27 @@ function App() {
   );
 
   const deleteTime = async (eventKeyParam, solveOrIndex, options = {}) => {
+    if (practiceMode) {
+      let practiceIndex = -1;
+
+      if (typeof solveOrIndex === "number") {
+        practiceIndex = solveOrIndex;
+      } else if (typeof solveOrIndex === "string") {
+        practiceIndex = (practiceSolves || []).findIndex(
+          (solve) => solve?.solveRef === solveOrIndex
+        );
+      } else if (solveOrIndex && typeof solveOrIndex === "object") {
+        const solveRef = solveOrIndex.solveRef || null;
+        practiceIndex = (practiceSolves || []).findIndex(
+          (solve) => solve?.solveRef === solveRef
+        );
+      }
+
+      if (practiceIndex < 0) return;
+      deletePracticeTime(practiceIndex, options);
+      return;
+    }
+
     const ev = String(eventKeyParam || "").toUpperCase();
     if (!ev) return;
     const requireConfirm = options?.requireConfirm === true;
@@ -2694,7 +2901,7 @@ function App() {
       const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
       return {
         ...(prev || {}),
-        [ev]: arr.filter((s) => s?.solveRef !== solveRefToDelete),
+        [ev]: removeSolveAndShiftIndices(arr, solveRefToDelete, targetSolve),
       };
     });
     adjustSessionSolveCount(
@@ -2712,13 +2919,11 @@ function App() {
         if (targetSolve) {
           setSessions((prev) => {
             const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
-            const next = [...arr];
             const restoreIndex =
-              solveIndex >= 0 ? Math.min(Math.max(solveIndex, 0), next.length) : next.length;
-            next.splice(restoreIndex, 0, targetSolve);
+              solveIndex >= 0 ? Math.min(Math.max(solveIndex, 0), arr.length) : arr.length;
             return {
               ...(prev || {}),
-              [ev]: next,
+              [ev]: insertSolveAndShiftIndices(arr, restoreIndex, targetSolve),
             };
           });
           adjustSessionSolveCount(
@@ -3075,6 +3280,42 @@ function App() {
       currentSessionStatsForEvent?.solveCount ??
       0
   );
+  useEffect(() => {
+    if (practiceMode) return;
+    const ev = String(eventKey || "").toUpperCase();
+    if (!ev) return;
+
+    const eventSolves = Array.isArray(sessions?.[ev]) ? sessions[ev] : [];
+    if (!eventSolves.length) return;
+
+    const hasExplicitIndices = eventSolves.every((solve) =>
+      Number.isFinite(Number(solve?.fullIndex))
+    );
+    if (hasExplicitIndices) return;
+    if (
+      !Number.isFinite(currentSessionTotalSolveCount) ||
+      currentSessionTotalSolveCount < eventSolves.length
+    ) {
+      return;
+    }
+
+    setSessions((prev) => {
+      const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
+      const stillMissing = arr.some((solve) => !Number.isFinite(Number(solve?.fullIndex)));
+      if (!stillMissing) return prev;
+      return {
+        ...(prev || {}),
+        [ev]: assignExplicitSolveIndices(arr, currentSessionTotalSolveCount),
+      };
+    });
+  }, [
+    assignExplicitSolveIndices,
+    currentSessionTotalSolveCount,
+    eventKey,
+    practiceMode,
+    sessions,
+  ]);
+
   const currentSolves = useMemo(() => {
     const items = Array.isArray(baseCurrentSolves) ? baseCurrentSolves : [];
     if (!items.length) return [];
@@ -3160,11 +3401,14 @@ function App() {
         const restoredSolve = normalizeSolve(restored?.item);
         setSessions((prev) => {
           const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
-          const next = [...arr];
-          next.splice(insertIndex, 0, restoredSolve);
           return {
             ...(prev || {}),
-            [ev]: next,
+            [ev]: insertSolveAndShiftIndices(arr, insertIndex, {
+              ...restoredSolve,
+              ...(Number.isFinite(Number(deletedSolve?.fullIndex))
+                ? { fullIndex: Number(deletedSolve.fullIndex) }
+                : {}),
+            }),
           };
         });
         adjustSessionSolveCount(
@@ -3183,11 +3427,9 @@ function App() {
 
     setSessions((prev) => {
       const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
-      const next = [...arr];
-      next.splice(insertIndex, 0, deletedSolve);
       return {
         ...(prev || {}),
-        [ev]: next,
+        [ev]: insertSolveAndShiftIndices(arr, insertIndex, deletedSolve),
       };
     });
     adjustSessionSolveCount(
@@ -3562,6 +3804,86 @@ function App() {
       });
   }, [sharedSession]);
 
+  const loadAllCurrentSessionSolves = useCallback(async () => {
+    if (practiceMode || !isSignedIn || !user?.UserID) return [];
+
+    try {
+      const items = await runDb(
+        "Loading full session solves",
+        () => getSolvesBySession(user.UserID, currentEvent, currentSession),
+        { showStatus: false }
+      );
+
+      const normalized = (items || []).map((item) => normalizeSolve(item)).filter(Boolean);
+      return assignExplicitSolveIndices(normalized, normalized.length);
+    } catch (error) {
+      console.warn("Failed to load full session solves:", error);
+      return [];
+    }
+  }, [currentEvent, currentSession, isSignedIn, practiceMode, runDb, user?.UserID]);
+
+  const applyLocalHomeMetricCorrection = useCallback((patch) => {
+    const ev = String(currentEvent || "").toUpperCase();
+    const sid = String(currentSession || "main");
+    if (!ev || !patch || typeof patch !== "object") return;
+
+    setSessionStats((prev) => ({
+      ...(prev || {}),
+      [ev]: {
+        ...(prev?.[ev] || {}),
+        [sid]: {
+          ...(prev?.[ev]?.[sid] || {}),
+          ...patch,
+        },
+      },
+    }));
+
+    setSessionsList((prev) =>
+      Array.isArray(prev)
+        ? prev.map((session) =>
+            String(session?.Event || "").toUpperCase() === ev &&
+            String(session?.SessionID || "main") === sid
+              ? {
+                  ...session,
+                  Stats: {
+                    ...(session?.Stats || {}),
+                    ...patch,
+                  },
+                }
+              : session
+          )
+        : prev
+    );
+  }, [currentEvent, currentSession]);
+
+  const refreshCanonicalCurrentSessionStats = useCallback(async () => {
+    if (practiceMode || !user?.UserID) return null;
+
+    try {
+      const item = await runDb(
+        "Refreshing session stats",
+        () => recomputeSessionStatsService(user.UserID, currentEvent, currentSession),
+        { showStatus: false }
+      );
+
+      if (item) {
+        applyLocalHomeMetricCorrection(item);
+      }
+
+      return item || null;
+    } catch (error) {
+      console.warn("Failed to refresh canonical current session stats:", error);
+      return null;
+    }
+  }, [
+    applyLocalHomeMetricCorrection,
+    currentEvent,
+    currentSession,
+    practiceMode,
+    runDb,
+    user?.UserID,
+  ]);
+
   const requestBestAverageWindow = async (count, startSolveRef, targetAvg) => {
     if (
       !practiceMode &&
@@ -3586,7 +3908,13 @@ function App() {
         );
 
         const normalized = (items || []).map((it) => normalizeSolve(it)).filter(Boolean);
-        if (normalized.length === count) {
+        const exactApiMatch =
+          normalized.length === count &&
+          typeof calculateAverage(normalized.map((solve) => solve?.time), true)?.average === "number" &&
+          Math.round(calculateAverage(normalized.map((solve) => solve?.time), true).average) ===
+            Math.round(Number(targetAvg));
+
+        if (exactApiMatch) {
           setSelectedAverageSolves(normalized);
           return true;
         }
@@ -3615,6 +3943,48 @@ function App() {
       return true;
     }
 
+    const fullSessionSolves = await loadAllCurrentSessionSolves();
+    const exactWindow = findAverageWindowByValue(fullSessionSolves, count, targetAvg);
+    if (exactWindow.length > 0) {
+      setSelectedAverageSolves(exactWindow);
+      return true;
+    }
+
+    const bestWindow = findBestAverageWindow(fullSessionSolves, count);
+    if (bestWindow.length > 0) {
+      const correctedAverage = calculateAverage(
+        bestWindow.map((solve) => solve?.time),
+        true
+      )?.average;
+
+      const patch =
+        count === 3
+          ? {
+              BestMo3Ms: correctedAverage,
+              BestMo3StartSolveSK: bestWindow[0]?.solveRef || null,
+            }
+          : count === 5
+          ? {
+              BestAo5Ms: correctedAverage,
+              BestAo5StartSolveSK: bestWindow[0]?.solveRef || null,
+            }
+          : count === 12
+          ? {
+              BestAo12Ms: correctedAverage,
+              BestAo12StartSolveSK: bestWindow[0]?.solveRef || null,
+            }
+          : {};
+
+      if (Object.keys(patch).length) {
+        applyLocalHomeMetricCorrection(patch);
+      }
+
+      await refreshCanonicalCurrentSessionStats();
+
+      setSelectedAverageSolves(bestWindow);
+      return true;
+    }
+
     return false;
   };
 
@@ -3624,6 +3994,7 @@ function App() {
 
       if (selection.kind === "single") {
         const solveRef = currentSessionStatsForEvent?.[selection.solveField] || null;
+        const target = Number(selection.value);
         let solve =
           currentSolves.find(
             (item) => String(item?.solveRef ?? item?.SK ?? "") === String(solveRef)
@@ -3644,10 +4015,30 @@ function App() {
           }
         }
 
+        const solveMatchesTarget =
+          solve && Number.isFinite(target)
+            ? Math.round(Number(solve?.time ?? solve?.finalTimeMs)) === Math.round(target)
+            : !!solve;
+
+        if (!solveMatchesTarget) {
+          solve = findSingleByTime(currentSolves, target);
+        }
+
         if (!solve) {
-          const target = Number(selection.value);
-          solve =
-            currentSolves.find((item) => Math.round(Number(item?.time)) === Math.round(target)) || null;
+          const fullSessionSolves = await loadAllCurrentSessionSolves();
+          solve = findSingleByTime(fullSessionSolves, target);
+
+          if (!solve) {
+            solve = findBestSingleSolve(fullSessionSolves);
+          }
+
+          if (solve) {
+            applyLocalHomeMetricCorrection({
+              BestSingleMs: Number(solve?.time ?? solve?.finalTimeMs) || null,
+              BestSingleSolveSK: solve?.solveRef || null,
+            });
+            await refreshCanonicalCurrentSessionStats();
+          }
         }
 
         if (solve) {
@@ -3671,9 +4062,12 @@ function App() {
       currentSession,
       currentSolves,
       isSignedIn,
+      applyLocalHomeMetricCorrection,
+      loadAllCurrentSessionSolves,
       normalizeSolve,
       currentSessionStatsForEvent,
       practiceMode,
+      refreshCanonicalCurrentSessionStats,
       requestBestAverageWindow,
       user?.UserID,
     ]
@@ -4137,6 +4531,7 @@ function App() {
                       title={`Average Detail (${selectedAverageSolves.length})`}
                       subtitle={`${eventKey === "333" ? "3x3" : eventKey} · ${currentSession}`}
                       solves={selectedAverageSolves}
+                      addPost={addPost}
                       tagConfig={homeTagConfig}
                       tagColors={currentTagColors}
                       profileColor={user?.Color || user?.color || "#2EC4B6"}

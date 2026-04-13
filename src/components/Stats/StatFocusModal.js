@@ -13,11 +13,12 @@ function StatFocusModal({
   overlayClassName = "",
   modalClassName = "",
   bodyClassName = "",
+  embedded = false,
 }) {
   const hasHeading = Boolean(title || subtitle);
 
   useEffect(() => {
-    if (!isOpen) return undefined;
+    if (!isOpen || embedded) return undefined;
 
     const onKeyDown = (event) => {
       if (event.key === "Escape") onClose?.();
@@ -25,9 +26,32 @@ function StatFocusModal({
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [isOpen, onClose]);
+  }, [embedded, isOpen, onClose]);
 
   if (!isOpen) return null;
+
+  if (embedded) {
+    return (
+      <div className={`statFocusModal ${modalClassName}`.trim()}>
+        {optionsContent ? <div className="statFocusOptions">{optionsContent}</div> : null}
+        <div className="statFocusActions">
+          {actionButtons.map((button) => (
+            <button
+              key={button.key}
+              type="button"
+              className={`statFocusActionBtn ${button.tone ? `is-${button.tone}` : ""}`}
+              onClick={button.onClick}
+              disabled={button.disabled}
+            >
+              {button.label}
+            </button>
+          ))}
+        </div>
+        {actionMessage ? <div className="statFocusMessage">{actionMessage}</div> : null}
+        <div className={`statFocusBody ${bodyClassName}`.trim()}>{children}</div>
+      </div>
+    );
+  }
 
   const modalContent = (
     <div
@@ -37,20 +61,14 @@ function StatFocusModal({
       }}
     >
       <div className={`statFocusModal ${modalClassName}`.trim()}>
-        <div className="statFocusHeader">
-          {hasHeading ? (
+        {hasHeading ? (
+          <div className="statFocusHeader">
             <div>
               {title ? <div className="statFocusTitle">{title}</div> : null}
               {subtitle ? <div className="statFocusSubtitle">{subtitle}</div> : null}
             </div>
-          ) : (
-            <div />
-          )}
-
-          <button type="button" className="statFocusClose" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        </div>
+          </div>
+        ) : null}
 
         {optionsContent ? <div className="statFocusOptions">{optionsContent}</div> : null}
 

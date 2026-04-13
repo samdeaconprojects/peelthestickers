@@ -101,80 +101,164 @@ export default function AllEventsTimeMatrix({
   mainOnly = false,
   onToggleMainOnly = null,
   onStatSelect = null,
+  orientation = "horizontal",
+  showSessionToggle = true,
 }) {
-  const gridStyle = {
-    gridTemplateColumns: `56px repeat(${Math.max(1, items.length)}, minmax(88px, 1fr))`,
-  };
+  const isVertical = orientation === "vertical";
+  const gridStyle = isVertical
+    ? {
+        gridTemplateColumns: "minmax(82px, 0.95fr) repeat(3, minmax(0, 1fr))",
+        gridTemplateRows: `auto repeat(${Math.max(1, items.length)}, 48px)`,
+      }
+    : {
+        gridTemplateColumns: `56px repeat(${Math.max(1, items.length)}, minmax(88px, 1fr))`,
+        gridTemplateRows: "auto repeat(3, 48px)",
+      };
 
   return (
-    <div className={`statsEventMatrix ${loading ? "is-loading" : ""}`} aria-busy={loading}>
+    <div
+      className={`statsEventMatrix ${isVertical ? "statsEventMatrix--vertical" : ""} ${loading ? "is-loading" : ""}`}
+      aria-busy={loading}
+    >
       <div className="statsEventMatrixScroller">
         <div className="statsEventMatrixGrid" style={gridStyle}>
-          <label className={`statsEventMatrixToggle statsEventMatrixMetricHead ${mainOnly ? "" : "is-active"}`}>
-            <input
-              type="checkbox"
-              checked={!mainOnly}
-              onChange={(event) => onToggleMainOnly?.(!event.target.checked)}
-            />
-            <span className="statsEventMatrixToggleLabel">
-              {mainOnly ? "Main Sessions" : "All Sessions"}
-            </span>
-          </label>
-          {items.map((item) => (
-            <div key={`head-${item.event}`} className="statsEventMatrixEventHead">
-              <div className="statsEventMatrixEventTitle">
-                <span
-                  className={`statsEventMatrixEventIcon ${
-                    isNxNStyleEvent(item.event) ? "is-nxn" : "is-other"
-                  }`}
-                  aria-hidden="true"
-                >
-                  <PuzzleSVG event={getPuzzleIconEvent(item.event)} scramble="" isStatsHeaderIcon />
+          {isVertical ? (
+            <>
+              <div className="statsEventMatrixMetricHead statsEventMatrixFirstCol">
+                <span className="statsEventMatrixFirstColContent">
+                  {showSessionToggle ? (mainOnly ? "Main Sessions" : "All Sessions") : "Event"}
                 </span>
-                <span>{formatEventLabel(item.event)}</span>
               </div>
-              <small>{Number(item.solveCount || 0).toLocaleString()}</small>
-            </div>
-          ))}
+              {["Single", "AO5", "AO12"].map((label) => (
+                <div key={label} className="statsEventMatrixMetricHead statsEventMatrixMetricHead--centered">
+                  <span>{label}</span>
+                </div>
+              ))}
 
-          <div className="statsEventMatrixMetricHead">Single</div>
-          {items.map((item) => (
-            <MatrixCell
-              key={`single-${item.event}`}
-              item={item}
-              metricKey="single"
-              best={item.singleBest}
-              worst={item.singleWorst}
-              average={false}
-              onStatSelect={onStatSelect}
-            />
-          ))}
+              {items.map((item) => (
+                <React.Fragment key={`row-${item.event}`}>
+                  <div className="statsEventMatrixEventHead statsEventMatrixFirstCol statsEventMatrixEventHead--vertical">
+                    <div className="statsEventMatrixEventTitle">
+                      <span
+                        className={`statsEventMatrixEventIcon ${
+                          isNxNStyleEvent(item.event) ? "is-nxn" : "is-other"
+                        }`}
+                        aria-hidden="true"
+                      >
+                        <PuzzleSVG event={getPuzzleIconEvent(item.event)} scramble="" isStatsHeaderIcon />
+                      </span>
+                      <span className="statsEventMatrixEventLabel">{formatEventLabel(item.event)}</span>
+                    </div>
+                    <small>{Number(item.solveCount || 0).toLocaleString()}</small>
+                  </div>
+                  <MatrixCell
+                    item={item}
+                    metricKey="single"
+                    best={item.singleBest}
+                    worst={item.singleWorst}
+                    average={false}
+                    onStatSelect={onStatSelect}
+                  />
+                  <MatrixCell
+                    item={item}
+                    metricKey="ao5"
+                    best={item.ao5Best}
+                    worst={item.ao5Worst}
+                    average
+                    onStatSelect={onStatSelect}
+                  />
+                  <MatrixCell
+                    item={item}
+                    metricKey="ao12"
+                    best={item.ao12Best}
+                    worst={item.ao12Worst}
+                    average
+                    onStatSelect={onStatSelect}
+                  />
+                </React.Fragment>
+              ))}
+            </>
+          ) : (
+            <>
+              {showSessionToggle ? (
+                <label className={`statsEventMatrixToggle statsEventMatrixMetricHead statsEventMatrixFirstCol ${mainOnly ? "" : "is-active"}`}>
+                  <input
+                    type="checkbox"
+                    checked={!mainOnly}
+                    onChange={(event) => onToggleMainOnly?.(!event.target.checked)}
+                  />
+                  <span className="statsEventMatrixToggleLabel">
+                    {mainOnly ? "Main Sessions" : "All Sessions"}
+                  </span>
+                </label>
+              ) : (
+                <div className="statsEventMatrixMetricHead statsEventMatrixFirstCol">
+                  <span className="statsEventMatrixFirstColContent">Event</span>
+                </div>
+              )}
+              {items.map((item) => (
+                <div key={`head-${item.event}`} className="statsEventMatrixEventHead">
+                  <div className="statsEventMatrixEventTitle">
+                    <span
+                      className={`statsEventMatrixEventIcon ${
+                        isNxNStyleEvent(item.event) ? "is-nxn" : "is-other"
+                      }`}
+                      aria-hidden="true"
+                    >
+                      <PuzzleSVG event={getPuzzleIconEvent(item.event)} scramble="" isStatsHeaderIcon />
+                    </span>
+                    <span>{formatEventLabel(item.event)}</span>
+                  </div>
+                  <small>{Number(item.solveCount || 0).toLocaleString()}</small>
+                </div>
+              ))}
 
-          <div className="statsEventMatrixMetricHead">AO5</div>
-          {items.map((item) => (
-            <MatrixCell
-              key={`ao5-${item.event}`}
-              item={item}
-              metricKey="ao5"
-              best={item.ao5Best}
-              worst={item.ao5Worst}
-              average
-              onStatSelect={onStatSelect}
-            />
-          ))}
+              <div className="statsEventMatrixMetricHead statsEventMatrixFirstCol">
+                <span className="statsEventMatrixFirstColContent">Single</span>
+              </div>
+              {items.map((item) => (
+                <MatrixCell
+                  key={`single-${item.event}`}
+                  item={item}
+                  metricKey="single"
+                  best={item.singleBest}
+                  worst={item.singleWorst}
+                  average={false}
+                  onStatSelect={onStatSelect}
+                />
+              ))}
 
-          <div className="statsEventMatrixMetricHead">AO12</div>
-          {items.map((item) => (
-            <MatrixCell
-              key={`ao12-${item.event}`}
-              item={item}
-              metricKey="ao12"
-              best={item.ao12Best}
-              worst={item.ao12Worst}
-              average
-              onStatSelect={onStatSelect}
-            />
-          ))}
+              <div className="statsEventMatrixMetricHead statsEventMatrixFirstCol">
+                <span className="statsEventMatrixFirstColContent">AO5</span>
+              </div>
+              {items.map((item) => (
+                <MatrixCell
+                  key={`ao5-${item.event}`}
+                  item={item}
+                  metricKey="ao5"
+                  best={item.ao5Best}
+                  worst={item.ao5Worst}
+                  average
+                  onStatSelect={onStatSelect}
+                />
+              ))}
+
+              <div className="statsEventMatrixMetricHead statsEventMatrixFirstCol">
+                <span className="statsEventMatrixFirstColContent">AO12</span>
+              </div>
+              {items.map((item) => (
+                <MatrixCell
+                  key={`ao12-${item.event}`}
+                  item={item}
+                  metricKey="ao12"
+                  best={item.ao12Best}
+                  worst={item.ao12Worst}
+                  average
+                  onStatSelect={onStatSelect}
+                />
+              ))}
+            </>
+          )}
         </div>
       </div>
     </div>

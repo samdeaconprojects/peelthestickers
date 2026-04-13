@@ -8,7 +8,7 @@ import StatSharePost from "../Profile/StatSharePost";
 import { getPosts } from "../../services/getPosts";
 import { getUser } from "../../services/getUser";
 import { updatePostComments } from "../../services/updatePostComments";
-import { getMessages } from "../../services/getMessages";
+import { getMessagesPage } from "../../services/getMessages";
 import { sendMessage } from "../../services/sendMessage";
 import { getConversations } from "../../services/getConversations";
 import { createConversation } from "../../services/createConversation";
@@ -37,7 +37,13 @@ import { hexToRgbString } from "../../utils/colorUtils";
 const FEED_POST_LIMIT = 25;
 const GROUP_POST_LIMIT = 25;
 const CONVERSATION_LIMIT = 100;
-const MESSAGE_LIMIT = 100;
+const MESSAGE_PAGE_SIZE = 25;
+const ACTIVITY_REFRESH_MS = 60000;
+const CONVERSATION_REFRESH_MS = 30000;
+const MESSAGE_REFRESH_MS = 10000;
+
+const isDocumentVisible = () =>
+  typeof document === "undefined" || document.visibilityState === "visible";
 
 const withAlpha = (hex, alpha = 0.12) => {
   if (!hex) return `rgba(255,255,255,${alpha})`;
@@ -60,6 +66,24 @@ const isInteractiveFeedTarget = (target) =>
   !!target?.closest?.(
     "button, input, select, textarea, a, .statsToggleBtn, .statsMiniBtn, .chartScaleInput, .lineChartDot, [data-interactive='solve-point'], svg .timeLineSegment, .timeLineSegment"
   );
+
+const getMessageKey = (message = {}) =>
+  `${message?.sender || ""}|${message?.timestamp || ""}|${message?.text || ""}`;
+
+const mergeMessagesByKey = (...lists) => {
+  const map = new Map();
+
+  lists
+    .flat()
+    .filter(Boolean)
+    .forEach((message) => {
+      map.set(getMessageKey(message), message);
+    });
+
+  return Array.from(map.values()).sort((a, b) =>
+    String(a?.timestamp || "").localeCompare(String(b?.timestamp || ""))
+  );
+};
 
 const normalizeConversationRecord = (item, profile = null) => {
   const conversationID = String(
@@ -94,6 +118,9 @@ const normalizeConversationRecord = (item, profile = null) => {
     profileEvent: profile?.ProfileEvent || profile?.profileEvent || "333",
     profileScramble: profile?.ProfileScramble || profile?.profileScramble || "",
     messages: Array.isArray(item?.messages) ? item.messages : [],
+    messagesCursor: item?.messagesCursor || null,
+    hasOlderMessages: !!item?.hasOlderMessages,
+    loadingOlderMessages: false,
     lastMessageAt: item?.LastMessageAt || item?.lastMessageAt || null,
     lastMessagePreview: item?.LastMessagePreview || item?.lastMessagePreview || "",
     sharedStats: item?.SharedStats || item?.sharedStats || null,
@@ -115,6 +142,9 @@ const buildPlaceholderDmConversation = (currentUserID, friendID, profile = null)
     profileEvent: profile?.ProfileEvent || profile?.profileEvent || "333",
     profileScramble: profile?.ProfileScramble || profile?.profileScramble || "",
     messages: [],
+    messagesCursor: null,
+    hasOlderMessages: false,
+    loadingOlderMessages: false,
     lastMessageAt: null,
     lastMessagePreview: "",
     sharedStats: null,
@@ -306,12 +336,16 @@ function Social({
 
   const activityEndRef = useRef(null);
   const activityPanelRef = useRef(null);
+  const messagesPanelRef = useRef(null);
   const messagesEndRef = useRef(null);
   const sharedMessageRefs = useRef({});
   const selectedConversationRef = useRef(null);
   const sharedSessionRef = useRef(sharedSession);
   const conversationsRef = useRef(conversations);
   const refreshInFlightRef = useRef(false);
+  const socialLoadInFlightRef = useRef(false);
+  const loadOlderInFlightRef = useRef(false);
+  const skipNextAutoScrollRef = useRef(false);
   const shouldStickActivityToBottomRef = useRef(true);
   const lastMessageMetaRef = useRef({
     conversationID: "",
@@ -454,6 +488,15 @@ function Social({
       ? selectedConversation.messages.length
       : 0;
 
+    if (skipNextAutoScrollRef.current) {
+      skipNextAutoScrollRef.current = false;
+      lastMessageMetaRef.current = {
+        conversationID: selectedConversation.conversationID,
+        count: currentCount,
+      };
+      return;
+    }
+
     const prev = lastMessageMetaRef.current;
     const switchedConversation =
       prev.conversationID !== selectedConversation.conversationID;
@@ -481,13 +524,25 @@ function Social({
 
     refreshInFlightRef.current = true;
     try {
-      const messages = await getMessages(conversationID, user.UserID, MESSAGE_LIMIT);
+      const page = await getMessagesPage(conversationID, user.UserID, {
+        limit: MESSAGE_PAGE_SIZE,
+      });
+      const messages = page.items || [];
 
       setSelectedConversation((prev) =>
         prev?.conversationID === conversationID
           ? {
               ...prev,
-              messages,
+              messages: mergeMessagesByKey(prev.messages || [], messages),
+              messagesCursor:
+                prev?.messagesCursor !== undefined && prev?.messagesCursor !== null
+                  ? prev.messagesCursor
+                  : page.nextCursor,
+              hasOlderMessages:
+                prev?.hasOlderMessages !== undefined
+                  ? prev.hasOlderMessages
+                  : !!page.hasMore,
+              loadingOlderMessages: false,
               isPlaceholder: false,
               lastMessageAt:
                 messages[messages.length - 1]?.timestamp || prev.lastMessageAt || null,
@@ -502,7 +557,16 @@ function Social({
           conv.conversationID === conversationID
             ? {
                 ...conv,
-                messages,
+                messages: mergeMessagesByKey(conv.messages || [], messages),
+                messagesCursor:
+                  conv?.messagesCursor !== undefined && conv?.messagesCursor !== null
+                    ? conv.messagesCursor
+                    : page.nextCursor,
+                hasOlderMessages:
+                  conv?.hasOlderMessages !== undefined
+                    ? conv.hasOlderMessages
+                    : !!page.hasMore,
+                loadingOlderMessages: false,
                 isPlaceholder: false,
                 lastMessageAt:
                   messages[messages.length - 1]?.timestamp || conv.lastMessageAt || null,
@@ -517,13 +581,16 @@ function Social({
         activeSharedSession?.sharedID &&
         String(activeSharedSession?.conversationID || "") === String(conversationID || "")
       ) {
-        const fetchedRoundResults = buildRoundResultsFromMessages(messages, activeSharedSession.sharedID);
+        const fetchedRoundResults = buildRoundResultsFromMessages(
+          mergeMessagesByKey(activeConversation.messages || [], messages),
+          activeSharedSession.sharedID
+        );
         const extendedSession = applySharedExtensions(
           {
             ...activeSharedSession,
             roundResults: mergeRoundResults(activeSharedSession.roundResults, fetchedRoundResults),
           },
-          messages
+          mergeMessagesByKey(activeConversation.messages || [], messages)
         );
 
         updateSharedSession((prev) => {
@@ -564,16 +631,109 @@ function Social({
     if (!user?.UserID) return;
 
     const id = setInterval(() => {
+      if (!isDocumentVisible()) return;
       handleRefreshMessages();
-    }, 10000);
+    }, MESSAGE_REFRESH_MS);
 
     return () => clearInterval(id);
   }, [activeTab, selectedConversation?.conversationID, user?.UserID, handleRefreshMessages]);
 
-  const loadSocialData = useCallback(
-    async (preferredConversationID = "") => {
-      if (!user?.UserID) return;
+  const handleLoadOlderMessages = useCallback(async () => {
+    const activeConversation = selectedConversationRef.current;
+    const panel = messagesPanelRef.current;
+    if (!activeConversation?.conversationID || !user?.UserID || !panel) return;
+    if (!activeConversation?.hasOlderMessages || !activeConversation?.messagesCursor) return;
+    if (loadOlderInFlightRef.current) return;
 
+    loadOlderInFlightRef.current = true;
+    const previousHeight = panel.scrollHeight;
+    const previousTop = panel.scrollTop;
+
+    setSelectedConversation((prev) =>
+      prev?.conversationID === activeConversation.conversationID
+        ? { ...prev, loadingOlderMessages: true }
+        : prev
+    );
+    setConversations((prev) =>
+      prev.map((conv) =>
+        conv.conversationID === activeConversation.conversationID
+          ? { ...conv, loadingOlderMessages: true }
+          : conv
+      )
+    );
+
+    try {
+      const page = await getMessagesPage(activeConversation.conversationID, user.UserID, {
+        limit: MESSAGE_PAGE_SIZE,
+        cursor: activeConversation.messagesCursor,
+      });
+
+      skipNextAutoScrollRef.current = true;
+
+      setSelectedConversation((prev) =>
+        prev?.conversationID === activeConversation.conversationID
+          ? {
+              ...prev,
+              messages: mergeMessagesByKey(page.items || [], prev.messages || []),
+              messagesCursor: page.nextCursor,
+              hasOlderMessages: !!page.hasMore,
+              loadingOlderMessages: false,
+            }
+          : prev
+      );
+
+      setConversations((prev) =>
+        prev.map((conv) =>
+          conv.conversationID === activeConversation.conversationID
+            ? {
+                ...conv,
+                messages: mergeMessagesByKey(page.items || [], conv.messages || []),
+                messagesCursor: page.nextCursor,
+                hasOlderMessages: !!page.hasMore,
+                loadingOlderMessages: false,
+              }
+            : conv
+        )
+      );
+
+      window.requestAnimationFrame(() => {
+        const nextPanel = messagesPanelRef.current;
+        if (!nextPanel) return;
+        const heightDelta = nextPanel.scrollHeight - previousHeight;
+        nextPanel.scrollTop = previousTop + Math.max(0, heightDelta);
+      });
+    } catch (err) {
+      console.error("Failed to load older messages:", err);
+      setSelectedConversation((prev) =>
+        prev?.conversationID === activeConversation.conversationID
+          ? { ...prev, loadingOlderMessages: false }
+          : prev
+      );
+      setConversations((prev) =>
+        prev.map((conv) =>
+          conv.conversationID === activeConversation.conversationID
+            ? { ...conv, loadingOlderMessages: false }
+            : conv
+        )
+      );
+    } finally {
+      loadOlderInFlightRef.current = false;
+    }
+  }, [user?.UserID]);
+
+  const handleMessagesScroll = useCallback(() => {
+    const panel = messagesPanelRef.current;
+    if (!panel || loadOlderInFlightRef.current) return;
+    if (panel.scrollTop > 80) return;
+    handleLoadOlderMessages();
+  }, [handleLoadOlderMessages]);
+
+  const loadSocialData = useCallback(
+    async (preferredConversationID = "", { includeFeed = true } = {}) => {
+      if (!user?.UserID) return;
+      if (socialLoadInFlightRef.current) return;
+
+      socialLoadInFlightRef.current = true;
       try {
         const friendIds = user.Friends || [];
         const profilesById = Object.fromEntries(
@@ -597,34 +757,6 @@ function Social({
           }))
         );
 
-        const own = await getPosts(user.UserID, FEED_POST_LIMIT);
-        const ownAnnotated = own.map((p) => ({
-          ...p,
-          author: user.Name,
-          authorID: user.UserID,
-          isOwn: true,
-          postColor: user.Color || user.color || "#2EC4B6",
-          profileEvent: user.ProfileEvent || "333",
-          profileScramble: user.ProfileScramble || "",
-        }));
-
-        const friendsArrays = await Promise.all(
-          friendIds.map(async (id) => {
-            const posts = await getPosts(id, FEED_POST_LIMIT);
-            const prof = profilesById[id];
-
-            return posts.map((p) => ({
-              ...p,
-              author: prof?.Name || prof?.name || id,
-              authorID: id,
-              isOwn: false,
-              postColor: prof?.Color || prof?.color || "#cccccc",
-              profileEvent: prof?.ProfileEvent || prof?.profileEvent || "333",
-              profileScramble: prof?.ProfileScramble || prof?.profileScramble || "",
-            }));
-          })
-        );
-
         let groups = [];
         try {
           groups = await getGroups(user.UserID);
@@ -639,36 +771,66 @@ function Social({
             .filter(([conversationID]) => conversationID)
         );
 
-        const groupPostArrays = await Promise.all(
-          groups.map(async (group) => {
-            const groupID = String(group?.GroupID || "").trim();
-            if (!groupID) return [];
+        if (includeFeed) {
+          const own = await getPosts(user.UserID, FEED_POST_LIMIT);
+          const ownAnnotated = own.map((p) => ({
+            ...p,
+            author: user.Name,
+            authorID: user.UserID,
+            isOwn: true,
+            postColor: user.Color || user.color || "#2EC4B6",
+            profileEvent: user.ProfileEvent || "333",
+            profileScramble: user.ProfileScramble || "",
+          }));
 
-            let posts = [];
-            try {
-              posts = await getGroupPosts(groupID, user.UserID, GROUP_POST_LIMIT);
-            } catch (err) {
-              console.warn("getGroupPosts failed for", groupID, err);
-              posts = [];
-            }
-            return posts.map((p) => ({
-              ...p,
-              author: p.AuthorName || p.AuthorID || group.Name || groupID,
-              authorID: p.AuthorID || "",
-              isOwn: p.AuthorID === user.UserID,
-              isGroupPost: true,
-              groupID,
-              groupName: group.Name || groupID,
-              postColor: group.Color || "#7f8c8d",
-              profileEvent: user.ProfileEvent || "333",
-              profileScramble: "",
-            }));
-          })
-        );
+          const friendsArrays = await Promise.all(
+            friendIds.map(async (id) => {
+              const posts = await getPosts(id, FEED_POST_LIMIT);
+              const prof = profilesById[id];
 
-        const merged = [...ownAnnotated, ...friendsArrays.flat(), ...groupPostArrays.flat()];
-        merged.sort((a, b) => new Date(a.DateTime || a.date) - new Date(b.DateTime || b.date));
-        setFeed(merged);
+              return posts.map((p) => ({
+                ...p,
+                author: prof?.Name || prof?.name || id,
+                authorID: id,
+                isOwn: false,
+                postColor: prof?.Color || prof?.color || "#cccccc",
+                profileEvent: prof?.ProfileEvent || prof?.profileEvent || "333",
+                profileScramble: prof?.ProfileScramble || prof?.profileScramble || "",
+              }));
+            })
+          );
+
+          const groupPostArrays = await Promise.all(
+            groups.map(async (group) => {
+              const groupID = String(group?.GroupID || "").trim();
+              if (!groupID) return [];
+
+              let posts = [];
+              try {
+                posts = await getGroupPosts(groupID, user.UserID, GROUP_POST_LIMIT);
+              } catch (err) {
+                console.warn("getGroupPosts failed for", groupID, err);
+                posts = [];
+              }
+              return posts.map((p) => ({
+                ...p,
+                author: p.AuthorName || p.AuthorID || group.Name || groupID,
+                authorID: p.AuthorID || "",
+                isOwn: p.AuthorID === user.UserID,
+                isGroupPost: true,
+                groupID,
+                groupName: group.Name || groupID,
+                postColor: group.Color || "#7f8c8d",
+                profileEvent: user.ProfileEvent || "333",
+                profileScramble: "",
+              }));
+            })
+          );
+
+          const merged = [...ownAnnotated, ...friendsArrays.flat(), ...groupPostArrays.flat()];
+          merged.sort((a, b) => new Date(a.DateTime || a.date) - new Date(b.DateTime || b.date));
+          setFeed(merged.slice(-FEED_POST_LIMIT));
+        }
 
         let storedConversations = [];
         try {
@@ -758,6 +920,8 @@ function Social({
         });
       } catch (err) {
         console.error("Error fetching social data:", err);
+      } finally {
+        socialLoadInFlightRef.current = false;
       }
     },
     [
@@ -772,6 +936,15 @@ function Social({
     ]
   );
 
+  const refreshConversationDirectory = useCallback(async () => {
+    const preferredConversationID = String(location.state?.conversationID || "").trim();
+    await loadSocialData(preferredConversationID, { includeFeed: false });
+  }, [loadSocialData, location.state?.conversationID]);
+
+  const handleRefreshMessagesAndSidebar = useCallback(async () => {
+    await Promise.allSettled([refreshConversationDirectory(), handleRefreshMessages()]);
+  }, [refreshConversationDirectory, handleRefreshMessages]);
+
   useEffect(() => {
     const preferredConversationID = String(location.state?.conversationID || "").trim();
 
@@ -779,16 +952,16 @@ function Social({
       setActiveTab(1);
     }
 
-    if (
-      activeTab === 1 &&
-      selectedConversationRef.current?.conversationID &&
-      user?.UserID
-    ) {
-      handleRefreshMessages();
+    if (activeTab === 1) {
+      loadSocialData(preferredConversationID, { includeFeed: false });
+
+      if (selectedConversationRef.current?.conversationID && user?.UserID) {
+        handleRefreshMessages();
+      }
       return;
     }
 
-    loadSocialData(preferredConversationID);
+    loadSocialData(preferredConversationID, { includeFeed: true });
   }, [
     refreshTick,
     activeTab,
@@ -804,6 +977,31 @@ function Social({
     loadSocialData,
     handleRefreshMessages,
   ]);
+
+  useEffect(() => {
+    if (activeTab !== 1) return;
+    if (!user?.UserID) return;
+
+    const id = setInterval(() => {
+      if (!isDocumentVisible()) return;
+      refreshConversationDirectory();
+    }, CONVERSATION_REFRESH_MS);
+
+    return () => clearInterval(id);
+  }, [activeTab, user?.UserID, refreshConversationDirectory]);
+
+  useEffect(() => {
+    if (activeTab !== 0) return;
+    if (!user?.UserID) return;
+
+    const id = setInterval(() => {
+      if (!isDocumentVisible()) return;
+      const preferredConversationID = String(location.state?.conversationID || "").trim();
+      loadSocialData(preferredConversationID, { includeFeed: true });
+    }, ACTIVITY_REFRESH_MS);
+
+    return () => clearInterval(id);
+  }, [activeTab, user?.UserID, loadSocialData, location.state?.conversationID]);
 
   useEffect(() => {
     const preferredConversationID = String(location.state?.conversationID || "").trim();
@@ -873,7 +1071,18 @@ function Social({
   const handleAddComment = async (comment) => {
     if (!selectedPost) return;
     const ts = selectedPost.DateTime || selectedPost.date;
-    const updatedComments = [...(selectedPost.Comments || []), comment];
+    const newComment = {
+      text: comment,
+      author:
+        user?.Username ||
+        user?.Name ||
+        user?.username ||
+        user?.name ||
+        "You",
+      userID: user?.UserID || "",
+      createdAt: new Date().toISOString(),
+    };
+    const updatedComments = [...(selectedPost.Comments || []), newComment];
     const updated = { ...selectedPost, Comments: updatedComments };
 
     setFeed((f) => f.map((p) => (p === selectedPost ? updated : p)));
@@ -1123,25 +1332,22 @@ function Social({
     const conversation = await ensureSelectedConversationExists();
     const conversationID = conversation?.conversationID;
     if (!conversationID) return;
-
-    const newMessage = {
-      sender: user.UserID,
-      text,
-      timestamp: new Date().toISOString(),
-    };
-
-    const updatedConversation = {
-      ...conversation,
-      messages: [...(conversation.messages || []), newMessage],
-      lastMessageAt: newMessage.timestamp,
-      lastMessagePreview: text,
-    };
-
-    upsertConversation(updatedConversation);
     setMessageInput("");
 
     try {
-      await sendMessage(conversationID, user.UserID, text);
+      const saved = await sendMessage(conversationID, user.UserID, text);
+      const savedMessage = {
+        sender: saved?.SenderID || user.UserID,
+        text: saved?.Text || text,
+        timestamp: saved?.CreatedAt || new Date().toISOString(),
+      };
+
+      upsertConversation({
+        ...conversation,
+        messages: mergeMessagesByKey(conversation.messages || [], [savedMessage]),
+        lastMessageAt: savedMessage.timestamp,
+        lastMessagePreview: savedMessage.text,
+      });
       handleRefreshMessages();
     } catch (err) {
       console.error("Failed to send message:", err);
@@ -1222,23 +1428,20 @@ function Social({
       opponentScrambles,
     })}`;
 
-    const message = {
-      sender: user.UserID,
-      text: scrambleText,
-      timestamp: new Date().toISOString(),
-    };
-
-    const updatedConversation = {
-      ...conversation,
-      messages: [...(conversation.messages || []), message],
-      lastMessageAt: message.timestamp,
-      lastMessagePreview: message.text,
-    };
-
-    upsertConversation(updatedConversation);
-
     try {
-      await sendMessage(conversationID, user.UserID, message.text);
+      const saved = await sendMessage(conversationID, user.UserID, scrambleText);
+      const savedMessage = {
+        sender: saved?.SenderID || user.UserID,
+        text: saved?.Text || scrambleText,
+        timestamp: saved?.CreatedAt || new Date().toISOString(),
+      };
+
+      upsertConversation({
+        ...conversation,
+        messages: mergeMessagesByKey(conversation.messages || [], [savedMessage]),
+        lastMessageAt: savedMessage.timestamp,
+        lastMessagePreview: savedMessage.text,
+      });
       await handleRefreshMessages();
     } catch (err) {
       console.error("Failed to send shared average:", err);
@@ -1275,7 +1478,7 @@ function Social({
             className={`tabIconButton tabIconButton--flip ${
               activeTab === 1 ? "" : "disabled"
             }`}
-            onClick={handleRefreshMessages}
+            onClick={handleRefreshMessagesAndSidebar}
             aria-label="Refresh messages"
             title={activeTab === 1 ? "Refresh" : "Switch to Messages to refresh"}
             disabled={activeTab !== 1 || !selectedConversation}
@@ -1582,7 +1785,18 @@ function Social({
                     )}
                   </div>
 
-                  <div className="messages">
+                  <div
+                    className="messages"
+                    ref={messagesPanelRef}
+                    onScroll={handleMessagesScroll}
+                  >
+                    {selectedConversation.loadingOlderMessages ? (
+                      <div className="messagesHistoryStatus">Loading older messages...</div>
+                    ) : null}
+                    {!selectedConversation.loadingOlderMessages &&
+                    selectedConversation.hasOlderMessages ? (
+                      <div className="messagesHistoryStatus">Scroll up to load older messages</div>
+                    ) : null}
                     {(selectedConversation.messages || []).map((msg, idx) => {
                       if (msg.text?.startsWith("[sharedAoN]")) {
                         const payload = parseSharedAoNPayload(msg.text);

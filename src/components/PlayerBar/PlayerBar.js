@@ -193,7 +193,6 @@ function PlayerBar({
               userID={user?.UserID}
               onSessionChange={onSessionChange}
               onSelectSessionObj={onSelectSessionObj}
-              compact={true}
             />
           </div>
 

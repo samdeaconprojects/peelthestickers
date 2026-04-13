@@ -147,7 +147,8 @@ export default function useBulkSolveActions({
     if (String(bulkCustom4 || "").trim()) patch.Custom4 = String(bulkCustom4).trim();
     if (String(bulkCustom5 || "").trim()) patch.Custom5 = String(bulkCustom5).trim();
 
-    const targets = selectedSolvesByIndex
+    const targets = [...selectedSolvesByIndex]
+      .sort((a, b) => b.idx - a.idx)
       .map(({ solve }) => solve)
       .filter(Boolean)
       .filter((s) => s?.solveRef);
@@ -420,11 +421,15 @@ export default function useBulkSolveActions({
 
     clearSelection();
 
-    const results = await Promise.allSettled(
-      targets.map((s) => deleteTime(s.solveRef))
-    );
+    const failures = [];
+    for (const solve of targets) {
+      try {
+        await deleteTime(solve.solveRef);
+      } catch (error) {
+        failures.push({ solveRef: solve.solveRef, error });
+      }
+    }
 
-    const failures = results.filter((result) => result.status === "rejected");
     if (failures.length > 0) {
       console.error("Bulk delete failed:", failures);
     }

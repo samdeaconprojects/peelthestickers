@@ -7,6 +7,7 @@ import socialIcon from '../../assets/Social.svg';
 import profileIcon from '../../assets/Profile.svg';
 import settingsIcon from '../../assets/SettingsOrange.svg';
 import PTSStatusLogo from './PTSStatusLogo';
+import { hexToRgbString } from '../../utils/colorUtils';
 
 // Paused nav-profile cube experiment. Keeping this here commented out so we can
 // bring it back later without losing the in-progress implementation.
@@ -37,6 +38,10 @@ import PTSStatusLogo from './PTSStatusLogo';
 
 function NavItem({ to, isActive, onClick, children, activeClassName = '', activeDotColor }) {
   if (isActive) {
+    const activeDotGlowColor = activeDotColor
+      ? `rgba(${hexToRgbString(activeDotColor, '255, 255, 255')}, 0.82)`
+      : undefined;
+
     return (
       <span
         className={`nav-item-current ${activeClassName}`.trim()}
@@ -46,6 +51,7 @@ function NavItem({ to, isActive, onClick, children, activeClassName = '', active
             ? {
                 '--nav-active-dot-color': activeDotColor,
                 '--nav-active-shadow-color': activeDotColor,
+                '--nav-active-dot-glow-color': activeDotGlowColor,
               }
             : undefined
         }

@@ -26,6 +26,8 @@ function Detail({
   discoveredTagOptions = {},
   tagColors = {},
   onTagColorsChange = null,
+  embedded = false,
+  showActions = true,
 }) {
   const { runDb } = useDbStatus();
   const isArray = Array.isArray(solve);
@@ -99,7 +101,12 @@ function Detail({
     const ref = getSolveRef(s);
     return typeof ref === "string" && ref.startsWith("SOLVE#");
   };
+  const hasMutableSolveRef = (s) => {
+    const ref = getSolveRef(s);
+    return typeof ref === "string" && (ref.startsWith("SOLVE#") || ref.startsWith("LOCAL#"));
+  };
   const isReadOnlySolve = (s) => !!s?.__readOnly || !hasRealSolveRef(s);
+  const canDeleteSolve = (s) => !s?.__readOnly && hasMutableSolveRef(s);
 
   const toFiniteNumber = (value) => {
     const n = Number(value);
@@ -174,6 +181,35 @@ function Detail({
   );
   const autosaveTimeoutsRef = useRef({});
   const lastSavedRef = useRef({});
+  const isMountedRef = useRef(true);
+  const closingRef = useRef(false);
+
+  const normalizeTagsForSignature = useCallback((tagStateValue) => {
+    if (!tagStateValue || typeof tagStateValue !== "object" || Array.isArray(tagStateValue)) {
+      return {};
+    }
+
+    const looksLikeEditorState =
+      "customRows" in tagStateValue ||
+      "CubeModel" in tagStateValue ||
+      "CrossColor" in tagStateValue ||
+      "SolveSource" in tagStateValue ||
+      "TimerInput" in tagStateValue ||
+      "Custom1" in tagStateValue ||
+      "Custom2" in tagStateValue ||
+      "Custom3" in tagStateValue ||
+      "Custom4" in tagStateValue ||
+      "Custom5" in tagStateValue;
+
+    return looksLikeEditorState ? buildTagsPayload(tagStateValue) : tagStateValue;
+  }, []);
+
+  const getEditSignature = useCallback((noteValue, tagStateValue) => {
+    return JSON.stringify({
+      note: String(noteValue ?? ""),
+      tags: normalizeTagsForSignature(tagStateValue),
+    });
+  }, [normalizeTagsForSignature]);
 
   const initTagState = (s) => {
     const t = getSolveTags(s);
@@ -210,6 +246,13 @@ function Detail({
   const tagsStateRef = useRef(tagsState);
 
   useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
 
@@ -235,15 +278,12 @@ function Detail({
         const currentTags = initTagState(item);
         return [
           String(idx),
-          JSON.stringify({
-            note: getSolveNote(item),
-            tags: buildTagsPayload(currentTags),
-          }),
+          getEditSignature(getSolveNote(item), currentTags),
         ];
       })
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [solve, isArray]);
+  }, [solve, isArray, getEditSignature]);
 
   useEffect(() => {
     const items = isArray ? solve : [solve];
@@ -252,12 +292,9 @@ function Detail({
       if (isReadOnlySolve(item)) return;
 
       const key = String(idx);
-      const noteValue = String(isArray ? notes[idx] : notes);
       const tagValue = isArray ? tagsState[idx] : tagsState;
-      const nextSignature = JSON.stringify({
-        note: noteValue,
-        tags: buildTagsPayload(tagValue),
-      });
+      const persistedNoteValue = getSolveNote(item);
+      const nextSignature = getEditSignature(persistedNoteValue, tagValue);
 
       if (lastSavedRef.current[key] === nextSignature) return;
 
@@ -277,24 +314,53 @@ function Detail({
       autosaveTimeoutsRef.current = {};
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notes, tagsState, isArray, solve]);
+  }, [tagsState, isArray, solve, getEditSignature]);
 
-  const flushPendingAutosaves = useCallback(() => {
-    Object.entries(autosaveTimeoutsRef.current || {}).forEach(([key, timeoutId]) => {
+  const flushPendingAutosaves = async () => {
+    const pendingSaves = Object.entries(autosaveTimeoutsRef.current || {}).map(([key, timeoutId]) => {
       window.clearTimeout(timeoutId);
       const idx = Number(key);
-      saveSolveEdits(isArray ? idx : null, {
+      return saveSolveEdits(isArray ? idx : null, {
         notes: notesRef.current,
         tagsState: tagsStateRef.current,
       });
     });
     autosaveTimeoutsRef.current = {};
-  }, [isArray]);
+    await Promise.all(pendingSaves);
+  };
 
-  const handleOverlayClose = useCallback(() => {
-    flushPendingAutosaves();
+  const flushDirtyNotes = async () => {
+    const items = isArray ? solve : [solve];
+    const dirtySaves = items
+      .map((item, idx) => {
+        if (isReadOnlySolve(item)) return null;
+
+        const noteValue = String(isArray ? notesRef.current[idx] : notesRef.current);
+        const tagValue = isArray ? tagsStateRef.current[idx] : tagsStateRef.current;
+        const nextSignature = getEditSignature(noteValue, tagValue);
+
+        if (lastSavedRef.current[String(idx)] === nextSignature) return null;
+        return saveSolveEdits(isArray ? idx : null, {
+          notes: notesRef.current,
+          tagsState: tagsStateRef.current,
+        });
+      })
+      .filter(Boolean);
+
+    await Promise.all(dirtySaves);
+  };
+
+  const handleOverlayClose = async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
     onClose();
-  }, [flushPendingAutosaves, onClose]);
+    try {
+      await flushPendingAutosaves();
+      await flushDirtyNotes();
+    } finally {
+      closingRef.current = false;
+    }
+  };
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -310,7 +376,7 @@ function Detail({
   const arrayIsMutable = useMemo(() => {
     if (!isArray) return false;
     return solve.every((s) => hasRealSolveRef(s) && !s?.__readOnly);
-  }, [isArray, solve]);
+  }, [isArray, solve, hasRealSolveRef]);
 
   const patchLocalSolve = (s, solveRef, patch) => {
     if (typeof setSessions === "function" && hasRealSolveRef(s)) {
@@ -369,6 +435,7 @@ function Detail({
   };
 
   const setSaveStatus = (index, patch) => {
+    if (!isMountedRef.current) return;
     if (isArray) {
       setSaveState((prev) => {
         const next = [...prev];
@@ -397,6 +464,9 @@ function Detail({
 
     const tState = isArray ? currentTagsState[index] : currentTagsState;
     const tagsPayload = buildTagsPayload(tState);
+    const nextSignature = getEditSignature(noteValue, tState);
+
+    if (lastSavedRef.current[String(index ?? 0)] === nextSignature) return;
 
     try {
       setSaveStatus(index, { saving: true, error: "" });
@@ -411,10 +481,7 @@ function Detail({
       );
 
       const savedItem = res?.item;
-      const savedSignature = JSON.stringify({
-        note: savedItem?.Note ?? noteValue,
-        tags: savedItem?.Tags ?? tagsPayload,
-      });
+      const savedSignature = getEditSignature(savedItem?.Note ?? noteValue, savedItem?.Tags ?? tagsPayload);
       patchLocalSolve(s, solveRef, {
         note: savedItem?.Note ?? noteValue,
         tags: savedItem?.Tags ?? tagsPayload,
@@ -428,6 +495,10 @@ function Detail({
       console.error("Solve update failed:", err);
       setSaveStatus(index, { saving: false, error: "Failed to save changes." });
     }
+  };
+
+  const handleNoteBlur = (index = null) => {
+    saveSolveEdits(index);
   };
 
   const updateTagField = (field, value, index = null) => {
@@ -522,7 +593,7 @@ function Detail({
 
   const handleDelete = (index) => {
     if (!isArray) {
-      if (!isReadOnlySolve(solve) && typeof deleteTime === "function") {
+      if (canDeleteSolve(solve) && typeof deleteTime === "function") {
         deleteTime();
       }
       onClose();
@@ -640,6 +711,7 @@ function Detail({
 
   const renderSolveCard = (item, index) => {
     const readOnly = isReadOnlySolve(item);
+    const canDelete = canDeleteSolve(item);
     const penalty = getSolvePenalty(item);
 
     return (
@@ -679,51 +751,148 @@ function Detail({
                 updatedNotes[index] = e.target.value;
                 setNotes(updatedNotes);
               }}
+              onBlur={() => handleNoteBlur(index)}
               disabled={readOnly}
             />
 
-                {renderTagsEditor(item, index)}
-              </div>
-
-        <div className="detailActions">
-          {!readOnly && typeof applyPenalty === "function" && (
-            <div className="penalty-buttons">
-              <button
-                type="button"
-                className={penalty === "+2" ? "is-active" : ""}
-                onClick={() => handlePenaltyChange("+2", index)}
-              >
-                +2
-              </button>
-              <button
-                type="button"
-                className={penalty === "DNF" ? "is-active" : ""}
-                onClick={() => handlePenaltyChange("DNF", index)}
-              >
-                DNF
-              </button>
-            </div>
-          )}
-
-          <div className="detailPrimaryActions">
-            <button className="share-button" onClick={() => handleShare(index)}>
-              Share
-            </button>
-
-            {!readOnly && typeof deleteTime === "function" && (
-              <button className="delete-button" onClick={() => handleDelete(index)}>
-                Delete
-              </button>
-            )}
+            {renderTagsEditor(item, index)}
           </div>
-        </div>
+
+          {showActions ? (
+            <div className="detailActions">
+              {!readOnly && typeof applyPenalty === "function" && (
+                <div className="penalty-buttons">
+                  <button
+                    type="button"
+                    className={penalty === "+2" ? "is-active" : ""}
+                    onClick={() => handlePenaltyChange("+2", index)}
+                  >
+                    +2
+                  </button>
+                  <button
+                    type="button"
+                    className={penalty === "DNF" ? "is-active" : ""}
+                    onClick={() => handlePenaltyChange("DNF", index)}
+                  >
+                    DNF
+                  </button>
+                </div>
+              )}
+
+              <div className="detailPrimaryActions">
+                <button className="share-button" onClick={() => handleShare(index)}>
+                  Share
+                </button>
+
+                {canDelete && typeof deleteTime === "function" && (
+                  <button className="delete-button" onClick={() => handleDelete(index)}>
+                    Delete
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     );
   };
 
   const singleReadOnly = !isArray && isReadOnlySolve(solve);
+  const singleCanDelete = !isArray && canDeleteSolve(solve);
   const singlePenalty = !isArray ? getSolvePenalty(solve) : null;
+
+  const detailBody = !isArray ? (
+    <div className="detailFlexCol">
+      <div className="detailTopRow">
+        <div className="detailTimeWrap">
+          <div className="detailTime">
+            {formatTime(getSolveFinalTimeMs(solve), false, solve.penalty)}
+          </div>
+          <div className="detailMetaLine">{getSolveSubline(solve)}</div>
+        </div>
+        <div
+          className="detailScramble"
+          style={{ fontSize: getScrambleFontSize(getSolveEvent(solve)) }}
+        >
+          {getSolveScramble(solve)}
+        </div>
+      </div>
+
+      <div className="detailDateRow">{formatDateTime(getSolveCreatedAt(solve))}</div>
+
+      <div className="detailBottomRow">
+        <div className="detailCube">
+          <PuzzleSVG
+            event={getSolveEvent(solve)}
+            scramble={getSolveScramble(solve)}
+          />
+        </div>
+
+        <div className="detailInfoSection">
+          <textarea
+            className="detailNotes"
+            value={notes}
+            placeholder="Add a note"
+            onChange={(e) => setNotes(e.target.value)}
+            onBlur={() => handleNoteBlur()}
+            disabled={singleReadOnly}
+          />
+
+          {renderTagsEditor(solve, null)}
+        </div>
+
+        {showActions ? (
+          <div className="detailActions">
+            {!singleReadOnly && typeof applyPenalty === "function" && (
+              <div className="penalty-buttons">
+                <button
+                  type="button"
+                  className={singlePenalty === "+2" ? "is-active" : ""}
+                  onClick={() => handlePenaltyChange("+2")}
+                >
+                  +2
+                </button>
+                <button
+                  type="button"
+                  className={singlePenalty === "DNF" ? "is-active" : ""}
+                  onClick={() => handlePenaltyChange("DNF")}
+                >
+                  DNF
+                </button>
+              </div>
+            )}
+
+            <div className="detailPrimaryActions">
+              <button className="share-button" onClick={() => handleShare()}>
+                Share
+              </button>
+
+              {singleCanDelete && typeof deleteTime === "function" && (
+                <button className="delete-button" onClick={() => handleDelete()}>
+                  Delete
+                </button>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {showNavButtons && (
+        <div className="detailNavButtons">
+          <button onClick={onPrev}>Previous</button>
+          <button onClick={onNext}>Next</button>
+        </div>
+      )}
+    </div>
+  ) : (
+    <div className="detailFlexCol detailScrollList">
+      {solve.map((s, i) => renderSolveCard(s, i))}
+    </div>
+  );
+
+  if (embedded) {
+    return <div className="detailPopupContent detailPopupContent--embedded">{detailBody}</div>;
+  }
 
   const modalContent = (
     <div
@@ -736,91 +905,7 @@ function Detail({
       }}
     >
       <div className="detailPopupContent" onClick={(event) => event.stopPropagation()}>
-        {!isArray ? (
-          <div className="detailFlexCol">
-            <div className="detailTopRow">
-              <div className="detailTimeWrap">
-                <div className="detailTime">
-                  {formatTime(getSolveFinalTimeMs(solve), false, solve.penalty)}
-                </div>
-                <div className="detailMetaLine">{getSolveSubline(solve)}</div>
-              </div>
-              <div
-                className="detailScramble"
-                style={{ fontSize: getScrambleFontSize(getSolveEvent(solve)) }}
-              >
-                {getSolveScramble(solve)}
-              </div>
-            </div>
-
-            <div className="detailDateRow">{formatDateTime(getSolveCreatedAt(solve))}</div>
-
-            <div className="detailBottomRow">
-              <div className="detailCube">
-                <PuzzleSVG
-                  event={getSolveEvent(solve)}
-                  scramble={getSolveScramble(solve)}
-                />
-              </div>
-
-              <div className="detailInfoSection">
-                <textarea
-                  className="detailNotes"
-                  value={notes}
-                  placeholder="Add a note"
-                  onChange={(e) => setNotes(e.target.value)}
-                  disabled={singleReadOnly}
-                />
-
-                {renderTagsEditor(solve, null)}
-              </div>
-
-              <div className="detailActions">
-                {!singleReadOnly && typeof applyPenalty === "function" && (
-                  <div className="penalty-buttons">
-                    <button
-                      type="button"
-                      className={singlePenalty === "+2" ? "is-active" : ""}
-                      onClick={() => handlePenaltyChange("+2")}
-                    >
-                      +2
-                    </button>
-                    <button
-                      type="button"
-                      className={singlePenalty === "DNF" ? "is-active" : ""}
-                      onClick={() => handlePenaltyChange("DNF")}
-                    >
-                      DNF
-                    </button>
-                  </div>
-                )}
-
-                <div className="detailPrimaryActions">
-                  <button className="share-button" onClick={() => handleShare()}>
-                    Share
-                  </button>
-
-                  {!singleReadOnly && typeof deleteTime === "function" && (
-                    <button className="delete-button" onClick={() => handleDelete()}>
-                      Delete
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {showNavButtons && (
-              <div className="detailNavButtons">
-                <button onClick={onPrev}>Previous</button>
-                <button onClick={onNext}>Next</button>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="detailFlexCol detailScrollList">
-            {solve.map((s, i) => renderSolveCard(s, i))}
-          </div>
-        )}
+        {detailBody}
       </div>
     </div>
   );
