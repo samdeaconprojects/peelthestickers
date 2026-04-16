@@ -6,7 +6,7 @@ import PuzzleSVG from '../PuzzleSVGs/PuzzleSVG';
 import NameTag from './NameTag';
 import { getScrambledFaces } from '../cubeStructure';
 import { currentEventToString } from "../../components/scrambleUtils";
-import { formatTime } from '../TimeList/TimeUtils';
+import { calculateAverage, formatTime } from '../TimeList/TimeUtils';
 import TimeItem from '../TimeList/TimeItem';
 import StatSharePost from './StatSharePost';
 
@@ -168,6 +168,21 @@ const buildPerfBorderStyle = (perfClass, borderStyle = "solid") => {
   };
 };
 
+const getPostHeadlineTime = (solves = []) => {
+  const items = Array.isArray(solves) ? solves.filter(Boolean) : [];
+  if (!items.length) return null;
+  if (items.length === 1) return items[0]?.time ?? null;
+
+  const result = calculateAverage(
+    items.map((solve) =>
+      String(solve?.penalty || "").toUpperCase() === "DNF" ? "DNF" : solve?.time
+    ),
+    true
+  );
+
+  return result?.average ?? null;
+};
+
 function Post({
   name,
   picture,
@@ -182,8 +197,9 @@ function Post({
 }) {
   const resolvedPostType = statShare ? "stat-share" : postType;
   const primary = solveList[0] || {};
-  const { event, scramble, time } = primary;
+  const { event, scramble } = primary;
   const singleOrAvg = solveList.length > 1 ? `Average of ${solveList.length}` : 'Single';
+  const headlineTime = getPostHeadlineTime(solveList);
   const eventStr = currentEventToString(event || '333');
   const showAverageSolveList =
     resolvedPostType !== "stat-share" && solveList.length > 1;
@@ -270,7 +286,9 @@ function Post({
                   {eventStr} {singleOrAvg}
                 </span>
                 <span className="titleTextSeparator"> - </span>
-                <span className="titleTextValue">{time != null ? formatTime(time) : '--'}</span>
+                <span className="titleTextValue">
+                  {headlineTime != null ? formatTime(headlineTime, solveList.length > 1) : '--'}
+                </span>
               </div>
             </div>
           </div>

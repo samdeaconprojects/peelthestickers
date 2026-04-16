@@ -42,6 +42,42 @@ function normalizeGanRecordedTimeToMs(ev) {
   return Math.round(n * 1000);
 }
 
+function normalizePenaltyValue(penalty) {
+  const value = String(penalty || '').trim().toUpperCase();
+  if (value === '+2') return '+2';
+  if (value === 'DNF') return 'DNF';
+  return null;
+}
+
+function getSolveDisplayState(solve) {
+  const penalty = normalizePenaltyValue(solve?.penalty ?? solve?.Penalty);
+  if (penalty === 'DNF') {
+    return { penalty: 'DNF', timeMs: 0 };
+  }
+
+  const finalTimeMs = Number(solve?.finalTimeMs);
+  if (Number.isFinite(finalTimeMs) && finalTimeMs >= 0) {
+    return { penalty, timeMs: finalTimeMs };
+  }
+
+  const rawTimeMs = Number(solve?.rawTimeMs);
+  if (Number.isFinite(rawTimeMs) && rawTimeMs >= 0) {
+    return { penalty, timeMs: penalty === '+2' ? rawTimeMs + 2000 : rawTimeMs };
+  }
+
+  const time = Number(solve?.time);
+  if (Number.isFinite(time) && time >= 0 && time !== Number.MAX_SAFE_INTEGER) {
+    return { penalty, timeMs: time };
+  }
+
+  return { penalty: null, timeMs: 0 };
+}
+
+function getSolveDisplaySignature(solve) {
+  const { penalty, timeMs } = getSolveDisplayState(solve);
+  return `${penalty || ''}|${Number.isFinite(timeMs) ? timeMs : 'NaN'}`;
+}
+
 /**
  * Returns true if facelets represent a solved cube (each face is uniform).
  * Works regardless of whether the cube uses U/R/F/D/L/B letters or color letters.
@@ -113,7 +149,13 @@ function tokenizeScramble(scramble) {
   return steps;
 }
 
-function Timer({ addTime, inPlayerBar = false, activeScramble = "", compact = false }) {
+function Timer({
+  addTime,
+  inPlayerBar = false,
+  activeScramble = "",
+  compact = false,
+  latestSolve = null,
+}) {
   const { settings } = useSettings();
 
   // ✅ keep latest addTime in a ref so Bluetooth callbacks always save
@@ -126,6 +168,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "", compact = fa
   const [manualTime, setManualTime] = useState('');
   const [elapsedTime, setElapsedTime] = useState(0);
   const [lastTime, setLastTime] = useState(0);
+  const [lastPenalty, setLastPenalty] = useState(null);
   const [timerOn, setTimerOn] = useState(false);
   const [isSpacebarHeld, setIsSpacebarHeld] = useState(false);
   const [canStart, setCanStart] = useState(true);
@@ -221,9 +264,22 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "", compact = fa
   const ignoreNextKeyUp = useRef(false);
 
   const inspectionBeepsRef = useRef(!!settings.inspectionBeeps);
+  const lastSyncedSolveSignatureRef = useRef(null);
   useEffect(() => {
     inspectionBeepsRef.current = !!settings.inspectionBeeps;
   }, [settings.inspectionBeeps]);
+
+  useEffect(() => {
+    if (timerOn || isInspecting) return;
+
+    const signature = getSolveDisplaySignature(latestSolve);
+    if (signature === lastSyncedSolveSignatureRef.current) return;
+
+    const { timeMs, penalty } = getSolveDisplayState(latestSolve);
+    lastSyncedSolveSignatureRef.current = signature;
+    setLastTime(timeMs);
+    setLastPenalty(penalty);
+  }, [latestSolve, timerOn, isInspecting]);
 
   const holdTimeoutRef = useRef(null);
 
@@ -325,6 +381,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "", compact = fa
     setTimerOn(false);
     setElapsedTime(finalWithInspection);
     setLastTime(finalWithInspection);
+    setLastPenalty(null);
 
     inspectionExtraMsRef.current = 0;
 
@@ -407,6 +464,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "", compact = fa
 
     setElapsedTime(ms);
     setLastTime(ms);
+    setLastPenalty(null);
 
     if (!ganSaveLockRef.current) {
       ganSaveLockRef.current = true;
@@ -453,7 +511,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "", compact = fa
           if (ev?.state === GanTimerState.RUNNING) setGanStatus('Solving…');
           if (ev?.state === GanTimerState.STOPPED) setGanStatus('Stopped');
           if (ev?.state === GanTimerState.FINISHED) setGanStatus('Finished');
-          if (ev?.state === GanTimerState.DISCONNECT) setGanStatus('Disconnected');
 
           if (ev?.state === GanTimerState.GET_SET) setGanReady(true);
           if (
@@ -491,18 +548,6 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "", compact = fa
               await tryFallbackReadFromTimer();
             }
           }
-
-          if (ev?.state === GanTimerState.DISCONNECT) {
-            setGanConnected(false);
-            setGanConnecting(false);
-            setGanAwaitingFinal(false);
-            setGanReady(false);
-            setGanDot('disconnected');
-
-            ganSaveLockRef.current = false;
-            ganReadFallbackLockRef.current = false;
-            stopLocalStopwatch();
-          }
         },
 
         onSolve: ({ ms }) => {
@@ -510,6 +555,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "", compact = fa
         },
 
         onDisconnect: () => {
+          setGanStatus('Disconnected');
           setGanConnected(false);
           setGanConnecting(false);
           setGanAwaitingFinal(false);
@@ -759,6 +805,7 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "", compact = fa
     if (Number.isFinite(ms) && ms >= 0) {
       setElapsedTime(ms);
       setLastTime(ms);
+      setLastPenalty(null);
 
       const splits = computeBasicCFOPSplits(moves, { totalMs: ms, finalFacelets });
 
@@ -1321,8 +1368,10 @@ function Timer({ addTime, inPlayerBar = false, activeScramble = "", compact = fa
 
   const formatTime = () => {
     if (isInspecting) return formatInspection();
+    if (!timerOn && lastPenalty === 'DNF') return 'DNF';
     const timeToDisplay = timerOn ? elapsedTime : lastTime;
-    return formatMs(timeToDisplay);
+    const formatted = formatMs(timeToDisplay);
+    return !timerOn && lastPenalty === '+2' ? `${formatted}+` : formatted;
   };
 
   const displayTime = formatTime();

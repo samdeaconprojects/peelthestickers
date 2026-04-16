@@ -85,7 +85,11 @@ function PlayerBar({
       {/* LEFT: Timer */}
       <div className="playerbar-left">
         <div className="playerbar-timer">
-          <Timer addTime={addTime} inPlayerBar={true} />
+          <Timer
+            addTime={addTime}
+            inPlayerBar={true}
+            latestSolve={currentSolves[currentSolves.length - 1] || null}
+          />
         </div>
       </div>
 

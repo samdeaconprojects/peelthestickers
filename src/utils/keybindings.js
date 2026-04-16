@@ -110,6 +110,7 @@ function resolveKeyCode(keyToken) {
     MINUS: "Minus",
     EQUAL: "Equal",
     BACKSPACE: "Backspace",
+    DELETE: "Delete",
     ESCAPE: "Escape",
     ENTER: "Enter",
     TAB: "Tab",

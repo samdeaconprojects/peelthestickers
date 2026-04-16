@@ -651,6 +651,64 @@ function insertSolveAndShiftIndices(solves, insertIndex, solveToInsert) {
   return shifted;
 }
 
+function getSolveMergeKey(solve) {
+  if (!solve || typeof solve !== "object") return "";
+
+  const event = String(solve?.event || solve?.Event || "").trim().toUpperCase();
+  const sessionID = String(solve?.sessionID || solve?.SessionID || "main").trim() || "main";
+  const createdAt = String(
+    solve?.createdAt || solve?.CreatedAt || solve?.datetime || solve?.DateTime || ""
+  ).trim();
+  const rawTimeMs = Number(
+    solve?.rawTimeMs ??
+      solve?.RawTimeMs ??
+      solve?.finalTimeMs ??
+      solve?.FinalTimeMs ??
+      solve?.time ??
+      solve?.Time
+  );
+  const penalty = String(solve?.penalty ?? solve?.Penalty ?? "").trim().toUpperCase();
+
+  if (event && sessionID && createdAt && Number.isFinite(rawTimeMs)) {
+    return `solve:${event}|${sessionID}|${createdAt}|${Math.round(rawTimeMs)}|${penalty}`;
+  }
+
+  const solveRef = String(solve?.solveRef || solve?.SK || "").trim();
+  return solveRef ? `ref:${solveRef}` : "";
+}
+
+function mergeSolveIntoListByIdentity(items, incomingSolve, preferIncoming = true) {
+  const list = Array.isArray(items) ? items : [];
+  const nextSolve = incomingSolve && typeof incomingSolve === "object" ? incomingSolve : null;
+  if (!nextSolve) return list;
+
+  const incomingKey = getSolveMergeKey(nextSolve);
+  const incomingRef = String(nextSolve?.solveRef || "").trim();
+  let didMerge = false;
+
+  const merged = list.map((solve) => {
+    const sameRef = incomingRef && String(solve?.solveRef || "").trim() === incomingRef;
+    const sameIdentity = incomingKey && getSolveMergeKey(solve) === incomingKey;
+    if (!sameRef && !sameIdentity) return solve;
+
+    didMerge = true;
+    const preservedFullIndex = Number.isFinite(Number(solve?.fullIndex))
+      ? { fullIndex: Number(solve.fullIndex) }
+      : {};
+
+    return preferIncoming
+      ? { ...solve, ...nextSolve, ...preservedFullIndex }
+      : { ...nextSolve, ...solve, ...preservedFullIndex };
+  });
+
+  return didMerge ? merged : [...merged, nextSolve];
+}
+
+function hasPersistedSolveRef(solve) {
+  const solveRef = String(solve?.solveRef || solve?.SK || "").trim();
+  return solveRef.startsWith("SOLVE#");
+}
+
 function findSingleByTime(solves, targetTimeMs) {
   const target = Number(targetTimeMs);
   if (!Number.isFinite(target)) return null;
@@ -1251,20 +1309,16 @@ function App() {
       ...(tagsByEvent[tagScopeEventKey] || {}),
     };
 
-    if (!String(base.TimerInput || "").trim()) {
-      base.TimerInput = String(settings?.timerInput || "Keyboard").trim() || "Keyboard";
-    }
+    base.TimerInput = String(settings?.timerInput || "Keyboard").trim() || "Keyboard";
 
-    if (!String(base.SolveSource || "").trim()) {
-      if (practiceMode) base.SolveSource = "Practice";
-      else if (sharedSession?.sharedID) base.SolveSource = "Shared";
-      else if (activeSessionObj?.SessionType === "RELAY") {
-        base.SolveSource = "Relay";
-      } else if (String(settings?.timerInput || "").trim() === "GAN Cube") {
-        base.SolveSource = "SmartCube";
-      } else {
-        base.SolveSource = "Standard";
-      }
+    if (practiceMode) base.SolveSource = "Practice";
+    else if (sharedSession?.sharedID) base.SolveSource = "Shared";
+    else if (activeSessionObj?.SessionType === "RELAY") {
+      base.SolveSource = "Relay";
+    } else if (String(settings?.timerInput || "").trim() === "GAN Cube") {
+      base.SolveSource = "SmartCube";
+    } else {
+      base.SolveSource = "Standard";
     }
 
     return base;
@@ -1353,10 +1407,28 @@ function App() {
           sessionStats?.[normalizedEvent]?.[sessionId]?.solveCount ??
           null;
 
-        setSessions((prev) => ({
-          ...prev,
-          [eventKey]: assignExplicitSolveIndices(normalizedSolves, existingTotalCount),
-        }));
+        setSessions((prev) => {
+          const existingForEvent = Array.isArray(prev?.[eventKey]) ? prev[eventKey] : [];
+          const optimisticSolves = existingForEvent.filter(
+            (solve) => !hasPersistedSolveRef(solve)
+          );
+          let mergedSolves = [...optimisticSolves];
+
+          normalizedSolves.forEach((solve) => {
+            mergedSolves = mergeSolveIntoListByIdentity(mergedSolves, solve, true);
+          });
+
+          mergedSolves = mergedSolves.sort((a, b) => {
+            const ta = new Date(a?.datetime || "").getTime();
+            const tb = new Date(b?.datetime || "").getTime();
+            return ta - tb;
+          });
+
+          return {
+            ...prev,
+            [eventKey]: assignExplicitSolveIndices(mergedSolves, existingTotalCount),
+          };
+        });
       } catch (err) {
         console.error("Error loading solves for current event/session:", err);
       }
@@ -2260,18 +2332,15 @@ function App() {
       adjustSessionSolveCount(ev, currentSession, 1, sessions[ev]?.length || 0);
     };
 
-    const replacePendingSolve = (ev, pendingRef, savedSolve) => {
+    const replacePendingSolve = (ev, pendingSolve, savedSolve) => {
       setSessions((prev) => ({
         ...prev,
-        [ev]: (prev[ev] || []).map((s) =>
-          s.solveRef === pendingRef
-            ? {
-                ...savedSolve,
-                ...(Number.isFinite(Number(s?.fullIndex))
-                  ? { fullIndex: Number(s.fullIndex) }
-                  : {}),
-              }
-            : s
+        [ev]: mergeSolveIntoListByIdentity(
+          (prev?.[ev] || []).map((solve) =>
+            solve?.solveRef === pendingSolve?.solveRef ? { ...solve, ...pendingSolve } : solve
+          ),
+          savedSolve,
+          true
         ),
       }));
     };
@@ -2376,7 +2445,7 @@ function App() {
             );
 
             const savedSolve = normalizeSolve(res?.item);
-            replacePendingSolve(currentEvent, pendingSolve.solveRef, savedSolve);
+            replacePendingSolve(currentEvent, pendingSolve, savedSolve);
             setStatsMutationTick((t) => t + 1);
           } catch (err) {
             removePendingSolve(currentEvent, pendingSolve.solveRef);
@@ -2436,7 +2505,7 @@ function App() {
           );
 
           const savedSolve = normalizeSolve(res?.item);
-          replacePendingSolve(currentEvent, pendingSolve.solveRef, savedSolve);
+          replacePendingSolve(currentEvent, pendingSolve, savedSolve);
           setStatsMutationTick((t) => t + 1);
         } catch (err) {
           removePendingSolve(currentEvent, pendingSolve.solveRef);
@@ -2612,7 +2681,7 @@ function App() {
         );
 
         const savedSolve = normalizeSolve(res?.item);
-        replacePendingSolve(activeSolveEvent, pendingSolve.solveRef, savedSolve);
+        replacePendingSolve(activeSolveEvent, pendingSolve, savedSolve);
         setStatsMutationTick((t) => t + 1);
       } catch (err) {
         removePendingSolve(activeSolveEvent, pendingSolve.solveRef);
@@ -3464,8 +3533,12 @@ function App() {
       );
       if (!Number.isFinite(rawTimeMs)) return false;
 
-      const nextTime = penalty === "+2" ? rawTimeMs + 2000 : rawTimeMs;
-      const normalizedPenalty = penalty === "clear" ? null : penalty;
+      const currentPenalty = String(
+        latestSolve?.penalty ?? latestSolve?.Penalty ?? ""
+      ).trim().toUpperCase();
+      const normalizedPenalty =
+        penalty === "clear" || currentPenalty === penalty ? null : penalty;
+      const nextTime = normalizedPenalty === "+2" ? rawTimeMs + 2000 : rawTimeMs;
 
       applyPenalty(solveRef, normalizedPenalty, nextTime);
       return true;
@@ -3553,6 +3626,15 @@ function App() {
       }
 
       if (eventMatchesShortcut(event, settings.solveKeyBindings?.deleteSolve)) {
+        event.preventDefault();
+        deleteLatestSolve();
+        return;
+      }
+
+      if (
+        eventMatchesShortcut(event, "Ctrl+Shift+Delete") ||
+        eventMatchesShortcut(event, "Ctrl+Shift+Backspace")
+      ) {
         event.preventDefault();
         deleteLatestSolve();
         return;
@@ -4441,6 +4523,7 @@ function App() {
                     addTime={addSolve}
                     activeScramble={displayedScramble}
                     compact={isSharedHomeView}
+                    latestSolve={currentSolves[currentSolves.length - 1] || null}
                   />
 
                   {sharedSession && activeSharedMessage ? (
@@ -4474,6 +4557,7 @@ function App() {
                         user={user}
                         applyPenalty={applyPenalty}
                         solves={currentSolves}
+                        sessionBestSingleMs={currentSessionStatsForEvent?.BestSingleMs}
                         deleteTime={(index) =>
                           practiceMode
                             ? deletePracticeTime(index)

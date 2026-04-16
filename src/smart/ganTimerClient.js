@@ -24,6 +24,7 @@ export class GanTimerClient {
   constructor() {
     this.conn = null;
     this.sub = null;
+    this.disconnectCheckToken = 0;
     this.handlers = {
       onState: null,
       onSolve: null,
@@ -32,11 +33,37 @@ export class GanTimerClient {
     };
   }
 
+  clearPendingDisconnect() {
+    this.disconnectCheckToken += 1;
+  }
+
+  async confirmDisconnect() {
+    const token = ++this.disconnectCheckToken;
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (token !== this.disconnectCheckToken) return;
+
+      try {
+        await this.conn?.getRecordedTimes?.();
+        if (token === this.disconnectCheckToken) {
+          this.clearPendingDisconnect();
+        }
+        return;
+      } catch (_) {}
+    }
+
+    if (token !== this.disconnectCheckToken) return;
+    this.disconnectCheckToken += 1;
+    this.handlers.onDisconnect?.();
+  }
+
   async connect({ onState, onSolve, onDisconnect, onError } = {}) {
     this.handlers.onState = onState || null;
     this.handlers.onSolve = onSolve || null;
     this.handlers.onDisconnect = onDisconnect || null;
     this.handlers.onError = onError || null;
+    this.clearPendingDisconnect();
 
     this.conn = await connectGanTimer();
 
@@ -51,10 +78,13 @@ export class GanTimerClient {
         }
 
         if (ev?.state === GanTimerState.DISCONNECT) {
-          this.handlers.onDisconnect?.();
+          this.confirmDisconnect();
+        } else {
+          this.clearPendingDisconnect();
         }
       },
       error: (err) => {
+        this.clearPendingDisconnect();
         this.handlers.onError?.(err);
       },
     });
@@ -63,6 +93,8 @@ export class GanTimerClient {
   }
 
   async disconnect() {
+    this.clearPendingDisconnect();
+
     try {
       this.sub?.unsubscribe?.();
     } catch (_) {}

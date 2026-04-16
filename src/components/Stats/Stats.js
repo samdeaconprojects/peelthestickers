@@ -3647,7 +3647,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     if (isAllEventsMode) return allEventsOverall?.SolveCountTotal ?? null;
     return stableOverallSolves.length ?? null;
   }, [allEventsOverall, isAllEventsMode, stableOverallSolves.length, stableOverallStats, statsViewMode]);
-
   const showingCount = useMemo(() => {
     if (useBucketBackedRange) return activeBucketSummary?.SolveCountTotal ?? 0;
     if (statsViewMode === "time") return visiblePageFilteredRawSolves?.length || 0;

@@ -143,6 +143,7 @@ function TimeList({
   user,
   applyPenalty,
   solves = [],
+  sessionBestSingleMs,
   deleteTime,
   rowsToShow = 3,
   inPlayerBar,
@@ -347,10 +348,24 @@ function TimeList({
   const overallMinValue = overallCalc.minVal;
   const overallMaxValue = overallCalc.maxVal;
 
+  const canonicalSessionBestSingleMs = useMemo(() => {
+    const value = Number(sessionBestSingleMs);
+    return Number.isFinite(value) ? value : null;
+  }, [sessionBestSingleMs]);
+
   const sessionSingleBeatByIndex = useMemo(() => {
-    if (overallMin < 0) return {};
+    if (canonicalSessionBestSingleMs != null) {
+      return solvesSafe.reduce((acc, solve, index) => {
+        if (Number(solve?.time) === canonicalSessionBestSingleMs) {
+          acc[index] = true;
+        }
+        return acc;
+      }, {});
+    }
+
+    if (!practiceMode || overallMin < 0) return {};
     return { [overallMin]: true };
-  }, [overallMin]);
+  }, [canonicalSessionBestSingleMs, overallMin, practiceMode, solvesSafe]);
 
   const colsPerRow = isHorizontal ? (windowWidth > 1100 ? 12 : 5) : nonRollingColsPerRow;
   const rowsToDisplay = inPlayerBar ? 1 : isHorizontal ? rowsToShow : nonRollingRowsToDisplay;
