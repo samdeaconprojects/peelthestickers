@@ -193,6 +193,7 @@ function Detail({
       "customRows" in tagStateValue ||
       "CubeModel" in tagStateValue ||
       "CrossColor" in tagStateValue ||
+      "Method" in tagStateValue ||
       "SolveSource" in tagStateValue ||
       "TimerInput" in tagStateValue ||
       "Custom1" in tagStateValue ||
@@ -221,6 +222,7 @@ function Detail({
     return {
       CubeModel: t?.CubeModel ? String(t.CubeModel) : "",
       CrossColor: t?.CrossColor ? String(t.CrossColor) : "",
+      Method: t?.Method ? String(t.Method) : "",
       SolveSource: t?.SolveSource ? String(t.SolveSource) : "",
       TimerInput: t?.TimerInput ? String(t.TimerInput) : "",
       Custom1: t?.Custom1 ? String(t.Custom1) : "",
@@ -408,11 +410,13 @@ function Detail({
 
     const cube = String(tState?.CubeModel || "").trim();
     const cross = String(tState?.CrossColor || "").trim();
+    const method = String(tState?.Method || "").trim();
     const solveSource = String(tState?.SolveSource || "").trim();
     const timerInput = String(tState?.TimerInput || "").trim();
 
     if (cube) payload.CubeModel = cube;
     if (cross) payload.CrossColor = cross;
+    if (method) payload.Method = method;
     if (solveSource) payload.SolveSource = solveSource;
     if (timerInput) payload.TimerInput = timerInput;
     if (String(tState?.Custom1 || "").trim()) payload.Custom1 = String(tState.Custom1).trim();
@@ -630,6 +634,7 @@ function Detail({
             tags={{
               CubeModel: t?.CubeModel || "",
               CrossColor: t?.CrossColor || "",
+              Method: t?.Method || "",
               SolveSource: t?.SolveSource || "",
               TimerInput: t?.TimerInput || "",
               Custom1: t?.Custom1 || "",
@@ -641,6 +646,7 @@ function Detail({
             onChange={(next) => {
               updateTagField("CubeModel", next?.CubeModel || "", index);
               updateTagField("CrossColor", next?.CrossColor || "", index);
+              updateTagField("Method", next?.Method || "", index);
               updateTagField("SolveSource", next?.SolveSource || "", index);
               updateTagField("TimerInput", next?.TimerInput || "", index);
               updateTagField("Custom1", next?.Custom1 || "", index);
@@ -653,6 +659,7 @@ function Detail({
             fields={[
               "CubeModel",
               "CrossColor",
+              "Method",
               "SolveSource",
               "TimerInput",
               "Custom1",

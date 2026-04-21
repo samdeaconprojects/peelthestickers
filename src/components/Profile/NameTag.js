@@ -12,6 +12,8 @@ function NameTag({
   picture,
   to,
   size = "sm",
+  variant = "default",
+  reverse = false,
 }) {
   if (isSignedIn === false) {
     return (
@@ -33,21 +35,31 @@ function NameTag({
 
   const ev = (u?.ProfileEvent || u?.profileEvent || "333");
   const evClass = String(ev).toLowerCase();
+  const linkClassName = [
+    "name-tag-link",
+    variant === "profile-corner" ? "name-tag-link--profileCorner" : "",
+    reverse ? "name-tag-link--reverse" : "",
+  ].filter(Boolean).join(" ");
 
   return (
     <div className={`name-tag name-tag--${size}`}>
       <Link
         to={linkTo}
-        className="name-tag-link"
-        style={{ borderColor: profileColor }}
+        className={linkClassName}
+        style={variant === "profile-corner" ? undefined : { borderColor: profileColor }}
       >
-        <div className={`nametagCube nametagCube--${evClass}`}>
-          <PuzzleSVG
-            event={ev}
-            scramble={u?.ProfileScramble || u?.profileScramble || ""}
-            isTimerCube={false}
-            isNameTagCube={true}
-          />
+        <div
+          className="name-tag-cubeFrame"
+          style={variant === "profile-corner" ? { borderColor: profileColor } : undefined}
+        >
+          <div className={`nametagCube nametagCube--${evClass}`}>
+            <PuzzleSVG
+              event={ev}
+              scramble={u?.ProfileScramble || u?.profileScramble || ""}
+              isTimerCube={false}
+              isNameTagCube={true}
+            />
+          </div>
         </div>
 
         <div className="nametagText">

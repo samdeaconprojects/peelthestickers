@@ -38,6 +38,7 @@ const {
   buildDayBucketItem,
   mergeDayBucketSummaries,
   buildTagStatsSK,
+  buildSolveTagSK,
   buildSolveItem,
   getSolveTagPairsFromItem,
   buildSolveTagItems,
@@ -47,17 +48,24 @@ const {
   getAllSolvesByEvent,
   getLastNSolvesBySession,
   getLastNSolvesByEvent,
+  getLastNSolvesByTag,
   recomputeSessionStats,
   recomputeEventStats,
   recomputeTagStats,
   putSolveAndTagItems,
   replaceSolveAndTagItems,
   deleteSolveAndTagItems,
+  upsertTagStatsOnNewSolve,
+  querySolvesBySparseTag,
+  getSparseTagIndexConfig,
+  buildSparseTagIndexPK,
 } = require("./lib/ptsCore");
 
 const REGION = process.env.AWS_REGION || "us-east-1";
 const TABLE = process.env.PTS_TABLE || "PTSProd";
 const USE_PK_SK = String(process.env.PTS_USE_PK_SK || "true").toLowerCase() === "true";
+const ENABLE_SPARSE_TAG_READS =
+  String(process.env.PTS_ENABLE_SPARSE_TAG_READS || "false").toLowerCase() === "true";
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }), {
   marshallOptions: { removeUndefinedValues: true },
@@ -89,6 +97,16 @@ const CORE_EVENT_IDS = new Set([
   "RELAY_MINIGUILDFORD_222_333_333OH_444_555_SKEWB_PYRAMINX_SQ1_CLOCK_MEGAMINX",
   "RELAY",
 ]);
+const TAG_SCOPE_EVENT_ALIASES = Object.freeze({
+  "333OH": "333",
+  "333BLD": "333",
+  "333FM": "333",
+  "333FT": "333",
+  "333MBLD": "333",
+  "MBLD": "333",
+  "444BLD": "444",
+  "555BLD": "555",
+});
 
 function requirePkSk(res) {
   if (!USE_PK_SK) {
@@ -102,6 +120,14 @@ function requirePkSk(res) {
 
 function isCoreEvent(event) {
   return CORE_EVENT_IDS.has(normalizeEvent(event));
+}
+
+function getTagScopeEventCandidates(event) {
+  const normalized = normalizeEvent(event);
+  const shared = TAG_SCOPE_EVENT_ALIASES[normalized] || normalized;
+  if (!normalized) return [shared].filter(Boolean);
+  if (shared === normalized) return [normalized];
+  return [shared, normalized];
 }
 
 function hasCurrentStrictWindowVersion(item) {
@@ -123,6 +149,7 @@ function hasCachedWorstMetrics(item) {
 const ALLOWED_TAG_KEYS = new Set([
   "CubeModel",
   "CrossColor",
+  "Method",
   "TimerInput",
   "SolveSource",
   "Custom1",
@@ -140,10 +167,14 @@ function buildDefaultTagConfig(tagOptions = null) {
         options: Array.isArray(tagOptions?.CubeModels) ? tagOptions.CubeModels : [],
       },
       CrossColor: {
-        label: "Cross Color",
+        label: "Start Color",
         options: Array.isArray(tagOptions?.CrossColors)
           ? tagOptions.CrossColors
           : ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
+      },
+      Method: {
+        label: "Method",
+        options: ["CFOP", "Roux", "ZZ", "Petrus", "LBL", "Other"],
       },
       TimerInput: {
         label: "Timer Input",
@@ -1819,6 +1850,183 @@ function getScopeSortKeyFromSolve(solve, sessionID = null) {
   return sessionID ? String(solve?.GSI1SK || "") : String(solve?.GSI2SK || "");
 }
 
+function getTagScopeQueryParts({ userID, tagKey, tagValue, event, sessionID = null }) {
+  const key = String(tagKey || "").trim();
+  const value = String(tagValue || "").trim();
+  const tagValueNorm = normalizeTagIndexValue(value);
+  const ev = normalizeEvent(event);
+  const sid = sessionID ? normalizeSessionID(sessionID) : null;
+  const sparseConfig = getSparseTagIndexConfig(key);
+
+  if (!userID || !key || !tagValueNorm || !ev) return null;
+
+  const rangePrefix = sid ? `${ev}#${sid}#` : `${ev}#`;
+  const rangeStart = rangePrefix;
+  const rangeEnd = `${rangePrefix}\uffff`;
+
+  if (sparseConfig) {
+    const pkValue = buildSparseTagIndexPK(key, userID, value);
+    if (!pkValue) return null;
+    return {
+      indexName: sparseConfig.indexName,
+      pkAttr: sparseConfig.attr,
+      skAttr: "SolveTagSK",
+      pkValue,
+      hydrate: false,
+      event: ev,
+      sessionID: sid,
+      rangeStart,
+      rangeEnd,
+    };
+  }
+
+  return {
+    indexName: "GSI3",
+    pkAttr: "GSI3PK",
+    skAttr: "GSI3SK",
+    pkValue: `TAG#${userID}#${key}#${tagValueNorm}`,
+    hydrate: true,
+    event: ev,
+    sessionID: sid,
+    rangeStart,
+    rangeEnd,
+  };
+}
+
+function getTagScopeSortKeyFromSolve(solve) {
+  return buildSolveTagSK(solve?.Event, solve?.SessionID, solve?.CreatedAt, solve?.SolveID);
+}
+
+async function queryTagScopeItems({
+  userID,
+  event,
+  sessionID = null,
+  tagKey,
+  tagValue,
+  comparator = null,
+  anchorSortKey = null,
+  scanIndexForward = true,
+  limit = 100,
+}) {
+  const scope = getTagScopeQueryParts({ userID, event, sessionID, tagKey, tagValue });
+  if (!scope) return [];
+
+  let keyConditionExpression = `${scope.pkAttr} = :pk AND ${scope.skAttr} BETWEEN :from AND :to`;
+  const expressionAttributeValues = {
+    ":pk": scope.pkValue,
+    ":from": scope.rangeStart,
+    ":to": scope.rangeEnd,
+  };
+
+  if (comparator && anchorSortKey) {
+    if (comparator === "<" || comparator === "<=") {
+      expressionAttributeValues[":to"] = anchorSortKey;
+    } else if (comparator === ">" || comparator === ">=") {
+      expressionAttributeValues[":from"] = anchorSortKey;
+    }
+  }
+
+  const out = await ddb.send(
+    new QueryCommand({
+      TableName: TABLE,
+      IndexName: scope.indexName,
+      KeyConditionExpression: keyConditionExpression,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ScanIndexForward: scanIndexForward,
+      Limit: Math.max(1, Math.min(1000, Number(limit || 100))),
+    })
+  );
+
+  const items = out?.Items || [];
+  if (!scope.hydrate || items.length === 0) {
+    if (comparator === "<" || comparator === "<=" || comparator === ">" || comparator === ">=") {
+      const cmp = String(anchorSortKey || "");
+      return items.filter((solve) => {
+        const sortKey = getTagScopeSortKeyFromSolve(solve);
+        if (!cmp) return true;
+        if (comparator === "<") return sortKey < cmp;
+        if (comparator === "<=") return sortKey <= cmp;
+        if (comparator === ">") return sortKey > cmp;
+        return sortKey >= cmp;
+      });
+    }
+    return items;
+  }
+
+  const solveKeys = items
+    .map((item) => ({ PK: item?.SolvePK, SK: item?.SolveSK }))
+    .filter((item) => item.PK && item.SK);
+  const solves = await batchGetItems(solveKeys);
+  const solveMap = new Map((solves || []).map((solve) => [`${solve.PK}|${solve.SK}`, solve]));
+
+  const hydrated = items
+    .map((item) => solveMap.get(`${item?.SolvePK}|${item?.SolveSK}`))
+    .filter(Boolean);
+
+  if (comparator === "<" || comparator === ">" || comparator === ">=" || comparator === "<=") {
+    const cmp = String(anchorSortKey || "");
+    return hydrated.filter((solve) => {
+      const sortKey = getTagScopeSortKeyFromSolve(solve);
+      if (!cmp) return true;
+      if (comparator === "<") return sortKey < cmp;
+      if (comparator === "<=") return sortKey <= cmp;
+      if (comparator === ">") return sortKey > cmp;
+      return sortKey >= cmp;
+    });
+  }
+
+  return hydrated;
+}
+
+async function queryTagScopeNeighborhood({
+  userID,
+  event,
+  sessionID = null,
+  tagKey,
+  tagValue,
+  anchorSortKey,
+  beforeCount,
+  afterCount,
+  includeAnchor,
+}) {
+  const beforeLimit = Math.max(0, Number(beforeCount || 0));
+  const afterLimit = Math.max(0, Number(afterCount || 0));
+  const before = [];
+  const after = [];
+
+  if (beforeLimit > 0) {
+    const items = await queryTagScopeItems({
+      userID,
+      event,
+      sessionID,
+      tagKey,
+      tagValue,
+      comparator: "<",
+      anchorSortKey,
+      scanIndexForward: false,
+      limit: beforeLimit,
+    });
+    before.push(...items.reverse());
+  }
+
+  if (afterLimit > 0) {
+    const items = await queryTagScopeItems({
+      userID,
+      event,
+      sessionID,
+      tagKey,
+      tagValue,
+      comparator: includeAnchor ? ">=" : ">",
+      anchorSortKey,
+      scanIndexForward: true,
+      limit: afterLimit,
+    });
+    after.push(...items);
+  }
+
+  return { before, after };
+}
+
 async function queryScopeNeighborhood({
   userID,
   event,
@@ -1919,6 +2127,25 @@ async function getLastSolveAtForScope({ userID, event, sessionID = null }) {
   const items = sessionID
     ? await getLastNSolvesBySession(ddb, TABLE, userID, event, sessionID, 1)
     : await getLastNSolvesByEvent(ddb, TABLE, userID, event, 1);
+  return items[0]?.CreatedAt || null;
+}
+
+async function getLastSolveAtForTagScope({
+  userID,
+  event,
+  sessionID = null,
+  tagKey,
+  tagValue,
+}) {
+  const items = await getLastNSolvesByTag(
+    ddb,
+    TABLE,
+    userID,
+    tagKey,
+    tagValue,
+    { event, sessionID: sessionID || "" },
+    1
+  );
   return items[0]?.CreatedAt || null;
 }
 
@@ -2062,6 +2289,254 @@ async function applyIncrementalStatsForScope({
   return next;
 }
 
+async function getOrBuildTagStatsBase({
+  userID,
+  event,
+  sessionID = null,
+  tagKey,
+  tagValue,
+}) {
+  const ev = normalizeEvent(event);
+  const sid = sessionID ? normalizeSessionID(sessionID) : null;
+  const key = String(tagKey || "").trim();
+  const value = String(tagValue || "").trim();
+  const sk = buildTagStatsSK(ev, sid, key, value);
+
+  const existingOut = await ddb.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: { PK: `USER#${userID}`, SK: sk },
+      ConsistentRead: true,
+    })
+  );
+
+  if (existingOut.Item) return existingOut.Item;
+
+  const empty = {
+    __synthetic: true,
+    PK: `USER#${userID}`,
+    SK: sk,
+    ItemType: "TAGSTATS",
+    Event: ev,
+    TagKey: key,
+    TagValue: value,
+    TagValueNorm: normalizeTagIndexValue(value),
+    UpdatedAt: nowIso(),
+    stale: false,
+    ...buildStatsFromSolves([]),
+  };
+  if (sid) empty.SessionID = sid;
+  return empty;
+}
+
+async function applyIncrementalTagStatsForScope({
+  userID,
+  event,
+  sessionID = null,
+  tagKey,
+  tagValue,
+  removeSolves = [],
+  addSolves = [],
+}) {
+  const ev = normalizeEvent(event);
+  const sid = sessionID ? normalizeSessionID(sessionID) : null;
+  const key = String(tagKey || "").trim();
+  const value = String(tagValue || "").trim();
+  const tagValueNorm = normalizeTagIndexValue(value);
+
+  if (!userID || !ev || !key || !tagValueNorm) return null;
+
+  const prev = await getOrBuildTagStatsBase({
+    userID,
+    event: ev,
+    sessionID: sid,
+    tagKey: key,
+    tagValue: value,
+  });
+
+  const hasWindowCache = CACHED_WINDOW_CONFIGS.every((config) =>
+    Array.isArray(prev?.[config.candidatesField])
+  );
+  if (prev.__synthetic || !hasWindowCache) {
+    return recomputeTagStats(ddb, TABLE, userID, ev, sid, key, value);
+  }
+
+  const removes = (Array.isArray(removeSolves) ? removeSolves : []).filter(Boolean);
+  const adds = (Array.isArray(addSolves) ? addSolves : []).filter(Boolean);
+
+  if (
+    removes.some((solve) => String(solve?.SK || "") === String(prev?.BestSingleSolveSK || "")) ||
+    removes.some((solve) => String(solve?.SK || "") === String(prev?.WorstSingleSolveSK || ""))
+  ) {
+    return recomputeTagStats(ddb, TABLE, userID, ev, sid, key, value);
+  }
+
+  let core = prev;
+  for (const solve of removes) core = applyCoreDelta(core, solve, null);
+  for (const solve of adds) core = applyCoreDelta(core, null, solve);
+
+  const touchedSolveSKs = new Set(
+    [...removes, ...adds].map((solve) => String(solve?.SK || "")).filter(Boolean)
+  );
+  const maxWindowSize = CACHED_WINDOW_CONFIGS.reduce(
+    (max, config) => Math.max(max, Number(config.windowSize || 0)),
+    0
+  );
+
+  const anchors = [
+    ...removes.map((solve) => ({ type: "remove", solve })),
+    ...adds.map((solve) => ({ type: "add", solve })),
+  ];
+
+  const [lastSolveAt, neighborhoods] = await Promise.all([
+    getLastSolveAtForTagScope({
+      userID,
+      event: ev,
+      sessionID: sid,
+      tagKey: key,
+      tagValue: value,
+    }),
+    Promise.all(
+      anchors.map(async ({ type, solve }) => {
+        const anchorSortKey = getTagScopeSortKeyFromSolve(solve);
+        if (!anchorSortKey) return { type, solve, before: [], after: [] };
+        const neighborhood = await queryTagScopeNeighborhood({
+          userID,
+          event: ev,
+          sessionID: sid,
+          tagKey: key,
+          tagValue: value,
+          anchorSortKey,
+          beforeCount: Math.max(0, maxWindowSize - 1),
+          afterCount: type === "add" ? maxWindowSize : Math.max(0, maxWindowSize - 1),
+          includeAnchor: type === "add",
+        });
+        return { type, solve, ...neighborhood };
+      })
+    ),
+  ]);
+
+  const next = {
+    ...prev,
+    ...core,
+    UpdatedAt: nowIso(),
+    LastSolveAt: lastSolveAt,
+    LastRecomputedAt: nowIso(),
+    stale: false,
+  };
+
+  if (next.SolveCountIncluded <= 0) {
+    next.BestSingleMs = null;
+    next.BestSingleSolveSK = null;
+    next.BestSingleAt = null;
+    next.WorstSingleMs = null;
+    next.WorstSingleSolveSK = null;
+  }
+
+  for (const solve of adds) {
+    const finalMs = getFinalTimeMs(solve);
+    if (!Number.isFinite(finalMs)) continue;
+
+    if (
+      next.BestSingleMs == null ||
+      finalMs < next.BestSingleMs ||
+      (finalMs === next.BestSingleMs &&
+        String(solve?.CreatedAt || "") < String(next.BestSingleAt || ""))
+    ) {
+      next.BestSingleMs = finalMs;
+      next.BestSingleSolveSK = solve?.SK || null;
+      next.BestSingleAt = solve?.CreatedAt || null;
+    }
+
+    if (next.WorstSingleMs == null || finalMs > next.WorstSingleMs) {
+      next.WorstSingleMs = finalMs;
+      next.WorstSingleSolveSK = solve?.SK || null;
+    }
+  }
+
+  for (const config of CACHED_WINDOW_CONFIGS) {
+    const localCandidates = [];
+
+    for (const neighborhood of neighborhoods) {
+      const combined = [...(neighborhood.before || []), ...(neighborhood.after || [])];
+      if (neighborhood.type === "add") {
+        localCandidates.push(
+          ...buildAnchorWindowCandidates(combined, config, neighborhood.solve?.SK)
+        );
+      } else {
+        localCandidates.push(
+          ...buildBoundaryWindowCandidates(combined, config, (neighborhood.before || []).length)
+        );
+      }
+    }
+
+    const mergedCandidates = mergeWindowCandidates({
+      prevCandidates: prev?.[config.candidatesField],
+      nextCandidates: dedupeWindowCandidates(localCandidates, config),
+      config,
+      touchedSolveSKs,
+      k: 10,
+    });
+
+    next[config.candidatesField] = mergedCandidates;
+    next[config.valueField] = mergedCandidates[0]?.ValueMs ?? null;
+    next[config.startField] = mergedCandidates[0]?.StartSolveSK || null;
+
+    const shouldExist = Number(core.SolveCountTotal || 0) >= Number(config.windowSize || 0);
+    if (shouldExist && mergedCandidates.length === 0) {
+      return recomputeTagStats(ddb, TABLE, userID, ev, sid, key, value);
+    }
+  }
+
+  const item = {
+    PK: `USER#${userID}`,
+    SK: buildTagStatsSK(ev, sid, key, value),
+    ItemType: "TAGSTATS",
+    Event: ev,
+    TagKey: key,
+    TagValue: value,
+    TagValueNorm: tagValueNorm,
+    UpdatedAt: nowIso(),
+    stale: false,
+    ...next,
+  };
+  if (sid) item.SessionID = sid;
+
+  await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+  return item;
+}
+
+function addTagScopeMutation(plan, solve, direction) {
+  if (!solve) return;
+  const event = normalizeEvent(solve.Event);
+  const sessionID = normalizeSessionID(solve.SessionID);
+
+  for (const pair of getSolveTagPairsFromItem(solve)) {
+    const tagKey = String(pair?.key || "").trim();
+    const tagValue = String(pair?.value || "").trim();
+    if (!event || !sessionID || !tagKey || !tagValue) continue;
+
+    const scopes = [
+      { scopeKey: `TS|${event}|${sessionID}|${tagKey}|${tagValue}`, event, sessionID, tagKey, tagValue },
+      { scopeKey: `TE|${event}|${tagKey}|${tagValue}`, event, sessionID: null, tagKey, tagValue },
+    ];
+
+    for (const scope of scopes) {
+      const existing = plan.get(scope.scopeKey) || {
+        event: scope.event,
+        sessionID: scope.sessionID,
+        tagKey: scope.tagKey,
+        tagValue: scope.tagValue,
+        removeSolves: [],
+        addSolves: [],
+      };
+      if (direction === "remove") existing.removeSolves.push(solve);
+      if (direction === "add") existing.addSolves.push(solve);
+      plan.set(scope.scopeKey, existing);
+    }
+  }
+}
+
 async function applySolveMutationStats({ userID, oldSolve = null, newSolve = null }) {
   if (oldSolve && newSolve) {
     const sameScope =
@@ -2070,7 +2545,13 @@ async function applySolveMutationStats({ userID, oldSolve = null, newSolve = nul
     const samePenalty =
       normalizePenalty(oldSolve.Penalty) === normalizePenalty(newSolve.Penalty);
     const sameFinal = getFinalTimeMs(oldSolve) === getFinalTimeMs(newSolve);
-    if (sameScope && samePenalty && sameFinal) return;
+    const tagFingerprint = (solve) =>
+      getSolveTagPairsFromItem(solve)
+        .map((pair) => `${String(pair?.key || "").trim()}|${String(pair?.value || "").trim()}`)
+        .sort((a, b) => a.localeCompare(b))
+        .join("||");
+    const sameTags = tagFingerprint(oldSolve) === tagFingerprint(newSolve);
+    if (sameScope && samePenalty && sameFinal && sameTags) return;
   }
 
   const plan = new Map();
@@ -2123,51 +2604,25 @@ async function applySolveMutationStats({ userID, oldSolve = null, newSolve = nul
     );
   }
 
-  const tagScopeKeys = new Map();
-  const addTagScopeRecomputes = (solve) => {
-    if (!solve) return;
-    const event = normalizeEvent(solve.Event);
-    const sessionID = normalizeSessionID(solve.SessionID);
+  const tagScopeMutations = new Map();
+  addTagScopeMutation(tagScopeMutations, oldSolve, "remove");
+  addTagScopeMutation(tagScopeMutations, newSolve, "add");
 
-    for (const pair of getSolveTagPairsFromItem(solve)) {
-      const tagKey = String(pair?.key || "").trim();
-      const tagValue = String(pair?.value || "").trim();
-      if (!event || !sessionID || !tagKey || !tagValue) continue;
-
-      tagScopeKeys.set(`TS|${event}|${sessionID}|${tagKey}|${tagValue}`, {
-        event,
-        sessionID,
-        tagKey,
-        tagValue,
-      });
-      tagScopeKeys.set(`TE|${event}|${tagKey}|${tagValue}`, {
-        event,
-        sessionID: null,
-        tagKey,
-        tagValue,
-      });
-    }
-  };
-
-  addTagScopeRecomputes(oldSolve);
-  addTagScopeRecomputes(newSolve);
-
-  for (const entry of tagScopeKeys.values()) {
+  for (const entry of tagScopeMutations.values()) {
     jobs.push(
-      recomputeTagStats(
-        ddb,
-        TABLE,
+      applyIncrementalTagStatsForScope({
         userID,
-        entry.event,
-        entry.sessionID,
-        entry.tagKey,
-        entry.tagValue
-      )
+        event: entry.event,
+        sessionID: entry.sessionID,
+        tagKey: entry.tagKey,
+        tagValue: entry.tagValue,
+        removeSolves: entry.removeSolves,
+        addSolves: entry.addSolves,
+      })
     );
   }
 
   await Promise.all(jobs);
-  await recomputeDayBucketsForSolveMutation({ userID, oldSolve, newSolve });
 }
 
 function runInBackground(label, fn) {
@@ -3831,6 +4286,8 @@ app.get("/api/sessionStats/:userID", async (req, res) => {
   if (!event) return res.status(400).json({ error: "Missing event" });
 
   try {
+    const shouldRepairTopSinglesOnRead =
+      String(req.query?.repairTopSingles || "false").toLowerCase() === "true";
     const out = await ddb.send(
       new GetCommand({
         TableName: TABLE,
@@ -3841,14 +4298,14 @@ app.get("/api/sessionStats/:userID", async (req, res) => {
     let item = out.Item || null;
     const needsRecompute =
       !!item && (!hasCurrentStrictWindowVersion(item) || !hasCachedWorstMetrics(item));
-
-    if (
-      item &&
+    const needsTopSinglesRepair =
+      !!item &&
       Number(item.SolveCountIncluded || 0) > 0 &&
       (!Number.isFinite(Number(item.BestSingleMs)) ||
         !Array.isArray(item.TopSingles10) ||
-        item.TopSingles10.length === 0)
-    ) {
+        item.TopSingles10.length === 0);
+
+    if (item && needsTopSinglesRepair && shouldRepairTopSinglesOnRead) {
       const topSingles = await getTopSinglesForScope({
         userID,
         event,
@@ -3867,6 +4324,7 @@ app.get("/api/sessionStats/:userID", async (req, res) => {
       item = {
         ...item,
         NeedsRecompute: needsRecompute,
+        NeedsTopSinglesRepair: needsTopSinglesRepair,
       };
     }
 
@@ -3888,6 +4346,8 @@ app.get("/api/eventStats/:userID", async (req, res) => {
   if (!event) return res.status(400).json({ error: "Missing event" });
 
   try {
+    const shouldRepairTopSinglesOnRead =
+      String(req.query?.repairTopSingles || "false").toLowerCase() === "true";
     const out = await ddb.send(
       new GetCommand({
         TableName: TABLE,
@@ -3898,14 +4358,14 @@ app.get("/api/eventStats/:userID", async (req, res) => {
     let item = out.Item || null;
     const needsRecompute =
       !!item && (!hasCurrentStrictWindowVersion(item) || !hasCachedWorstMetrics(item));
-
-    if (
-      item &&
+    const needsTopSinglesRepair =
+      !!item &&
       Number(item.SolveCountIncluded || 0) > 0 &&
       (!Number.isFinite(Number(item.BestSingleMs)) ||
         !Array.isArray(item.TopSingles10) ||
-        item.TopSingles10.length === 0)
-    ) {
+        item.TopSingles10.length === 0);
+
+    if (item && needsTopSinglesRepair && shouldRepairTopSinglesOnRead) {
       const topSingles = await getTopSinglesForScope({
         userID,
         event,
@@ -3924,6 +4384,7 @@ app.get("/api/eventStats/:userID", async (req, res) => {
       item = {
         ...item,
         NeedsRecompute: needsRecompute,
+        NeedsTopSinglesRepair: needsTopSinglesRepair,
       };
     }
 
@@ -3988,16 +4449,38 @@ app.get("/api/tagValues/:userID", async (req, res) => {
   );
 
   try {
-    const solves = sessionID
-      ? await getAllSolvesBySession(ddb, TABLE, userID, event, sessionID)
-      : await getAllSolvesByEvent(ddb, TABLE, userID, event);
+    const profileOut = await ddb.send(
+      new GetCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${userID}`, SK: "PROFILE" },
+        ConsistentRead: true,
+      })
+    );
+    const tagCatalog =
+      profileOut.Item?.TagCatalog && typeof profileOut.Item.TagCatalog === "object"
+        ? profileOut.Item.TagCatalog
+        : {};
+    const globalCatalog =
+      tagCatalog.Global && typeof tagCatalog.Global === "object" ? tagCatalog.Global : {};
+    const byEventCatalog =
+      tagCatalog.ByEvent && typeof tagCatalog.ByEvent === "object" ? tagCatalog.ByEvent : {};
 
-    for (const solve of solves || []) {
-      for (const pair of getSolveTagPairsFromItem(solve)) {
-        const tagKey = String(pair?.key || "").trim();
-        const tagValue = String(pair?.value || "").trim();
-        if (!ALLOWED_TAG_KEYS.has(tagKey) || !tagValue) continue;
-        valuesByField[tagKey].add(tagValue);
+    for (const field of ALLOWED_TAG_KEYS) {
+      for (const value of Array.isArray(globalCatalog?.[field]) ? globalCatalog[field] : []) {
+        const clean = String(value || "").trim();
+        if (clean) valuesByField[field].add(clean);
+      }
+    }
+
+    for (const eventKey of getTagScopeEventCandidates(event)) {
+      const scoped = byEventCatalog?.[eventKey];
+      if (!scoped || typeof scoped !== "object") continue;
+
+      for (const field of ALLOWED_TAG_KEYS) {
+        for (const value of Array.isArray(scoped?.[field]) ? scoped[field] : []) {
+          const clean = String(value || "").trim();
+          if (clean) valuesByField[field].add(clean);
+        }
       }
     }
 
@@ -4238,6 +4721,22 @@ app.get("/api/solvesByTag/:userID", async (req, res) => {
   }
 
   try {
+    if (ENABLE_SPARSE_TAG_READS && ["CubeModel", "CrossColor", "Method"].includes(rawTagKey)) {
+      const sparseOut = await querySolvesBySparseTag(ddb, TABLE, userID, rawTagKey, rawTagValue, {
+        event,
+        sessionID,
+        limit,
+        cursor,
+      });
+
+      return res.json({
+        ok: true,
+        items: sparseOut.items || [],
+        lastKey: sparseOut.lastKey || null,
+        source: "sparse-gsi",
+      });
+    }
+
     const out = await ddb.send(
       new QueryCommand({
         TableName: TABLE,
@@ -4276,6 +4775,7 @@ app.get("/api/solvesByTag/:userID", async (req, res) => {
       ok: true,
       items: hydrated,
       lastKey: out.LastEvaluatedKey || null,
+      source: "solvetag",
     });
   } catch (e) {
     console.error("GET /api/solvesByTag error:", e);
@@ -4319,6 +4819,28 @@ app.post("/api/solve", async (req, res) => {
     await putSolveAndTagItems(ddb, TABLE, solveItem);
     await syncSingleRankItemsForMutation({ userID, oldSolve: null, newSolve: solveItem });
 
+    const tagPairs = getSolveTagPairsFromItem(solveItem);
+    const tagStatJobs = tagPairs.flatMap((pair) => {
+      const tagKey = String(pair?.key || "").trim();
+      const tagValue = String(pair?.value || "").trim();
+      if (!tagKey || !tagValue) return [];
+
+      return [
+        upsertTagStatsOnNewSolve(ddb, TABLE, userID, solveItem, {
+          event: solveItem.Event,
+          sessionID: solveItem.SessionID,
+          tagKey,
+          tagValue,
+        }),
+        upsertTagStatsOnNewSolve(ddb, TABLE, userID, solveItem, {
+          event: solveItem.Event,
+          sessionID: null,
+          tagKey,
+          tagValue,
+        }),
+      ];
+    });
+
     const [sessionStats, eventStats] = await Promise.all([
       applyIncrementalStatsForScope({
         userID,
@@ -4331,6 +4853,7 @@ app.post("/api/solve", async (req, res) => {
         event: solveItem.Event,
         addSolve: solveItem,
       }),
+      ...tagStatJobs,
     ]);
     runInBackground(`dayBuckets:add:${userID}:${solveItem.Event}`, () =>
       recomputeDayBucketsForSolveMutation({
@@ -4975,31 +5498,8 @@ app.post("/api/solves/move-session", async (req, res) => {
     const writeRequests = [];
     const sessionScopes = new Map();
     const eventScopes = new Set();
-    const tagScopes = new Map();
+    const tagScopeMutations = new Map();
     let skipped = 0;
-
-    const addTagScopesForSolve = (solve) => {
-      if (!solve) return;
-      const event = normalizeEvent(solve.Event);
-      const sessionID = normalizeSessionID(solve.SessionID);
-      for (const pair of getSolveTagPairsFromItem(solve)) {
-        const tagKey = String(pair?.key || "").trim();
-        const tagValue = String(pair?.value || "").trim();
-        if (!event || !sessionID || !tagKey || !tagValue) continue;
-        tagScopes.set(`TS|${event}|${sessionID}|${tagKey}|${tagValue}`, {
-          event,
-          sessionID,
-          tagKey,
-          tagValue,
-        });
-        tagScopes.set(`TE|${event}|${tagKey}|${tagValue}`, {
-          event,
-          sessionID: null,
-          tagKey,
-          tagValue,
-        });
-      }
-    };
 
     for (const solveRef of solveRefs) {
       const existing = existingBySK.get(solveRef);
@@ -5045,8 +5545,8 @@ app.post("/api/solves/move-session", async (req, res) => {
       sessionScopes.set(`${nextEvent}|${nextSessionID}`, { event: nextEvent, sessionID: nextSessionID });
       eventScopes.add(oldEvent);
       eventScopes.add(nextEvent);
-      addTagScopesForSolve(existing);
-      addTagScopesForSolve(rebuilt);
+      addTagScopeMutation(tagScopeMutations, existing, "remove");
+      addTagScopeMutation(tagScopeMutations, rebuilt, "add");
     }
 
     const writeStartedAt = Date.now();
@@ -5059,8 +5559,16 @@ app.post("/api/solves/move-session", async (req, res) => {
         recomputeSessionStats(ddb, TABLE, userID, scope.event, scope.sessionID)
       ),
       ...Array.from(eventScopes.values()).map((event) => recomputeEventStats(ddb, TABLE, userID, event)),
-      ...Array.from(tagScopes.values()).map((scope) =>
-        recomputeTagStats(ddb, TABLE, userID, scope.event, scope.sessionID, scope.tagKey, scope.tagValue)
+      ...Array.from(tagScopeMutations.values()).map((scope) =>
+        applyIncrementalTagStatsForScope({
+          userID,
+          event: scope.event,
+          sessionID: scope.sessionID,
+          tagKey: scope.tagKey,
+          tagValue: scope.tagValue,
+          removeSolves: scope.removeSolves,
+          addSolves: scope.addSolves,
+        })
       ),
     ]);
     const recomputeMs = Date.now() - recomputeStartedAt;
@@ -5084,6 +5592,113 @@ app.post("/api/solves/move-session", async (req, res) => {
     });
   } catch (e) {
     console.error("POST /api/solves/move-session error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.post("/api/solves/bulk-tags", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const userID = String(req.body?.userID || "").trim();
+    const updatesRaw = Array.isArray(req.body?.updates) ? req.body.updates : [];
+
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+    if (!updatesRaw.length) return res.json({ ok: true, updated: 0, items: [] });
+    if (updatesRaw.length > 1000) {
+      return res.status(400).json({ error: "Too many solves in one bulk tag update (max 1000)" });
+    }
+
+    const normalizedUpdates = Array.from(
+      new Map(
+        updatesRaw
+          .map((entry) => {
+            const solveRef = String(entry?.solveRef || "").trim();
+            const ref = solveRef && !solveRef.startsWith("SOLVE#") ? `SOLVE#${solveRef}` : solveRef;
+            const tags = entry?.tags && typeof entry.tags === "object" ? entry.tags : {};
+            return [ref, { solveRef: ref, tags }];
+          })
+          .filter(([solveRef]) => Boolean(solveRef))
+      ).values()
+    );
+
+    if (!normalizedUpdates.length) return res.json({ ok: true, updated: 0, items: [] });
+
+    const existingItems = await batchGetItems(
+      normalizedUpdates.map(({ solveRef }) => ({
+        PK: `USER#${userID}`,
+        SK: solveRef,
+      }))
+    );
+    const existingBySK = new Map(existingItems.map((item) => [String(item?.SK || ""), item]));
+
+    const writeRequests = [];
+    const tagScopeMutations = new Map();
+    const updatedItems = [];
+
+    for (const update of normalizedUpdates) {
+      const existing = existingBySK.get(update.solveRef);
+      if (!existing) continue;
+
+      const nextTags = update.tags && typeof update.tags === "object" ? update.tags : {};
+      const rebuilt = buildSolveItem({
+        userID,
+        event: existing.Event,
+        sessionID: existing.SessionID,
+        rawTimeMs: getRawTimeMs(existing),
+        penalty: existing.Penalty,
+        scramble: existing.Scramble ?? "",
+        note: existing.Note ?? "",
+        tags: nextTags,
+        createdAt: existing.CreatedAt,
+        solveID: existing.SolveID,
+        existing,
+      });
+
+      const oldPairs = getSolveTagPairsFromItem(existing)
+        .map((pair) => `${String(pair?.key || "").trim()}|${String(pair?.value || "").trim()}`)
+        .sort((a, b) => a.localeCompare(b))
+        .join("||");
+      const newPairs = getSolveTagPairsFromItem(rebuilt)
+        .map((pair) => `${String(pair?.key || "").trim()}|${String(pair?.value || "").trim()}`)
+        .sort((a, b) => a.localeCompare(b))
+        .join("||");
+
+      if (oldPairs === newPairs) {
+        updatedItems.push(existing);
+        continue;
+      }
+
+      writeRequests.push(...buildReplaceSolveAndTagRequests(existing, rebuilt));
+      addTagScopeMutation(tagScopeMutations, existing, "remove");
+      addTagScopeMutation(tagScopeMutations, rebuilt, "add");
+      updatedItems.push(rebuilt);
+    }
+
+    const wrote = await batchWriteRequestsWithRetry(writeRequests);
+
+    await Promise.all(
+      Array.from(tagScopeMutations.values()).map((scope) =>
+        applyIncrementalTagStatsForScope({
+          userID,
+          event: scope.event,
+          sessionID: scope.sessionID,
+          tagKey: scope.tagKey,
+          tagValue: scope.tagValue,
+          removeSolves: scope.removeSolves,
+          addSolves: scope.addSolves,
+        })
+      )
+    );
+
+    return res.json({
+      ok: true,
+      updated: updatedItems.length,
+      wrote,
+      items: updatedItems,
+    });
+  } catch (e) {
+    console.error("POST /api/solves/bulk-tags error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
   }
 });
@@ -5166,10 +5781,15 @@ app.put("/api/solve/:userID/:solveRef", async (req, res) => {
           "GSI1SK",
           "GSI2PK",
           "GSI2SK",
+          "SolveTagSK",
+          "CubeModelIdx",
+          "StartColorIdx",
+          "MethodIdx",
           "GSI3PK",
           "GSI3SK",
           "Tag_CubeModel",
           "Tag_CrossColor",
+          "Tag_Method",
           "Tag_TimerInput",
           "Tag_Custom1",
           "Tag_Custom2",
@@ -5289,14 +5909,6 @@ app.delete("/api/solve/:userID/:solveRef", async (req, res) => {
       oldSolve: existing,
       newSolve: null,
     });
-
-    // Deletes can invalidate cached best-window references far away from the
-    // deleted solve after a series of edits. Recompute the canonical stats so
-    // detail views and home-summary drilldowns keep pointing at the right solves.
-    await Promise.all([
-      recomputeSessionStats(ddb, TABLE, userID, existing.Event, existing.SessionID),
-      recomputeEventStats(ddb, TABLE, userID, existing.Event),
-    ]);
 
     runInBackground(`dayBuckets:delete:${userID}:${existing.Event}`, () =>
       recomputeDayBucketsForSolveMutation({

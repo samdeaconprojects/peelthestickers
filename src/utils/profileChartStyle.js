@@ -37,16 +37,16 @@ export function resolvePaletteColor(style, ratio, fallback = "#50B6FF") {
 
 export function getProfileChartStyle(profile) {
   const base = normalizeHex(profile?.Color || profile?.color || "#50B6FF", "#50B6FF");
-  const dark = mixHex(base, "#08131A", 0.42);
-  const mid = mixHex(base, "#FFFFFF", 0.18);
-  const light = mixHex(base, "#FFFFFF", 0.42);
+  const dark = mixHex(base, "#061017", 0.56);
+  const mid = mixHex(base, "#FFFFFF", 0.08);
+  const light = mixHex(base, "#FFFFFF", 0.58);
 
   return {
     label: "Profile",
     mode: "gradient",
     stops: [dark, mid, light],
     primary: base,
-    accent: light,
+    accent: mixHex(base, "#FFFFFF", 0.68),
   };
 }
 

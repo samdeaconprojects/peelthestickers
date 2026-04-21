@@ -375,6 +375,12 @@
 
 .postDetailPopupContent {
   text-align: left;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.postDetailPopupContent::-webkit-scrollbar {
+  display: none;
 }
 
 .postDetailPopupContent--single {
@@ -398,8 +404,19 @@
 }
 
 .postDetailHeader {
+  position: relative;
   margin-bottom: 18px;
   padding-right: 28px;
+}
+
+.postDetailHeader .name-tag {
+  margin-top: 0;
+  transform: translateY(-4px);
+  margin-bottom: 14px;
+}
+
+.postDetailHeader .name-tag--sm .name-tag-link--profileCorner .name-tag-text {
+  font-size: 16pt !important;
 }
 
 .postDetailAuthor {
@@ -409,8 +426,11 @@
 }
 
 .postDetailDate {
-  margin-top: 6px;
+  position: absolute;
+  top: 0;
+  right: 0;
   margin-bottom: 0;
+  text-align: right;
 }
 
 .postDetailCaption {
@@ -546,16 +566,44 @@
 
 .postDetailCommentAuthorRow {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 4px;
 }
 
 .postDetailCommentAuthor {
-  font-size: 13px;
-  font-weight: 800;
-  color: white;
+  min-width: 0;
+}
+
+.postDetailCommentAuthor .name-tag {
+  margin-top: 0;
+  margin-left: -3px;
+  margin-bottom: 2px;
+}
+
+.postDetailCommentAuthor .name-tag-link--profileCorner .name-tag-cubeFrame {
+  width: 32px;
+  height: 32px;
+}
+
+.postDetailCommentAuthor .name-tag-link--profileCorner .name-tag-cubeFrame .nametagCube {
+  transform: scale(0.82);
+  transform-origin: center;
+}
+
+.postDetailCommentAuthor .name-tag-link--profileCorner
+  .name-tag-cubeFrame
+  .puzzle-svg-wrap,
+.postDetailCommentAuthor .name-tag-link--profileCorner
+  .name-tag-cubeFrame
+  .puzzle-svg-inner {
+  transform: translate(-13px, 3px) scale(0.82);
+  transform-origin: center;
+}
+
+.postDetailCommentAuthor .name-tag-link--profileCorner .name-tag-text {
+  font-size: 10pt;
 }
 
 .postDetailCommentDate {

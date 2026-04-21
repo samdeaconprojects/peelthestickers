@@ -229,6 +229,21 @@ function Post({
   const nxn = isNxNEvent(event);
   const prettyDate = formatPostDateTime(date);
   const trimmedNote = String(note || "").trim();
+  const postMeta = (
+    <div className="dateAndName">
+      <div className="postDate">{prettyDate}</div>
+      <div className="postNameAndPicture">
+        <NameTag
+          name={name}
+          picture={picture}
+          user={safeUser}
+          size="xs"
+          variant="profile-corner"
+          reverse={true}
+        />
+      </div>
+    </div>
+  );
 
   return (
     <div
@@ -242,14 +257,7 @@ function Post({
             <StatSharePost note={trimmedNote} statShare={statShare} shareColor={postColor} />
           </div>
 
-          <div className="dateAndName">
-            <div className="postDate">{prettyDate}</div>
-            <div className="postNameAndPicture">
-              <div style={{ color: "white", fontWeight: 700 }}>
-                @{safeUser?.Name || name || safeUser?.UserID || "user"}
-              </div>
-            </div>
-          </div>
+          {postMeta}
         </>
       ) : (
         <>
@@ -382,17 +390,7 @@ function Post({
             </div>
           ) : null}
 
-          <div className="dateAndName">
-            <div className="postDate">{prettyDate}</div>
-            <div className="postNameAndPicture">
-              <NameTag
-                name={name}
-                picture={picture}
-                user={safeUser}
-                size="sm"
-              />
-            </div>
-          </div>
+          {postMeta}
         </>
       )}
     </div>

@@ -239,7 +239,9 @@ export default function TagBar({
   };
 
   const visibleHomeFields = fieldMeta.filter((item) => {
-    if (item.field === "CubeModel" || item.field === "CrossColor") return true;
+    if (item.field === "CubeModel" || item.field === "CrossColor" || item.field === "Method") {
+      return true;
+    }
     return !!String(safeTags[item.field] || "").trim();
   });
 

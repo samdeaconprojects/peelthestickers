@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
-import { updateSolve } from "../services/updateSolve";
 import { moveSolvesToSession } from "../services/moveSolvesToSession";
+import { bulkUpdateSolveTags } from "../services/bulkUpdateSolveTags";
 import { normalizeEventCode } from "../components/SolveBulk/solveBulkUtils";
 
 function safeMergeCanonicalTags(existingTags, patch, mode = "merge") {
@@ -186,49 +186,54 @@ export default function useBulkSolveActions({
     if (!user?.UserID) return;
 
     try {
-      for (const s of targets) {
-        const nextTags = safeMergeCanonicalTags(s.tags, patch, bulkTagMode);
-        const saved = await updateSolve(user.UserID, s.solveRef, { Tags: nextTags });
+      const updates = targets.map((solve) => ({
+        solveRef: solve.solveRef,
+        tags: safeMergeCanonicalTags(solve.tags, patch, bulkTagMode),
+      }));
+      const response = await bulkUpdateSolveTags(user.UserID, updates);
+      const savedByRef = new Map(
+        (Array.isArray(response?.items) ? response.items : []).map((item) => [
+          String(item?.SK || ""),
+          item,
+        ])
+      );
 
-        setSessions?.((prev) => {
-          const next = { ...(prev || {}) };
-          const arr = Array.isArray(next[sourceListKey]) ? [...next[sourceListKey]] : [];
-          const idx = arr.findIndex((x) => x?.solveRef === s.solveRef);
+      setSessions?.((prev) => {
+        const next = { ...(prev || {}) };
+        const arr = Array.isArray(next[sourceListKey]) ? [...next[sourceListKey]] : [];
 
-          if (idx >= 0) {
-            arr[idx] = saved
-              ? {
-                  ...arr[idx],
-                  solveRef: saved?.SK || arr[idx].solveRef,
-                  createdAt: saved?.CreatedAt || arr[idx].createdAt,
-                  rawTimeMs:
-                    Number.isFinite(saved?.RawTimeMs) ? saved.RawTimeMs : arr[idx].rawTimeMs,
-                  finalTimeMs:
-                    Number.isFinite(saved?.FinalTimeMs) || saved?.FinalTimeMs === null
-                      ? saved.FinalTimeMs
-                      : arr[idx].finalTimeMs,
-                  time:
-                    saved?.Penalty === "DNF"
-                      ? Number.MAX_SAFE_INTEGER
-                      : Number.isFinite(saved?.FinalTimeMs)
-                      ? saved.FinalTimeMs
-                      : arr[idx].time,
-                  isDNF: saved?.Penalty === "DNF" || saved?.IsDNF === true,
-                  penalty:
-                    typeof saved?.Penalty !== "undefined" ? saved.Penalty : arr[idx].penalty,
-                  tags: saved?.Tags || nextTags,
-                  event: saved?.Event || arr[idx].event,
-                  sessionID: saved?.SessionID || arr[idx].sessionID,
-                  scramble: saved?.Scramble ?? arr[idx].scramble,
-                  note: saved?.Note ?? arr[idx].note,
-                }
-              : { ...arr[idx], tags: nextTags };
-          }
-
-          next[sourceListKey] = arr;
-          return next;
+        next[sourceListKey] = arr.map((entry) => {
+          const saved = savedByRef.get(String(entry?.solveRef || ""));
+          if (!saved) return entry;
+          return {
+            ...entry,
+            solveRef: saved?.SK || entry.solveRef,
+            createdAt: saved?.CreatedAt || entry.createdAt,
+            rawTimeMs:
+              Number.isFinite(saved?.RawTimeMs) ? saved.RawTimeMs : entry.rawTimeMs,
+            finalTimeMs:
+              Number.isFinite(saved?.FinalTimeMs) || saved?.FinalTimeMs === null
+                ? saved.FinalTimeMs
+                : entry.finalTimeMs,
+            time:
+              saved?.Penalty === "DNF"
+                ? Number.MAX_SAFE_INTEGER
+                : Number.isFinite(saved?.FinalTimeMs)
+                ? saved.FinalTimeMs
+                : entry.time,
+            isDNF: saved?.Penalty === "DNF" || saved?.IsDNF === true,
+            penalty:
+              typeof saved?.Penalty !== "undefined" ? saved.Penalty : entry.penalty,
+            tags: saved?.Tags || entry.tags,
+            event: saved?.Event || entry.event,
+            sessionID: saved?.SessionID || entry.sessionID,
+            scramble: saved?.Scramble ?? entry.scramble,
+            note: saved?.Note ?? entry.note,
+          };
         });
-      }
+
+        return next;
+      });
     } catch (err) {
       console.error("Bulk tag update failed:", err);
     }

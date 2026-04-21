@@ -4,6 +4,8 @@ import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import { formatTime } from "../TimeList/TimeUtils";
 import { currentEventToString } from "../../components/scrambleUtils";
 import StatSharePost from "./StatSharePost";
+import NameTag from "./NameTag";
+import { getUser } from "../../services/getUser";
 
 const getDetailComponent = () => {
   const mod = require("../Detail/Detail");
@@ -17,6 +19,7 @@ const getAverageDetailComponent = () => {
 
 function PostDetail({
   author,
+  authorUser = null,
   date,
   solveList = [],
   note = "",
@@ -30,6 +33,7 @@ function PostDetail({
 }) {
   const [newComment, setNewComment] = useState("");
   const [selectedAverageSolve, setSelectedAverageSolve] = useState(null);
+  const [commentProfilesById, setCommentProfilesById] = useState({});
   const trimmedNote = String(note || "").trim();
   const resolvedPostType = statShare ? "stat-share" : postType;
   const isAveragePost = solveList.length > 1;
@@ -63,6 +67,61 @@ function PostDetail({
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const commentUserIDs = Array.from(
+      new Set(
+        (Array.isArray(comments) ? comments : [])
+          .map((comment) =>
+            String(
+              comment?.userID ||
+              comment?.UserID ||
+              comment?.authorID ||
+              comment?.AuthorID ||
+              ""
+            ).trim()
+          )
+          .filter(Boolean)
+      )
+    );
+
+    const missingUserIDs = commentUserIDs.filter((userID) => !commentProfilesById[userID]);
+    if (!missingUserIDs.length) return () => {
+      isCancelled = true;
+    };
+
+    const loadCommentProfiles = async () => {
+      const loadedProfiles = await Promise.all(
+        missingUserIDs.map(async (userID) => {
+          try {
+            const profile = await getUser(userID);
+            return [userID, profile];
+          } catch (error) {
+            console.warn("Failed to load comment profile", userID, error);
+            return [userID, null];
+          }
+        })
+      );
+
+      if (isCancelled) return;
+
+      setCommentProfilesById((prev) => {
+        const next = { ...prev };
+        loadedProfiles.forEach(([userID, profile]) => {
+          if (profile) next[userID] = profile;
+        });
+        return next;
+      });
+    };
+
+    loadCommentProfiles();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [comments, commentProfilesById]);
 
   const handleAdd = () => {
     if (!newComment.trim()) return;
@@ -137,16 +196,31 @@ function PostDetail({
 
   const normalizedComments = comments.map((comment, index) => {
     if (comment && typeof comment === "object") {
+      const commentUserID =
+        comment.userID ||
+        comment.UserID ||
+        comment.authorID ||
+        comment.AuthorID ||
+        "";
+      const commentAuthor =
+        comment.author ||
+        comment.Author ||
+        comment.username ||
+        comment.Username ||
+        comment.name ||
+        comment.Name ||
+        "Unknown";
+
       return {
         id: comment.id || comment.createdAt || comment.DateTime || `comment-${index}`,
-        author:
-          comment.author ||
-          comment.Author ||
-          comment.username ||
-          comment.Username ||
-          comment.name ||
-          comment.Name ||
-          "Unknown",
+        author: commentAuthor,
+        authorUser: commentProfilesById[commentUserID] || {
+          UserID: commentUserID,
+          Name: commentAuthor,
+          Color: comment.color || comment.Color || "#FFFFFF",
+          ProfileEvent: comment.profileEvent || comment.ProfileEvent || "333",
+          ProfileScramble: comment.profileScramble || comment.ProfileScramble || "",
+        },
         text: comment.text || comment.Text || comment.comment || comment.Comment || "",
         createdAt: comment.createdAt || comment.CreatedAt || comment.DateTime || comment.date || "",
       };
@@ -155,6 +229,12 @@ function PostDetail({
     return {
       id: `comment-${index}`,
       author: "Comment",
+      authorUser: {
+        Name: "Comment",
+        Color: "#FFFFFF",
+        ProfileEvent: "333",
+        ProfileScramble: "",
+      },
       text: String(comment || ""),
       createdAt: "",
     };
@@ -173,7 +253,14 @@ function PostDetail({
       >
         {(author || date || trimmedNote) && (
           <div className="postDetailHeader">
-            {author ? <div className="postDetailAuthor">@{author}</div> : null}
+            {author ? (
+              <NameTag
+                user={authorUser || { Name: author }}
+                name={author}
+                size="sm"
+                variant="profile-corner"
+              />
+            ) : null}
             {date ? <div className="detailDateRow postDetailDate">{formatDateTime(date)}</div> : null}
             {trimmedNote ? <div className="postDetailCaption">{trimmedNote}</div> : null}
           </div>
@@ -225,7 +312,14 @@ function PostDetail({
               normalizedComments.map((comment) => (
                 <div key={comment.id} className="postDetailComment">
                   <div className="postDetailCommentAuthorRow">
-                    <span className="postDetailCommentAuthor">{comment.author}</span>
+                    <div className="postDetailCommentAuthor">
+                      <NameTag
+                        user={comment.authorUser}
+                        name={comment.author}
+                        size="xs"
+                        variant="profile-corner"
+                      />
+                    </div>
                     {comment.createdAt ? (
                       <span className="postDetailCommentDate">
                         {formatDateTime(comment.createdAt)}

@@ -816,6 +816,8 @@ function App() {
 
   const [scrambles, setScrambles] = useState({});
   const [sessions, setSessions] = useState(INITIAL_SESSIONS);
+  const currentSessionLoadTokenRef = useRef(0);
+  const deletedSolveRefsRef = useRef(new Set());
   const [showPlayerBar, setShowPlayerBar] = useState(true);
   const [showDetail, setShowDetail] = useState(false);
   const [user, setUser] = useState(null);
@@ -1340,6 +1342,19 @@ function App() {
     () => getConfiguredCubeModelOptionsForEvent(tagConfig, eventKey),
     [tagConfig, eventKey]
   );
+  const currentSessionSolveCountTotal = useMemo(() => {
+    const normalizedEvent = String(eventKey || "").toUpperCase();
+    const sessionId = String(currentSession || "main");
+    const stats = sessionStats?.[normalizedEvent]?.[sessionId];
+
+    return (
+      stats?.SolveCountTotal ??
+      stats?.solveCountTotal ??
+      stats?.SolveCount ??
+      stats?.solveCount ??
+      null
+    );
+  }, [currentSession, eventKey, sessionStats]);
 
   const homeTagConfig = useMemo(
     () => ({
@@ -1365,6 +1380,7 @@ function App() {
 
     if (t.CubeModel) payload.CubeModel = t.CubeModel;
     if (t.CrossColor) payload.CrossColor = t.CrossColor;
+    if (t.Method) payload.Method = t.Method;
 
     payload.TimerInput =
       payload.TimerInput || t.TimerInput || settings.timerInput || "Keyboard";
@@ -1388,6 +1404,9 @@ function App() {
   useEffect(() => {
     if (!isSignedIn || !user?.UserID) return;
 
+    const loadToken = ++currentSessionLoadTokenRef.current;
+    let cancelled = false;
+
     const loadSolvesForCurrent = async () => {
       try {
         const normalizedEvent = eventKey.toUpperCase();
@@ -1399,26 +1418,45 @@ function App() {
           sessionId,
           200
         );
-        const normalizedSolves = solves.map(normalizeSolve);
-        const existingTotalCount =
-          sessionStats?.[normalizedEvent]?.[sessionId]?.SolveCountTotal ??
-          sessionStats?.[normalizedEvent]?.[sessionId]?.solveCountTotal ??
-          sessionStats?.[normalizedEvent]?.[sessionId]?.SolveCount ??
-          sessionStats?.[normalizedEvent]?.[sessionId]?.solveCount ??
-          null;
+        if (cancelled || currentSessionLoadTokenRef.current !== loadToken) return;
+
+        const normalizedSolves = solves
+          .map(normalizeSolve)
+          .filter((solve) => {
+            const solveRef = String(solve?.solveRef || solve?.SK || "").trim();
+            return !solveRef || !deletedSolveRefsRef.current.has(solveRef);
+          });
+        const existingTotalCount = currentSessionSolveCountTotal;
 
         setSessions((prev) => {
           const existingForEvent = Array.isArray(prev?.[eventKey]) ? prev[eventKey] : [];
-          const optimisticSolves = existingForEvent.filter(
-            (solve) => !hasPersistedSolveRef(solve)
+          const currentSessionSolves = existingForEvent.filter((solve) => {
+            if (String(solve?.sessionID || solve?.SessionID || "main") !== String(sessionId)) {
+              return false;
+            }
+            const solveRef = String(solve?.solveRef || solve?.SK || "").trim();
+            return !solveRef || !deletedSolveRefsRef.current.has(solveRef);
+          });
+          const otherSessions = existingForEvent.filter(
+            (solve) =>
+              String(solve?.sessionID || solve?.SessionID || "main") !== String(sessionId)
           );
-          let mergedSolves = [...optimisticSolves];
+          let mergedSolves = [...currentSessionSolves];
 
           normalizedSolves.forEach((solve) => {
             mergedSolves = mergeSolveIntoListByIdentity(mergedSolves, solve, true);
           });
 
-          mergedSolves = mergedSolves.sort((a, b) => {
+          const normalizedCurrentSessionSolves = assignExplicitSolveIndices(
+            mergedSolves.sort((a, b) => {
+              const ta = new Date(a?.datetime || "").getTime();
+              const tb = new Date(b?.datetime || "").getTime();
+              return ta - tb;
+            }),
+            existingTotalCount
+          );
+
+          const nextEventSolves = [...otherSessions, ...normalizedCurrentSessionSolves].sort((a, b) => {
             const ta = new Date(a?.datetime || "").getTime();
             const tb = new Date(b?.datetime || "").getTime();
             return ta - tb;
@@ -1426,16 +1464,21 @@ function App() {
 
           return {
             ...prev,
-            [eventKey]: assignExplicitSolveIndices(mergedSolves, existingTotalCount),
+            [eventKey]: nextEventSolves,
           };
         });
       } catch (err) {
+        if (cancelled || currentSessionLoadTokenRef.current !== loadToken) return;
         console.error("Error loading solves for current event/session:", err);
       }
     };
 
     loadSolvesForCurrent();
-  }, [eventKey, isSignedIn, normalizeSolve, sessionStats, currentSession, user?.UserID]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSession, currentSessionSolveCountTotal, eventKey, isSignedIn, normalizeSolve, user?.UserID]);
 
   useEffect(() => {
     if (!isSignedIn || !user?.UserID || practiceMode) return;
@@ -1520,6 +1563,37 @@ function App() {
       };
     });
   }, []);
+
+  const mergeCanonicalSessionStats = useCallback(
+    (eventCode, sessionID, stats) => {
+      const ev = String(eventCode || "").toUpperCase();
+      const sid = String(sessionID || "main");
+      if (!ev || !sid) return;
+
+      setSessionStats((prev) => ({
+        ...(prev || {}),
+        [ev]: {
+          ...(prev?.[ev] || {}),
+          [sid]: stats || null,
+        },
+      }));
+
+      setSessionsList((prev) =>
+        Array.isArray(prev)
+          ? prev.map((session) =>
+              String(session?.Event || "").toUpperCase() === ev &&
+              String(session?.SessionID || "main") === sid
+                ? {
+                    ...session,
+                    Stats: stats || null,
+                  }
+                : session
+            )
+          : prev
+      );
+    },
+    []
+  );
 
   useEffect(() => {
     if (!isSignedIn || !user?.UserID || !eventKey) {
@@ -2279,6 +2353,13 @@ function App() {
   };
 
   const addSolve = async (newTime, smartMeta = null, options = {}) => {
+    if (Number(newTime) > 0 && Number(newTime) < 300 && options?.skipTinySolveConfirm !== true) {
+      const keepTinySolve = window.confirm(
+        "That solve is under 0.30 seconds. Keep it?"
+      );
+      if (!keepTinySolve) return;
+    }
+
     const hasManualScramble = Object.prototype.hasOwnProperty.call(
       options || {},
       "scrambleOverride"
@@ -2446,7 +2527,9 @@ function App() {
 
             const savedSolve = normalizeSolve(res?.item);
             replacePendingSolve(currentEvent, pendingSolve, savedSolve);
-            setStatsMutationTick((t) => t + 1);
+            if (res?.sessionStats) {
+              mergeCanonicalSessionStats(currentEvent, currentSession, res.sessionStats);
+            }
           } catch (err) {
             removePendingSolve(currentEvent, pendingSolve.solveRef);
             console.error("Error adding relay solve:", err);
@@ -2506,7 +2589,9 @@ function App() {
 
           const savedSolve = normalizeSolve(res?.item);
           replacePendingSolve(currentEvent, pendingSolve, savedSolve);
-          setStatsMutationTick((t) => t + 1);
+          if (res?.sessionStats) {
+            mergeCanonicalSessionStats(currentEvent, currentSession, res.sessionStats);
+          }
         } catch (err) {
           removePendingSolve(currentEvent, pendingSolve.solveRef);
           console.error("Error adding relay solve:", err);
@@ -2682,7 +2767,9 @@ function App() {
 
         const savedSolve = normalizeSolve(res?.item);
         replacePendingSolve(activeSolveEvent, pendingSolve, savedSolve);
-        setStatsMutationTick((t) => t + 1);
+        if (res?.sessionStats) {
+          mergeCanonicalSessionStats(activeSolveEvent, currentSession, res.sessionStats);
+        }
       } catch (err) {
         removePendingSolve(activeSolveEvent, pendingSolve.solveRef);
         console.error("Error adding solve (DB write failed):", err);
@@ -2950,6 +3037,8 @@ function App() {
       return;
     }
 
+    deletedSolveRefsRef.current.add(solveRefToDelete);
+
     if (targetSolve) {
       setDeleteUndoState({
         source: "session",
@@ -2985,6 +3074,7 @@ function App() {
         await runDb("Deleting solve", () => deleteSolve(user.UserID, solveRefToDelete));
         setStatsMutationTick((t) => t + 1);
       } catch (err) {
+        deletedSolveRefsRef.current.delete(solveRefToDelete);
         if (targetSolve) {
           setSessions((prev) => {
             const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
@@ -3337,7 +3427,17 @@ function App() {
     });
   }, [navigate, sharedSession]);
 
-  const baseCurrentSolves = practiceMode ? practiceSolves || [] : sessions[eventKey] || [];
+  const baseCurrentSolves = useMemo(() => {
+    if (practiceMode) return practiceSolves || [];
+
+    const ev = String(eventKey || "").toUpperCase();
+    const sid = String(currentSession || "main");
+    const eventSolves = Array.isArray(sessions?.[ev]) ? sessions[ev] : [];
+
+    return eventSolves.filter(
+      (solve) => String(solve?.sessionID || solve?.SessionID || "main") === sid
+    );
+  }, [currentSession, eventKey, practiceMode, practiceSolves, sessions]);
   const currentSessionStatsForEvent =
     sessionStats?.[String(eventKey || "").toUpperCase()]?.[
       String(currentSession || "main")
@@ -3352,34 +3452,55 @@ function App() {
   useEffect(() => {
     if (practiceMode) return;
     const ev = String(eventKey || "").toUpperCase();
+    const sid = String(currentSession || "main");
     if (!ev) return;
 
     const eventSolves = Array.isArray(sessions?.[ev]) ? sessions[ev] : [];
-    if (!eventSolves.length) return;
+    const sessionSolves = eventSolves.filter(
+      (solve) => String(solve?.sessionID || solve?.SessionID || "main") === sid
+    );
+    if (!sessionSolves.length) return;
 
-    const hasExplicitIndices = eventSolves.every((solve) =>
+    const hasExplicitIndices = sessionSolves.every((solve) =>
       Number.isFinite(Number(solve?.fullIndex))
     );
     if (hasExplicitIndices) return;
     if (
       !Number.isFinite(currentSessionTotalSolveCount) ||
-      currentSessionTotalSolveCount < eventSolves.length
+      currentSessionTotalSolveCount < sessionSolves.length
     ) {
       return;
     }
 
     setSessions((prev) => {
       const arr = Array.isArray(prev?.[ev]) ? prev[ev] : [];
-      const stillMissing = arr.some((solve) => !Number.isFinite(Number(solve?.fullIndex)));
+      const targetSessionSolves = arr.filter(
+        (solve) => String(solve?.sessionID || solve?.SessionID || "main") === sid
+      );
+      const otherSessions = arr.filter(
+        (solve) => String(solve?.sessionID || solve?.SessionID || "main") !== sid
+      );
+      const stillMissing = targetSessionSolves.some(
+        (solve) => !Number.isFinite(Number(solve?.fullIndex))
+      );
       if (!stillMissing) return prev;
+
       return {
         ...(prev || {}),
-        [ev]: assignExplicitSolveIndices(arr, currentSessionTotalSolveCount),
+        [ev]: [
+          ...otherSessions,
+          ...assignExplicitSolveIndices(targetSessionSolves, currentSessionTotalSolveCount),
+        ].sort((a, b) => {
+          const ta = new Date(a?.datetime || "").getTime();
+          const tb = new Date(b?.datetime || "").getTime();
+          return ta - tb;
+        }),
       };
     });
   }, [
     assignExplicitSolveIndices,
     currentSessionTotalSolveCount,
+    currentSession,
     eventKey,
     practiceMode,
     sessions,
@@ -3435,6 +3556,10 @@ function App() {
     );
 
     if (!ev || !deletedSolve) return;
+
+    if (typeof deletedSolve?.solveRef === "string" && deletedSolve.solveRef.trim()) {
+      deletedSolveRefsRef.current.delete(deletedSolve.solveRef.trim());
+    }
 
     if (pending.persisted) {
       if (!user?.UserID) {
@@ -4545,7 +4670,7 @@ function App() {
                       showRefreshAction={false}
                     />
                   ) : (
-                    <>
+                    <div className="home-bottom-stack">
                       <AveragesDisplay
                         currentSolves={currentSolves}
                         overallSessionStats={currentSessionStatsForEvent}
@@ -4606,7 +4731,7 @@ function App() {
                             : undefined
                         }
                       />
-                    </>
+                    </div>
                   )}
 
                   {selectedAverageSolves.length > 0 && (

@@ -71,7 +71,7 @@ const DEFAULT_TAG_CONFIG = {
   Fixed: {
     CubeModel: { label: "Cube Model", options: [] },
     CrossColor: {
-      label: "Cross Color",
+      label: "Start Color",
       options: ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
     },
     TimerInput: {
@@ -101,7 +101,7 @@ const RECOMPUTE_SCOPE_OPTIONS = [
 const TAG_KEY_OPTIONS = [
   { value: "SolveSource", label: "Solve Source" },
   { value: "CubeModel", label: "Cube Model" },
-  { value: "CrossColor", label: "Cross Color" },
+  { value: "CrossColor", label: "Start Color" },
   { value: "TimerInput", label: "Timer Input" },
   { value: "Custom1", label: "Custom 1" },
   { value: "Custom2", label: "Custom 2" },
@@ -246,7 +246,7 @@ function normalizeTagConfig(input) {
             : Object.fromEntries(CUBE_MODEL_GROUPS.map((group) => [group.key, []])),
       },
       CrossColor: {
-        label: fixed?.CrossColor?.label || "Cross Color",
+        label: fixed?.CrossColor?.label || "Start Color",
         options: Array.isArray(fixed?.CrossColor?.options)
           ? fixed.CrossColor.options
           : ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
@@ -1656,7 +1656,7 @@ function Settings({
         <div className="settings-container">
 
           <div className="setting-item">
-            <label>{tagConfig?.Fixed?.CrossColor?.label || "Cross Color"} Options:</label>
+            <label>{tagConfig?.Fixed?.CrossColor?.label || "Start Color"} Options:</label>
             <input
               value={(tagConfig?.Fixed?.CrossColor?.options || []).join(", ")}
               onChange={(e) => handleFixedOptionsChange("CrossColor", e.target.value)}

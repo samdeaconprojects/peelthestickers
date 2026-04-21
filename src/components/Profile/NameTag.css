@@ -20,10 +20,42 @@
   max-width: none;              /* remove the 200px cap */
 }
 
+.name-tag-link--reverse {
+  flex-direction: row-reverse;
+}
+
 .name-tag--xs .name-tag-link {
   height: 32px;
   padding: 2px 7px;
   border-radius: 8px;
+}
+
+.name-tag-cubeFrame {
+  display: flex;
+  align-items: center;
+}
+
+.name-tag-link--profileCorner {
+  gap: 8px;
+  height: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+}
+
+.name-tag-link--profileCorner .name-tag-cubeFrame {
+  width: 38px;
+  height: 38px;
+  box-sizing: border-box;
+  justify-content: center;
+  border: 2px solid #fff;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.name-tag--sm .name-tag-link--profileCorner .name-tag-cubeFrame {
+  width: 42px;
+  height: 42px;
 }
 
 /* ✅ Default behavior (NxN should look exactly like before) */
@@ -36,6 +68,15 @@
 
 .name-tag--xs .nametagCube {
   margin-right: 12px;
+}
+
+.name-tag-link--profileCorner .nametagCube {
+  margin-right: 0;
+}
+
+.name-tag-link--profileCorner .name-tag-cubeFrame .puzzle-svg-wrap,
+.name-tag-link--profileCorner .name-tag-cubeFrame .puzzle-svg-inner {
+  transform: translate(-15px, 2px);
 }
 
 /* -------------------------------------------------
@@ -100,4 +141,17 @@
 
 .name-tag--xs .name-tag-text {
   font-size: 8.5pt;
+}
+
+.name-tag-link--profileCorner .nametagText {
+  max-width: 120px;
+}
+
+.name-tag-link--profileCorner .name-tag-text {
+  font-size: 9.5pt;
+  font-weight: 700;
+}
+
+.name-tag--sm .name-tag-link--profileCorner .name-tag-text {
+  font-size: 10pt;
 }

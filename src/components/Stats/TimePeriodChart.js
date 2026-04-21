@@ -511,7 +511,7 @@ function TimePeriodChart({
           <option value="speed">Colors: Speed</option>
           <option value="event">Colors: Event</option>
           <option value="cube-model">Colors: Cube Model</option>
-          <option value="cross-color">Colors: Cross Color</option>
+          <option value="cross-color">Colors: Start Color</option>
           <option value="timer-input">Colors: Timer Input</option>
         </select>
 

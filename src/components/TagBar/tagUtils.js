@@ -2,8 +2,12 @@ export const DEFAULT_TAG_CONFIG = {
   Fixed: {
     CubeModel: { label: "Cube Model", options: [] },
     CrossColor: {
-      label: "Cross Color",
+      label: "Start Color",
       options: ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
+    },
+    Method: {
+      label: "Method",
+      options: ["CFOP", "Roux", "ZZ", "Petrus", "LBL", "Other"],
     },
     TimerInput: {
       label: "Timer Input",
@@ -26,6 +30,7 @@ export const DEFAULT_TAG_CONFIG = {
 export const SHARED_TAG_FIELDS = [
   "CubeModel",
   "CrossColor",
+  "Method",
   "TimerInput",
   "SolveSource",
   "Custom1",
@@ -280,10 +285,16 @@ export function normalizeTagConfig(input) {
             : {},
       },
       CrossColor: {
-        label: fixed?.CrossColor?.label || "Cross Color",
+        label: fixed?.CrossColor?.label || "Start Color",
         options: Array.isArray(fixed?.CrossColor?.options)
           ? fixed.CrossColor.options
           : DEFAULT_TAG_CONFIG.Fixed.CrossColor.options,
+      },
+      Method: {
+        label: fixed?.Method?.label || "Method",
+        options: Array.isArray(fixed?.Method?.options)
+          ? fixed.Method.options
+          : DEFAULT_TAG_CONFIG.Fixed.Method.options,
       },
       TimerInput: {
         label: fixed?.TimerInput?.label || "Timer Input",
@@ -313,6 +324,7 @@ export function makeEmptyTagSelection() {
   return {
     CubeModel: "",
     CrossColor: "",
+    Method: "",
     TimerInput: "",
     SolveSource: "",
     Custom1: "",
@@ -368,7 +380,8 @@ export function getSharedTagLabels(tagConfig) {
   const cfg = normalizeTagConfig(tagConfig);
   const labelByField = {
     CubeModel: cfg.Fixed.CubeModel.label || "Cube Model",
-    CrossColor: cfg.Fixed.CrossColor.label || "Cross Color",
+    CrossColor: cfg.Fixed.CrossColor.label || "Start Color",
+    Method: cfg.Fixed.Method.label || "Method",
     TimerInput: cfg.Fixed.TimerInput.label || "Timer Input",
     SolveSource: cfg.Fixed.SolveSource.label || "Solve Source",
   };
@@ -390,8 +403,13 @@ export function getSharedTagFieldMeta(tagConfig) {
     },
     {
       field: "CrossColor",
-      label: cfg.Fixed.CrossColor.label || "Cross Color",
+      label: cfg.Fixed.CrossColor.label || "Start Color",
       options: cfg.Fixed.CrossColor.options || [],
+    },
+    {
+      field: "Method",
+      label: cfg.Fixed.Method.label || "Method",
+      options: cfg.Fixed.Method.options || [],
     },
     {
       field: "TimerInput",
@@ -453,6 +471,7 @@ export function collectTagSelectionOptions(solves, tagConfig, cubeModelOptions =
       ...(Array.isArray(cubeModelOptions) ? cubeModelOptions : []),
     ]),
     CrossColor: new Set(cfg.Fixed.CrossColor.options || []),
+    Method: new Set(cfg.Fixed.Method.options || []),
     TimerInput: new Set(cfg.Fixed.TimerInput.options || []),
     SolveSource: new Set(cfg.Fixed.SolveSource.options || []),
     Custom1: new Set(cfg.CustomSlots?.[0]?.options || []),

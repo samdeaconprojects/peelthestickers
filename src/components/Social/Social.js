@@ -5,6 +5,7 @@ import { useDbStatus } from "../../contexts/DbStatusContext";
 import Post from "../Profile/Post";
 import PostDetail from "../Profile/PostDetail";
 import StatSharePost from "../Profile/StatSharePost";
+import NameTag from "../Profile/NameTag";
 import { getPosts } from "../../services/getPosts";
 import { getUser } from "../../services/getUser";
 import { updatePostComments } from "../../services/updatePostComments";
@@ -371,7 +372,28 @@ function Social({
   const formatPostDate = (value) => {
     const d = value instanceof Date ? value : new Date(value);
     if (!d || isNaN(d.getTime())) return String(value ?? "");
-    return d.toLocaleString();
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfThatDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const diffDays = Math.round((startOfToday - startOfThatDay) / (1000 * 60 * 60 * 24));
+
+    const timeStr = d.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+
+    if (diffDays === 0) return `Today at ${timeStr}`;
+    if (diffDays === 1) return `Yesterday at ${timeStr}`;
+
+    const dateStr = d.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    return `${dateStr} ${timeStr}`;
   };
 
   const scrollActivityToBottom = useCallback(() => {
@@ -1080,6 +1102,9 @@ function Social({
         user?.name ||
         "You",
       userID: user?.UserID || "",
+      color: user?.Color || user?.color || "#FFFFFF",
+      profileEvent: user?.ProfileEvent || user?.profileEvent || "333",
+      profileScramble: user?.ProfileScramble || user?.profileScramble || "",
       createdAt: new Date().toISOString(),
     };
     const updatedComments = [...(selectedPost.Comments || []), newComment];
@@ -1655,7 +1680,20 @@ function Social({
                             <div className="postDate">
                               {formatPostDate(post.DateTime || post.date)}
                             </div>
-                            <div className="statFeedAuthor">@{post.author}</div>
+                            <div className="postNameAndPicture">
+                              <NameTag
+                                user={{
+                                  UserID: post.authorID,
+                                  Name: post.author,
+                                  Color: post.postColor,
+                                  ProfileEvent: post.profileEvent,
+                                  ProfileScramble: post.profileScramble,
+                                }}
+                                size="xs"
+                                variant="profile-corner"
+                                reverse={true}
+                              />
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -1924,6 +1962,13 @@ function Social({
       {selectedPost && (
         <PostDetail
           author={selectedPost.author}
+          authorUser={{
+            UserID: selectedPost.authorID,
+            Name: selectedPost.author,
+            Color: selectedPost.postColor,
+            ProfileEvent: selectedPost.profileEvent,
+            ProfileScramble: selectedPost.profileScramble,
+          }}
           date={formatPostDate(selectedPost.DateTime || selectedPost.date)}
           solveList={
             selectedPost.StatShare || selectedPost.statShare

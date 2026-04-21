@@ -163,6 +163,7 @@ const LineChartBuilder = ({
     () => (Array.isArray(comparisonSeries) ? comparisonSeries : []),
     [comparisonSeries]
   );
+  const multiSeriesOpacity = safeComparisonSeries.length > 0 ? 0.75 : 1;
 
   const {
     leftPadding,
@@ -408,7 +409,7 @@ const LineChartBuilder = ({
         fill="none"
         stroke={series.stroke || "#7c8cff"}
         strokeWidth={2.6}
-        opacity={0.92}
+        opacity={multiSeriesOpacity}
         points={pts}
       />
     );
@@ -488,6 +489,7 @@ const LineChartBuilder = ({
           fill="none"
           stroke={primaryStroke || safeData[0]?.color || "#00FFFF"}
           strokeWidth={STROKE}
+          opacity={multiSeriesOpacity}
           points={mainPoints}
         />
 
@@ -511,6 +513,7 @@ const LineChartBuilder = ({
               cy={y}
               r={isSelected ? selectedDotRadius : Math.max(2, dotRadius)}
               fill={element.isDNF ? "none" : element.color}
+              opacity={multiSeriesOpacity}
               stroke={
                 isSelected
                   ? "#2EC4B6"
@@ -546,6 +549,7 @@ const LineChartBuilder = ({
                 cy={y}
                 r={Math.max(2, dotRadius - 1)}
                 fill={element.color || series.stroke || "#7c8cff"}
+                opacity={multiSeriesOpacity}
                 stroke="rgba(5,10,14,0.6)"
                 strokeWidth={1}
                 onMouseOver={(e) => handleMouseOver(e, `${series.label || "Compare"} · ${element.time}`)}

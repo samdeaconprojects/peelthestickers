@@ -282,6 +282,24 @@ function getSeriesStyle(paletteKey, fallbackKey = DEFAULT_PRIMARY_PALETTE, profi
   return COMPARE_PALETTES[resolvedKey] || null;
 }
 
+function getTagSelectionAccentColor(activeEntries, eventKey, tagColorCatalog, fallbackColor) {
+  const entries = Array.isArray(activeEntries) ? activeEntries : [];
+  if (!entries.length) return "";
+
+  const [field, value] = entries[0] || [];
+  const safeField = String(field || "").trim();
+  const safeValue = String(value || "").trim();
+  if (!safeField || !safeValue) return "";
+
+  const tagColors = getTagColorMapForEvent(tagColorCatalog, eventKey || "");
+  return (
+    tagColors?.[safeField]?.[safeValue] ||
+    (safeField === "CrossColor"
+      ? resolveHeaderCrossColorTone(safeValue, fallbackColor)
+      : fallbackColor)
+  );
+}
+
 function interpolateHexColor(a, b, ratio) {
   const safeRatio = clampNumber(Number(ratio) || 0, 0, 1);
   const normalize = (hex) => String(hex || "").replace("#", "");
@@ -2096,7 +2114,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const hasCompareIndexedTagScopeCache = useMemo(() => {
     return !!compareIndexedTagScopeKey && compareTagScopeCacheKey === compareIndexedTagScopeKey;
   }, [compareIndexedTagScopeKey, compareTagScopeCacheKey]);
-  const compareStyle = useMemo(
+  const baseCompareStyle = useMemo(
     () =>
       getSeriesStyle(
         compareSelection?.paletteKey || DEFAULT_COMPARE_PALETTE,
@@ -2105,7 +2123,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       ),
     [compareSelection?.paletteKey, profileChartStyle]
   );
-  const primaryCompareStyle = useMemo(
+  const basePrimaryCompareStyle = useMemo(
     () =>
       getSeriesStyle(
         compareSelection?.primaryPaletteKey ?? primaryPaletteKey,
@@ -2113,6 +2131,40 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         profileChartStyle
       ),
     [compareSelection?.primaryPaletteKey, primaryPaletteKey, profileChartStyle]
+  );
+  const primaryTagAccentColor = useMemo(
+    () =>
+      getTagSelectionAccentColor(
+        activeTagEntries,
+        statsEvent === ALL_EVENTS ? "" : String(statsEvent || "").toUpperCase(),
+        tagColorCatalog,
+        basePrimaryCompareStyle?.primary || profileChartStyle?.primary || "#2EC4B6"
+      ),
+    [activeTagEntries, basePrimaryCompareStyle?.primary, profileChartStyle?.primary, statsEvent, tagColorCatalog]
+  );
+  const compareTagAccentColor = useMemo(
+    () =>
+      getTagSelectionAccentColor(
+        compareActiveTagEntries,
+        compareEvent === ALL_EVENTS ? "" : String(compareEvent || "").toUpperCase(),
+        tagColorCatalog,
+        baseCompareStyle?.primary || "#7c8cff"
+      ),
+    [baseCompareStyle?.primary, compareActiveTagEntries, compareEvent, tagColorCatalog]
+  );
+  const compareStyle = useMemo(
+    () =>
+      compareTagAccentColor
+        ? getProfileChartStyle({ Color: compareTagAccentColor })
+        : baseCompareStyle,
+    [baseCompareStyle, compareTagAccentColor]
+  );
+  const primaryCompareStyle = useMemo(
+    () =>
+      primaryTagAccentColor
+        ? getProfileChartStyle({ Color: primaryTagAccentColor })
+        : basePrimaryCompareStyle,
+    [basePrimaryCompareStyle, primaryTagAccentColor]
   );
 
   const compareSessionsForEvent = useMemo(() => {
@@ -2147,18 +2199,29 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
   useEffect(() => {
     if (isAllEventsMode) {
-      setStatsSession(ALL_SESSIONS);
+      if (statsViewMode === "time") {
+        setTimeSelection((prev) =>
+          prev?.session === ALL_SESSIONS ? prev : { ...prev, session: ALL_SESSIONS }
+        );
+      }
       return;
     }
 
     const valid = sessionsForEvent.some((s) => s.SessionID === statsSession);
     if (!valid) {
       const hasMain = sessionsForEvent.some((s) => s.SessionID === "main");
-      setStatsSession(
-        hasMain ? "main" : (sessionsForEvent[0]?.SessionID || "main")
-      );
+      const fallbackSession = hasMain ? "main" : (sessionsForEvent[0]?.SessionID || "main");
+      if (statsViewMode === "time") {
+        setTimeSelection((prev) =>
+          prev?.session === fallbackSession ? prev : { ...prev, session: fallbackSession }
+        );
+      } else {
+        setStandardSelection((prev) =>
+          prev?.session === fallbackSession ? prev : { ...prev, session: fallbackSession }
+        );
+      }
     }
-  }, [isAllEventsMode, sessionsForEvent, statsSession]);
+  }, [isAllEventsMode, sessionsForEvent, statsSession, statsViewMode]);
 
   useEffect(() => {
     if (!compareSelection) return;
@@ -2212,37 +2275,39 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
     if (hasActiveTagFilter) {
       setOverallStatsForEvent(null);
-      setLoadingOverallStats(false);
       return;
     }
 
     if (isAllSessionsMode) {
       const aggregated = getEventAggregateFromSessionsList(sessionsList, statsEvent);
       setOverallStatsForEvent(aggregated || null);
-
-      let cancelled = false;
-
-      (async () => {
-        try {
-          setLoadingOverallStats(true);
-          const item = await getEventStats(userID, statsEvent);
-          if (!cancelled) setOverallStatsForEvent(item || aggregated || null);
-        } catch (e) {
-          console.error("Failed to load EVENTSTATS:", e);
-          if (!cancelled) setOverallStatsForEvent(aggregated || null);
-        } finally {
-          if (!cancelled) setLoadingOverallStats(false);
-        }
-      })();
-
-      return () => {
-        cancelled = true;
-      };
+      return;
     }
 
     const embedded = getSessionStatsFromSessionsList(sessionsList, statsEvent, sessionId);
     if (embedded) {
       setOverallStatsForEvent(embedded);
+    }
+  }, [
+    user?.UserID,
+    statsEvent,
+    sessionId,
+    sessionsList,
+    isAllEventsMode,
+    isAllSessionsMode,
+    hasActiveTagFilter,
+  ]);
+
+  useEffect(() => {
+    const userID = user?.UserID;
+    if (!userID) {
+      setLoadingOverallStats(false);
+      return;
+    }
+
+    if (isAllEventsMode || hasActiveTagFilter) {
+      setLoadingOverallStats(false);
+      return;
     }
 
     let cancelled = false;
@@ -2250,11 +2315,20 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     (async () => {
       try {
         setLoadingOverallStats(true);
+
+        if (isAllSessionsMode) {
+          const item = await getEventStats(userID, statsEvent);
+          if (!cancelled) setOverallStatsForEvent((prev) => item || prev || null);
+          return;
+        }
+
         const item = await getSessionStats(userID, statsEvent, sessionId);
         if (!cancelled) setOverallStatsForEvent(item || null);
       } catch (e) {
-        console.error("Failed to load SESSIONSTATS:", e);
-        if (!cancelled) setOverallStatsForEvent(null);
+        if (!cancelled) {
+          console.error(isAllSessionsMode ? "Failed to load EVENTSTATS:" : "Failed to load SESSIONSTATS:", e);
+          if (!isAllSessionsMode) setOverallStatsForEvent(null);
+        }
       } finally {
         if (!cancelled) setLoadingOverallStats(false);
       }
@@ -2267,7 +2341,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     user?.UserID,
     statsEvent,
     sessionId,
-    sessionsList,
     isAllEventsMode,
     isAllSessionsMode,
     hasActiveTagFilter,
@@ -2319,13 +2392,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     hasActiveTagFilter,
   ]);
 
-  useEffect(() => {
-    const userID = user?.UserID;
-    if (!userID || statsViewMode !== "time") {
-      setCachedEventMatrixStats({});
-      setLoadingEventMatrixStats(false);
-      return;
-    }
+  const timeViewMatrixEvents = useMemo(() => {
+    if (statsViewMode !== "time") return [];
 
     const filteredSessions = (sessionsList || []).filter((session) => {
       const event = String(session?.Event || "").trim().toUpperCase();
@@ -2335,15 +2403,30 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       }
       return true;
     });
-    const events = Array.from(
+
+    return Array.from(
       new Set(
         filteredSessions
           .map((session) => String(session?.Event || "").trim().toUpperCase())
           .filter(Boolean)
       )
     ).sort((a, b) => a.localeCompare(b));
+  }, [sessionsList, statsViewMode, timeViewMainSessionsOnly]);
 
-    if (!events.length) {
+  const timeViewMatrixEventsKey = useMemo(
+    () => timeViewMatrixEvents.join(","),
+    [timeViewMatrixEvents]
+  );
+
+  useEffect(() => {
+    const userID = user?.UserID;
+    if (!userID || statsViewMode !== "time") {
+      setCachedEventMatrixStats({});
+      setLoadingEventMatrixStats(false);
+      return;
+    }
+
+    if (!timeViewMatrixEvents.length) {
       setCachedEventMatrixStats({});
       setLoadingEventMatrixStats(false);
       return;
@@ -2355,7 +2438,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       try {
         setLoadingEventMatrixStats(true);
         const items = await Promise.all(
-          events.map(async (event) => {
+          timeViewMatrixEvents.map(async (event) => {
             const stats = timeViewMainSessionsOnly
               ? await getSessionStats(userID, event, "main")
               : await getEventStats(userID, event);
@@ -2378,7 +2461,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     return () => {
       cancelled = true;
     };
-  }, [user?.UserID, statsViewMode, sessionsList, timeViewMainSessionsOnly]);
+  }, [user?.UserID, statsViewMode, timeViewMainSessionsOnly, timeViewMatrixEvents, timeViewMatrixEventsKey]);
 
   const loadInitialSolves = useCallback(async () => {
     const userID = user?.UserID;
@@ -3284,7 +3367,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     }
   }, [DEFAULT_IN_VIEW, compareEnabled]);
 
-  const fetchNextOlderPage = useCallback(async () => {
+  const appendOlderSessionPages = useCallback(async ({ maxPages = 1, minSolveCount = null } = {}) => {
     const userID = user?.UserID;
     if (!userID) return;
     if (!isSolveLevelMode) return;
@@ -3294,17 +3377,41 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     const myToken = ++requestTokenRef.current;
 
     try {
-      const { items, lastKey } = await getSolvesBySessionPage(
-        userID,
-        String(statsEvent || "").toUpperCase(),
-        sessionId,
-        DEFAULT_PAGE_FETCH,
-        pageCursor
-      );
+      let cursor = pageCursor;
+      let lastKey = pageCursor;
+      let pagesLoaded = 0;
+      const accumulated = [];
+      const targetCount =
+        minSolveCount == null ? null : Math.max(0, Number(minSolveCount) || 0);
+
+      while (cursor && pagesLoaded < Math.max(1, Number(maxPages) || 1)) {
+        const out = await getSolvesBySessionPage(
+          userID,
+          String(statsEvent || "").toUpperCase(),
+          sessionId,
+          DEFAULT_PAGE_FETCH,
+          cursor
+        );
+
+        if (requestTokenRef.current !== myToken) return { addedCount: 0, lastKey: cursor, hasMore: true };
+
+        const pageOldestToNewest = (out?.items || []).map(normalizeSolve).reverse();
+        if (pageOldestToNewest.length) accumulated.push(...pageOldestToNewest);
+
+        lastKey = out?.lastKey || null;
+        cursor = lastKey;
+        pagesLoaded += 1;
+
+        if (targetCount != null && activeStandardSolves.length + accumulated.length >= targetCount) {
+          break;
+        }
+
+        if (!cursor) break;
+      }
 
       if (requestTokenRef.current !== myToken) return;
 
-      const pageOldestToNewest = (items || []).map(normalizeSolve).reverse();
+      const pageOldestToNewest = accumulated;
 
       setSessions((prev) => {
         const ev = String(statsEvent || "").toUpperCase();
@@ -3329,12 +3436,19 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       setPageCursor(lastKey || null);
       setHasMoreOlder(!!lastKey);
       setIsAllLoaded(!lastKey);
+      return {
+        addedCount: pageOldestToNewest.length,
+        lastKey: lastKey || null,
+        hasMore: !!lastKey,
+      };
     } catch (err) {
       console.error("Failed to fetch older solves page:", err);
+      return { addedCount: 0, lastKey: pageCursor, hasMore: hasMoreOlder };
     } finally {
       if (requestTokenRef.current === myToken) setLoadingMore(false);
     }
   }, [
+    activeStandardSolves.length,
     user?.UserID,
     statsEvent,
     sessionId,
@@ -3346,6 +3460,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     setSessions,
     isSolveLevelMode,
   ]);
+
+  const fetchNextOlderPage = useCallback(async () => {
+    return appendOlderSessionPages({ maxPages: 1 });
+  }, [appendOlderSessionPages]);
 
   const loadAllSessionSolves = useCallback(async () => {
     const userID = user?.UserID;
@@ -4292,16 +4410,18 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
   const handleZoomOut = useCallback(async () => {
     if (!isSolveLevelMode) return;
+    const target = getNextLargerSolveWindow(solvesPerPage);
 
-    if (solvesPerPage < activeStandardSolves.length) {
-      setSolvesPerPage((prev) => Math.min(getNextLargerSolveWindow(prev), activeStandardSolves.length));
+    if (target <= activeStandardSolves.length) {
+      setSolvesPerPage(target);
       setCurrentPage(0);
       return;
     }
 
     if (hasMoreOlder && !loadingMore && !isAllLoaded) {
-      await fetchNextOlderPage();
-      setSolvesPerPage((prev) => getNextLargerSolveWindow(prev));
+      const result = await appendOlderSessionPages({ minSolveCount: target });
+      const loadedCount = activeStandardSolves.length + Number(result?.addedCount || 0);
+      setSolvesPerPage(Math.min(target, Math.max(activeStandardSolves.length, loadedCount)));
       setCurrentPage(0);
     }
   }, [
@@ -4310,7 +4430,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     hasMoreOlder,
     loadingMore,
     isAllLoaded,
-    fetchNextOlderPage,
+    appendOlderSessionPages,
     isSolveLevelMode,
   ]);
 
@@ -4322,16 +4442,18 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
   const handleIncreaseSolveCount = useCallback(async () => {
     if (!isSolveLevelMode) return;
+    const target = solvesPerPage + 1;
 
-    if (solvesPerPage < activeStandardSolves.length) {
-      setSolvesPerPage((prev) => Math.min(prev + 1, activeStandardSolves.length));
+    if (target <= activeStandardSolves.length) {
+      setSolvesPerPage(target);
       setCurrentPage(0);
       return;
     }
 
     if (hasMoreOlder && !loadingMore && !isAllLoaded) {
-      await fetchNextOlderPage();
-      setSolvesPerPage((prev) => prev + 1);
+      const result = await appendOlderSessionPages({ minSolveCount: target });
+      const loadedCount = activeStandardSolves.length + Number(result?.addedCount || 0);
+      setSolvesPerPage(Math.min(target, Math.max(activeStandardSolves.length, loadedCount)));
       setCurrentPage(0);
     }
   }, [
@@ -4340,7 +4462,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     hasMoreOlder,
     loadingMore,
     isAllLoaded,
-    fetchNextOlderPage,
+    appendOlderSessionPages,
     isSolveLevelMode,
   ]);
 
@@ -5378,9 +5500,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     selectedTagLabel,
   ]);
 
-  const primaryAccentColor = compareEnabled
-    ? resolveSeriesColor(primaryCompareStyle, 0.5, profileChartStyle?.primary || "#2EC4B6")
-    : profileChartStyle?.primary || "#2EC4B6";
+  const primaryAccentColor = resolveSeriesColor(
+    primaryCompareStyle,
+    0.5,
+    profileChartStyle?.primary || "#2EC4B6"
+  );
   const compareAccentColor = resolveSeriesColor(compareStyle, 0.5, "#7c8cff");
 
   const compareSelectedTagSummaryLabel = useMemo(() => {
@@ -6380,7 +6504,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             selectedTagPills={selectedTagPills}
             loadedSolveCount={loadedSolveCountForSummary}
             onStatSelect={handleSummaryStatSelect}
-            profileColor={user?.Color || user?.color || "#50B6FF"}
+            profileColor={primaryAccentColor}
             loading={primaryOverallSummaryLoading}
           />
         );
@@ -6960,7 +7084,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                 <div className="statsScopeTagQuickNav">
                   {[
                     { key: "tag-cube-model", label: "Cube Model" },
-                    { key: "tag-cross-color", label: "Cross Color" },
+                    { key: "tag-cross-color", label: "Start Color" },
                     { key: "tag-solve-source", label: "Solve Source" },
                     { key: "tag-time-input", label: "Time Input" },
                   ].map((item) => (
@@ -6995,7 +7119,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                 <div className="statsScopeTagQuickNav">
                   {[
                     { key: "tag-cube-model", label: "Cube Model" },
-                    { key: "tag-cross-color", label: "Cross Color" },
+                    { key: "tag-cross-color", label: "Start Color" },
                     { key: "tag-solve-source", label: "Solve Source" },
                     { key: "tag-time-input", label: "Time Input" },
                   ].map((item) => (
@@ -7467,6 +7591,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             <div
               className={`statsCompareControls ${
                 statsViewMode === "standard" ? "statsCompareControls--standard" : "statsCompareControls--time"
+              } ${compareEnabled ? "statsCompareControls--dual" : "statsCompareControls--single"} ${
+                canCompare && !compareEnabled ? "statsCompareControls--singleAddable" : ""
               }`}
               aria-label="Stats settings"
             >
@@ -7502,7 +7628,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     aria-label="Add another stat group"
                     title="Add another stat group"
                   >
-                    +
+                    <span className="statsAddComparePlus" aria-hidden="true">+</span>
                   </button>
                   <span className="statsAddCompareHint">Add stat group</span>
                 </div>
@@ -7625,10 +7751,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       })}
 
       <div className="stats-page">
-        <div className={`stats-grid stats-grid--figma ${statsViewMode === "time" ? "stats-grid--time" : ""}`}>
+        <div
+          className={`stats-grid stats-grid--figma ${statsViewMode === "time" ? "stats-grid--time" : ""} ${
+            showAllEventsTimeMatrixCard ? "" : "stats-grid--noEventMatrix"
+          }`}
+        >
           <div
             className={`stats-item stats-item--header stats-item--minh stats-item--headerSplit${
-              isAllEventsMode ? " stats-item--headerSplitSingle" : ""
+              isAllEventsMode || (!compareEnabled && statsViewMode === "time") ? " stats-item--headerSplitSingle" : ""
             }${compareEnabled ? " stats-item--headerSplitSingle" : ""}`}
           >
             {!compareEnabled ? (
@@ -7682,6 +7812,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     viewMode={statsViewMode}
                     summaryLayout={summaryLayout}
                     selectedDay={selectedTimeDay}
+                    profileColor={primaryAccentColor}
                     onStatSelect={handleSummaryStatSelect}
                     loading={primaryOverallSummaryLoading}
                   />
@@ -7730,7 +7861,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             summarySource="primary"
             loadedSolveCount={loadedSolveCountForSummary}
             onStatSelect={handleSummaryStatSelect}
-            profileColor={user?.Color || user?.color || "#50B6FF"}
+            profileColor={primaryAccentColor}
                       loading={primaryOverallSummaryLoading}
                     />
                   </div>
@@ -7789,7 +7920,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         selectedTagPills={selectedTagPills}
                         loadedSolveCount={loadedSolveCountForSummary}
                         onStatSelect={handleSummaryStatSelect}
-                        profileColor={user?.Color || user?.color || "#50B6FF"}
+                        profileColor={primaryAccentColor}
                         loading={primaryOverallSummaryLoading}
                       />
                     </div>

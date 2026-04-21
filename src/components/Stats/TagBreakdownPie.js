@@ -5,7 +5,7 @@ import "./Stats.css";
 
 const BREAKDOWN_OPTIONS = [
   { value: "CubeModel", label: "Cube Model" },
-  { value: "CrossColor", label: "Cross Color" },
+  { value: "CrossColor", label: "Start Color" },
   { value: "TimerInput", label: "Timer Input" },
   { value: "SolveSource", label: "Solve Source" },
   { value: "Shared", label: "Shared" },

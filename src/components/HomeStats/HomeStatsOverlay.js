@@ -344,7 +344,7 @@ function slotTitle(config) {
   if (config.chartType === "pie") {
     if (config.pieBreakdown === "solveSource") return "Solve Source";
     if (config.pieBreakdown === "cubeModel") return "Cube Model";
-    if (config.pieBreakdown === "crossColor") return "Cross Color";
+    if (config.pieBreakdown === "crossColor") return "Start Color";
     if (config.pieBreakdown === "timerInput") return "Timer Input";
     return "Penalty";
   }

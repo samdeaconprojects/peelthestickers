@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
 import { findBestStrictWindow } from "../../utils/strictAverageUtils";
 import PieChartBuilder from "./PieChartBuilder";
@@ -354,6 +354,283 @@ function buildBucketViewSummary(bucketSummary, bucketItems = []) {
   };
 }
 
+function buildBucketTimeViewSummary(bucketSummary, bucketItems = []) {
+  if (!bucketSummary) return null;
+
+  const items = (Array.isArray(bucketItems) ? bucketItems : [])
+    .filter((item) => item && item.BucketDay)
+    .sort((a, b) => String(a.BucketDay).localeCompare(String(b.BucketDay)));
+
+  const startDay = String(items[0]?.BucketDay || "").trim();
+  const endDay = String(items[items.length - 1]?.BucketDay || "").trim();
+  const startDate = startDay ? new Date(`${startDay}T00:00:00`) : null;
+  const endDate = endDay ? new Date(`${endDay}T00:00:00`) : null;
+  const busiestDay = [...items].sort(
+    (a, b) =>
+      Number(b?.SolveCountTotal || 0) - Number(a?.SolveCountTotal || 0) ||
+      String(a?.BucketDay || "").localeCompare(String(b?.BucketDay || ""))
+  )[0] || null;
+
+  return {
+    solveCount: Number(bucketSummary?.SolveCountTotal || 0),
+    dateLabel: startDay && endDay ? `${formatDayLabel(startDay)} - ${formatDayLabel(endDay)}` : "—",
+    firstSolve: startDay || "—",
+    lastSolve: endDay || "—",
+    activeDays: items.length,
+    activeHours: null,
+    busiestDay: busiestDay ? `${formatDayLabel(busiestDay.BucketDay)} (${formatCount(busiestDay.SolveCountTotal)})` : "—",
+    busiestHour: "—",
+    fastestHour: "—",
+    bestSingle: Number.isFinite(Number(bucketSummary?.BestSingleMs)) ? Number(bucketSummary.BestSingleMs) : null,
+    worstSingle: Number.isFinite(Number(bucketSummary?.WorstSingleMs)) ? Number(bucketSummary.WorstSingleMs) : null,
+    mean: Number.isFinite(Number(bucketSummary?.MeanMs)) ? Number(bucketSummary.MeanMs) : null,
+    median: null,
+    stdDev: stdDevFromAggregate(bucketSummary),
+    sum: Number(bucketSummary?.SumFinalTimeMs || 0),
+    dnfCount: Number(bucketSummary?.DNFCount || 0),
+    spanMs:
+      startDate && endDate && Number.isFinite(startDate.getTime()) && Number.isFinite(endDate.getTime())
+        ? Math.max(0, endDate.getTime() - startDate.getTime())
+        : null,
+    topHours: [],
+  };
+}
+
+function buildBucketDailyTrend(bucketItems = []) {
+  return (Array.isArray(bucketItems) ? bucketItems : [])
+    .filter((item) => item && item.BucketDay)
+    .map((item) => ({
+      dayKey: String(item.BucketDay).trim(),
+      average: Number.isFinite(Number(item?.MeanMs)) ? Number(item.MeanMs) : null,
+      count: Number(item?.SolveCountTotal || 0),
+    }))
+    .filter((item) => item.dayKey)
+    .sort((a, b) => String(a.dayKey).localeCompare(String(b.dayKey)));
+}
+
+function buildRawDailyTrend(solves = []) {
+  const grouped = new Map();
+
+  for (const solve of Array.isArray(solves) ? solves : []) {
+    const date = getSolveDate(solve);
+    const dayKey = getLocalDayKey(date);
+    if (!dayKey) continue;
+
+    const existing = grouped.get(dayKey) || { dayKey, count: 0, numeric: [] };
+    existing.count += 1;
+    const adjusted = solveMsAdjusted(solve);
+    if (typeof adjusted === "number" && isFinite(adjusted)) {
+      existing.numeric.push(adjusted);
+    }
+    grouped.set(dayKey, existing);
+  }
+
+  return Array.from(grouped.values())
+    .map((item) => ({
+      dayKey: item.dayKey,
+      average: item.numeric.length ? meanMs(item.numeric) : null,
+      count: item.count,
+    }))
+    .sort((a, b) => String(a.dayKey).localeCompare(String(b.dayKey)));
+}
+
+function buildTrendPath(points, width, height, minValue, maxValue) {
+  if (!Array.isArray(points) || points.length === 0) return "";
+  const safeWidth = Math.max(1, Number(width) || 1);
+  const safeHeight = Math.max(1, Number(height) || 1);
+  const span = Math.max(1, maxValue - minValue);
+
+  return points
+    .map((point, index) => {
+      const x = points.length === 1 ? safeWidth / 2 : (index / (points.length - 1)) * safeWidth;
+      const y = safeHeight - ((point.value - minValue) / span) * safeHeight;
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(" ");
+}
+
+function bucketTrendItems(items = [], maxPoints = 56, mode = "average") {
+  const input = Array.isArray(items) ? items : [];
+  if (input.length <= maxPoints) {
+    return input.map((item) => ({
+      ...item,
+      startDayKey: item.dayKey,
+      endDayKey: item.dayKey,
+      value: mode === "count" ? Number(item.count || 0) : Number(item.average),
+    }));
+  }
+
+  const bucketSize = Math.ceil(input.length / maxPoints);
+  const out = [];
+
+  for (let index = 0; index < input.length; index += bucketSize) {
+    const slice = input.slice(index, index + bucketSize);
+    const values = slice
+      .map((item) => (mode === "count" ? Number(item.count || 0) : Number(item.average)))
+      .filter((value) => Number.isFinite(value));
+
+    if (!values.length) continue;
+
+    out.push({
+      dayKey: slice[slice.length - 1]?.dayKey || slice[0]?.dayKey || "",
+      startDayKey: slice[0]?.dayKey || "",
+      endDayKey: slice[slice.length - 1]?.dayKey || slice[0]?.dayKey || "",
+      value: meanMs(values),
+      count: meanMs(slice.map((item) => Number(item.count || 0)).filter((value) => Number.isFinite(value))),
+      average: meanMs(slice.map((item) => Number(item.average)).filter((value) => Number.isFinite(value))),
+    });
+  }
+
+  return out;
+}
+
+function formatTrendDayRange(startDayKey, endDayKey) {
+  const start = String(startDayKey || "").trim();
+  const end = String(endDayKey || "").trim();
+  if (!start && !end) return "—";
+  if (!start || start === end) return formatDayLabel(start || end);
+  return `${formatDayLabel(start)} - ${formatDayLabel(end)}`;
+}
+
+function MiniTrendChart({ items = [], mode = "average" }) {
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const chart = useMemo(() => {
+    const normalized = bucketTrendItems(
+      (Array.isArray(items) ? items : []).map((item) => ({
+        dayKey: String(item?.dayKey || "").trim(),
+        startDayKey: String(item?.startDayKey || item?.dayKey || "").trim(),
+        endDayKey: String(item?.endDayKey || item?.dayKey || "").trim(),
+        average: Number(item?.average),
+        count: Number(item?.count || 0),
+      })),
+      56,
+      mode
+    )
+      .filter((item) => item.dayKey && Number.isFinite(item.value));
+
+    if (!normalized.length) return null;
+
+    const values = normalized.map((item) => item.value);
+    const minValue = Math.min(...values);
+    const maxValue = Math.max(...values);
+    const path = buildTrendPath(normalized, 100, 44, minValue, maxValue);
+    const first = normalized[0] || null;
+    const last = normalized[normalized.length - 1] || null;
+    const peak = [...normalized].sort((a, b) => b.value - a.value || String(a.dayKey).localeCompare(String(b.dayKey)))[0] || null;
+    const trough = [...normalized].sort((a, b) => a.value - b.value || String(a.dayKey).localeCompare(String(b.dayKey)))[0] || null;
+    const span = Math.max(1, maxValue - minValue);
+    const bars = normalized.map((point, index) => {
+      const step = 100 / normalized.length;
+      const width = Math.max(0.8, step - 0.6);
+      const x = index * step + (step - width) / 2;
+      const y = 44 - ((point.value - minValue) / span) * 44;
+      return {
+        x,
+        y,
+        width,
+        height: Math.max(1.5, 44 - y),
+      };
+    });
+
+    return {
+      points: normalized,
+      path,
+      bars,
+      minValue,
+      maxValue,
+      first,
+      last,
+      peak,
+      trough,
+    };
+  }, [items, mode]);
+
+  if (!chart) {
+    return <div className="ssTrendEmpty">No daily data</div>;
+  }
+
+  const activePoint =
+    activeIndex >= 0 && activeIndex < chart.points.length ? chart.points[activeIndex] : null;
+  const hoverLabel = activePoint
+    ? formatTrendDayRange(activePoint.startDayKey, activePoint.endDayKey)
+    : "Hover a bar";
+  const hoverPrimary = activePoint
+    ? mode === "count"
+      ? `${formatCount(activePoint.count)} solves`
+      : `${formatStatTime(activePoint.average)} mean`
+    : mode === "count"
+      ? "Solve count"
+      : "Daily mean";
+  const hoverSecondary = activePoint
+    ? mode === "count"
+      ? (Number.isFinite(activePoint.average) ? `${formatStatTime(activePoint.average)} mean` : "No average")
+      : `${formatCount(activePoint.count)} solves`
+    : "Move across the chart";
+
+  return (
+    <div className="ssTrendCard">
+      <div className="ssTrendHover">
+        <div className="ssTrendHoverLabel">{hoverLabel}</div>
+        <div className="ssTrendHoverValue">{hoverPrimary}</div>
+        <div className="ssTrendHoverMeta">{hoverSecondary}</div>
+      </div>
+
+      <div className="ssTrendCanvas">
+        <svg className="ssTrendSvg" viewBox="0 0 100 44" preserveAspectRatio="none">
+          <path className="ssTrendGridLine" d="M 0 43.5 L 100 43.5" />
+          <path className="ssTrendGridLine" d="M 0 22 L 100 22" />
+          {mode === "count"
+            ? chart.bars.map((bar, index) => (
+                <rect
+                  key={`${chart.points[index]?.dayKey || index}`}
+                  className={`ssTrendBar ${index === activeIndex ? "is-active" : ""}`}
+                  x={bar.x}
+                  y={bar.y}
+                  width={bar.width}
+                  height={bar.height}
+                  rx="0.8"
+                />
+              ))
+            : <path className="ssTrendLine" d={chart.path} />}
+          {chart.bars.map((bar, index) => (
+            <rect
+              key={`hover-${chart.points[index]?.dayKey || index}`}
+              className="ssTrendHitbox"
+              x={bar.x}
+              y="0"
+              width={bar.width}
+              height="44"
+              rx="0.8"
+              onMouseEnter={() => setActiveIndex(index)}
+              onMouseLeave={() => setActiveIndex(-1)}
+              onFocus={() => setActiveIndex(index)}
+              onBlur={() => setActiveIndex(-1)}
+            >
+              <title>
+                {`${formatTrendDayRange(chart.points[index]?.startDayKey, chart.points[index]?.endDayKey)} | ${
+                  mode === "count"
+                    ? `${formatCount(chart.points[index]?.count)} solves`
+                    : `${formatStatTime(chart.points[index]?.average)} mean`
+                }${
+                  mode === "count" && Number.isFinite(chart.points[index]?.average)
+                    ? ` | ${formatStatTime(chart.points[index]?.average)} mean`
+                    : mode !== "count"
+                      ? ` | ${formatCount(chart.points[index]?.count)} solves`
+                      : ""
+                }`}
+              </title>
+            </rect>
+          ))}
+        </svg>
+        <div className="ssTrendAxis">
+          <span>{formatTrendDayRange(chart.first?.startDayKey, chart.first?.endDayKey)}</span>
+          <span>{formatTrendDayRange(chart.last?.startDayKey, chart.last?.endDayKey)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function buildOverallDerived(solves) {
   const input = Array.isArray(solves) ? solves : [];
   if (!input.length) return null;
@@ -508,6 +785,9 @@ function MetricRow({
   onStatSelect,
   summarySource = "primary",
 }) {
+  const isAoMetric = /^AO\d+$/i.test(String(label || "").trim());
+  const isSingleMetric = metricKey === "single" || /^single$/i.test(String(label || "").trim());
+
   const selectValue = (variant, value) => {
     if (typeof onStatSelect !== "function") return;
     onStatSelect({
@@ -533,7 +813,13 @@ function MetricRow({
     return (
       <span className="ssMetricSlot">
         <StatValueButton onClick={() => selectValue(variant, value)} disabled={value == null}>
-          <span className={`ssMetricValue ${className}`}>{formatStatTime(value)}</span>
+          <span
+            className={`ssMetricValue ${className} ${isAoMetric ? "ssMetricValue--ao" : ""} ${
+              isSingleMetric ? "ssMetricValue--singleMetric" : ""
+            }`}
+          >
+            {formatStatTime(value)}
+          </span>
         </StatValueButton>
       </span>
     );
@@ -541,7 +827,7 @@ function MetricRow({
 
   return (
     <div className="ssMetricRow">
-      <div className="ssMetricLabel">{label}</div>
+      <div className={`ssMetricLabel ${isAoMetric ? "ssMetricLabel--ao" : ""}`}>{label}</div>
       <div className={`ssMetricValues ${collapseHiddenSlots ? "ssMetricValues--compact" : ""}`}>
         {renderValueSlot({
           variant: "best",
@@ -661,6 +947,7 @@ function SummaryTileValue({
   average = true,
   showLabel = true,
   single = false,
+  emphasizeValue = false,
 }) {
   return (
     <div
@@ -670,7 +957,7 @@ function SummaryTileValue({
     >
       {showLabel ? <div className={`ssTileMetricValueLabel ${className}`}>{label}</div> : null}
       <StatValueButton onClick={onClick} disabled={disabled}>
-        <div className={`ssTileMetricValue ${className}`}>
+        <div className={`ssTileMetricValue ${className} ${emphasizeValue ? "ssTileMetricValue--emphasized" : ""}`}>
           {formatStatTime(value, { average })}
         </div>
       </StatValueButton>
@@ -689,7 +976,8 @@ function SummaryMetricTile({
   onStatSelect,
 }) {
   const { prefix, value, single } = formatTileMetricParts(label);
-
+  const isAoMetric = /^AO\d+$/i.test(String(label || "").trim());
+  const isSingleMetric = metricKey === "single" || /^single$/i.test(String(label || "").trim());
   const selectValue = (variant, metricValue) => {
     if (typeof onStatSelect !== "function") return;
     onStatSelect({
@@ -720,6 +1008,7 @@ function SummaryMetricTile({
           value={best}
           className="ssMetricValue--best"
           average={average}
+          emphasizeValue={isAoMetric || isSingleMetric}
           showLabel={single}
           single={single}
           onClick={() => selectValue("best", best)}
@@ -730,6 +1019,7 @@ function SummaryMetricTile({
           value={worst}
           className="ssMetricValue--worst"
           average={average}
+          emphasizeValue={isAoMetric || isSingleMetric}
           showLabel={single}
           single={single}
           onClick={() => selectValue("worst", worst)}
@@ -897,6 +1187,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
   eventBreakdownData = [],
   loading = false,
 }) {
+  const [timeTrendMode, setTimeTrendMode] = useState("average");
   const view = useMemo(
     () =>
       bucketSummary
@@ -908,7 +1199,14 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
     () => buildViewSummary(compareSummary?.solves || [], null, null),
     [compareSummary?.solves]
   );
-  const timeView = useMemo(() => buildTimeViewSummary(solves), [solves]);
+  const timeView = useMemo(
+    () => (bucketSummary ? buildBucketTimeViewSummary(bucketSummary, bucketItems) : buildTimeViewSummary(solves)),
+    [bucketItems, bucketSummary, solves]
+  );
+  const timeTrendItems = useMemo(
+    () => (bucketSummary ? buildBucketDailyTrend(bucketItems) : buildRawDailyTrend(solves)),
+    [bucketItems, bucketSummary, solves]
+  );
   const effectiveViewMode = viewMode === "time" ? "time" : bucketSummary ? "standard" : viewMode;
   const isTileLayout = effectiveViewMode === "standard" && summaryLayout === "tile";
   const hasEventBreakdownData = Array.isArray(eventBreakdownData) && eventBreakdownData.length > 0;
@@ -977,22 +1275,47 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
               <div className="ssViewCountValue">{formatCount(timeView.solveCount)}</div>
               <div className="ssViewCountLabel">solves in range</div>
               <div className="ssViewMeta">{timeView.dateLabel}</div>
-              <div className="ssViewMeta">
-                {timeView.firstSolve} - {timeView.lastSolve}
-              </div>
+              <div className="ssViewMeta">{formatCount(timeView.activeDays)} active days</div>
             </div>
 
             <div className="ssTimeBody">
-              <div className="ssTimeBodyHeader">Top hours</div>
-              <div className="ssTimeHours">
-                {timeView.topHours.map((hour) => (
-                  <div key={hour.label} className="ssTimeHourRow">
-                    <span className="ssTimeHourLabel">{hour.label}</span>
-                    <span className="ssTimeHourCount">{hour.count} solves</span>
-                    <span className="ssTimeHourMean">{formatStatTime(hour.mean)}</span>
-                  </div>
-                ))}
+              <div className="ssTimeBodyHeaderRow">
+                <div className="ssTimeBodyHeader">Daily trend</div>
+                <div className="ssTrendToggle" role="tablist" aria-label="Daily trend metric">
+                  <button
+                    type="button"
+                    className={`ssTrendToggleButton ${timeTrendMode === "average" ? "is-active" : ""}`}
+                    aria-pressed={timeTrendMode === "average"}
+                    onClick={() => setTimeTrendMode("average")}
+                  >
+                    Avg
+                  </button>
+                  <button
+                    type="button"
+                    className={`ssTrendToggleButton ${timeTrendMode === "count" ? "is-active" : ""}`}
+                    aria-pressed={timeTrendMode === "count"}
+                    onClick={() => setTimeTrendMode("count")}
+                  >
+                    Count
+                  </button>
+                </div>
               </div>
+              <MiniTrendChart items={timeTrendItems} mode={timeTrendMode} />
+
+              {timeView.topHours.length > 0 && (
+                <>
+                  <div className="ssTimeBodyHeader">Top hours</div>
+                  <div className="ssTimeHours">
+                    {timeView.topHours.map((hour) => (
+                      <div key={hour.label} className="ssTimeHourRow">
+                        <span className="ssTimeHourLabel">{hour.label}</span>
+                        <span className="ssTimeHourCount">{hour.count} solves</span>
+                        <span className="ssTimeHourMean">{formatStatTime(hour.mean)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="ssTimeSide">
@@ -1132,7 +1455,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
             ) : null}
           </div>
 
-          <div className="ssViewBody">
+          <div className={`ssViewBody ${isTileLayout ? "ssViewBody--tile" : ""}`}>
             {isTileLayout ? (
               <div className="ssCurrentTileLayout">
                 <div className="ssCurrentTileLead">
@@ -1156,37 +1479,42 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
                       summarySource={summarySource}
                       onStatSelect={onStatSelect}
                     />
+                    <SummaryMetricTile
+                      label="AO12"
+                      metricKey="ao12"
+                      best={view?.metrics?.ao12?.best}
+                      worst={view?.metrics?.ao12?.worst}
+                      scope="current"
+                      summarySource={summarySource}
+                      onStatSelect={onStatSelect}
+                    />
+                  </div>
+                </div>
+
+                <div className="ssCurrentTileMeta">
+                  <div className="ssTopMetaRow">
+                    <MetaStat label="Mean" value={formatStatTime(view?.mean)} tone="accent" stacked />
+                    <MetaStat label="Median" value={formatStatTime(view?.median)} tone="accent" stacked />
+                    <MetaStat label="σ" value={formatStatTime(view?.stdDev)} tone="accent" stacked />
                   </div>
 
-                  <div className="ssCurrentTileMeta">
-                    <div className="ssTopMetaRow">
-                      <MetaStat label="Mean" value={formatStatTime(view?.mean)} tone="accent" stacked />
-                      <MetaStat label="Median" value={formatStatTime(view?.median)} tone="accent" stacked />
-                      <MetaStat label="σ" value={formatStatTime(view?.stdDev)} tone="accent" stacked />
-                    </div>
+                  <div className="ssMetaGrid ssMetaGrid--currentRow">
+                    <MetaStat label="+2 Count" value={formatCount(view?.plus2Count)} tone="lime" />
+                    <MetaStat label="+2 Best" value={formatStatTime(view?.plus2Best, { average: false })} tone="teal" />
+                  </div>
 
-                    <div className="ssMetaGrid ssMetaGrid--currentRow">
-                      <MetaStat label="+2 Count" value={formatCount(view?.plus2Count)} tone="lime" />
-                      <MetaStat label="Sum" value={formatDurationMs(view?.sum)} tone="blue" />
-                    </div>
-
-                    <div className="ssMetaGrid ssMetaGrid--currentRow">
-                      <MetaStat
-                        label="+2 Best"
-                        value={formatStatTime(view?.plus2Best, { average: false })}
-                        tone="teal"
-                      />
-                      <MetaStat label="DNF Count" value={formatCount(view?.dnfCount)} tone="danger" />
-                    </div>
+                  <div className="ssMetaGrid ssMetaGrid--currentRow">
+                    <MetaStat label="Sum" value={formatDurationMs(view?.sum)} tone="blue" />
+                    <MetaStat label="DNF Count" value={formatCount(view?.dnfCount)} tone="danger" />
                   </div>
                 </div>
 
                 <div className="ssMetricTileGrid">
                   <SummaryMetricTile
-                    label="AO12"
-                    metricKey="ao12"
-                    best={view?.metrics?.ao12?.best}
-                    worst={view?.metrics?.ao12?.worst}
+                    label="MO3"
+                    metricKey="mo3"
+                    best={view?.metrics?.mo3?.best}
+                    worst={view?.metrics?.mo3?.worst}
                     scope="current"
                     summarySource={summarySource}
                     onStatSelect={onStatSelect}
@@ -1205,15 +1533,6 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
                     metricKey="ao50"
                     best={view?.metrics?.ao50?.best}
                     worst={view?.metrics?.ao50?.worst}
-                    scope="current"
-                    summarySource={summarySource}
-                    onStatSelect={onStatSelect}
-                  />
-                  <SummaryMetricTile
-                    label="MO3"
-                    metricKey="mo3"
-                    best={view?.metrics?.mo3?.best}
-                    worst={view?.metrics?.mo3?.worst}
                     scope="current"
                     summarySource={summarySource}
                     onStatSelect={onStatSelect}

@@ -665,6 +665,14 @@ function LineChart({
   const bulkEnabled = solveLevel && !hasComparison;
   const isTimeView = viewMode === "time";
   const profileColor = normalizeHexColor(user?.Color || user?.color || "#2EC4B6");
+  const controlAccentColor = normalizeHexColor(
+    seriesStyle?.primary ||
+      seriesStyle?.accent ||
+      (seriesStyle?.mode === "gradient" && Array.isArray(seriesStyle?.stops)
+        ? seriesStyle.stops[1] || seriesStyle.stops[2] || seriesStyle.stops[0]
+        : "") ||
+      profileColor
+  );
 
   useEffect(() => {
     if (!isTimeView) return;
@@ -831,9 +839,9 @@ function LineChart({
     <div
       className="lineChart"
       style={{
-        "--line-chart-accent": profileColor,
-        "--line-chart-accent-soft": hexToRgba(profileColor, 0.18),
-        "--line-chart-accent-strong": hexToRgba(profileColor, 0.55),
+        "--line-chart-accent": controlAccentColor,
+        "--line-chart-accent-soft": hexToRgba(controlAccentColor, 0.18),
+        "--line-chart-accent-strong": hexToRgba(controlAccentColor, 0.55),
       }}
     >
       {isTimeView ? (
@@ -954,49 +962,51 @@ function LineChart({
             </div>
           </div>
 
-          <button
-            type="button"
-            className={`statsToggleBtn ${showAo5 ? "is-active" : ""}`}
-            disabled={!solveLevel || isTimeView || hasComparison}
-            onClick={() => setShowAo5((value) => !value)}
-          >
-            Ao5
-          </button>
+          <div className="chartControlGroup chartControlGroup--toggleSet">
+            <button
+              type="button"
+              className={`statsToggleBtn ${showAo5 ? "is-active" : ""}`}
+              disabled={!solveLevel || isTimeView || hasComparison}
+              onClick={() => setShowAo5((value) => !value)}
+            >
+              Ao5
+            </button>
 
-          <button
-            type="button"
-            className={`statsToggleBtn ${showAo12 ? "is-active" : ""}`}
-            disabled={!solveLevel || isTimeView || hasComparison}
-            onClick={() => setShowAo12((value) => !value)}
-          >
-            Ao12
-          </button>
+            <button
+              type="button"
+              className={`statsToggleBtn ${showAo12 ? "is-active" : ""}`}
+              disabled={!solveLevel || isTimeView || hasComparison}
+              onClick={() => setShowAo12((value) => !value)}
+            >
+              Ao12
+            </button>
 
-          <button
-            type="button"
-            className={`statsToggleBtn ${xScaleMode === "datetime" ? "is-active" : ""}`}
-            onClick={() =>
-              setXScaleMode((value) => (value === "datetime" ? "ordinal" : "datetime"))
-            }
-          >
-            Date Gaps
-          </button>
+            <button
+              type="button"
+              className={`statsToggleBtn ${xScaleMode === "datetime" ? "is-active" : ""}`}
+              onClick={() =>
+                setXScaleMode((value) => (value === "datetime" ? "ordinal" : "datetime"))
+              }
+            >
+              Date Gaps
+            </button>
 
-          <button
-            type="button"
-            className={`statsToggleBtn ${showMean ? "is-active" : ""}`}
-            onClick={() => setShowMean((value) => !value)}
-          >
-            Mean
-          </button>
+            <button
+              type="button"
+              className={`statsToggleBtn ${showMean ? "is-active" : ""}`}
+              onClick={() => setShowMean((value) => !value)}
+            >
+              Mean
+            </button>
 
-          <button
-            type="button"
-            className={`statsToggleBtn ${showGrid ? "is-active" : ""}`}
-            onClick={() => setShowGrid((value) => !value)}
-          >
-            Grid
-          </button>
+            <button
+              type="button"
+              className={`statsToggleBtn ${showGrid ? "is-active" : ""}`}
+              onClick={() => setShowGrid((value) => !value)}
+            >
+              Grid
+            </button>
+          </div>
 
           <div className="chartControlGroup chartControlGroup--inline">
             <span className="chartControlLabel">Dots</span>

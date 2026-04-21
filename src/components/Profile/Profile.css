@@ -478,7 +478,7 @@
 }
 
 .postAverageSnapshot {
-  width: min(360px, 100%);
+  width: min(480px, 100%);
   align-self: center;
   margin: 0 10px;
   flex: 0 0 auto;
@@ -625,21 +625,31 @@
 .dateAndName {
     display: flex;
     flex-direction: column;
-    justify-content: space-between;    
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 6px;
+    min-width: 180px;
+    padding: 8px 8px 8px 0;
+    box-sizing: border-box;
 }
 
 .postDate {
     color: #c2c2c2;
     opacity: 65%;
     margin-left: auto;
-    padding: 8px;
+    padding: 0;
+    text-align: right;
 }
 
 .postNameAndPicture {
     display: flex;
     justify-content: right;
     align-items: center;
-    margin: 5px;
+    margin: 0;
+}
+
+.postNameAndPicture .name-tag {
+    margin-top: 0;
 }
 
 .profilePicturePost {
@@ -1277,6 +1287,6 @@
   }
 
   .postAverageSnapshot {
-    width: min(220px, 100%);
+    width: min(294px, 100%);
   }
 }

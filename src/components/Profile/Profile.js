@@ -6,6 +6,7 @@ import Post from "./Post";
 import PostDetail from "./PostDetail";
 import StatSharePost from "./StatSharePost";
 import ProfileHeader from "./ProfileHeader";
+import NameTag from "./NameTag";
 import LineChart from "../Stats/LineChart";
 import EventCountPieChart from "../Stats/EventCountPieChart";
 import BarChart from "../Stats/BarChart";
@@ -331,7 +332,28 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
   const formatPostDate = (value) => {
     const d = value instanceof Date ? value : new Date(value);
     if (!d || isNaN(d.getTime())) return String(value ?? "");
-    return d.toLocaleString();
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfThatDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const diffDays = Math.round((startOfToday - startOfThatDay) / (1000 * 60 * 60 * 24));
+
+    const timeStr = d.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+
+    if (diffDays === 0) return `Today at ${timeStr}`;
+    if (diffDays === 1) return `Yesterday at ${timeStr}`;
+
+    const dateStr = d.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    return `${dateStr} ${timeStr}`;
   };
 
   useEffect(() => {
@@ -487,6 +509,9 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
         user?.name ||
         "You",
       userID: user?.UserID || "",
+      color: user?.Color || user?.color || "#FFFFFF",
+      profileEvent: user?.ProfileEvent || user?.profileEvent || "333",
+      profileScramble: user?.ProfileScramble || user?.profileScramble || "",
       createdAt: new Date().toISOString(),
     };
     const updatedComments = [...(selectedPost.Comments || []), newComment];
@@ -985,7 +1010,14 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
                           <div className="postDate">
                             {formatPostDate(post.DateTime ? new Date(post.DateTime) : post.date)}
                           </div>
-                          <div className="statFeedAuthor">@{viewedProfile.Name || viewedProfile.name}</div>
+                          <div className="postNameAndPicture">
+                            <NameTag
+                              user={viewedProfile}
+                              size="xs"
+                              variant="profile-corner"
+                              reverse={true}
+                            />
+                          </div>
                         </div>
                         </div>
                       </div>
@@ -1034,6 +1066,7 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
       {selectedPost && (
         <PostDetail
           author={viewedProfile.Name || viewedProfile.name}
+          authorUser={viewedProfile}
           date={
             selectedPost.DateTime
               ? formatPostDate(new Date(selectedPost.DateTime))

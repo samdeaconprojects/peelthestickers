@@ -37,13 +37,13 @@
   display: grid;
   grid-template-columns: 128px 228px minmax(0, 1fr);
   gap: 10px;
-  padding: 4px 14px 3px 14px;
+  padding: 2px 14px 1px 14px;
 }
 
 .ssCard--viewTile {
   grid-template-columns: 148px minmax(0, 1fr);
   gap: 4px;
-  padding: 4px 14px 3px;
+  padding: 2px 14px 1px;
 }
 
 .ssCard--viewTile .ssViewBody {
@@ -55,7 +55,7 @@
 
 .ssCard--time {
   display: grid;
-  grid-template-columns: 156px minmax(0, 1fr) 250px;
+  grid-template-columns: 156px minmax(260px, 1.2fr) 250px;
   gap: 10px;
   padding: 12px 14px 10px 14px;
 }
@@ -69,7 +69,7 @@
 }
 
 .ssCard--overall {
-  padding: 1px 14px 1px;
+  padding: 0 14px;
   display: flex;
   flex-direction: column;
   border-width: 2px;
@@ -114,6 +114,11 @@
   display: flex;
   justify-content: flex-start;
   width: 100%;
+}
+
+.ssViewBody--tile {
+  align-self: center;
+  padding-top: 10px;
 }
 
 .ssTimeAllEventsLead {
@@ -235,41 +240,93 @@
 
 .ssCurrentTileLayout {
   display: grid;
-  grid-template-columns: minmax(280px, 1.08fr) minmax(0, 1.45fr);
-  gap: 6px;
+  grid-template-columns: minmax(0, 1.38fr) minmax(280px, 0.92fr);
+  grid-template-rows: auto auto;
+  gap: 10px;
   width: 100%;
-  align-items: center;
+  align-items: start;
 }
 
 .ssCurrentTileLead {
   display: grid;
-  gap: 4px;
+  gap: 10px;
   align-content: start;
+  width: 100%;
+  padding-top: 18px;
+  min-height: 0;
 }
 
 .ssCurrentTileTopRow {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(3, max-content);
+  gap: 26px;
+  justify-content: start;
+  width: fit-content;
+  max-width: 100%;
+  margin-left: 8px;
+}
+
+.ssCurrentTileTopRow > :nth-child(2) {
+  margin-left: -6px;
+  margin-right: 2px;
+}
+
+.ssCurrentTileTopRow > :nth-child(3) {
+  margin-left: 2px;
 }
 
 .ssCurrentTileMeta {
   display: grid;
   gap: 4px;
   align-content: start;
+  justify-content: stretch;
+  width: 100%;
+  padding-top: 10px;
+  min-height: 0;
 }
 
 .ssMetricTileGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px 16px;
-  margin-top: 12px;
-  margin-left: -20px;
-  width: calc(100% + 20px);
+  margin-top: 10px;
+  margin-left: 0;
+  width: 100%;
+  align-self: start;
 }
 
-.ssMetricTileGrid .ssMetricTile:nth-child(n + 4) {
-  margin-top: 0;
+.ssMetricTileGrid .ssMetricTile {
+  opacity: 0.78;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    filter 140ms ease;
+}
+
+.ssMetricTileGrid .ssMetricTile:hover,
+.ssMetricTileGrid .ssMetricTile:focus-within {
+  opacity: 1;
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+
+.ssMetricTileGrid .ssStatButton:hover .ssTileMetricValue,
+.ssMetricTileGrid .ssStatButton:focus-visible .ssTileMetricValue {
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+
+.ssCurrentTileTopRow .ssStatButton:hover .ssTileMetricValue,
+.ssCurrentTileTopRow .ssStatButton:focus-visible .ssTileMetricValue {
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+
+.ssMetricTileGrid .ssMetricTilePrefix,
+.ssMetricTileGrid .ssMetricTileSingleLabel {
+  font-size: 0.64rem;
+  opacity: 0.72;
 }
 
 .ssMetricTile {
@@ -302,7 +359,7 @@
 }
 
 .ssMetricTileNumber {
-  font-size: clamp(2rem, 2.8vw, 2.7rem);
+  font-size: clamp(2.35rem, 3.2vw, 3.05rem);
   line-height: 0.92;
   font-weight: 800;
   letter-spacing: -0.05em;
@@ -310,7 +367,8 @@
 }
 
 .ssMetricTileGrid .ssMetricTileNumber {
-  font-size: clamp(1.56rem, 2.1vw, 2rem);
+  font-size: clamp(1.38rem, 1.82vw, 1.72rem);
+  opacity: 0.78;
 }
 
 .ssMetricTileValues {
@@ -356,9 +414,35 @@
   letter-spacing: -0.03em;
 }
 
+.ssTileMetricValue--emphasized {
+  font-size: clamp(1.42rem, 2.05vw, 2rem);
+}
+
 .ssTileMetricValueBlock--single .ssTileMetricValue {
   font-size: clamp(1.48rem, 2vw, 2.08rem);
   line-height: 0.92;
+}
+
+.ssCard--view .ssTileMetricValueBlock--single .ssTileMetricValue {
+  font-size: clamp(1.66rem, 2.22vw, 2.32rem);
+}
+
+.ssCard--view .ssCurrentTileTopRow > :first-child .ssTileMetricValueBlock--single .ssTileMetricValue.ssMetricValue--best {
+  font-size: clamp(1.84rem, 2.46vw, 2.58rem);
+}
+
+.ssMetricTileGrid .ssTileMetricValue {
+  font-size: clamp(0.92rem, 1.2vw, 1.16rem);
+  opacity: 0.76;
+}
+
+.ssMetricTileGrid .ssTileMetricValue--emphasized {
+  font-size: clamp(1rem, 1.32vw, 1.26rem);
+}
+
+.ssMetricTileGrid .ssMetricTileValues,
+.ssMetricTileGrid .ssTileMetricValueBlock {
+  gap: 0;
 }
 
 .ssTileMetricValueBlock--worst .ssTileMetricValue {
@@ -462,10 +546,142 @@
   align-content: start;
 }
 
+.ssTimeBodyHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .ssTimeBodyHeader {
   font-size: 0.84rem;
   font-weight: 700;
   color: rgba(243, 244, 246, 0.78);
+}
+
+.ssTrendToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ssTrendToggleButton {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: rgba(243, 244, 246, 0.68);
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ssTrendToggleButton.is-active {
+  background: rgba(90, 178, 255, 0.18);
+  color: #ffffff;
+}
+
+.ssTrendCard,
+.ssTrendEmpty {
+  min-height: 118px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ssTrendCard {
+  display: grid;
+  grid-template-rows: auto minmax(72px, 1fr);
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.ssTrendEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(243, 244, 246, 0.62);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.ssTrendCanvas {
+  min-height: 74px;
+}
+
+.ssTrendSvg {
+  display: block;
+  width: 100%;
+  height: 76px;
+  overflow: visible;
+  margin-bottom: 4px;
+}
+
+.ssTrendGridLine {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 1;
+}
+
+.ssTrendLine {
+  fill: none;
+  stroke: var(--ss-best);
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ssTrendBar {
+  fill: rgba(56, 214, 201, 0.85);
+}
+
+.ssTrendBar.is-active {
+  fill: rgba(98, 231, 220, 1);
+}
+
+.ssTrendHitbox {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.ssTrendAxis {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.66rem;
+  line-height: 1.1;
+  font-weight: 700;
+  color: rgba(243, 244, 246, 0.58);
+}
+
+.ssTrendHover {
+  display: grid;
+  gap: 2px;
+}
+
+.ssTrendHoverLabel {
+  font-size: 0.68rem;
+  line-height: 1.2;
+  font-weight: 700;
+  color: rgba(243, 244, 246, 0.62);
+}
+
+.ssTrendHoverValue {
+  font-size: 0.98rem;
+  line-height: 1.05;
+  font-weight: 800;
+  color: rgba(243, 244, 246, 0.94);
+}
+
+.ssTrendHoverMeta {
+  font-size: 0.68rem;
+  line-height: 1.2;
+  color: rgba(243, 244, 246, 0.56);
 }
 
 .ssTimeHours {
@@ -507,6 +723,17 @@
   display: grid;
   gap: 8px;
   align-content: start;
+}
+
+@media (max-width: 980px) {
+  .ssCard--time {
+    grid-template-columns: 1fr;
+  }
+
+  .ssTimeBodyHeaderRow {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .ssViewLegend,
@@ -567,6 +794,12 @@
   white-space: nowrap;
 }
 
+.ssMetricLabel--ao,
+.ssOverallMetricLabel--ao {
+  font-size: clamp(0.96rem, 1.2vw, 1.12rem);
+  font-weight: 800;
+}
+
 .ssStatButton {
   appearance: none;
   border: 0;
@@ -624,6 +857,19 @@
   letter-spacing: -0.02em;
 }
 
+.ssMetricRow .ssMetricValue,
+.ssOverallMetricRow .ssMetricValue {
+  font-size: clamp(1.08rem, 1.3vw, 1.24rem);
+}
+
+.ssMetricValue--ao {
+  font-size: clamp(1.24rem, 1.55vw, 1.46rem) !important;
+}
+
+.ssMetricValue--singleMetric {
+  font-size: clamp(1.28rem, 1.65vw, 1.56rem) !important;
+}
+
 .ssMetricValue--current {
   color: var(--ss-current);
 }
@@ -675,12 +921,24 @@
   font-size: clamp(1rem, 1.35vw, 1.22rem);
 }
 
+.ssSingleValues .ssMetricValue--best,
+.ssSingleValues .ssMetricValue--worst,
+.ssSingleValues .ssMetricValue--current {
+  font-size: clamp(1.18rem, 1.6vw, 1.44rem);
+}
+
+.ssCard--view .ssSingleValues .ssMetricValue--best,
+.ssCard--view .ssSingleValues .ssMetricValue--worst,
+.ssCard--view .ssSingleValues .ssMetricValue--current {
+  font-size: clamp(1.34rem, 1.82vw, 1.62rem);
+}
+
 .ssTopMetaRow {
   display: grid;
-  grid-template-columns: repeat(3, minmax(64px, max-content));
-  gap: 6px;
+  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  gap: 6px 12px;
   align-items: start;
-  justify-content: start;
+  justify-content: stretch;
 }
 
 .ssMetaGrid,
@@ -692,9 +950,9 @@
 }
 
 .ssMetaGrid--currentRow {
-  grid-template-columns: repeat(2, minmax(99px, max-content));
-  gap: 2px 14px;
-  justify-content: start;
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+  gap: 4px 12px;
+  justify-content: stretch;
 }
 
 .ssMetaColumn {
@@ -708,6 +966,7 @@
   justify-content: start;
   gap: 4px;
   align-items: baseline;
+  width: 100%;
 }
 
 .ssMetaStat--stacked {
@@ -732,6 +991,18 @@
   line-height: 1.02;
 }
 
+.ssCard--view .ssTopMetaRow .ssMetaStat--stacked .ssMetaLabel {
+  font-size: 0.68rem;
+}
+
+.ssCard--view .ssTopMetaRow .ssMetaStat--stacked .ssMetaLabel--sigma {
+  font-size: 0.98rem;
+}
+
+.ssCard--view .ssTopMetaRow .ssMetaStat--stacked .ssMetaValue {
+  font-size: clamp(1rem, 1.12vw, 1.14rem);
+}
+
 .ssMetaLabel {
   font-size: 0.68rem;
   color: var(--ss-muted);
@@ -751,6 +1022,14 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.ssCard--view .ssMetaGrid--currentRow .ssMetaLabel {
+  font-size: 0.76rem;
+}
+
+.ssCard--view .ssMetaGrid--currentRow .ssMetaValue {
+  font-size: clamp(0.96rem, 1.08vw, 1.08rem);
 }
 
 .ssMetaStat--accent .ssMetaValue {
@@ -778,7 +1057,7 @@
   justify-content: space-between;
   align-items: baseline;
   gap: 10px;
-  margin-bottom: 1px;
+  margin-bottom: 0;
 }
 
 .ssOverallTitle {
@@ -868,7 +1147,7 @@
   grid-template-columns: 1fr;
   grid-template-rows: repeat(5, minmax(0, 1fr));
   max-width: 142px;
-  padding-top: 12px;
+  padding-top: 6px;
   gap: 0;
   align-content: stretch;
   height: 100%;

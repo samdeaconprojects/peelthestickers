@@ -58,7 +58,7 @@ export const HOME_STAT_PIE_BREAKDOWN_OPTIONS = [
   { value: "penalty", label: "Penalty" },
   { value: "solveSource", label: "Solve Source" },
   { value: "cubeModel", label: "Cube Model" },
-  { value: "crossColor", label: "Cross Color" },
+  { value: "crossColor", label: "Start Color" },
   { value: "timerInput", label: "Timer Input" },
 ];
 

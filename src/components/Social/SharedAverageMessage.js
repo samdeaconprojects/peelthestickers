@@ -1635,7 +1635,14 @@ function SharedAverageMessage({
 
         <div className="sharedAverageScrollable">
           {viewMode === "summary" ? (
-            <div className="sharedAverageTableWrap">
+            <div
+              className={[
+                "sharedAverageTableWrap",
+                isGroupConversation ? "sharedAverageTableWrap--group" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
               {isGroupConversation ? (
                 <table
                   className={[
@@ -1671,13 +1678,13 @@ function SharedAverageMessage({
                               </span>
                             </span>
                             <span className="sharedAverageGroupHeaderMetaRow">
-                              <span className="sharedAverageGroupHeaderMeta sharedAverageGroupHeaderMeta--best">
-                                {groupMemberCount >= 14 ? "B" : "Best"}{" "}
-                                {member.best != null ? formatSolveMs(member.best) : "–"}
-                              </span>
-                              <span className="sharedAverageGroupHeaderMeta sharedAverageGroupHeaderMeta--worst">
-                                {groupMemberCount >= 14 ? "W" : "Worst"}{" "}
-                                {member.max != null ? formatSolveMs(member.max) : "–"}
+                              <span className="sharedAverageGroupHeaderMetaStack">
+                                <span className="sharedAverageGroupHeaderMeta sharedAverageGroupHeaderMeta--best">
+                                  {member.best != null ? formatSolveMs(member.best) : "–"}
+                                </span>
+                                <span className="sharedAverageGroupHeaderMeta sharedAverageGroupHeaderMeta--worst">
+                                  {member.max != null ? formatSolveMs(member.max) : "–"}
+                                </span>
                               </span>
                               <span className="sharedAverageGroupHeaderMeta">
                                 {member.wins} {scoreLabel.toLowerCase()}

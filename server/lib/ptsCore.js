@@ -12,6 +12,11 @@ const DEFAULT_DAY_BUCKET_TIMEZONE =
   process.env.PTS_DEFAULT_TIMEZONE ||
   Intl.DateTimeFormat().resolvedOptions().timeZone ||
   "UTC";
+const SPARSE_TAG_INDEX_CONFIG = Object.freeze({
+  CubeModel: { attr: "CubeModelIdx", prefix: "CM", indexName: "GSI4" },
+  CrossColor: { attr: "StartColorIdx", prefix: "SC", indexName: "GSI5" },
+  Method: { attr: "MethodIdx", prefix: "MT", indexName: "GSI6" },
+});
 
 function nowIso() {
   return new Date().toISOString();
@@ -79,6 +84,36 @@ function createSolveID() {
 
 function buildSolveSK(createdAt, solveID) {
   return `SOLVE#${createdAt}#${solveID}`;
+}
+
+function buildSolveTagSK(event, sessionID, createdAt, solveID) {
+  return `${normalizeEvent(event)}#${normalizeSessionID(sessionID)}#${String(createdAt || "").trim()}#${String(
+    solveID || ""
+  ).trim()}`;
+}
+
+function getSparseTagIndexConfig(tagKey) {
+  return SPARSE_TAG_INDEX_CONFIG[String(tagKey || "").trim()] || null;
+}
+
+function buildSparseTagIndexPK(tagKey, userID, tagValue) {
+  const config = getSparseTagIndexConfig(tagKey);
+  const valueNorm = normalizeTagIndexValue(tagValue);
+  if (!config || !userID || !valueNorm) return null;
+  return `${config.prefix}#${userID}#${valueNorm}`;
+}
+
+function buildSolveSparseTagIndexFields(userID, canonicalTags = {}) {
+  const out = {};
+
+  for (const [tagKey, config] of Object.entries(SPARSE_TAG_INDEX_CONFIG)) {
+    const value = cleanTagValue(canonicalTags?.[tagKey]);
+    const pk = buildSparseTagIndexPK(tagKey, userID, value);
+    if (!pk) continue;
+    out[config.attr] = pk;
+  }
+
+  return out;
 }
 
 function parseSolveSK(sk) {
@@ -1057,6 +1092,342 @@ function buildStatsFromSolves(solves = []) {
   };
 }
 
+function compareWindowCandidate(a, b) {
+  const valueDiff = Number(a?.ValueMs || 0) - Number(b?.ValueMs || 0);
+  if (valueDiff !== 0) return valueDiff;
+  return String(a?.StartSolveSK || "").localeCompare(String(b?.StartSolveSK || ""));
+}
+
+function insertTopWindowCandidate(candidates, candidate, k = 10) {
+  const next = Array.isArray(candidates) ? [...candidates] : [];
+  next.push(candidate);
+  next.sort(compareWindowCandidate);
+  return next.slice(0, Math.max(1, Number(k || 10)));
+}
+
+async function* iterateQueryItems(
+  ddb,
+  tableName,
+  { indexName, keyConditionExpression, expressionAttributeValues, limit = 1000 }
+) {
+  let cursor = undefined;
+
+  do {
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: tableName,
+        IndexName: indexName,
+        KeyConditionExpression: keyConditionExpression,
+        ExpressionAttributeValues: expressionAttributeValues,
+        ScanIndexForward: true,
+        ExclusiveStartKey: cursor,
+        Limit: limit,
+      })
+    );
+
+    for (const item of out.Items || []) {
+      yield item;
+    }
+
+    cursor = out.LastEvaluatedKey;
+  } while (cursor);
+}
+
+async function* iterateTagScopeSolves(
+  ddb,
+  tableName,
+  userID,
+  tagKey,
+  tagValue,
+  { event = "", sessionID = "", limit = 500 } = {}
+) {
+  const key = String(tagKey || "").trim();
+  const cleanValue = cleanTagValue(tagValue);
+  const tagValueNorm = normalizeTagIndexValue(cleanValue);
+  const ev = normalizeEvent(event || "");
+  const sid = sessionID ? normalizeSessionID(sessionID) : "";
+  const pageLimit = Math.max(1, Math.min(1000, Number(limit || 500)));
+
+  if (!userID || !key || !tagValueNorm) return;
+
+  const sparseConfig = getSparseTagIndexConfig(key);
+  if (sparseConfig) {
+    const pk = buildSparseTagIndexPK(key, userID, cleanValue);
+    if (!pk) return;
+
+    let keyConditionExpression = `${sparseConfig.attr} = :pk`;
+    const expressionAttributeValues = {
+      ":pk": pk,
+    };
+
+    if (ev && sid) {
+      keyConditionExpression += " AND begins_with(SolveTagSK, :skPrefix)";
+      expressionAttributeValues[":skPrefix"] = `${ev}#${sid}#`;
+    } else if (ev) {
+      keyConditionExpression += " AND begins_with(SolveTagSK, :skPrefix)";
+      expressionAttributeValues[":skPrefix"] = `${ev}#`;
+    }
+
+    yield* iterateQueryItems(ddb, tableName, {
+      indexName: sparseConfig.indexName,
+      keyConditionExpression,
+      expressionAttributeValues,
+      limit: pageLimit,
+    });
+    return;
+  }
+
+  let keyConditionExpression = "GSI3PK = :pk";
+  const expressionAttributeValues = {
+    ":pk": `TAG#${userID}#${key}#${tagValueNorm}`,
+  };
+
+  if (ev && sid) {
+    keyConditionExpression += " AND begins_with(GSI3SK, :skPrefix)";
+    expressionAttributeValues[":skPrefix"] = `${ev}#${sid}#`;
+  } else if (ev) {
+    keyConditionExpression += " AND begins_with(GSI3SK, :skPrefix)";
+    expressionAttributeValues[":skPrefix"] = `${ev}#`;
+  }
+
+  let cursor = undefined;
+
+  do {
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: tableName,
+        IndexName: "GSI3",
+        KeyConditionExpression: keyConditionExpression,
+        ExpressionAttributeValues: expressionAttributeValues,
+        ScanIndexForward: true,
+        ExclusiveStartKey: cursor,
+        Limit: pageLimit,
+      })
+    );
+
+    const tagItems = out.Items || [];
+    if (tagItems.length) {
+      const solveKeys = tagItems
+        .map((item) => ({ PK: item?.SolvePK, SK: item?.SolveSK }))
+        .filter((item) => item.PK && item.SK);
+      const solves = await batchGetAll(ddb, tableName, solveKeys);
+      const solveMap = new Map(solves.map((solve) => [`${solve.PK}|${solve.SK}`, solve]));
+
+      for (const tagItem of tagItems) {
+        const solve = solveMap.get(`${tagItem?.SolvePK}|${tagItem?.SolveSK}`);
+        if (solve) yield solve;
+      }
+    }
+
+    cursor = out.LastEvaluatedKey;
+  } while (cursor);
+}
+
+async function buildStatsFromSolveIterator(iterable) {
+  const stats = buildStatsFromSolves([]);
+  for (const config of CACHED_WINDOW_CONFIGS) {
+    if (!Array.isArray(stats[config.candidatesField])) {
+      stats[config.candidatesField] = [];
+    }
+    if (typeof stats[config.valueField] === "undefined") {
+      stats[config.valueField] = null;
+    }
+    if (typeof stats[config.startField] === "undefined") {
+      stats[config.startField] = null;
+    }
+  }
+  const windowConfigs = [
+    {
+      kind: "mo3",
+      windowSize: 3,
+      valueField: "BestMo3Ms",
+      startField: "BestMo3StartSolveSK",
+      worstField: "WorstMo3Ms",
+      worstStartField: "WorstMo3StartSolveSK",
+      strictValueField: "BestMo3StrictMs",
+      strictStartField: "BestMo3StrictStartSolveSK",
+      candidatesField: "TopMo3Candidates",
+      topK: 10,
+    },
+    {
+      kind: "ao",
+      windowSize: 5,
+      valueField: "BestAo5Ms",
+      startField: "BestAo5StartSolveSK",
+      worstField: "WorstAo5Ms",
+      worstStartField: "WorstAo5StartSolveSK",
+      strictValueField: "BestAo5StrictMs",
+      strictStartField: "BestAo5StrictStartSolveSK",
+      candidatesField: "TopAo5Candidates",
+      topK: 10,
+    },
+    {
+      kind: "ao",
+      windowSize: 12,
+      valueField: "BestAo12Ms",
+      startField: "BestAo12StartSolveSK",
+      worstField: "WorstAo12Ms",
+      worstStartField: "WorstAo12StartSolveSK",
+      strictValueField: "BestAo12StrictMs",
+      strictStartField: "BestAo12StrictStartSolveSK",
+      candidatesField: "TopAo12Candidates",
+      topK: 10,
+    },
+    {
+      kind: "ao",
+      windowSize: 25,
+      valueField: "BestAo25Ms",
+      startField: "BestAo25StartSolveSK",
+    },
+    {
+      kind: "ao",
+      windowSize: 50,
+      valueField: "BestAo50Ms",
+      startField: "BestAo50StartSolveSK",
+    },
+    {
+      kind: "ao",
+      windowSize: 100,
+      valueField: "BestAo100Ms",
+      startField: "BestAo100StartSolveSK",
+    },
+    {
+      kind: "ao",
+      windowSize: 1000,
+      valueField: "BestAo1000Ms",
+      startField: "BestAo1000StartSolveSK",
+    },
+  ].map((config) => ({
+    ...config,
+    recent: [],
+  }));
+
+  const strictConfigs = [
+    { kind: "mo3", windowSize: 3, valueField: "BestMo3StrictMs", startField: "BestMo3StrictStartSolveSK" },
+    { kind: "ao", windowSize: 5, valueField: "BestAo5StrictMs", startField: "BestAo5StrictStartSolveSK" },
+    { kind: "ao", windowSize: 12, valueField: "BestAo12StrictMs", startField: "BestAo12StrictStartSolveSK" },
+  ];
+  const strictState = new Map(
+    strictConfigs.map((config) => [
+      config.windowSize,
+      {
+        config,
+        nonWcaRemainder: [],
+        wcaRemainders: new Map(),
+      },
+    ])
+  );
+
+  const applyStrictChunk = (config, chunk) => {
+    if (!Array.isArray(chunk) || chunk.length !== config.windowSize) return;
+    const value =
+      config.kind === "mo3" ? computeWindowMeanMs(chunk) : computeWindowAverageMs(chunk);
+    if (!Number.isFinite(value)) return;
+    if (stats[config.valueField] == null || value < stats[config.valueField]) {
+      stats[config.valueField] = value;
+      stats[config.startField] = chunk[0]?.SK || null;
+    }
+  };
+
+  for await (const solve of iterable) {
+    stats.SolveCountTotal += 1;
+
+    const penalty = normalizePenalty(solve?.Penalty);
+    const isDNF = isDnfSolve(solve);
+    if (isDNF) stats.DNFCount += 1;
+    if (penalty === "+2") stats.Plus2Count += 1;
+
+    const finalMs = getFinalTimeMs(solve);
+    if (Number.isFinite(finalMs)) {
+      stats.SolveCountIncluded += 1;
+      stats.SumFinalTimeMs += finalMs;
+
+      if (stats.BestSingleMs === null || finalMs < stats.BestSingleMs) {
+        stats.BestSingleMs = finalMs;
+        stats.BestSingleSolveSK = solve?.SK || null;
+        stats.BestSingleAt = solve?.CreatedAt || null;
+      }
+
+      if (stats.WorstSingleMs === null || finalMs > stats.WorstSingleMs) {
+        stats.WorstSingleMs = finalMs;
+        stats.WorstSingleSolveSK = solve?.SK || null;
+      }
+    }
+
+    stats.LastSolveAt = solve?.CreatedAt || stats.LastSolveAt || null;
+
+    for (const config of windowConfigs) {
+      config.recent.push(solve);
+      if (config.recent.length > config.windowSize) config.recent.shift();
+      if (config.recent.length !== config.windowSize) continue;
+
+      const value =
+        config.kind === "mo3"
+          ? computeWindowMeanMs(config.recent)
+          : computeWindowAverageMs(config.recent);
+      if (!Number.isFinite(value)) continue;
+
+      if (stats[config.valueField] == null || value < stats[config.valueField]) {
+        stats[config.valueField] = value;
+        stats[config.startField] = config.recent[0]?.SK || null;
+      }
+
+      if (
+        config.worstField &&
+        (stats[config.worstField] == null || value > stats[config.worstField])
+      ) {
+        stats[config.worstField] = value;
+        stats[config.worstStartField] = config.recent[0]?.SK || null;
+      }
+
+      if (config.candidatesField) {
+        stats[config.candidatesField] = insertTopWindowCandidate(
+          stats[config.candidatesField],
+          {
+            ValueMs: Number(value),
+            StartSolveSK: config.recent[0]?.SK || null,
+            MemberSolveSKs: config.recent.map((item) => String(item?.SK || "")).filter(Boolean),
+          },
+          config.topK
+        );
+      }
+    }
+
+    const source = getSolveSourceForStrict(solve);
+    const note = getSolveNoteForStrict(solve);
+    const isGroupedWca = source === "WCA" && note;
+
+    for (const strict of strictState.values()) {
+      if (isGroupedWca) {
+        strict.nonWcaRemainder = [];
+        const existing = strict.wcaRemainders.get(note) || [];
+        existing.push(solve);
+        if (existing.length === strict.config.windowSize) {
+          applyStrictChunk(strict.config, existing);
+          strict.wcaRemainders.set(note, []);
+        } else {
+          strict.wcaRemainders.set(note, existing);
+        }
+        continue;
+      }
+
+      strict.nonWcaRemainder.push(solve);
+      if (strict.nonWcaRemainder.length === strict.config.windowSize) {
+        applyStrictChunk(strict.config, strict.nonWcaRemainder);
+        strict.nonWcaRemainder = [];
+      }
+    }
+  }
+
+  stats.MeanMs =
+    stats.SolveCountIncluded > 0
+      ? Math.round(stats.SumFinalTimeMs / stats.SolveCountIncluded)
+      : null;
+  stats.LastRecomputedAt = nowIso();
+
+  return stats;
+}
+
 function cleanTagValue(v) {
   const s = String(v ?? "").trim();
   return s || null;
@@ -1085,7 +1456,8 @@ function sanitizeTags(input = {}) {
 
   return {
     CubeModel: cleanTagValue(input?.CubeModel),
-    CrossColor: cleanTagValue(input?.CrossColor),
+    CrossColor: cleanTagValue(input?.StartColor || input?.CrossColor),
+    Method: cleanTagValue(input?.Method),
     TimerInput: cleanTagValue(input?.TimerInput || input?.InputType),
     SolveSource: derivedSolveSource,
     Custom1: cleanTagValue(input?.Custom1),
@@ -1135,6 +1507,8 @@ function buildSolveItem({
 
     GSI2PK: `EVENT#${userID}#${ev}`,
     GSI2SK: `${ts}#${sid}#${sid2}`,
+    SolveTagSK: buildSolveTagSK(ev, sid, ts, sid2),
+    ...buildSolveSparseTagIndexFields(userID, canonicalTags),
 
     ItemType: "SOLVE",
     SolveID: sid2,
@@ -1152,6 +1526,7 @@ function buildSolveItem({
 
     Tag_CubeModel: canonicalTags.CubeModel,
     Tag_CrossColor: canonicalTags.CrossColor,
+    Tag_Method: canonicalTags.Method,
     Tag_TimerInput: canonicalTags.TimerInput,
     Tag_SolveSource: canonicalTags.SolveSource,
     Tag_Custom1: canonicalTags.Custom1,
@@ -1163,6 +1538,7 @@ function buildSolveItem({
     Tags: {
       CubeModel: canonicalTags.CubeModel,
       CrossColor: canonicalTags.CrossColor,
+      Method: canonicalTags.Method,
       TimerInput: canonicalTags.TimerInput,
       SolveSource: canonicalTags.SolveSource,
       Custom1: canonicalTags.Custom1,
@@ -1218,11 +1594,15 @@ function getSolveTagPairsFromItem(solveItem) {
     "CrossColor",
     firstNonEmpty(
       solveItem?.Tag_CrossColor,
+      solveItem?.Tag_StartColor,
+      nestedTags?.StartColor,
+      nestedTags?.startColor,
       nestedTags?.CrossColor,
       nestedTags?.crossColor,
       nestedTags?.cross
     )
   );
+  add("Method", firstNonEmpty(solveItem?.Tag_Method, nestedTags?.Method, nestedTags?.method));
   add(
     "TimerInput",
     firstNonEmpty(
@@ -1299,7 +1679,9 @@ function buildSolveTagItems(solveItem) {
   const event = normalizeEvent(solveItem?.Event);
   const sessionID = normalizeSessionID(solveItem?.SessionID);
 
-  return getSolveTagPairsFromItem(solveItem).map(({ key, value }) => {
+  return getSolveTagPairsFromItem(solveItem)
+    .filter(({ key }) => !getSparseTagIndexConfig(key))
+    .map(({ key, value }) => {
     const valueNorm = normalizeTagIndexValue(value);
 
     return {
@@ -1321,7 +1703,7 @@ function buildSolveTagItems(solveItem) {
       CreatedAt: createdAt,
       UpdatedAt: nowIso(),
     };
-  });
+    });
 }
 
 async function batchWriteAll(ddb, tableName, requests) {
@@ -1586,6 +1968,24 @@ async function getAllSolvesByTag(
 
   if (!userID || !key || !tagValueNorm) return [];
 
+  if (getSparseTagIndexConfig(key)) {
+    let cursor = undefined;
+    const all = [];
+
+    do {
+      const out = await querySolvesBySparseTag(ddb, tableName, userID, key, cleanValue, {
+        event: ev,
+        sessionID: sid,
+        limit: 500,
+        cursor,
+      });
+      if (out.items?.length) all.push(...out.items);
+      cursor = out.lastKey || undefined;
+    } while (cursor);
+
+    return all.sort((a, b) => String(a?.CreatedAt || "").localeCompare(String(b?.CreatedAt || "")));
+  }
+
   let keyConditionExpression = "GSI3PK = :pk";
   const expressionAttributeValues = {
     ":pk": `TAG#${userID}#${key}#${tagValueNorm}`,
@@ -1626,6 +2026,55 @@ async function getAllSolvesByTag(
   const solves = await batchGetAll(ddb, tableName, solveKeys);
 
   return solves.sort((a, b) => String(a?.CreatedAt || "").localeCompare(String(b?.CreatedAt || "")));
+}
+
+async function querySolvesBySparseTag(
+  ddb,
+  tableName,
+  userID,
+  tagKey,
+  tagValue,
+  { event = "", sessionID = "", limit = 100, cursor = undefined } = {}
+) {
+  const config = getSparseTagIndexConfig(tagKey);
+  const pk = buildSparseTagIndexPK(tagKey, userID, tagValue);
+  const ev = normalizeEvent(event || "");
+  const sid = sessionID ? normalizeSessionID(sessionID) : "";
+  const pageLimit = Math.max(1, Math.min(500, Number(limit || 100)));
+
+  if (!config || !pk) {
+    return { items: [], lastKey: null };
+  }
+
+  let keyConditionExpression = `${config.attr} = :pk`;
+  const expressionAttributeValues = {
+    ":pk": pk,
+  };
+
+  if (ev && sid) {
+    keyConditionExpression += " AND begins_with(SolveTagSK, :skPrefix)";
+    expressionAttributeValues[":skPrefix"] = `${ev}#${sid}#`;
+  } else if (ev) {
+    keyConditionExpression += " AND begins_with(SolveTagSK, :skPrefix)";
+    expressionAttributeValues[":skPrefix"] = `${ev}#`;
+  }
+
+  const out = await ddb.send(
+    new QueryCommand({
+      TableName: tableName,
+      IndexName: config.indexName,
+      KeyConditionExpression: keyConditionExpression,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ScanIndexForward: false,
+      Limit: pageLimit,
+      ExclusiveStartKey: cursor,
+    })
+  );
+
+  return {
+    items: out.Items || [],
+    lastKey: out.LastEvaluatedKey || null,
+  };
 }
 
 async function getLastNSolvesBySession(ddb, tableName, userID, event, sessionID, n) {
@@ -1669,12 +2118,80 @@ async function getLastNSolvesByEvent(ddb, tableName, userID, event, n) {
   return (out.Items || []).reverse();
 }
 
+async function getLastNSolvesByTag(
+  ddb,
+  tableName,
+  userID,
+  tagKey,
+  tagValue,
+  { event = "", sessionID = "" } = {},
+  n = 12
+) {
+  const key = String(tagKey || "").trim();
+  const cleanValue = cleanTagValue(tagValue);
+  const tagValueNorm = normalizeTagIndexValue(cleanValue);
+  const ev = normalizeEvent(event || "");
+  const sid = sessionID ? normalizeSessionID(sessionID) : "";
+  const limit = Math.max(1, Math.min(1000, Number(n || 12)));
+
+  if (!userID || !key || !tagValueNorm) return [];
+
+  if (getSparseTagIndexConfig(key)) {
+    const out = await querySolvesBySparseTag(ddb, tableName, userID, key, cleanValue, {
+      event: ev,
+      sessionID: sid,
+      limit,
+    });
+
+    return (out.items || []).sort((a, b) => String(a?.CreatedAt || "").localeCompare(String(b?.CreatedAt || "")));
+  }
+
+  let keyConditionExpression = "GSI3PK = :pk";
+  const expressionAttributeValues = {
+    ":pk": `TAG#${userID}#${key}#${tagValueNorm}`,
+  };
+
+  if (ev && sid) {
+    keyConditionExpression += " AND begins_with(GSI3SK, :skPrefix)";
+    expressionAttributeValues[":skPrefix"] = `${ev}#${sid}#`;
+  } else if (ev) {
+    keyConditionExpression += " AND begins_with(GSI3SK, :skPrefix)";
+    expressionAttributeValues[":skPrefix"] = `${ev}#`;
+  }
+
+  const out = await ddb.send(
+    new QueryCommand({
+      TableName: tableName,
+      IndexName: "GSI3",
+      KeyConditionExpression: keyConditionExpression,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ScanIndexForward: false,
+      Limit: limit,
+    })
+  );
+
+  const solveKeys = (out.Items || []).map((item) => ({
+    PK: item?.SolvePK,
+    SK: item?.SolveSK,
+  }));
+  const solves = await batchGetAll(ddb, tableName, solveKeys);
+
+  return solves.sort((a, b) => String(a?.CreatedAt || "").localeCompare(String(b?.CreatedAt || "")));
+}
+
 async function recomputeSessionStats(ddb, tableName, userID, event, sessionID) {
   const ev = normalizeEvent(event);
   const sid = normalizeSessionID(sessionID);
 
-  const solves = await getAllSolvesBySession(ddb, tableName, userID, ev, sid);
-  const stats = buildStatsFromSolves(solves);
+  const stats = await buildStatsFromSolveIterator(
+    iterateQueryItems(ddb, tableName, {
+      indexName: "GSI1",
+      keyConditionExpression: "GSI1PK = :pk",
+      expressionAttributeValues: {
+        ":pk": `SESSION#${userID}#${ev}#${sid}`,
+      },
+    })
+  );
 
   const item = {
     PK: `USER#${userID}`,
@@ -1694,8 +2211,15 @@ async function recomputeSessionStats(ddb, tableName, userID, event, sessionID) {
 async function recomputeEventStats(ddb, tableName, userID, event) {
   const ev = normalizeEvent(event);
 
-  const solves = await getAllSolvesByEvent(ddb, tableName, userID, ev);
-  const stats = buildStatsFromSolves(solves);
+  const stats = await buildStatsFromSolveIterator(
+    iterateQueryItems(ddb, tableName, {
+      indexName: "GSI2",
+      keyConditionExpression: "GSI2PK = :pk",
+      expressionAttributeValues: {
+        ":pk": `EVENT#${userID}#${ev}`,
+      },
+    })
+  );
 
   const item = {
     PK: `USER#${userID}`,
@@ -1730,11 +2254,12 @@ async function recomputeTagStats(
     throw new Error("Invalid tag stats scope");
   }
 
-  const solves = await getAllSolvesByTag(ddb, tableName, userID, key, cleanValue, {
-    event: ev,
-    sessionID: sid || "",
-  });
-  const stats = buildStatsFromSolves(solves);
+  const stats = await buildStatsFromSolveIterator(
+    iterateTagScopeSolves(ddb, tableName, userID, key, cleanValue, {
+      event: ev,
+      sessionID: sid || "",
+    })
+  );
 
   const item = {
     PK: `USER#${userID}`,
@@ -1964,6 +2489,82 @@ async function upsertEventStatsOnNewSolve(ddb, tableName, userID, solveItem) {
   return item;
 }
 
+async function upsertTagStatsOnNewSolve(
+  ddb,
+  tableName,
+  userID,
+  solveItem,
+  { event, sessionID = null, tagKey, tagValue } = {}
+) {
+  const ev = normalizeEvent(event || solveItem?.Event);
+  const sid = sessionID == null || sessionID === "" ? null : normalizeSessionID(sessionID);
+  const key = String(tagKey || "").trim();
+  const cleanValue = cleanTagValue(tagValue);
+  const tagValueNorm = normalizeTagIndexValue(cleanValue);
+  const pk = `USER#${userID}`;
+  const sk = buildTagStatsSK(ev, sid, key, cleanValue);
+
+  if (!ev || !key || !tagValueNorm) {
+    throw new Error("Invalid tag stats scope");
+  }
+
+  const existingStats = await getStatsItem(ddb, tableName, pk, sk);
+
+  if (
+    existingStats?.LastSolveAt &&
+    String(solveItem?.CreatedAt || "") < String(existingStats.LastSolveAt)
+  ) {
+    return recomputeTagStats(ddb, tableName, userID, ev, sid, key, cleanValue);
+  }
+
+  const recentSolves = await getLastNSolvesByTag(
+    ddb,
+    tableName,
+    userID,
+    key,
+    cleanValue,
+    { event: ev, sessionID: sid || "" },
+    1000
+  );
+
+  let nextStats = mergeIncrementalStats(existingStats, solveItem, recentSolves, 3);
+  nextStats = mergeIncrementalStats(nextStats, solveItem, recentSolves, 5, {
+    includeCounters: false,
+  });
+  nextStats = mergeIncrementalStats(nextStats, solveItem, recentSolves, 12, {
+    includeCounters: false,
+  });
+  nextStats = mergeIncrementalStats(nextStats, solveItem, recentSolves, 25, {
+    includeCounters: false,
+  });
+  nextStats = mergeIncrementalStats(nextStats, solveItem, recentSolves, 50, {
+    includeCounters: false,
+  });
+  nextStats = mergeIncrementalStats(nextStats, solveItem, recentSolves, 100, {
+    includeCounters: false,
+  });
+  nextStats = mergeIncrementalStats(nextStats, solveItem, recentSolves, 1000, {
+    includeCounters: false,
+  });
+
+  const item = {
+    PK: pk,
+    SK: sk,
+    ItemType: "TAGSTATS",
+    Event: ev,
+    TagKey: key,
+    TagValue: cleanValue,
+    TagValueNorm: tagValueNorm,
+    UpdatedAt: nowIso(),
+    stale: false,
+    ...nextStats,
+  };
+  if (sid) item.SessionID = sid;
+
+  await ddb.send(new PutCommand({ TableName: tableName, Item: item }));
+  return item;
+}
+
 module.exports = {
   nowIso,
   normalizeEvent,
@@ -1997,6 +2598,10 @@ module.exports = {
   normalizeTagIndexValue,
   sanitizeTags,
   buildTagStatsSK,
+  buildSolveTagSK,
+  getSparseTagIndexConfig,
+  buildSparseTagIndexPK,
+  buildSolveSparseTagIndexFields,
 
   buildSolveItem,
   getSolveTagPairsFromItem,
@@ -2004,16 +2609,20 @@ module.exports = {
   putSolveAndTagItems,
   replaceSolveAndTagItems,
   deleteSolveAndTagItems,
+  batchWriteAll,
 
   getAllSolvesBySession,
   getAllSolvesByEvent,
   getAllSolvesByTag,
   getLastNSolvesBySession,
   getLastNSolvesByEvent,
+  getLastNSolvesByTag,
+  querySolvesBySparseTag,
 
   recomputeSessionStats,
   recomputeEventStats,
   recomputeTagStats,
   upsertSessionStatsOnNewSolve,
   upsertEventStatsOnNewSolve,
+  upsertTagStatsOnNewSolve,
 };
