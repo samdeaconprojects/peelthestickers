@@ -191,7 +191,7 @@ function finiteMetric(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function aggregateProfileMatrixStats(sessionMap = {}) {
+function aggregateProfileMatrixStats(sessionMap = {}, { mainOnly = false } = {}) {
   let solveCount = 0;
   let singleBest = null;
   let singleWorst = null;
@@ -199,8 +199,11 @@ function aggregateProfileMatrixStats(sessionMap = {}) {
   let ao5Worst = null;
   let ao12Best = null;
   let ao12Worst = null;
+  const entries = mainOnly
+    ? Object.entries(sessionMap || {}).filter(([sessionID]) => String(sessionID || "main") === "main")
+    : Object.entries(sessionMap || {});
 
-  for (const stats of Object.values(sessionMap || {})) {
+  for (const [, stats] of entries) {
     if (!stats || typeof stats !== "object") continue;
     solveCount += Number(stats.SolveCountTotal || 0);
 
@@ -584,9 +587,10 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
     () =>
       Object.entries(viewedSessionStats || {})
         .map(([event, sessionMap]) => {
-          const aggregate = aggregateProfileMatrixStats(sessionMap || {});
+          const aggregate = aggregateProfileMatrixStats(sessionMap || {}, { mainOnly: true });
           return {
             event,
+            mainOnly: true,
             solveCount: aggregate.solveCount,
             singleBest: aggregate.singleBest,
             singleWorst: aggregate.singleWorst,
@@ -970,6 +974,7 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
                     {profileTimeMatrixItems.length > 0 ? (
                       <AllEventsTimeMatrix
                         items={profileTimeMatrixItems}
+                        mainOnly
                         orientation="vertical"
                         showSessionToggle={false}
                       />

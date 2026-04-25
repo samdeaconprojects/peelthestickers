@@ -209,7 +209,53 @@ body {
 
 .left-slot-auth {
   width: 13%;
-  transform: translate(8px, -8px);
+  transform: translate(8px, -12px);
+}
+
+.left-slot-auth .name-tag-link {
+  --home-nametag-collapsed-width: 48px;
+  opacity: 0.855;
+  height: 36px;
+  border-color: transparent !important;
+  transition: opacity 160ms ease;
+  overflow: visible;
+}
+
+.left-slot-auth .name-tag-link::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--home-nametag-collapsed-width);
+  border: 2px solid var(--name-tag-border-color, currentColor);
+  border-radius: 8px;
+  pointer-events: none;
+  box-sizing: border-box;
+  transition: width 200ms ease;
+}
+
+.left-slot-auth .name-tag-link:hover,
+.left-slot-auth .name-tag-link:focus-visible {
+  opacity: 1;
+}
+
+.left-slot-auth .name-tag-link:hover::before,
+.left-slot-auth .name-tag-link:focus-visible::before {
+  width: 100%;
+}
+
+.left-slot-auth .nametagText {
+  padding-left: 8px;
+  transition: padding-left 150ms ease;
+}
+
+.left-slot-auth .name-tag-link:hover .nametagText,
+.left-slot-auth .name-tag-link:focus-visible .nametagText {
+  padding-left: 4px;
+}
+
+.left-slot-auth .nametagCube .puzzle-svg-wrap,
+.left-slot-auth .nametagCube .puzzle-svg-inner {
+  transform: translateY(2px);
 }
 
 .scramble-container {

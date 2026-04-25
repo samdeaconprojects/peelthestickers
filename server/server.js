@@ -1,5 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
+const { AsyncLocalStorage } = require("async_hooks");
 require("dotenv").config();
 
 const app = express();
@@ -32,6 +33,7 @@ const {
   CACHED_WINDOW_CONFIGS,
   parseSolveSK,
   normalizeTagIndexValue,
+  normalizeAlgorithmTagValue,
   getRawTimeMs,
   getFinalTimeMs,
   buildDayBucketSK,
@@ -66,10 +68,182 @@ const TABLE = process.env.PTS_TABLE || "PTSProd";
 const USE_PK_SK = String(process.env.PTS_USE_PK_SK || "true").toLowerCase() === "true";
 const ENABLE_SPARSE_TAG_READS =
   String(process.env.PTS_ENABLE_SPARSE_TAG_READS || "false").toLowerCase() === "true";
+const ENABLE_DB_LOGS = String(process.env.PTS_LOG_DB || "false").toLowerCase() === "true";
+const ENABLE_VERBOSE_DB_LOGS =
+  String(process.env.PTS_LOG_DB_VERBOSE || "false").toLowerCase() === "true";
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }), {
   marshallOptions: { removeUndefinedValues: true },
 });
+const dbMetricsStorage = new AsyncLocalStorage();
+
+function compactDbMeta(meta = {}) {
+  if (!meta || typeof meta !== "object") return {};
+
+  const out = {};
+  for (const [key, value] of Object.entries(meta)) {
+    if (
+      value == null ||
+      value === "" ||
+      (Array.isArray(value) && value.length === 0) ||
+      (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0)
+    ) {
+      continue;
+    }
+
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      out[key] = value;
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      out[key] = value.slice(0, 10);
+      continue;
+    }
+
+    out[key] = "[object]";
+  }
+
+  return out;
+}
+
+function createDbMetricsContext(label, meta = {}) {
+  return {
+    label: String(label || "db").trim() || "db",
+    meta: compactDbMeta(meta),
+    startedAt: Date.now(),
+    operations: [],
+    counts: {},
+    totalDurationMs: 0,
+  };
+}
+
+function recordDbOperation(entry) {
+  if (!ENABLE_DB_LOGS) return;
+  const store = dbMetricsStorage.getStore();
+  if (!store) return;
+
+  store.operations.push(entry);
+  store.totalDurationMs += Number(entry?.durationMs || 0);
+  store.counts[entry.command] = Number(store.counts[entry.command] || 0) + 1;
+}
+
+function formatDbMetricsSummary(store) {
+  const counts = Object.entries(store?.counts || {})
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([command, count]) => `${command}=${count}`)
+    .join(" ");
+  const requestMs = Math.max(0, Date.now() - Number(store?.startedAt || Date.now()));
+  const meta = compactDbMeta(store?.meta || {});
+
+  return {
+    label: store?.label || "db",
+    requestMs,
+    dbMs: Math.round(Number(store?.totalDurationMs || 0)),
+    opCount: Array.isArray(store?.operations) ? store.operations.length : 0,
+    counts,
+    ...meta,
+  };
+}
+
+function logDbMetricsSummary(store, extras = {}) {
+  if (!ENABLE_DB_LOGS || !store) return;
+  console.log("[db-summary]", {
+    ...formatDbMetricsSummary(store),
+    ...compactDbMeta(extras),
+  });
+}
+
+async function withDbPhase(label, fn) {
+  if (!ENABLE_DB_LOGS) return fn();
+
+  const parent = dbMetricsStorage.getStore();
+  if (!parent) return fn();
+
+  const phaseStore = createDbMetricsContext(label, parent?.meta || {});
+  return dbMetricsStorage.run(phaseStore, async () => {
+    try {
+      const result = await fn();
+      logDbMetricsSummary(phaseStore, { phase: true });
+
+      parent.operations.push(...(phaseStore.operations || []));
+      parent.totalDurationMs += Number(phaseStore.totalDurationMs || 0);
+      for (const [command, count] of Object.entries(phaseStore.counts || {})) {
+        parent.counts[command] = Number(parent.counts[command] || 0) + Number(count || 0);
+      }
+
+      return result;
+    } catch (error) {
+      logDbMetricsSummary(phaseStore, {
+        phase: true,
+        failed: true,
+        error: error?.message || "unknown",
+      });
+
+      parent.operations.push(...(phaseStore.operations || []));
+      parent.totalDurationMs += Number(phaseStore.totalDurationMs || 0);
+      for (const [command, count] of Object.entries(phaseStore.counts || {})) {
+        parent.counts[command] = Number(parent.counts[command] || 0) + Number(count || 0);
+      }
+
+      throw error;
+    }
+  });
+}
+
+async function runWithDbMetrics(label, meta, fn) {
+  if (!ENABLE_DB_LOGS) return fn();
+
+  const context = createDbMetricsContext(label, meta);
+  return dbMetricsStorage.run(context, async () => {
+    try {
+      const result = await fn();
+      logDbMetricsSummary(context);
+      return result;
+    } catch (error) {
+      logDbMetricsSummary(context, { failed: true, error: error?.message || "unknown" });
+      throw error;
+    }
+  });
+}
+
+const originalDdbSend = ddb.send.bind(ddb);
+ddb.send = async function instrumentedSend(command, ...args) {
+  const startedAt = Date.now();
+  const commandName =
+    String(command?.constructor?.name || "UnknownCommand").replace(/Command$/, "") || "Unknown";
+
+  try {
+    const result = await originalDdbSend(command, ...args);
+    const durationMs = Date.now() - startedAt;
+    recordDbOperation({
+      command: commandName,
+      durationMs,
+      ok: true,
+    });
+    if (ENABLE_DB_LOGS && ENABLE_VERBOSE_DB_LOGS) {
+      console.log("[db-op]", { command: commandName, durationMs, ok: true });
+    }
+    return result;
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    recordDbOperation({
+      command: commandName,
+      durationMs,
+      ok: false,
+      error: error?.name || error?.message || "unknown",
+    });
+    if (ENABLE_DB_LOGS && ENABLE_VERBOSE_DB_LOGS) {
+      console.log("[db-op]", {
+        command: commandName,
+        durationMs,
+        ok: false,
+        error: error?.name || error?.message || "unknown",
+      });
+    }
+    throw error;
+  }
+};
 const BEST_CANDIDATES_K = Math.max(
   10,
   Math.min(500, Number(process.env.PTS_BEST_CANDIDATES_K || 100))
@@ -107,6 +281,26 @@ const TAG_SCOPE_EVENT_ALIASES = Object.freeze({
   "444BLD": "444",
   "555BLD": "555",
 });
+
+if (ENABLE_DB_LOGS) {
+  app.use((req, res, next) => {
+    const label = `${req.method} ${req.path}`;
+    const meta = {
+      userID: String(req.params?.userID || req.body?.userID || req.query?.userID || "").trim(),
+      event: normalizeEvent(req.query?.event || req.body?.event || req.body?.Event || ""),
+      sessionID: normalizeSessionID(req.query?.sessionID || req.body?.sessionID || "main"),
+      solveRef: String(req.params?.solveRef || req.body?.solveRef || "").trim(),
+    };
+
+    const context = createDbMetricsContext(label, meta);
+    dbMetricsStorage.run(context, () => {
+      res.on("finish", () => {
+        logDbMetricsSummary(context, { status: res.statusCode });
+      });
+      next();
+    });
+  });
+}
 
 function requirePkSk(res) {
   if (!USE_PK_SK) {
@@ -150,6 +344,10 @@ const ALLOWED_TAG_KEYS = new Set([
   "CubeModel",
   "CrossColor",
   "Method",
+  "Alg_OLL",
+  "Alg_PLL",
+  "Alg_CMLL",
+  "Alg_CLL",
   "TimerInput",
   "SolveSource",
   "Custom1",
@@ -158,6 +356,36 @@ const ALLOWED_TAG_KEYS = new Set([
   "Custom4",
   "Custom5",
 ]);
+
+const OLL_CASE_OPTIONS = [
+  "Skip",
+  ...Array.from({ length: 57 }, (_, index) => `OLL #${index + 1}`),
+];
+
+const PLL_CASE_OPTIONS = [
+  "Skip",
+  "Aa Perm",
+  "Ab Perm",
+  "E Perm",
+  "H Perm",
+  "Ua Perm",
+  "Ub Perm",
+  "Z Perm",
+  "F Perm",
+  "Ga Perm",
+  "Gb Perm",
+  "Gc Perm",
+  "Gd Perm",
+  "Ja Perm",
+  "Jb Perm",
+  "Na Perm",
+  "Nb Perm",
+  "Ra Perm",
+  "Rb Perm",
+  "T Perm",
+  "V Perm",
+  "Y Perm",
+];
 
 function buildDefaultTagConfig(tagOptions = null) {
   return {
@@ -175,6 +403,22 @@ function buildDefaultTagConfig(tagOptions = null) {
       Method: {
         label: "Method",
         options: ["CFOP", "Roux", "ZZ", "Petrus", "LBL", "Other"],
+      },
+      Alg_OLL: {
+        label: "OLL",
+        options: OLL_CASE_OPTIONS,
+      },
+      Alg_PLL: {
+        label: "PLL",
+        options: PLL_CASE_OPTIONS,
+      },
+      Alg_CMLL: {
+        label: "CMLL",
+        options: ["Skip"],
+      },
+      Alg_CLL: {
+        label: "CLL",
+        options: ["Skip"],
       },
       TimerInput: {
         label: "Timer Input",
@@ -2537,6 +2781,56 @@ function addTagScopeMutation(plan, solve, direction) {
   }
 }
 
+async function markTagStatsScopeStale({ userID, event, sessionID = null, tagKey, tagValue }) {
+  const ev = normalizeEvent(event);
+  const sid = sessionID ? normalizeSessionID(sessionID) : null;
+  const key = String(tagKey || "").trim();
+  const value = String(tagValue || "").trim();
+
+  if (!userID || !ev || !key || !value) return null;
+
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: {
+          PK: `USER#${userID}`,
+          SK: buildTagStatsSK(ev, sid, key, value),
+        },
+        UpdateExpression: "SET stale = :stale, UpdatedAt = :updated",
+        ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK)",
+        ExpressionAttributeValues: {
+          ":stale": true,
+          ":updated": nowIso(),
+        },
+      })
+    );
+    return true;
+  } catch (error) {
+    if (String(error?.name || "") === "ConditionalCheckFailedException") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function markTagStatsScopesStale(userID, tagScopeMutations) {
+  const scopes = Array.from(tagScopeMutations?.values?.() || []);
+  if (!userID || scopes.length === 0) return [];
+
+  return Promise.all(
+    scopes.map((scope) =>
+      markTagStatsScopeStale({
+        userID,
+        event: scope.event,
+        sessionID: scope.sessionID,
+        tagKey: scope.tagKey,
+        tagValue: scope.tagValue,
+      })
+    )
+  );
+}
+
 async function applySolveMutationStats({ userID, oldSolve = null, newSolve = null }) {
   if (oldSolve && newSolve) {
     const sameScope =
@@ -2607,20 +2901,7 @@ async function applySolveMutationStats({ userID, oldSolve = null, newSolve = nul
   const tagScopeMutations = new Map();
   addTagScopeMutation(tagScopeMutations, oldSolve, "remove");
   addTagScopeMutation(tagScopeMutations, newSolve, "add");
-
-  for (const entry of tagScopeMutations.values()) {
-    jobs.push(
-      applyIncrementalTagStatsForScope({
-        userID,
-        event: entry.event,
-        sessionID: entry.sessionID,
-        tagKey: entry.tagKey,
-        tagValue: entry.tagValue,
-        removeSolves: entry.removeSolves,
-        addSolves: entry.addSolves,
-      })
-    );
-  }
+  jobs.push(markTagStatsScopesStale(userID, tagScopeMutations));
 
   await Promise.all(jobs);
 }
@@ -2629,7 +2910,7 @@ function runInBackground(label, fn) {
   setImmediate(async () => {
     const started = Date.now();
     try {
-      await fn();
+      await runWithDbMetrics(`background:${label}`, {}, fn);
       console.log(`${label} completed in ${Date.now() - started}ms`);
     } catch (err) {
       console.error(`${label} failed:`, err);
@@ -4250,8 +4531,14 @@ app.delete("/api/session/:userID/:event/:sessionID", async (req, res) => {
       runInBackground(`sessionDelete:cleanup:${userID}:${event}:${sessionID}`, () =>
         Promise.all([
           recomputeEventStats(ddb, TABLE, userID, event),
-          ...Array.from(affectedEventTagScopes.values()).map(({ tagKey, tagValue }) =>
-            recomputeTagStats(ddb, TABLE, userID, event, null, tagKey, tagValue)
+          markTagStatsScopesStale(
+            userID,
+            new Map(
+              Array.from(affectedEventTagScopes.values()).map(({ tagKey, tagValue }) => [
+                `${event}|${tagKey}|${tagValue}`,
+                { event, sessionID: null, tagKey, tagValue },
+              ])
+            )
           ),
           ...Array.from(affectedDayKeys).flatMap((dayKey) => [
             recomputeEventDayBucket(userID, event, dayKey, { mainOnly: false }),
@@ -4422,7 +4709,7 @@ app.get("/api/tagStats/:userID", async (req, res) => {
     );
 
     let item = out.Item || null;
-    if (!item || !hasCurrentStrictWindowVersion(item)) {
+    if (!item || item?.stale === true || !hasCurrentStrictWindowVersion(item)) {
       item = await recomputeTagStats(ddb, TABLE, userID, event, sessionID, tagKey, tagValue);
     }
 
@@ -4696,7 +4983,8 @@ app.get("/api/solvesByTag/:userID", async (req, res) => {
     return res.status(400).json({ error: "Invalid tagKey" });
   }
 
-  const tagValueNorm = normalizeTagIndexValue(rawTagValue);
+  const canonicalTagValue = normalizeAlgorithmTagValue(rawTagKey, rawTagValue) || rawTagValue;
+  const tagValueNorm = normalizeTagIndexValue(canonicalTagValue);
 
   let keyConditionExpression = "GSI3PK = :pk";
   const exprValues = {
@@ -4816,44 +5104,33 @@ app.post("/api/solve", async (req, res) => {
       createdAt,
     });
 
-    await putSolveAndTagItems(ddb, TABLE, solveItem);
-    await syncSingleRankItemsForMutation({ userID, oldSolve: null, newSolve: solveItem });
+    await withDbPhase("solve:add:write-solve-and-tags", () =>
+      putSolveAndTagItems(ddb, TABLE, solveItem)
+    );
+    await withDbPhase("solve:add:single-ranks", () =>
+      syncSingleRankItemsForMutation({ userID, oldSolve: null, newSolve: solveItem })
+    );
 
-    const tagPairs = getSolveTagPairsFromItem(solveItem);
-    const tagStatJobs = tagPairs.flatMap((pair) => {
-      const tagKey = String(pair?.key || "").trim();
-      const tagValue = String(pair?.value || "").trim();
-      if (!tagKey || !tagValue) return [];
-
-      return [
-        upsertTagStatsOnNewSolve(ddb, TABLE, userID, solveItem, {
-          event: solveItem.Event,
-          sessionID: solveItem.SessionID,
-          tagKey,
-          tagValue,
-        }),
-        upsertTagStatsOnNewSolve(ddb, TABLE, userID, solveItem, {
-          event: solveItem.Event,
-          sessionID: null,
-          tagKey,
-          tagValue,
-        }),
-      ];
-    });
+    const tagScopeMutations = new Map();
+    addTagScopeMutation(tagScopeMutations, solveItem, "add");
 
     const [sessionStats, eventStats] = await Promise.all([
-      applyIncrementalStatsForScope({
-        userID,
-        event: solveItem.Event,
-        sessionID: solveItem.SessionID,
-        addSolve: solveItem,
-      }),
-      applyIncrementalStatsForScope({
-        userID,
-        event: solveItem.Event,
-        addSolve: solveItem,
-      }),
-      ...tagStatJobs,
+      withDbPhase("solve:add:session-stats", () =>
+        applyIncrementalStatsForScope({
+          userID,
+          event: solveItem.Event,
+          sessionID: solveItem.SessionID,
+          addSolve: solveItem,
+        })
+      ),
+      withDbPhase("solve:add:event-stats", () =>
+        applyIncrementalStatsForScope({
+          userID,
+          event: solveItem.Event,
+          addSolve: solveItem,
+        })
+      ),
+      withDbPhase("solve:add:tag-stats", () => markTagStatsScopesStale(userID, tagScopeMutations)),
     ]);
     runInBackground(`dayBuckets:add:${userID}:${solveItem.Event}`, () =>
       recomputeDayBucketsForSolveMutation({
@@ -5559,17 +5836,7 @@ app.post("/api/solves/move-session", async (req, res) => {
         recomputeSessionStats(ddb, TABLE, userID, scope.event, scope.sessionID)
       ),
       ...Array.from(eventScopes.values()).map((event) => recomputeEventStats(ddb, TABLE, userID, event)),
-      ...Array.from(tagScopeMutations.values()).map((scope) =>
-        applyIncrementalTagStatsForScope({
-          userID,
-          event: scope.event,
-          sessionID: scope.sessionID,
-          tagKey: scope.tagKey,
-          tagValue: scope.tagValue,
-          removeSolves: scope.removeSolves,
-          addSolves: scope.addSolves,
-        })
-      ),
+      markTagStatsScopesStale(userID, tagScopeMutations),
     ]);
     const recomputeMs = Date.now() - recomputeStartedAt;
 
@@ -5677,19 +5944,7 @@ app.post("/api/solves/bulk-tags", async (req, res) => {
 
     const wrote = await batchWriteRequestsWithRetry(writeRequests);
 
-    await Promise.all(
-      Array.from(tagScopeMutations.values()).map((scope) =>
-        applyIncrementalTagStatsForScope({
-          userID,
-          event: scope.event,
-          sessionID: scope.sessionID,
-          tagKey: scope.tagKey,
-          tagValue: scope.tagValue,
-          removeSolves: scope.removeSolves,
-          addSolves: scope.addSolves,
-        })
-      )
-    );
+    await markTagStatsScopesStale(userID, tagScopeMutations);
 
     return res.json({
       ok: true,

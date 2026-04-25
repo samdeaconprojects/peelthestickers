@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import StatFocusModal from "../Stats/StatFocusModal";
 import TimeTable from "../Stats/TimeTable";
@@ -8,12 +8,17 @@ import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
 import tagBadge from "../../assets/Tag.svg";
 import {
   DEFAULT_TAG_CONFIG,
+  getAlgorithmTagDisplayValue,
   getSharedTagFieldMeta,
   getSolveTagValue,
   getTagChipStyle,
 } from "../TagBar/tagUtils";
 import "./AverageDetailModal.css";
 import "../TagBar/TagBar.css";
+
+function isAlgorithmField(field) {
+  return String(field || "").startsWith("Alg_");
+}
 
 function getSolvePenalty(solve) {
   return String(solve?.penalty ?? solve?.Penalty ?? "").toUpperCase();
@@ -153,6 +158,7 @@ function AverageDetailModal({
   embedded = false,
 }) {
   const [displayMode, setDisplayMode] = useState("items");
+  const [activeTagFilters, setActiveTagFilters] = useState({});
 
   const detail = useMemo(() => {
     const items = Array.isArray(solves) ? solves.filter(Boolean) : [];
@@ -163,14 +169,15 @@ function AverageDetailModal({
         rows: [],
         solveRangeLabel: null,
         sessionIndexLabel: null,
-        tagGroups: [],
+        sharedTagGroups: [],
       };
     }
 
     const values = items.map(getSolveValue);
     const result = calculateAverage(values, true);
-    const tagGroups = tagFields
+    const sharedTagGroups = tagFields
       .map((fieldMeta) => {
+        if (isAlgorithmField(fieldMeta.field)) return null;
         const valuesForField = Array.from(
           new Set(items.map((solve) => getSolveTagValue(solve, fieldMeta.field)).filter(Boolean))
         ).sort((a, b) => a.localeCompare(b));
@@ -189,17 +196,56 @@ function AverageDetailModal({
       rows: items.map((solve, index) => ({
         solve,
         index,
+        algorithmTags: tagFields
+          .filter((fieldMeta) => isAlgorithmField(fieldMeta.field))
+          .map((fieldMeta) => {
+            const value = getSolveTagValue(solve, fieldMeta.field);
+            if (!value) return null;
+            return {
+              ...fieldMeta,
+              value,
+            };
+          })
+          .filter(Boolean),
       })),
       event: getSolveEvent(items[0]),
       scramble: getSolveScramble(items[0]),
       solveRangeLabel: formatSolveRangeLabel(items),
       sessionIndexLabel: formatSessionIndexLabel(items),
-      tagGroups,
+      sharedTagGroups,
     };
   }, [solves, tagConfig]);
 
-  const itemRowSize = detail.rows.length <= 5 ? 5 : 12;
-  const canShare = !embedded && typeof addPost === "function" && detail.rows.length > 0;
+  useEffect(() => {
+    setActiveTagFilters({});
+  }, [solves, isOpen]);
+
+  const filteredRows = useMemo(() => {
+    const entries = Object.entries(activeTagFilters).filter(([, value]) => !!value);
+    if (!entries.length) return detail.rows;
+
+    return detail.rows.filter((row) =>
+      entries.every(([field, value]) => getSolveTagValue(row.solve, field) === value)
+    );
+  }, [activeTagFilters, detail.rows]);
+
+  const filteredAverage = useMemo(() => {
+    if (!filteredRows.length) return null;
+    const values = filteredRows.map((row) => getSolveValue(row.solve));
+    const result = calculateAverage(values, true);
+    return result?.average ?? null;
+  }, [filteredRows]);
+
+  const itemRowSize = filteredRows.length <= 5 ? 5 : 12;
+  const canShare = !embedded && typeof addPost === "function" && filteredRows.length > 0;
+  const hasActiveFilters = Object.values(activeTagFilters).some(Boolean);
+
+  const toggleTagFilter = (field, value) => {
+    setActiveTagFilters((prev) => ({
+      ...prev,
+      [field]: prev[field] === value ? "" : value,
+    }));
+  };
 
   const handleShare = () => {
     if (!canShare) return;
@@ -207,10 +253,51 @@ function AverageDetailModal({
     addPost({
       note: "",
       event: detail.event || "333",
-      solveList: detail.rows.map((row) => row.solve),
+      solveList: filteredRows.map((row) => row.solve),
       comments: [],
     });
     onClose?.();
+  };
+
+  const algorithmTagsByKey = useMemo(
+    () =>
+      new Map(
+        filteredRows.map((row, index) => [
+          row.solve?.solveRef || row.solve?.SolveID || row.solve?.SK || `${index}`,
+          row.algorithmTags,
+        ])
+      ),
+    [filteredRows]
+  );
+
+  const renderSolveAlgorithmTags = (solve, { displayMode }) => {
+    const rowKey =
+      solve?.solveRef || solve?.SolveID || solve?.SK || `${solve?.fullIndex ?? solve?.__flatIndex ?? ""}`;
+    const tags = algorithmTagsByKey.get(rowKey) || [];
+    if (!tags.length) return null;
+
+    return (
+      <div
+        className={`averageDetailSolveAlgorithms averageDetailSolveAlgorithms--${displayMode}`}
+        aria-label="Algorithm tags for this solve"
+      >
+        {tags.map((tag) => (
+          <div className="averageDetailSolveAlgorithm" key={`${tag.field}-${tag.value}`}>
+            <div
+              className="tagHomeChip is-set averageDetailTagChip"
+              style={getTagChipStyle(tag.field, tag.value, tagColors, profileColor)}
+              title={tag.value}
+            >
+              <span className="tagHomeChipText">
+                <span className="tagHomeChipValue">
+                  {getAlgorithmTagDisplayValue(tag.field, tag.value) || tag.value}
+                </span>
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -230,11 +317,11 @@ function AverageDetailModal({
           <div className="averageDetailSummary">
             <div className="averageDetailHeaderLine">
               <div className="averageDetailHeroValue">
-                {detail.average === "DNF"
+                {filteredAverage === "DNF"
                   ? "DNF"
-                  : detail.average == null
+                  : filteredAverage == null
                     ? "—"
-                    : formatTime(detail.average, true)}
+                    : formatTime(filteredAverage, true)}
               </div>
               <div className="averageDetailEventIcon" aria-hidden="true">
                 <div className="averageDetailEventIconStage">
@@ -248,7 +335,7 @@ function AverageDetailModal({
               <div className="averageDetailTitleRow">
                 <div className="averageDetailTitleCopy">
                   <div className="averageDetailHeroLabel">
-                    {currentEventToString(detail.event)} Average of {detail.rows.length}
+                    {currentEventToString(detail.event)} Average of {filteredRows.length}
                   </div>
                   {detail.solveRangeLabel ? (
                     <div className="averageDetailHeroDate">{detail.solveRangeLabel}</div>
@@ -259,18 +346,27 @@ function AverageDetailModal({
                 </div>
               </div>
             </div>
-            {detail.tagGroups.length ? (
+            {detail.sharedTagGroups.length ? (
               <div className="averageDetailTagSummary" aria-label="Tags used in this average">
-                {detail.tagGroups.map((group) => (
+                {detail.sharedTagGroups.map((group) => (
                   <div className="averageDetailTagGroup" key={group.field}>
                     <div className="averageDetailTagGroupLabel">{group.label}</div>
                     <div className="averageDetailTagGroupValues">
                       {group.values.map((value) => (
-                        <div
+                        <button
+                          type="button"
                           key={`${group.field}-${value}`}
-                          className="tagHomeChip is-set averageDetailTagChip"
+                          className={`tagHomeChip is-set averageDetailTagChip averageDetailTagFilterChip ${
+                            activeTagFilters[group.field] === value ? "is-active" : ""
+                          } ${
+                            hasActiveFilters && activeTagFilters[group.field] !== value
+                              ? "is-dimmed"
+                              : ""
+                          }`}
                           style={getTagChipStyle(group.field, value, tagColors, profileColor)}
                           title={value}
+                          aria-pressed={activeTagFilters[group.field] === value}
+                          onClick={() => toggleTagFilter(group.field, value)}
                         >
                           <span className="tagHomeChipIconWrap" aria-hidden="true">
                             <img src={tagBadge} alt="" className="tagHomeChipIcon" />
@@ -278,11 +374,19 @@ function AverageDetailModal({
                           <span className="tagHomeChipText">
                             <span className="tagHomeChipValue">{value}</span>
                           </span>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   </div>
                 ))}
+                <button
+                  type="button"
+                  className={`averageDetailClearFilters ${hasActiveFilters ? "is-visible" : ""}`}
+                  onClick={() => setActiveTagFilters({})}
+                  disabled={!hasActiveFilters}
+                >
+                  Clear filters
+                </button>
               </div>
             ) : null}
           </div>
@@ -314,7 +418,7 @@ function AverageDetailModal({
         <div className={`averageDetailList averageDetailList--${displayMode}`}>
           <TimeTable
             key={displayMode}
-            solves={detail.rows.map((row, idx) => ({
+            solves={filteredRows.map((row, idx) => ({
               ...row.solve,
               fullIndex:
                 Number.isFinite(Number(row.solve?.fullIndex))
@@ -334,6 +438,7 @@ function AverageDetailModal({
             preserveInputOrder={true}
             showSolveAverages={false}
             containerClassName="averageDetailEmbeddedTable"
+            renderSolveFooter={renderSolveAlgorithmTags}
           />
         </div>
       </div>

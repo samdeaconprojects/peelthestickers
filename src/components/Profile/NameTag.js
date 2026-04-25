@@ -40,13 +40,27 @@ function NameTag({
     variant === "profile-corner" ? "name-tag-link--profileCorner" : "",
     reverse ? "name-tag-link--reverse" : "",
   ].filter(Boolean).join(" ");
+  const displayNameLength = String(displayName).length;
+  const nameLengthClass =
+    displayNameLength >= 18
+      ? "name-tag--name-xl"
+      : displayNameLength >= 14
+        ? "name-tag--name-lg"
+        : "";
+  const linkStyle =
+    variant === "profile-corner"
+      ? { "--name-tag-border-color": profileColor }
+      : {
+          borderColor: profileColor,
+          "--name-tag-border-color": profileColor,
+        };
 
   return (
-    <div className={`name-tag name-tag--${size}`}>
+    <div className={`name-tag name-tag--${size} ${nameLengthClass}`.trim()}>
       <Link
         to={linkTo}
         className={linkClassName}
-        style={variant === "profile-corner" ? undefined : { borderColor: profileColor }}
+        style={linkStyle}
       >
         <div
           className="name-tag-cubeFrame"

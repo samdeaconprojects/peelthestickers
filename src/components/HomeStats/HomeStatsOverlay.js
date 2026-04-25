@@ -18,10 +18,37 @@ import {
 import "./HomeStatsOverlay.css";
 
 const HOME_SUMMARY_METRICS = [
-  { key: "single", label: "Best Single", kind: "single", solveField: "BestSingleSolveSK" },
-  { key: "mo3", label: "MO3", size: 3, kind: "mo3", startField: "BestMo3StartSolveSK" },
-  { key: "ao5", label: "AO5", size: 5, kind: "ao", startField: "BestAo5StartSolveSK" },
-  { key: "ao12", label: "AO12", size: 12, kind: "ao", startField: "BestAo12StartSolveSK" },
+  {
+    key: "single",
+    label: "Single",
+    kind: "single",
+    solveField: "BestSingleSolveSK",
+    worstSolveField: "WorstSingleSolveSK",
+  },
+  {
+    key: "mo3",
+    label: "MO3",
+    size: 3,
+    kind: "mo3",
+    startField: "BestMo3StartSolveSK",
+    worstStartField: "WorstMo3StartSolveSK",
+  },
+  {
+    key: "ao5",
+    label: "AO5",
+    size: 5,
+    kind: "ao",
+    startField: "BestAo5StartSolveSK",
+    worstStartField: "WorstAo5StartSolveSK",
+  },
+  {
+    key: "ao12",
+    label: "AO12",
+    size: 12,
+    kind: "ao",
+    startField: "BestAo12StartSolveSK",
+    worstStartField: "WorstAo12StartSolveSK",
+  },
   { key: "ao25", label: "AO25", size: 25, kind: "ao", startField: "BestAo25StartSolveSK" },
   { key: "ao50", label: "AO50", size: 50, kind: "ao", startField: "BestAo50StartSolveSK" },
   { key: "ao100", label: "AO100", size: 100, kind: "ao", startField: "BestAo100StartSolveSK" },
@@ -29,10 +56,13 @@ const HOME_SUMMARY_METRICS = [
 ];
 
 const HOME_SUMMARY_LAYOUT = [
-  ["single", "ao5"],
-  ["mo3", "ao12", "ao25"],
-  ["ao50", "ao100", "ao1000"],
+  ["single", "ao5", "ao12"],
+  ["mo3", "ao25", "ao50"],
 ];
+
+const HOME_SUMMARY_METRIC_BY_KEY = new Map(
+  HOME_SUMMARY_METRICS.map((metric) => [metric.key, metric])
+);
 
 function getSolvePenalty(solve) {
   return String(solve?.penalty ?? solve?.Penalty ?? "").toUpperCase();
@@ -70,20 +100,21 @@ function getAdjustedSolveTimeMs(solve) {
   return penalty === "+2" ? ms + 2000 : ms;
 }
 
-function computeBestWindowValue(solves, spec) {
+function computeWindowExtremeValue(solves, spec, mode = "best") {
   const source = Array.isArray(solves) ? solves : [];
   if (!source.length) return null;
+  const isWorst = mode === "worst";
 
   if (spec.kind === "single") {
     const numeric = source
       .map(getAdjustedSolveTimeMs)
       .filter((value) => Number.isFinite(value));
-    return numeric.length ? Math.min(...numeric) : null;
+    return numeric.length ? (isWorst ? Math.max(...numeric) : Math.min(...numeric)) : null;
   }
 
   if (source.length < spec.size) return null;
 
-  let best = null;
+  let extreme = null;
 
   for (let index = 0; index <= source.length - spec.size; index += 1) {
     const window = source.slice(index, index + spec.size);
@@ -101,39 +132,66 @@ function computeBestWindowValue(solves, spec) {
       value = Number.isFinite(result) ? result : null;
     }
 
-    if (Number.isFinite(value) && (best == null || value < best)) {
-      best = value;
+    if (
+      Number.isFinite(value) &&
+      (extreme == null || (isWorst ? value > extreme : value < extreme))
+    ) {
+      extreme = value;
     }
   }
 
-  return best;
+  return extreme;
 }
 
 function buildCompactSummary(solves) {
   return HOME_SUMMARY_METRICS.map((metric) => ({
     ...metric,
-    value: computeBestWindowValue(solves, metric),
+    value: computeWindowExtremeValue(solves, metric, "best"),
+    bestValue: computeWindowExtremeValue(solves, metric, "best"),
+    worstValue: computeWindowExtremeValue(solves, metric, "worst"),
   }));
+}
+
+function meanMs(values) {
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function medianMs(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function stdDevMs(values) {
+  if (values.length < 2) return null;
+  const mean = meanMs(values);
+  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
+  return Math.sqrt(variance);
 }
 
 function buildCompactSummaryFromCache(overallStats) {
   if (!overallStats || typeof overallStats !== "object") return [];
   const source = {
-    single: overallStats?.BestSingleMs,
-    mo3: overallStats?.BestMo3Ms,
-    ao5: overallStats?.BestAo5Ms,
-    ao12: overallStats?.BestAo12Ms,
-    ao25: overallStats?.BestAo25Ms,
-    ao50: overallStats?.BestAo50Ms,
-    ao100: overallStats?.BestAo100Ms,
-    ao1000: overallStats?.BestAo1000Ms,
+    single: { best: overallStats?.BestSingleMs, worst: overallStats?.WorstSingleMs },
+    mo3: { best: overallStats?.BestMo3Ms, worst: overallStats?.WorstMo3Ms },
+    ao5: { best: overallStats?.BestAo5Ms, worst: overallStats?.WorstAo5Ms },
+    ao12: { best: overallStats?.BestAo12Ms, worst: overallStats?.WorstAo12Ms },
+    ao25: { best: overallStats?.BestAo25Ms, worst: overallStats?.WorstAo25Ms },
+    ao50: { best: overallStats?.BestAo50Ms, worst: overallStats?.WorstAo50Ms },
+    ao100: { best: overallStats?.BestAo100Ms, worst: overallStats?.WorstAo100Ms },
+    ao1000: { best: overallStats?.BestAo1000Ms, worst: overallStats?.WorstAo1000Ms },
   };
 
   return HOME_SUMMARY_METRICS.map((metric) => {
-    const raw = Number(source[metric.key]);
+    const rawBest = Number(source[metric.key]?.best);
+    const rawWorst = Number(source[metric.key]?.worst);
     return {
       ...metric,
-      value: Number.isFinite(raw) ? raw : null,
+      value: Number.isFinite(rawBest) ? rawBest : null,
+      bestValue: Number.isFinite(rawBest) ? rawBest : null,
+      worstValue: Number.isFinite(rawWorst) ? rawWorst : null,
     };
   });
 }
@@ -143,6 +201,122 @@ function groupSummaryRows(rows) {
   return HOME_SUMMARY_LAYOUT.map((group) =>
     group.map((key) => rowsByKey.get(key)).filter(Boolean)
   ).filter((group) => group.length);
+}
+
+function buildSummaryMeta(solves, overallStats) {
+  const numeric = (Array.isArray(solves) ? solves : [])
+    .map(getAdjustedSolveTimeMs)
+    .filter((value) => Number.isFinite(value));
+  const plus2Values = (Array.isArray(solves) ? solves : [])
+    .filter((solve) => getSolvePenalty(solve) === "+2")
+    .map(getAdjustedSolveTimeMs)
+    .filter((value) => Number.isFinite(value));
+  const dnfCount = (Array.isArray(solves) ? solves : []).filter(
+    (solve) => getSolvePenalty(solve) === "DNF"
+  ).length;
+
+  const cachedMean = Number(overallStats?.MeanMs);
+  const cachedMedian = Number(overallStats?.MedianMs);
+  const cachedPlus2Count = Number(overallStats?.Plus2Count);
+  const cachedPlus2Best = Number(overallStats?.Plus2BestMs);
+  const cachedSum = Number(overallStats?.SumFinalTimeMs);
+  const cachedDnfCount = Number(overallStats?.DNFCount);
+  const count = Number(overallStats?.SolveCountIncluded || 0);
+  const sum = Number(overallStats?.SumFinalTimeMs || 0);
+  const sumSquares = Number(overallStats?.SumFinalTimeSqMs || 0);
+  const cachedStdDev =
+    count >= 2 && Number.isFinite(sum) && Number.isFinite(sumSquares)
+      ? Math.sqrt(Math.max(0, sumSquares / count - (sum / count) ** 2))
+      : null;
+
+  return [
+    {
+      key: "mean",
+      label: "Mean",
+      value: Number.isFinite(cachedMean) ? cachedMean : meanMs(numeric),
+      average: true,
+    },
+    {
+      key: "median",
+      label: "Median",
+      value: Number.isFinite(cachedMedian) ? cachedMedian : medianMs(numeric),
+      average: true,
+    },
+    {
+      key: "std-dev",
+      label: "σ",
+      value: Number.isFinite(cachedStdDev) ? cachedStdDev : stdDevMs(numeric),
+      average: true,
+    },
+    {
+      key: "plus2-count",
+      label: "+2 Count",
+      value: Number.isFinite(cachedPlus2Count) ? cachedPlus2Count : plus2Values.length,
+      numeric: true,
+    },
+    {
+      key: "plus2-best",
+      label: "+2 Best",
+      value:
+        Number.isFinite(cachedPlus2Best)
+          ? cachedPlus2Best
+          : plus2Values.length
+            ? Math.min(...plus2Values)
+            : null,
+      average: false,
+    },
+    {
+      key: "dnf-count",
+      label: "DNF",
+      value: Number.isFinite(cachedDnfCount) ? cachedDnfCount : dnfCount,
+      numeric: true,
+    },
+    {
+      key: "sum",
+      label: "Sum",
+      value: Number.isFinite(cachedSum) ? cachedSum : numeric.reduce((acc, value) => acc + value, 0),
+      duration: true,
+    },
+  ];
+}
+
+function formatCount(value) {
+  return Number.isFinite(Number(value)) ? Number(value).toLocaleString() : "—";
+}
+
+function formatDurationMs(ms) {
+  if (!Number.isFinite(Number(ms))) return "—";
+  const total = Math.max(0, Math.round(Number(ms)));
+  const hours = Math.floor(total / 3600000);
+  const minutes = Math.floor((total % 3600000) / 60000);
+  const seconds = Math.floor((total % 60000) / 1000);
+  const centis = Math.floor((total % 1000) / 10)
+    .toString()
+    .padStart(2, "0");
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${centis}`;
+  }
+
+  return `${minutes}:${String(seconds).padStart(2, "0")}.${centis}`;
+}
+
+function formatTileMetricParts(label) {
+  const safeLabel = String(label || "").trim().toUpperCase();
+  if (safeLabel === "SINGLE") {
+    return { prefix: "Single", value: "", single: true };
+  }
+
+  const match = safeLabel.match(/^([A-Z]+)(\d+)$/);
+  if (!match) {
+    return { prefix: safeLabel, value: "", single: false };
+  }
+
+  return {
+    prefix: match[1],
+    value: match[2],
+    single: false,
+  };
 }
 
 function getWeekNumber(date) {
@@ -385,11 +559,11 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
             ? {
                 "--home-summary-border": rgbaString("#2EC4B6", 0.72),
                 "--home-summary-border-hover": rgbaString("#2EC4B6", 0.96),
-                "--home-summary-panel": rgbaString("#2EC4B6", 0.28),
-                "--home-summary-panel-strong": rgbaString("#2EC4B6", 0.72),
+                "--home-summary-panel": rgbaString("#2EC4B6", 0.05),
+                "--home-summary-panel-strong": rgbaString("#2EC4B6", 0.42),
                 "--home-summary-glow": rgbaString("#2EC4B6", 0.22),
-                "--home-summary-label": "rgba(243, 255, 252, 0.84)",
-                "--home-summary-text": "rgba(255, 255, 255, 0.99)",
+                "--home-summary-label": "rgba(243, 255, 252, 0.9)",
+                "--home-summary-text": "rgba(255, 255, 255, 0.92)",
               }
             : undefined;
 
@@ -415,11 +589,26 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
             : [];
         const summaryGroups =
           config.chartType === "summary" ? groupSummaryRows(summaryRows) : [];
+        const summaryListRows =
+          config.chartType === "summary"
+            ? HOME_SUMMARY_METRICS.map((metric) =>
+                summaryRows.find((row) => row.key === metric.key)
+              ).filter(Boolean)
+            : [];
+        const summarySolveWindow =
+          config.chartType === "summary" ? getSolveWindow(solves, solveLimit) : [];
+        const isSummaryTile =
+          config.chartType === "summary" && (config.summaryLayout || "tile") === "tile";
+        const summaryMeta =
+          config.chartType === "summary" && isSummaryTile
+            ? buildSummaryMeta(summarySolveWindow, overallStats)
+            : [];
 
         const empty =
           (config.chartType === "line" && !lineData.length) ||
           (config.chartType === "pie" && !pieData.length) ||
-          (config.chartType === "summary" && !summaryRows.some((row) => row.value != null)) ||
+          (config.chartType === "summary" &&
+            !summaryRows.some((row) => row.value != null)) ||
           ((config.chartType === "bar" || config.chartType === "percent") &&
             !(Array.isArray(solves) && solves.length));
 
@@ -444,11 +633,23 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
                     "--home-stat-background-opacity": `${config.opacity}`,
                   }
                 : {
-                    width: `${config.width}px`,
-                    height: `${config.height}px`,
+                    width: `${
+                      config.chartType === "summary"
+                        ? isSummaryTile
+                          ? Math.round(config.width * 1.46)
+                          : Math.round(config.width * 0.8)
+                        : config.width
+                    }px`,
+                    height: `${
+                      config.chartType === "summary"
+                        ? isSummaryTile
+                          ? Math.round(config.height * 0.94)
+                          : Math.round(config.height * 1.62)
+                        : config.height
+                    }px`,
                     "--home-stat-rest-opacity": `${
                       config.chartType === "summary"
-                        ? Math.max(0.48, Math.min(config.opacity * 0.68, 0.68))
+                        ? Math.max(0.58, Math.min(config.opacity * 0.7, 0.72))
                         : Math.max(0.16, Math.min(config.opacity * 0.55, 0.55))
                     }`,
                     "--home-stat-hover-opacity": `${
@@ -458,7 +659,13 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
             }}
           >
             <div
-              className={`homeStatsCard homeStatsCard--${config.chartType} ${slotKey === "background" ? "is-background" : ""}${
+              className={`homeStatsCard homeStatsCard--${config.chartType}${
+                config.chartType === "summary"
+                  ? isSummaryTile
+                    ? " homeStatsCard--summaryTile"
+                    : " homeStatsCard--summaryCompact"
+                  : ""
+              } ${slotKey === "background" ? "is-background" : ""}${
                 isSideSlot ? " is-side-slot" : ""
               }${isHovered ? " is-hovered" : ""}`}
               style={
@@ -520,31 +727,209 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
                     compact={!isHovered}
                   />
                 ) : config.chartType === "summary" ? (
-                  <div className="homeStatsSummary">
-                    {summaryGroups.map((group, groupIndex) => (
-                      <div
-                        className={`homeStatsSummaryGroup homeStatsSummaryGroup--${group.length}`}
-                        key={`${slotKey}-group-${groupIndex}`}
-                      >
-                        {group.map((row) => (
-                          <button
-                            type="button"
-                            className="homeStatsSummaryRow"
-                            key={`${slotKey}-${row.key}`}
-                            onClick={() => onSummarySelect?.(row)}
-                            disabled={row.value == null}
-                          >
-                            <span className="homeStatsSummaryLabel">{row.label}</span>
-                            <span className="homeStatsSummaryValue">
-                              {row.value == null
-                                ? "—"
-                                : formatTime(row.value, row.kind !== "single")}
-                            </span>
-                          </button>
-                        ))}
+                  isSummaryTile ? (
+                    <div
+                      className={`homeStatsSummaryTile${
+                        config.summaryShowMeta ? " homeStatsSummaryTile--withMeta" : ""
+                      }`}
+                    >
+                      {config.summaryShowMeta ? (
+                        <div className="homeStatsSummaryMeta">
+                          {summaryMeta.map((item) => (
+                            <div className="homeStatsSummaryMetaItem" key={`${slotKey}-${item.key}`}>
+                              <span className="homeStatsSummaryMetaLabel">{item.label}</span>
+                              <span className="homeStatsSummaryMetaValue">
+                                {item.value == null
+                                  ? "—"
+                                  : item.numeric
+                                  ? formatCount(item.value)
+                                  : item.duration
+                                    ? formatDurationMs(item.value)
+                                    : formatTime(item.value, item.average !== false)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      <div className="homeStatsSummaryTileLead">
+                        {summaryGroups[0]?.map((row) => {
+                          const metric = HOME_SUMMARY_METRIC_BY_KEY.get(row.key) || row;
+                          const { prefix, value, single } = formatTileMetricParts(row.label);
+                          return (
+                            <div
+                              className={`homeStatsSummaryTileItem homeStatsSummaryTileItem--lead homeStatsSummaryTileItem--${row.key}${
+                                single ? " homeStatsSummaryTileItem--single" : ""
+                              }`}
+                              key={`${slotKey}-${row.key}`}
+                            >
+                              {!single ? (
+                                <div className="homeStatsSummaryTileHeader">
+                                  <span className="homeStatsSummaryTilePrefix">{prefix}</span>
+                                  <span className="homeStatsSummaryTileNumber">{value}</span>
+                                </div>
+                              ) : (
+                                <div
+                                  className="homeStatsSummaryTileHeader homeStatsSummaryTileHeader--single"
+                                  aria-hidden="true"
+                                />
+                              )}
+
+                              <div className="homeStatsSummaryTileValues">
+                                <button
+                                  type="button"
+                                  className="homeStatsSummaryTileValueBlock homeStatsSummaryTileValueBlock--best"
+                                  onClick={() =>
+                                    onSummarySelect?.({
+                                      ...metric,
+                                      variant: "best",
+                                      value: row.bestValue,
+                                    })
+                                  }
+                                  disabled={row.bestValue == null}
+                                >
+                                  <span className="homeStatsSummaryTileValueRow">
+                                    {single ? (
+                                      <span className="homeStatsSummaryTileValueLabel homeStatsSummaryTileValueLabel--best">
+                                        B
+                                      </span>
+                                    ) : null}
+                                    <span className="homeStatsSummaryTileValue homeStatsSummaryTileValue--best">
+                                      {row.bestValue == null
+                                        ? "—"
+                                        : formatTime(row.bestValue, row.kind !== "single")}
+                                    </span>
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="homeStatsSummaryTileValueBlock homeStatsSummaryTileValueBlock--worst"
+                                  onClick={() =>
+                                    onSummarySelect?.({
+                                      ...metric,
+                                      variant: "worst",
+                                      value: row.worstValue,
+                                    })
+                                  }
+                                  disabled={row.worstValue == null}
+                                >
+                                  <span className="homeStatsSummaryTileValueRow">
+                                    {single ? (
+                                      <span className="homeStatsSummaryTileValueLabel homeStatsSummaryTileValueLabel--worst">
+                                        W
+                                      </span>
+                                    ) : null}
+                                    <span className="homeStatsSummaryTileValue homeStatsSummaryTileValue--worst">
+                                      {row.worstValue == null
+                                        ? "—"
+                                        : formatTime(row.worstValue, row.kind !== "single")}
+                                    </span>
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
-                  </div>
+
+                      <div className="homeStatsSummaryTileGrid">
+                        {summaryGroups.slice(1).flat().map((row) => {
+                          const metric = HOME_SUMMARY_METRIC_BY_KEY.get(row.key) || row;
+                          const { prefix, value } = formatTileMetricParts(row.label);
+                          return (
+                            <div
+                              className={`homeStatsSummaryTileItem homeStatsSummaryTileItem--grid homeStatsSummaryTileItem--${row.key}`}
+                              key={`${slotKey}-${row.key}`}
+                            >
+                              <span className="homeStatsSummaryTileHeader">
+                                <span className="homeStatsSummaryTilePrefix">{prefix}</span>
+                                <span className="homeStatsSummaryTileNumber">{value}</span>
+                              </span>
+                              <div className="homeStatsSummaryTileValues">
+                                <button
+                                  type="button"
+                                  className="homeStatsSummaryTileValueBlock homeStatsSummaryTileValueBlock--best"
+                                  onClick={() =>
+                                    onSummarySelect?.({
+                                      ...metric,
+                                      variant: "best",
+                                      value: row.bestValue,
+                                    })
+                                  }
+                                  disabled={row.bestValue == null}
+                                >
+                                  <span className="homeStatsSummaryTileValueRow">
+                                    <span
+                                      className="homeStatsSummaryTileValueLabel homeStatsSummaryTileValueLabel--best"
+                                      aria-hidden="true"
+                                    />
+                                    <span className="homeStatsSummaryTileValue homeStatsSummaryTileValue--best">
+                                      {row.bestValue == null
+                                        ? "—"
+                                        : formatTime(row.bestValue, row.kind !== "single")}
+                                    </span>
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="homeStatsSummaryTileValueBlock homeStatsSummaryTileValueBlock--worst"
+                                  onClick={() =>
+                                    onSummarySelect?.({
+                                      ...metric,
+                                      variant: "worst",
+                                      value: row.worstValue,
+                                    })
+                                  }
+                                  disabled={row.worstValue == null}
+                                >
+                                  <span className="homeStatsSummaryTileValueRow">
+                                    <span
+                                      className="homeStatsSummaryTileValueLabel homeStatsSummaryTileValueLabel--worst"
+                                      aria-hidden="true"
+                                    />
+                                    <span className="homeStatsSummaryTileValue homeStatsSummaryTileValue--worst">
+                                      {row.worstValue == null
+                                        ? "—"
+                                        : formatTime(row.worstValue, row.kind !== "single")}
+                                    </span>
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="homeStatsSummary homeStatsSummary--list">
+                      {summaryListRows.map((row) => (
+                        <button
+                          type="button"
+                          className="homeStatsSummaryRow homeStatsSummaryRow--list"
+                          key={`${slotKey}-${row.key}`}
+                          onClick={() =>
+                            onSummarySelect?.({
+                              ...row,
+                              variant: "best",
+                              value: row.bestValue,
+                            })
+                          }
+                          disabled={row.bestValue == null}
+                        >
+                          <span className="homeStatsSummaryLabel">{row.label}</span>
+                          <div className="homeStatsSummaryValuePair">
+                            <span className="homeStatsSummaryValueButton homeStatsSummaryValueButton--best">
+                              <span className="homeStatsSummaryValue homeStatsSummaryValue--best">
+                                {row.bestValue == null
+                                  ? "—"
+                                  : formatTime(row.bestValue, row.kind !== "single")}
+                              </span>
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )
                 ) : (
                   <div className="homeStatsChartFrame homeStatsChartFrame--pie">
                     <PieChartBuilder

@@ -3,12 +3,20 @@ import "./TagBar.css";
 import tagBadge from "../../assets/Tag.svg";
 import {
   DEFAULT_TAG_CONFIG,
+  getEventScopedAlgorithmFields,
+  getAlgorithmTagDisplayValue,
   getTagChipStyle,
   getSharedTagFieldMeta,
+  getVisibleSharedTagFields,
   makeEmptyTagSelection,
+  normalizeAlgorithmTagValue,
   normalizeTagConfig,
+  pruneHiddenMethodScopedTags,
   sanitizeTagSelection,
 } from "./tagUtils";
+
+const ALG_TAG_FIELDS = new Set(["Alg_OLL", "Alg_PLL", "Alg_CMLL", "Alg_CLL"]);
+const ALG_TAG_FIELD_ORDER = ["Alg_PLL", "Alg_OLL", "Alg_CMLL", "Alg_CLL"];
 
 function EditorField({
   field,
@@ -38,13 +46,17 @@ function EditorField({
     if (!next) return;
     onSelectValue(next);
   };
+  const displayValue =
+    ALG_TAG_FIELDS.has(String(field || "").trim()) && value
+      ? getAlgorithmTagDisplayValue(field, value)
+      : value;
 
   return (
     <div className={`tagEditorField ${isActive ? "is-active" : ""}`}>
       <button type="button" className="tagEditorFieldBtn" onClick={onActivate}>
         <span className="tagEditorFieldLabel">{label}</span>
         <span className={`tagEditorFieldValue ${value ? "is-set" : ""}`}>
-          {value || `+ ${label}`}
+          {displayValue || `+ ${label}`}
         </span>
       </button>
 
@@ -76,7 +88,11 @@ function EditorField({
                   <img src={tagBadge} alt="" className="tagHomeChipIcon" />
                 </span>
                 <span className="tagHomeChipText">
-                  <span className="tagHomeChipValue">{option}</span>
+                  <span className="tagHomeChipValue">
+                    {ALG_TAG_FIELDS.has(String(field || "").trim())
+                      ? getAlgorithmTagDisplayValue(field, option)
+                      : option}
+                  </span>
                 </span>
               </button>
             ))}
@@ -97,7 +113,10 @@ function EditorField({
             {options.length > 0 && (
               <datalist id={listId}>
                 {options.map((option) => (
-                  <option key={`${listId}-${option}`} value={option} />
+                  <option
+                    key={`${listId}-${option}`}
+                    value={ALG_TAG_FIELDS.has(String(field || "").trim()) ? getAlgorithmTagDisplayValue(field, option) : option}
+                  />
                 ))}
               </datalist>
             )}
@@ -131,6 +150,7 @@ export default function TagBar({
   tags,
   onChange,
   tagConfig,
+  eventKey = "",
   fields = null,
   cubeModelOptions = [],
   discoveredOptions = {},
@@ -138,6 +158,9 @@ export default function TagBar({
   tagColors = {},
   onTagColorsChange = null,
   variant = "compact",
+  algorithmGrouping = "method",
+  showEventScopedAlgorithmFields = false,
+  expandMethodAlgorithms = false,
   allowAdditions = false,
   activeField: controlledActiveField = null,
   onActiveFieldChange = null,
@@ -165,13 +188,29 @@ export default function TagBar({
   );
   const fieldMeta = useMemo(() => {
     const allFields = getSharedTagFieldMeta(cfg);
-    if (!Array.isArray(fields) || fields.length === 0) return allFields;
+    const visibleFields = new Set(getVisibleSharedTagFields(safeTags, eventKey));
+    if (showEventScopedAlgorithmFields) {
+      getEventScopedAlgorithmFields(eventKey).forEach((field) => visibleFields.add(field));
+    }
+    const filtered = allFields.filter((item) => visibleFields.has(item.field));
+    if (!Array.isArray(fields) || fields.length === 0) return filtered;
     const allowed = new Set(fields.map((field) => String(field || "").trim()).filter(Boolean));
-    return allFields.filter((item) => allowed.has(item.field));
-  }, [cfg, fields]);
+    return filtered.filter((item) => allowed.has(item.field));
+  }, [cfg, eventKey, fields, safeTags, showEventScopedAlgorithmFields]);
 
   const [uncontrolledActiveField, setUncontrolledActiveField] = useState("CubeModel");
   const [homeEditorOpen, setHomeEditorOpen] = useState(false);
+  const rootFieldMeta = useMemo(
+    () => fieldMeta.filter((item) => !ALG_TAG_FIELDS.has(item.field)),
+    [fieldMeta]
+  );
+  const methodScopedFieldMeta = useMemo(
+    () =>
+      [...fieldMeta.filter((item) => ALG_TAG_FIELDS.has(item.field))].sort(
+        (a, b) => ALG_TAG_FIELD_ORDER.indexOf(a.field) - ALG_TAG_FIELD_ORDER.indexOf(b.field)
+      ),
+    [fieldMeta]
+  );
 
   const activeField = controlledActiveField || uncontrolledActiveField;
 
@@ -191,6 +230,12 @@ export default function TagBar({
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, []);
+
+  useEffect(() => {
+    if (!fieldMeta.some((item) => item.field === activeField)) {
+      setActiveField(fieldMeta[0]?.field || "CubeModel");
+    }
+  }, [activeField, fieldMeta]);
 
   const optionsByField = useMemo(() => {
     return fieldMeta.reduce((acc, item) => {
@@ -218,10 +263,15 @@ export default function TagBar({
   }, [cubeModelOptions, discoveredOptions, fieldMeta, safeTags]);
 
   const setField = (field, value) => {
-    onChange?.({
+    const normalizedValue = ALG_TAG_FIELDS.has(String(field || "").trim())
+      ? normalizeAlgorithmTagValue(field, value)
+      : String(value || "").trim();
+    onChange?.(pruneHiddenMethodScopedTags({
       ...safeTags,
-      [field]: String(value || "").trim(),
-    });
+      [field]: normalizedValue,
+    }, eventKey, {
+      keepEventScopedAlgorithms: showEventScopedAlgorithmFields,
+    }));
   };
 
   const setFieldColor = (field, tagValue, color) => {
@@ -239,11 +289,48 @@ export default function TagBar({
   };
 
   const visibleHomeFields = fieldMeta.filter((item) => {
-    if (item.field === "CubeModel" || item.field === "CrossColor" || item.field === "Method") {
+    if (
+      item.field === "CubeModel" ||
+      item.field === "CrossColor" ||
+      item.field === "Method"
+    ) {
       return true;
     }
-    return !!String(safeTags[item.field] || "").trim();
+    const value = String(safeTags[item.field] || "").trim();
+    if (String(item.field || "").startsWith("Alg_")) return !!value;
+    return !!value;
   });
+  const activeAlgorithmSummary = useMemo(() => {
+    const parts = methodScopedFieldMeta
+      .map((item) => {
+        const value = String(safeTags[item.field] || "").trim();
+        if (!value) return "";
+        const displayValue = getAlgorithmTagDisplayValue(item.field, value);
+        if (!displayValue) return "";
+        return `${item.label} - ${displayValue}`;
+      })
+      .filter(Boolean);
+
+    return parts.length
+      ? {
+          field: "__Algorithms",
+          label: "Algorithms",
+          value: parts.join(", "),
+        }
+      : null;
+  }, [methodScopedFieldMeta, safeTags]);
+  const homeSummaryItems = useMemo(() => {
+    const nonAlgorithmFields = visibleHomeFields.filter(
+      (item) => !ALG_TAG_FIELDS.has(String(item.field || "").trim())
+    );
+
+    if (!activeAlgorithmSummary) return nonAlgorithmFields;
+
+    const methodIndex = nonAlgorithmFields.findIndex((item) => item.field === "Method");
+    const next = [...nonAlgorithmFields];
+    next.splice(methodIndex >= 0 ? methodIndex + 1 : next.length, 0, activeAlgorithmSummary);
+    return next;
+  }, [activeAlgorithmSummary, visibleHomeFields]);
 
   const isAutomaticHomeField = (field) => field === "SolveSource" || field === "TimerInput";
 
@@ -254,22 +341,75 @@ export default function TagBar({
 
   const renderEditor = () => (
     <div className={`tagEditor tagEditor--${variant === "home" ? "home" : "stats"}`}>
-      {fieldMeta.map((item) => (
-        <EditorField
-          key={item.field}
-          field={item.field}
-          label={item.label}
-          value={safeTags[item.field] || ""}
-          options={optionsByField[item.field] || []}
-          isActive={activeField === item.field}
-          onActivate={() => setActiveField(item.field)}
-          onSelectValue={(value) => setField(item.field, value)}
-          allowAdditions={allowAdditions}
-          getChipStyle={getHomeChipStyle}
-          getColorValue={(option) => safeTagColors?.[item.field]?.[String(option || "").trim()] || ""}
-          onColorChange={(option, color) => setFieldColor(item.field, option, color)}
-        />
+      {rootFieldMeta.map((item) => (
+        <React.Fragment key={item.field}>
+          <EditorField
+            field={item.field}
+            label={item.label}
+            value={safeTags[item.field] || ""}
+            options={optionsByField[item.field] || []}
+            isActive={activeField === item.field}
+            onActivate={() => setActiveField(item.field)}
+            onSelectValue={(value) => setField(item.field, value)}
+            allowAdditions={allowAdditions}
+            getChipStyle={getHomeChipStyle}
+            getColorValue={(option) => safeTagColors?.[item.field]?.[String(option || "").trim()] || ""}
+            onColorChange={(option, color) => setFieldColor(item.field, option, color)}
+          />
+
+          {item.field === "Method" &&
+            algorithmGrouping === "method" &&
+            methodScopedFieldMeta.length > 0 && (
+            <div className="tagEditorSubgroup">
+              {methodScopedFieldMeta.map((subItem) => (
+                <EditorField
+                  key={subItem.field}
+                  field={subItem.field}
+                  label={subItem.label}
+                  value={safeTags[subItem.field] || ""}
+                  options={optionsByField[subItem.field] || []}
+                  isActive={
+                    activeField === subItem.field ||
+                    (expandMethodAlgorithms && activeField === "Method")
+                  }
+                  onActivate={() => setActiveField(expandMethodAlgorithms ? "Method" : subItem.field)}
+                  onSelectValue={(value) => setField(subItem.field, value)}
+                  allowAdditions={allowAdditions}
+                  getChipStyle={getHomeChipStyle}
+                  getColorValue={(option) =>
+                    safeTagColors?.[subItem.field]?.[String(option || "").trim()] || ""
+                  }
+                  onColorChange={(option, color) => setFieldColor(subItem.field, option, color)}
+                />
+              ))}
+            </div>
+          )}
+        </React.Fragment>
       ))}
+
+      {algorithmGrouping === "section" && methodScopedFieldMeta.length > 0 && (
+        <div className="tagEditorSubgroup tagEditorSubgroup--section">
+          <div className="tagEditorSubgroupLabel">Algorithms</div>
+          {methodScopedFieldMeta.map((subItem) => (
+            <EditorField
+              key={subItem.field}
+              field={subItem.field}
+              label={subItem.label}
+              value={safeTags[subItem.field] || ""}
+              options={optionsByField[subItem.field] || []}
+              isActive={activeField === subItem.field}
+              onActivate={() => setActiveField(subItem.field)}
+              onSelectValue={(value) => setField(subItem.field, value)}
+              allowAdditions={allowAdditions}
+              getChipStyle={getHomeChipStyle}
+              getColorValue={(option) =>
+                safeTagColors?.[subItem.field]?.[String(option || "").trim()] || ""
+              }
+              onColorChange={(option, color) => setFieldColor(subItem.field, option, color)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 
@@ -277,8 +417,15 @@ export default function TagBar({
     return (
       <div className="tagHomeWrap" ref={wrapRef}>
         <div className="tagHomeSummary">
-          {visibleHomeFields.map((item) => {
-            const value = safeTags[item.field] || "";
+          {homeSummaryItems.map((item) => {
+            const isAlgorithmSummary = item.field === "__Algorithms";
+            const value = isAlgorithmSummary ? item.value : safeTags[item.field] || "";
+            const displayValue =
+              isAlgorithmSummary
+                ? value
+                : ALG_TAG_FIELDS.has(String(item.field || "").trim()) && value
+                ? getAlgorithmTagDisplayValue(item.field, value)
+                : value;
             return (
               <div
                 key={item.field}
@@ -290,7 +437,7 @@ export default function TagBar({
                   className={`tagHomeChip ${value ? "is-set" : ""}`}
                   style={getHomeChipStyle(item.field, value)}
                   onClick={() => {
-                    setActiveField(item.field);
+                    setActiveField(isAlgorithmSummary ? methodScopedFieldMeta[0]?.field || "Method" : item.field);
                     setHomeEditorOpen(true);
                   }}
                 >
@@ -298,14 +445,14 @@ export default function TagBar({
                     <img src={tagBadge} alt="" className="tagHomeChipIcon" />
                   </span>
                   <span className="tagHomeChipText">
-                    <span className="tagHomeChipValue">{value || `+ ${item.label}`}</span>
+                    <span className="tagHomeChipValue">{displayValue || `+ ${item.label}`}</span>
                   </span>
                 </button>
               </div>
             );
           })}
 
-          {visibleHomeFields.length < fieldMeta.length && (
+          {homeSummaryItems.length < fieldMeta.length && (
             <div className="tagHomeItem tagHomeItem--add is-automatic">
               <button
                 type="button"

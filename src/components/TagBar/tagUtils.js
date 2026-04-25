@@ -1,3 +1,33 @@
+const OLL_CASE_OPTIONS = [
+  "Skip",
+  ...Array.from({ length: 57 }, (_, index) => `OLL #${index + 1}`),
+];
+
+const PLL_CASE_OPTIONS = [
+  "Skip",
+  "Aa Perm",
+  "Ab Perm",
+  "E Perm",
+  "H Perm",
+  "Ua Perm",
+  "Ub Perm",
+  "Z Perm",
+  "F Perm",
+  "Ga Perm",
+  "Gb Perm",
+  "Gc Perm",
+  "Gd Perm",
+  "Ja Perm",
+  "Jb Perm",
+  "Na Perm",
+  "Nb Perm",
+  "Ra Perm",
+  "Rb Perm",
+  "T Perm",
+  "V Perm",
+  "Y Perm",
+];
+
 export const DEFAULT_TAG_CONFIG = {
   Fixed: {
     CubeModel: { label: "Cube Model", options: [] },
@@ -8,6 +38,22 @@ export const DEFAULT_TAG_CONFIG = {
     Method: {
       label: "Method",
       options: ["CFOP", "Roux", "ZZ", "Petrus", "LBL", "Other"],
+    },
+    Alg_OLL: {
+      label: "OLL",
+      options: OLL_CASE_OPTIONS,
+    },
+    Alg_PLL: {
+      label: "PLL",
+      options: PLL_CASE_OPTIONS,
+    },
+    Alg_CMLL: {
+      label: "CMLL",
+      options: ["Skip"],
+    },
+    Alg_CLL: {
+      label: "CLL",
+      options: ["Skip"],
     },
     TimerInput: {
       label: "Timer Input",
@@ -31,6 +77,10 @@ export const SHARED_TAG_FIELDS = [
   "CubeModel",
   "CrossColor",
   "Method",
+  "Alg_PLL",
+  "Alg_OLL",
+  "Alg_CMLL",
+  "Alg_CLL",
   "TimerInput",
   "SolveSource",
   "Custom1",
@@ -39,6 +89,28 @@ export const SHARED_TAG_FIELDS = [
   "Custom4",
   "Custom5",
 ];
+
+const METHOD_SCOPED_TAG_RULES = {
+  Alg_PLL: { methods: ["CFOP"], eventScopes: ["333"] },
+  Alg_OLL: { methods: ["CFOP"], eventScopes: ["333"] },
+  Alg_CMLL: { methods: ["Roux"], eventScopes: ["333"] },
+  Alg_CLL: { methods: [], eventScopes: ["222"] },
+};
+
+const PLL_CASE_ALIASES = Object.fromEntries(
+  PLL_CASE_OPTIONS.flatMap((label) => {
+    if (label === "Skip") return [["skip", "Skip"]];
+    const base = label.replace(/\s+perm$/i, "");
+    const normalizedBase = base.toLowerCase();
+    return [
+      [normalizedBase, label],
+      [`${normalizedBase}perm`, label],
+      [`${normalizedBase} permutation`, label],
+      [`${normalizedBase} pll`, label],
+      [`${normalizedBase}permpll`, label],
+    ];
+  })
+);
 
 const TAG_SCOPE_EVENT_ALIASES = {
   "333OH": "333",
@@ -58,6 +130,59 @@ function normalizeEventKey(eventKey) {
 export function getTagScopeEventKey(eventKey) {
   const normalized = normalizeEventKey(eventKey);
   return TAG_SCOPE_EVENT_ALIASES[normalized] || normalized;
+}
+
+export function getEventScopedAlgorithmFields(eventKey) {
+  const scopeEvent = getTagScopeEventKey(eventKey);
+  return Object.entries(METHOD_SCOPED_TAG_RULES)
+    .filter(([, rule]) =>
+      !Array.isArray(rule?.eventScopes) || rule.eventScopes.length === 0
+        ? true
+        : rule.eventScopes.includes(scopeEvent)
+    )
+    .map(([field]) => field);
+}
+
+export function normalizeAlgorithmTagValue(field, value) {
+  const key = String(field || "").trim();
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  if (/^skip$/i.test(raw)) return "Skip";
+
+  if (key === "Alg_OLL") {
+    const match = raw.match(/^oll\s*#?\s*(\d{1,2})$/i);
+    if (match) {
+      const num = Number(match[1]);
+      if (Number.isInteger(num) && num >= 1 && num <= 57) return `OLL #${num}`;
+    }
+  }
+
+  if (key === "Alg_PLL") {
+    const normalized = raw.toLowerCase().replace(/[\s_-]+/g, "");
+    return PLL_CASE_ALIASES[normalized] || raw;
+  }
+
+  return raw;
+}
+
+export function getAlgorithmTagDisplayValue(field, value) {
+  const key = String(field || "").trim();
+  const canonical = normalizeAlgorithmTagValue(key, value);
+  if (!canonical) return "";
+
+  if (key === "Alg_PLL") {
+    if (canonical === "Skip") return canonical;
+    return canonical.replace(/\s+Perm$/i, "");
+  }
+
+  if (key === "Alg_OLL") {
+    if (canonical === "Skip") return canonical;
+    const match = canonical.match(/^OLL\s+#(\d{1,2})$/i);
+    if (match) return match[1];
+  }
+
+  return canonical;
 }
 
 function getTagScopeEventCandidates(eventKey) {
@@ -296,6 +421,30 @@ export function normalizeTagConfig(input) {
           ? fixed.Method.options
           : DEFAULT_TAG_CONFIG.Fixed.Method.options,
       },
+      Alg_OLL: {
+        label: fixed?.Alg_OLL?.label || "OLL",
+        options: Array.isArray(fixed?.Alg_OLL?.options)
+          ? fixed.Alg_OLL.options
+          : DEFAULT_TAG_CONFIG.Fixed.Alg_OLL.options,
+      },
+      Alg_PLL: {
+        label: fixed?.Alg_PLL?.label || "PLL",
+        options: Array.isArray(fixed?.Alg_PLL?.options)
+          ? fixed.Alg_PLL.options
+          : DEFAULT_TAG_CONFIG.Fixed.Alg_PLL.options,
+      },
+      Alg_CMLL: {
+        label: fixed?.Alg_CMLL?.label || "CMLL",
+        options: Array.isArray(fixed?.Alg_CMLL?.options)
+          ? fixed.Alg_CMLL.options
+          : DEFAULT_TAG_CONFIG.Fixed.Alg_CMLL.options,
+      },
+      Alg_CLL: {
+        label: fixed?.Alg_CLL?.label || "CLL",
+        options: Array.isArray(fixed?.Alg_CLL?.options)
+          ? fixed.Alg_CLL.options
+          : DEFAULT_TAG_CONFIG.Fixed.Alg_CLL.options,
+      },
       TimerInput: {
         label: fixed?.TimerInput?.label || "Timer Input",
         options: Array.isArray(fixed?.TimerInput?.options)
@@ -325,6 +474,10 @@ export function makeEmptyTagSelection() {
     CubeModel: "",
     CrossColor: "",
     Method: "",
+    Alg_OLL: "",
+    Alg_PLL: "",
+    Alg_CMLL: "",
+    Alg_CLL: "",
     TimerInput: "",
     SolveSource: "",
     Custom1: "",
@@ -349,13 +502,13 @@ export function hasActiveTagSelection(selection) {
 
 export function getSolveTagValue(solve, field) {
   const tags = solve?.tags || solve?.Tags || {};
-  return String(tags?.[field] || "").trim();
+  return normalizeAlgorithmTagValue(field, String(tags?.[field] || "").trim());
 }
 
 export function solveMatchesTagSelection(solve, selection) {
   const safeSelection = sanitizeTagSelection(selection);
   return SHARED_TAG_FIELDS.every((field) => {
-    const expected = safeSelection[field];
+    const expected = normalizeAlgorithmTagValue(field, safeSelection[field]);
     if (!expected) return true;
     return getSolveTagValue(solve, field) === expected;
   });
@@ -382,6 +535,10 @@ export function getSharedTagLabels(tagConfig) {
     CubeModel: cfg.Fixed.CubeModel.label || "Cube Model",
     CrossColor: cfg.Fixed.CrossColor.label || "Start Color",
     Method: cfg.Fixed.Method.label || "Method",
+    Alg_OLL: cfg.Fixed.Alg_OLL.label || "OLL",
+    Alg_PLL: cfg.Fixed.Alg_PLL.label || "PLL",
+    Alg_CMLL: cfg.Fixed.Alg_CMLL.label || "CMLL",
+    Alg_CLL: cfg.Fixed.Alg_CLL.label || "CLL",
     TimerInput: cfg.Fixed.TimerInput.label || "Timer Input",
     SolveSource: cfg.Fixed.SolveSource.label || "Solve Source",
   };
@@ -412,6 +569,26 @@ export function getSharedTagFieldMeta(tagConfig) {
       options: cfg.Fixed.Method.options || [],
     },
     {
+      field: "Alg_PLL",
+      label: cfg.Fixed.Alg_PLL.label || "PLL",
+      options: cfg.Fixed.Alg_PLL.options || [],
+    },
+    {
+      field: "Alg_OLL",
+      label: cfg.Fixed.Alg_OLL.label || "OLL",
+      options: cfg.Fixed.Alg_OLL.options || [],
+    },
+    {
+      field: "Alg_CMLL",
+      label: cfg.Fixed.Alg_CMLL.label || "CMLL",
+      options: cfg.Fixed.Alg_CMLL.options || [],
+    },
+    {
+      field: "Alg_CLL",
+      label: cfg.Fixed.Alg_CLL.label || "CLL",
+      options: cfg.Fixed.Alg_CLL.options || [],
+    },
+    {
       field: "TimerInput",
       label: cfg.Fixed.TimerInput.label || "Timer Input",
       options: cfg.Fixed.TimerInput.options || [],
@@ -427,6 +604,55 @@ export function getSharedTagFieldMeta(tagConfig) {
       options: slot.options || [],
     })),
   ];
+}
+
+export function isMethodScopedTagFieldVisible(field, selection = {}, eventKey = "") {
+  const key = String(field || "").trim();
+  const rule = METHOD_SCOPED_TAG_RULES[key];
+  if (!rule) return true;
+
+  const method = String(selection?.Method || "").trim();
+  const scopeEvent = getTagScopeEventKey(eventKey);
+
+  const methodMatches =
+    !Array.isArray(rule.methods) || rule.methods.length === 0
+      ? true
+      : rule.methods.includes(method);
+  const eventMatches =
+    !Array.isArray(rule.eventScopes) || rule.eventScopes.length === 0
+      ? true
+      : rule.eventScopes.includes(scopeEvent);
+
+  return methodMatches && eventMatches;
+}
+
+export function getVisibleSharedTagFields(selection = {}, eventKey = "") {
+  return SHARED_TAG_FIELDS.filter((field) => {
+    const currentValue = String(selection?.[field] || "").trim();
+    if (currentValue) return true;
+    return isMethodScopedTagFieldVisible(field, selection, eventKey);
+  });
+}
+
+export function pruneHiddenMethodScopedTags(
+  selection = {},
+  eventKey = "",
+  { keepEventScopedAlgorithms = false } = {}
+) {
+  const safe = sanitizeTagSelection(selection);
+  const next = { ...safe };
+  const allowedEventScopedAlgorithms = keepEventScopedAlgorithms
+    ? new Set(getEventScopedAlgorithmFields(eventKey))
+    : new Set();
+
+  for (const field of SHARED_TAG_FIELDS) {
+    if (allowedEventScopedAlgorithms.has(field)) continue;
+    if (!isMethodScopedTagFieldVisible(field, safe, eventKey)) {
+      next[field] = "";
+    }
+  }
+
+  return next;
 }
 
 export function resolveTagChipTone(field, value, tagColors = {}, profileColor = "#2EC4B6") {
@@ -472,6 +698,10 @@ export function collectTagSelectionOptions(solves, tagConfig, cubeModelOptions =
     ]),
     CrossColor: new Set(cfg.Fixed.CrossColor.options || []),
     Method: new Set(cfg.Fixed.Method.options || []),
+    Alg_OLL: new Set(cfg.Fixed.Alg_OLL.options || []),
+    Alg_PLL: new Set(cfg.Fixed.Alg_PLL.options || []),
+    Alg_CMLL: new Set(cfg.Fixed.Alg_CMLL.options || []),
+    Alg_CLL: new Set(cfg.Fixed.Alg_CLL.options || []),
     TimerInput: new Set(cfg.Fixed.TimerInput.options || []),
     SolveSource: new Set(cfg.Fixed.SolveSource.options || []),
     Custom1: new Set(cfg.CustomSlots?.[0]?.options || []),

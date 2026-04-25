@@ -51,7 +51,7 @@ function normalizeNonRollingMaxRows(rawValue) {
 
 function normalizeStatsSummaryLayout(rawValue) {
   const raw = String(rawValue || "").trim().toLowerCase();
-  return raw === "tile" ? "tile" : "row";
+  return raw === "row" ? "row" : "tile";
 }
 
 export const defaultSettings = {
@@ -98,7 +98,7 @@ export const defaultSettings = {
   smartCubeProvider: "gan",
   navigationArrowStyle: "scramble",
   showAddSolveButton: true,
-  statsSummaryLayout: "row",
+  statsSummaryLayout: "tile",
 
   // random-state = cubing.js default
   // legacy = old generateScramble behavior

@@ -1441,6 +1441,73 @@ function normalizeTagIndexValue(v) {
   return s || null;
 }
 
+function normalizeAlgorithmTagValue(tagKey, value) {
+  const key = String(tagKey || "").trim();
+  const raw = cleanTagValue(value);
+  if (!raw) return "";
+
+  if (/^skip$/i.test(raw)) return "Skip";
+
+  if (key === "Alg_OLL") {
+    const match = raw.match(/^oll\s*#?\s*(\d{1,2})$/i);
+    if (match) {
+      const num = Number(match[1]);
+      if (Number.isInteger(num) && num >= 1 && num <= 57) return `OLL #${num}`;
+    }
+  }
+
+  if (key === "Alg_PLL") {
+    const normalized = raw.toLowerCase().replace(/[\s_-]+/g, "");
+    const pllAliases = {
+      aa: "Aa Perm",
+      aaperm: "Aa Perm",
+      ab: "Ab Perm",
+      abperm: "Ab Perm",
+      e: "E Perm",
+      eperm: "E Perm",
+      h: "H Perm",
+      hperm: "H Perm",
+      ua: "Ua Perm",
+      uaperm: "Ua Perm",
+      ub: "Ub Perm",
+      ubperm: "Ub Perm",
+      z: "Z Perm",
+      zperm: "Z Perm",
+      f: "F Perm",
+      fperm: "F Perm",
+      ga: "Ga Perm",
+      gaperm: "Ga Perm",
+      gb: "Gb Perm",
+      gbperm: "Gb Perm",
+      gc: "Gc Perm",
+      gcperm: "Gc Perm",
+      gd: "Gd Perm",
+      gdperm: "Gd Perm",
+      ja: "Ja Perm",
+      japerm: "Ja Perm",
+      jb: "Jb Perm",
+      jbperm: "Jb Perm",
+      na: "Na Perm",
+      naperm: "Na Perm",
+      nb: "Nb Perm",
+      nbperm: "Nb Perm",
+      ra: "Ra Perm",
+      raperm: "Ra Perm",
+      rb: "Rb Perm",
+      rbperm: "Rb Perm",
+      t: "T Perm",
+      tperm: "T Perm",
+      v: "V Perm",
+      vperm: "V Perm",
+      y: "Y Perm",
+      yperm: "Y Perm",
+    };
+    return pllAliases[normalized] || raw;
+  }
+
+  return raw;
+}
+
 function sanitizeTags(input = {}) {
   const legacyCustom = input?.Custom && typeof input.Custom === "object" ? input.Custom : {};
   const solveSourceRaw = cleanTagValue(input?.SolveSource);
@@ -1458,6 +1525,10 @@ function sanitizeTags(input = {}) {
     CubeModel: cleanTagValue(input?.CubeModel),
     CrossColor: cleanTagValue(input?.StartColor || input?.CrossColor),
     Method: cleanTagValue(input?.Method),
+    Alg_OLL: normalizeAlgorithmTagValue("Alg_OLL", input?.Alg_OLL || input?.OLL),
+    Alg_PLL: normalizeAlgorithmTagValue("Alg_PLL", input?.Alg_PLL || input?.PLL),
+    Alg_CMLL: normalizeAlgorithmTagValue("Alg_CMLL", input?.Alg_CMLL || input?.CMLL),
+    Alg_CLL: normalizeAlgorithmTagValue("Alg_CLL", input?.Alg_CLL || input?.CLL),
     TimerInput: cleanTagValue(input?.TimerInput || input?.InputType),
     SolveSource: derivedSolveSource,
     Custom1: cleanTagValue(input?.Custom1),
@@ -1527,6 +1598,10 @@ function buildSolveItem({
     Tag_CubeModel: canonicalTags.CubeModel,
     Tag_CrossColor: canonicalTags.CrossColor,
     Tag_Method: canonicalTags.Method,
+    Tag_Alg_OLL: canonicalTags.Alg_OLL,
+    Tag_Alg_PLL: canonicalTags.Alg_PLL,
+    Tag_Alg_CMLL: canonicalTags.Alg_CMLL,
+    Tag_Alg_CLL: canonicalTags.Alg_CLL,
     Tag_TimerInput: canonicalTags.TimerInput,
     Tag_SolveSource: canonicalTags.SolveSource,
     Tag_Custom1: canonicalTags.Custom1,
@@ -1539,6 +1614,10 @@ function buildSolveItem({
       CubeModel: canonicalTags.CubeModel,
       CrossColor: canonicalTags.CrossColor,
       Method: canonicalTags.Method,
+      Alg_OLL: canonicalTags.Alg_OLL,
+      Alg_PLL: canonicalTags.Alg_PLL,
+      Alg_CMLL: canonicalTags.Alg_CMLL,
+      Alg_CLL: canonicalTags.Alg_CLL,
       TimerInput: canonicalTags.TimerInput,
       SolveSource: canonicalTags.SolveSource,
       Custom1: canonicalTags.Custom1,
@@ -1581,7 +1660,10 @@ function getSolveTagPairsFromItem(solveItem) {
   };
 
   const add = (key, value) => {
-    const clean = cleanTagValue(value);
+    const clean =
+      key === "Alg_OLL" || key === "Alg_PLL" || key === "Alg_CMLL" || key === "Alg_CLL"
+        ? normalizeAlgorithmTagValue(key, value)
+        : cleanTagValue(value);
     if (!clean) return;
     pairs.push({ key, value: clean });
   };
@@ -1603,6 +1685,10 @@ function getSolveTagPairsFromItem(solveItem) {
     )
   );
   add("Method", firstNonEmpty(solveItem?.Tag_Method, nestedTags?.Method, nestedTags?.method));
+  add("Alg_OLL", firstNonEmpty(solveItem?.Tag_Alg_OLL, nestedTags?.Alg_OLL, nestedTags?.OLL));
+  add("Alg_PLL", firstNonEmpty(solveItem?.Tag_Alg_PLL, nestedTags?.Alg_PLL, nestedTags?.PLL));
+  add("Alg_CMLL", firstNonEmpty(solveItem?.Tag_Alg_CMLL, nestedTags?.Alg_CMLL, nestedTags?.CMLL));
+  add("Alg_CLL", firstNonEmpty(solveItem?.Tag_Alg_CLL, nestedTags?.Alg_CLL, nestedTags?.CLL));
   add(
     "TimerInput",
     firstNonEmpty(
@@ -2596,6 +2682,7 @@ module.exports = {
 
   cleanTagValue,
   normalizeTagIndexValue,
+  normalizeAlgorithmTagValue,
   sanitizeTags,
   buildTagStatsSK,
   buildSolveTagSK,

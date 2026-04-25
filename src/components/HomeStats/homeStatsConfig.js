@@ -40,6 +40,11 @@ export const HOME_STAT_SUMMARY_SURFACE_OPTIONS = [
   { value: "gradient", label: "Gradient" },
 ];
 
+export const HOME_STAT_SUMMARY_LAYOUT_OPTIONS = [
+  { value: "tile", label: "Organized Tile" },
+  { value: "compact", label: "Simple Vertical List" },
+];
+
 export const HOME_STAT_LINE_METRIC_OPTIONS = [
   { value: "single", label: "Single Times" },
   { value: "ao5", label: "Ao5 Trend" },
@@ -87,6 +92,8 @@ function defaultSlotConfig(slotKey) {
       height: meta.defaultHeight,
       opacity: meta.defaultOpacity,
       summaryColorCustomized: false,
+      summaryLayout: "tile",
+      summaryShowMeta: false,
       summarySurface: "flat",
     };
   }
@@ -104,6 +111,8 @@ function defaultSlotConfig(slotKey) {
       height: meta.defaultHeight,
       opacity: meta.defaultOpacity,
       summaryColorCustomized: false,
+      summaryLayout: "tile",
+      summaryShowMeta: false,
       summarySurface: "flat",
     };
   }
@@ -121,6 +130,8 @@ function defaultSlotConfig(slotKey) {
       height: meta.defaultHeight,
       opacity: meta.defaultOpacity,
       summaryColorCustomized: false,
+      summaryLayout: "tile",
+      summaryShowMeta: false,
       summarySurface: "flat",
     };
   }
@@ -137,6 +148,8 @@ function defaultSlotConfig(slotKey) {
     height: meta.defaultHeight,
     opacity: meta.defaultOpacity,
     summaryColorCustomized: false,
+    summaryLayout: "tile",
+    summaryShowMeta: false,
     summarySurface: "flat",
   };
 }
@@ -185,6 +198,11 @@ export function normalizeHomeStatsSlots(input) {
     )
       ? raw.summarySurface
       : fallback.summarySurface;
+    const summaryLayout = HOME_STAT_SUMMARY_LAYOUT_OPTIONS.some(
+      (opt) => opt.value === raw.summaryLayout
+    )
+      ? raw.summaryLayout
+      : fallback.summaryLayout;
 
     acc[slotKey] = {
       enabled: !!raw.enabled,
@@ -198,6 +216,8 @@ export function normalizeHomeStatsSlots(input) {
       height: clampNumber(raw.height, fallback.height, 90, 700),
       opacity: clampNumber(raw.opacity, fallback.opacity, 0.05, 1),
       summaryColorCustomized,
+      summaryLayout,
+      summaryShowMeta: !!raw.summaryShowMeta,
       summarySurface,
     };
     return acc;

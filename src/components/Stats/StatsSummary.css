@@ -79,25 +79,42 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 1px;
-  padding-right: 4px;
+  align-items: center;
+  text-align: center;
+  justify-self: start;
+  gap: 0;
+  padding-left: 6px;
+  padding-right: 0;
 }
 
 .ssViewCountValue {
-  font-size: clamp(2.55rem, 3.5vw, 3.35rem);
+  font-size: clamp(2.7rem, 3.7vw, 3.5rem);
   line-height: 0.92;
   font-weight: 700;
   letter-spacing: -0.04em;
 }
 
 .ssViewCountLabel {
-  font-size: 0.86rem;
-  color: var(--ss-muted);
+  margin-top: 0;
+  font-size: 1.04rem;
+  line-height: 0.96;
+  font-weight: 700;
+  color: var(--ss-text);
 }
 
 .ssViewMeta {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
+  line-height: 1.05;
   color: rgba(243, 244, 246, 0.82);
+}
+
+.ssViewMeta--date {
+  margin-top: 6px;
+}
+
+.ssViewMeta--range {
+  margin-top: 2px;
+  color: rgba(243, 244, 246, 0.66);
 }
 
 .ssViewTagList {
@@ -280,8 +297,14 @@
   gap: 4px;
   align-content: start;
   justify-content: stretch;
-  width: 100%;
-  padding-top: 10px;
+  text-align: center;
+  padding-top: 6px;
+  padding-right: 8px;
+  padding-bottom: 4px;
+  padding-left: 8px;
+  border-radius: 12px;
+  /*background: rgba(255, 255, 255, 0.04);*/
+  border: 1px solid rgba(255, 255, 255, 0.08);
   min-height: 0;
 }
 
@@ -290,7 +313,7 @@
   grid-column: 1 / -1;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px 16px;
-  margin-top: 10px;
+  margin-top: 6px;
   margin-left: 0;
   width: 100%;
   align-self: start;
@@ -367,7 +390,7 @@
 }
 
 .ssMetricTileGrid .ssMetricTileNumber {
-  font-size: clamp(1.38rem, 1.82vw, 1.72rem);
+  font-size: clamp(1.3rem, 1.72vw, 1.62rem);
   opacity: 0.78;
 }
 
@@ -432,12 +455,18 @@
 }
 
 .ssMetricTileGrid .ssTileMetricValue {
-  font-size: clamp(0.92rem, 1.2vw, 1.16rem);
+  font-size: clamp(0.86rem, 1.12vw, 1.08rem);
   opacity: 0.76;
 }
 
 .ssMetricTileGrid .ssTileMetricValue--emphasized {
-  font-size: clamp(1rem, 1.32vw, 1.26rem);
+  font-size: clamp(0.94rem, 1.24vw, 1.18rem);
+}
+
+.ssMetricTileGrid .ssTileMetricValue.ssMetricValue--best,
+.ssMetricTileGrid .ssTileMetricValue--emphasized.ssMetricValue--best {
+  font-size: clamp(1.18rem, 1.56vw, 1.5rem);
+  opacity: 0.96;
 }
 
 .ssMetricTileGrid .ssMetricTileValues,
@@ -1000,7 +1029,7 @@
 }
 
 .ssCard--view .ssTopMetaRow .ssMetaStat--stacked .ssMetaValue {
-  font-size: clamp(1rem, 1.12vw, 1.14rem);
+  font-size: clamp(1.2rem, 1.36vw, 1.4rem);
 }
 
 .ssMetaLabel {
@@ -1029,7 +1058,7 @@
 }
 
 .ssCard--view .ssMetaGrid--currentRow .ssMetaValue {
-  font-size: clamp(0.96rem, 1.08vw, 1.08rem);
+  font-size: clamp(1.14rem, 1.28vw, 1.3rem);
 }
 
 .ssMetaStat--accent .ssMetaValue {

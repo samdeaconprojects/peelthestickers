@@ -50,6 +50,7 @@ import {
   getTagColorMapForEvent,
   getTagCatalogOptionsForEvent,
   getSharedTagLabels,
+  getVisibleSharedTagFields,
   hasActiveTagSelection,
   makeEmptyTagSelection,
   normalizeTagConfig,
@@ -1515,9 +1516,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const [statsViewMode, setStatsViewMode] = useState("standard");
   const [timeViewMainSessionsOnly, setTimeViewMainSessionsOnly] = useState(true);
   const summaryLayout =
-    String(settings?.statsSummaryLayout || "row").trim().toLowerCase() === "tile"
-      ? "tile"
-      : "row";
+    String(settings?.statsSummaryLayout || "tile").trim().toLowerCase() === "row"
+      ? "row"
+      : "tile";
   const showSolveCharts = isSolveLevelMode || statsViewMode === "time";
   const [selectedTimeDay, setSelectedTimeDay] = useState("");
   const [dateFilterStart, setDateFilterStart] = useState("");
@@ -4004,6 +4005,15 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         return true;
       }
 
+      const nextActiveTagEntries = Object.entries(sanitized).filter(([, value]) => String(value || "").trim());
+      const willUseDateScopedLocalFilter = hasActiveDateFilter;
+      const willUseIndexedTagLoad = !hasActiveDateFilter && nextActiveTagEntries.length > 0;
+
+      if (willUseDateScopedLocalFilter || willUseIndexedTagLoad) {
+        setTagFilterSelection(sanitized);
+        return true;
+      }
+
       const isDateScopedTagLoad = hasActiveDateFilter;
       const scopedSolveEstimate = hasActiveDateFilter
         ? formatSolveEstimate(scopeSolvesForSelection.length)
@@ -6483,6 +6493,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             loadedSolveCount={loadedSolveCountForSummary}
             showCurrentMetrics={currentPage === 0}
             viewMode={statsViewMode}
+            summaryLayout={summaryLayout}
             selectedDay={selectedTimeDay}
             onStatSelect={handleSummaryStatSelect}
             loading={primarySummaryLoading}
@@ -6522,6 +6533,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         loadedSolveCount={compareFilteredRawSolves.length}
             showCurrentMetrics={currentPage === 0}
             viewMode="standard"
+            summaryLayout={summaryLayout}
             selectedDay=""
             onStatSelect={null}
             loading={compareSummaryLoading}
@@ -6759,6 +6771,24 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     return renderFocusedCardBody(focusedCard);
   }, [focusedCard, renderFocusedCardBody]);
 
+  const focusedCardFrameClassName = useMemo(() => {
+    const key = String(focusedCard?.key || "");
+
+    if (key === "line") return "statFocusFrame stats-item stats-item--line";
+    if (key === "percent") return "statFocusFrame stats-item stats-item--percent";
+    if (key === "bar") return "statFocusFrame stats-item stats-item--bar";
+    if (key === "table") return "statFocusFrame stats-item stats-item--table";
+    if (key.startsWith("summary")) {
+      return `statFocusFrame statsSummaryPanel ${
+        key.includes("overall")
+          ? "statFocusFrame--summaryOverall"
+          : "statFocusFrame--summaryCurrent"
+      }`;
+    }
+
+    return "statFocusFrame";
+  }, [focusedCard?.key]);
+
   const focusOptionsContent = useMemo(() => {
     if (focusedCard?.key !== "line") return null;
 
@@ -6896,8 +6926,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const getTagFieldForSection = useCallback((section) => {
     if (section === "tag-cube-model") return "CubeModel";
     if (section === "tag-cross-color") return "CrossColor";
+    if (section === "tag-method") return "Method";
     if (section === "tag-solve-source") return "SolveSource";
-    if (section === "tag-time-input") return "TimeInput";
+    if (section === "tag-time-input") return "TimerInput";
     return "CubeModel";
   }, []);
 
@@ -6946,6 +6977,17 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     const activeTagField = getTagFieldForSection(scopeModalSection);
     const resolvedTagEvent =
       eventValue && eventValue !== ALL_EVENTS ? String(eventValue || "").toUpperCase() : "";
+    const quickTagFields = getVisibleSharedTagFields(tagSelection, resolvedTagEvent);
+    const hasMethodOrAlgorithms = quickTagFields.some((field) =>
+      ["Method", "Alg_PLL", "Alg_OLL", "Alg_CMLL", "Alg_CLL"].includes(field)
+    );
+    const quickTagNavItems = [
+      quickTagFields.includes("CubeModel") ? { key: "tag-cube-model", label: "Cube Model" } : null,
+      quickTagFields.includes("CrossColor") ? { key: "tag-cross-color", label: "Start Color" } : null,
+      hasMethodOrAlgorithms ? { key: "tag-method", label: "Method + Algorithms" } : null,
+      quickTagFields.includes("SolveSource") ? { key: "tag-solve-source", label: "Solve Source" } : null,
+      quickTagFields.includes("TimerInput") ? { key: "tag-time-input", label: "Time Input" } : null,
+    ].filter(Boolean);
     const scopeTagColors = getTagColorMapForEvent(tagColorCatalog, resolvedTagEvent);
     const handleScopeTagColorsChange =
       typeof onTagColorsChange === "function" && resolvedTagEvent
@@ -7082,12 +7124,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             {scopeModalSection === "tags" && (
               <>
                 <div className="statsScopeTagQuickNav">
-                  {[
-                    { key: "tag-cube-model", label: "Cube Model" },
-                    { key: "tag-cross-color", label: "Start Color" },
-                    { key: "tag-solve-source", label: "Solve Source" },
-                    { key: "tag-time-input", label: "Time Input" },
-                  ].map((item) => (
+                  {quickTagNavItems.map((item) => (
                     <button
                       key={`${scopeKey}-${item.key}`}
                       type="button"
@@ -7101,6 +7138,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
                 <TagBar
                   tags={tagSelection}
+                  eventKey={resolvedTagEvent}
                   tagColors={scopeTagColors}
                   onChange={onTagSelectionChange}
                   onTagColorsChange={handleScopeTagColorsChange}
@@ -7109,6 +7147,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   discoveredOptions={discoveredOptions}
                   profileColor={user?.Color || user?.color || "#2EC4B6"}
                   variant="stats"
+                  algorithmGrouping="method"
+                  showEventScopedAlgorithmFields
+                  expandMethodAlgorithms
                   allowAdditions
                 />
               </>
@@ -7117,12 +7158,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             {String(scopeModalSection || "").startsWith("tag-") && (
               <>
                 <div className="statsScopeTagQuickNav">
-                  {[
-                    { key: "tag-cube-model", label: "Cube Model" },
-                    { key: "tag-cross-color", label: "Start Color" },
-                    { key: "tag-solve-source", label: "Solve Source" },
-                    { key: "tag-time-input", label: "Time Input" },
-                  ].map((item) => (
+                  {quickTagNavItems.map((item) => (
                     <button
                       key={`${scopeKey}-nav-${item.key}`}
                       type="button"
@@ -7136,6 +7172,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
                 <TagBar
                   tags={tagSelection}
+                  eventKey={resolvedTagEvent}
                   tagColors={scopeTagColors}
                   onChange={onTagSelectionChange}
                   onTagColorsChange={handleScopeTagColorsChange}
@@ -7144,6 +7181,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   discoveredOptions={discoveredOptions}
                   profileColor={user?.Color || user?.color || "#2EC4B6"}
                   variant="stats"
+                  algorithmGrouping="method"
+                  showEventScopedAlgorithmFields
+                  expandMethodAlgorithms
                   allowAdditions
                   activeField={activeTagField}
                 />
@@ -8257,6 +8297,20 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         subtitle={focusedCard?.subtitle}
         actionMessage={focusActionMessage}
         optionsContent={focusOptionsContent}
+        modalClassName={
+          focusedCard?.key?.startsWith("summary")
+            ? focusedCard?.key?.includes("overall")
+              ? "statFocusModal--summary statFocusModal--summaryOverall"
+              : "statFocusModal--summary statFocusModal--summaryCurrent"
+            : ""
+        }
+        bodyClassName={
+          focusedCard?.key?.startsWith("summary")
+            ? focusedCard?.key?.includes("overall")
+              ? "statFocusBody--summary statFocusBody--summaryOverall"
+              : "statFocusBody--summary statFocusBody--summaryCurrent"
+            : ""
+        }
         onClose={closeCardFocus}
         actionButtons={[
           {
@@ -8288,9 +8342,17 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         <div
           className={`statFocusCanvas ${focusedCard?.key === "summary" ? "is-summary" : ""} ${
             focusedCard?.key === "line" ? "is-line" : ""
+          } ${
+            focusedCard?.key?.startsWith("summary")
+              ? focusedCard?.key?.includes("overall")
+                ? "is-summary-overall"
+                : "is-summary-current"
+              : ""
           }`}
         >
-          {focusedCardBody}
+          <div className={focusedCardFrameClassName}>
+            {focusedCardBody}
+          </div>
         </div>
       </StatFocusModal>
 

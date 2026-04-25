@@ -323,6 +323,7 @@ function Social({
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [messageInput, setMessageInput] = useState("");
   const [showConversationStats, setShowConversationStats] = useState(false);
+  const [showConversationHeader, setShowConversationHeader] = useState(true);
   const [showSharedModal, setShowSharedModal] = useState(false);
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [creatingGroup, setCreatingGroup] = useState(false);
@@ -1305,6 +1306,13 @@ function Social({
     return bTime - aTime;
   });
 
+  const handleOpenMessagesTab = useCallback(() => {
+    setActiveTab(1);
+    if (sortedConversations.length > 0) {
+      setSelectedConversation(sortedConversations[0]);
+    }
+  }, [sortedConversations]);
+
   const selectedConversationMembers =
     selectedConversation?.type === "GROUP"
       ? (selectedConversation.memberProfiles || []).filter((member) => !member.isYou)
@@ -1489,53 +1497,38 @@ function Social({
             {activeTab === 0 && <img className="tabDot" src={DotIcon} alt="" />}
           </button>
 
+          <span className="tabDivider" aria-hidden="true">
+            |
+          </span>
+
           <button
-            className={`tabIconButton ${activeTab === 1 ? "active" : ""}`}
-            onClick={() => setActiveTab(1)}
+            className={`tabIconButton tabIconButton--messages ${
+              activeTab === 1 ? "active" : ""
+            }`}
+            onClick={handleOpenMessagesTab}
             aria-label="Messages"
             title="Messages"
           >
             <img className="tabIcon" src={SocialMessagesIcon} alt="" />
             {activeTab === 1 && <img className="tabDot" src={DotIcon} alt="" />}
           </button>
-
-          <button
-            className={`tabIconButton tabIconButton--flip ${
-              activeTab === 1 ? "" : "disabled"
-            }`}
-            onClick={handleRefreshMessagesAndSidebar}
-            aria-label="Refresh messages"
-            title={activeTab === 1 ? "Refresh" : "Switch to Messages to refresh"}
-            disabled={activeTab !== 1 || !selectedConversation}
-          >
-            <img className="tabIcon" src={FlipIcon} alt="" />
-          </button>
         </div>
 
         {activeTab === 1 && (
           <div className="headerConversationStrip">
-            <button
-              type="button"
-              className="conversationPreview conversationPreviewCreate"
-              onClick={() => setShowCreateGroupModal(true)}
-            >
-              <div className="avatarContainer">
-                <div className="profilePicturePost profilePicturePostCreate">
-                  <div className="conversationCreatePlus">+</div>
-                </div>
-                <div className="avatarName">New Group</div>
-              </div>
-            </button>
-
             {sortedConversations.map((conv) => (
-              <div
+              <button
+                type="button"
                 key={conv.conversationID}
                 className={`conversationPreview ${
                   selectedConversation?.conversationID === conv.conversationID
                     ? "selected"
                     : ""
                 }`}
-                onClick={() => setSelectedConversation(conv)}
+                onClick={() => {
+                  setSelectedConversation(conv);
+                  setActiveTab(1);
+                }}
               >
                 <div className="avatarContainer">
                   <div
@@ -1584,7 +1577,7 @@ function Social({
                   </div>
                   <div className="avatarName">{conv.name}</div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -1597,31 +1590,57 @@ function Social({
             }
           }}
         >
-          <input
-            ref={searchInputRef}
-            type="text"
-            placeholder="Search user..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            onKeyDown={(e) =>
-              e.key === "Enter" &&
-              suggestions.length &&
-              handleSearchSelect(suggestions[0].id)
-            }
-          />
+          <div className="searchRow">
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search user..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) =>
+                e.key === "Enter" &&
+                suggestions.length &&
+                handleSearchSelect(suggestions[0].id)
+              }
+            />
 
-          <button
-            className="searchIconButton"
-            onClick={() => {
-              setSearchOpen(true);
-              setTimeout(() => searchInputRef.current?.focus(), 0);
-            }}
-            aria-label="Search users"
-            title="Search"
-            type="button"
-          >
-            <img className="tabIcon" src={SearchIcon} alt="" />
-          </button>
+            <button
+              className="searchIconButton"
+              onClick={() => {
+                setSearchOpen(true);
+                setTimeout(() => searchInputRef.current?.focus(), 0);
+              }}
+              aria-label="Search users"
+              title="Search"
+              type="button"
+            >
+              <img className="tabIcon" src={SearchIcon} alt="" />
+            </button>
+          </div>
+
+          <div className="searchActionRow">
+            <button
+              type="button"
+              className="searchActionButton"
+              onClick={handleRefreshMessagesAndSidebar}
+              aria-label="Refresh messages"
+              title={activeTab === 1 ? "Refresh" : "Open a conversation to refresh"}
+              disabled={activeTab !== 1 || !selectedConversation}
+            >
+              <img className="searchActionIcon" src={FlipIcon} alt="" />
+            </button>
+
+            <button
+              type="button"
+              className="searchActionButton"
+              onClick={() => setShowCreateGroupModal(true)}
+              aria-label="Create group"
+              title="New group"
+              disabled={activeTab !== 1}
+            >
+              <span className="searchActionPlus">+</span>
+            </button>
+          </div>
 
           {searchOpen && suggestions.length > 0 && (
             <ul className="suggestionsList">
@@ -1744,84 +1763,114 @@ function Social({
             <div className="conversationView">
               {selectedConversation ? (
                 <>
-                  {selectedConversation.type === "GROUP" && (
-                    <div className="groupThreadMeta">
-                      <div className="groupThreadTitle">{selectedConversation.name}</div>
-                      <div className="groupThreadMembers">
-                        {selectedConversationMembers.length
-                          ? selectedConversationMembers.map((member) => member.name).join(", ")
-                          : "No other members"}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="sharedConversationStatsWrap">
+                  <div className="conversationHeaderToggleWrap">
                     <button
                       type="button"
-                      className="sharedConversationStatsToggle"
-                      onClick={() => setShowConversationStats((prev) => !prev)}
+                      className="conversationHeaderToggle"
+                      onClick={() => setShowConversationHeader((prev) => !prev)}
+                      aria-label={
+                        showConversationHeader
+                          ? "Collapse conversation details"
+                          : "Expand conversation details"
+                      }
                     >
-                      <span>Chat stats</span>
-                      <span>{showConversationStats ? "Hide" : "Show"}</span>
+                      <span className="conversationHeaderToggleLabel">Details</span>
+                      <span
+                        className={`conversationHeaderToggleArrow ${
+                          showConversationHeader ? "is-open" : ""
+                        }`}
+                        aria-hidden="true"
+                      >
+                        ^
+                      </span>
                     </button>
+                  </div>
 
-                    {showConversationStats && (
-                      <div className="sharedConversationStats">
-                        <div className="sharedConversationStatsTitle">Shared totals</div>
-                        <div className="sharedConversationStatsGrid">
-                          <div className="sharedConversationStatCard">
-                            <div className="sharedConversationStatValue">
-                              {selectedConversationSharedStats.TotalSessions || 0}
-                            </div>
-                            <div className="sharedConversationStatLabel">Sessions</div>
-                          </div>
-                          <div className="sharedConversationStatCard">
-                            <div className="sharedConversationStatValue">
-                              {selectedConversationSharedStats.TotalSolves || 0}
-                            </div>
-                            <div className="sharedConversationStatLabel">Shared solves</div>
-                          </div>
-                          <div className="sharedConversationStatCard">
-                            <div className="sharedConversationStatValue">
-                              {yourSharedStats.Wins || 0}
-                            </div>
-                            <div className="sharedConversationStatLabel">Your wins</div>
+                  {showConversationHeader && (
+                    <>
+                      {selectedConversation.type === "GROUP" && (
+                        <div className="groupThreadMeta">
+                          <div className="groupThreadTitle">{selectedConversation.name}</div>
+                          <div className="groupThreadMembers">
+                            {selectedConversationMembers.length
+                              ? selectedConversationMembers.map((member) => member.name).join(", ")
+                              : "No other members"}
                           </div>
                         </div>
+                      )}
 
-                        {selectedConversation?.type === "DM" && (
-                          <div className="sharedConversationHeadToHeadRow">
-                            <div className="sharedConversationHeadToHeadName">
-                              {user?.Username || user?.Name || "You"}: {yourSharedStats.Wins || 0}
-                            </div>
-                            <div className="sharedConversationHeadToHeadName">
-                              {selectedConversation?.username || selectedConversation?.name || "Them"}:{" "}
-                              {theirSharedStats.Wins || 0}
-                            </div>
-                          </div>
-                        )}
+                      <div className="sharedConversationStatsWrap">
+                        <button
+                          type="button"
+                          className="sharedConversationStatsToggle"
+                          onClick={() => setShowConversationStats((prev) => !prev)}
+                        >
+                          <span>Chat stats</span>
+                          <span>{showConversationStats ? "Hide" : "Show"}</span>
+                        </button>
 
-                        {selectedConversationTopEvents.length > 0 && (
-                          <div className="sharedConversationEventRow">
-                            {selectedConversationTopEvents.map((row) => (
-                              <div
-                                key={`${selectedConversation.conversationID}-${row.eventKey}`}
-                                className="sharedConversationEventPill"
-                              >
-                                <span>{currentEventToString(row.eventKey)}</span>
-                                <span>{row.solves} solves</span>
-                                {selectedConversation?.type === "DM" ? (
-                                  <span>{row.yourWins}-{row.theirWins} wins</span>
-                                ) : (
-                                  <span>{row.wins} wins</span>
-                                )}
+                        {showConversationStats && (
+                          <div className="sharedConversationStats">
+                            <div className="sharedConversationStatsTitle">Shared totals</div>
+                            <div className="sharedConversationStatsGrid">
+                              <div className="sharedConversationStatCard">
+                                <div className="sharedConversationStatValue">
+                                  {selectedConversationSharedStats.TotalSessions || 0}
+                                </div>
+                                <div className="sharedConversationStatLabel">Sessions</div>
                               </div>
-                            ))}
+                              <div className="sharedConversationStatCard">
+                                <div className="sharedConversationStatValue">
+                                  {selectedConversationSharedStats.TotalSolves || 0}
+                                </div>
+                                <div className="sharedConversationStatLabel">Shared solves</div>
+                              </div>
+                              <div className="sharedConversationStatCard">
+                                <div className="sharedConversationStatValue">
+                                  {yourSharedStats.Wins || 0}
+                                </div>
+                                <div className="sharedConversationStatLabel">Your wins</div>
+                              </div>
+                            </div>
+
+                            {selectedConversation?.type === "DM" && (
+                              <div className="sharedConversationHeadToHeadRow">
+                                <div className="sharedConversationHeadToHeadName">
+                                  {user?.Username || user?.Name || "You"}:{" "}
+                                  {yourSharedStats.Wins || 0}
+                                </div>
+                                <div className="sharedConversationHeadToHeadName">
+                                  {selectedConversation?.username ||
+                                    selectedConversation?.name ||
+                                    "Them"}
+                                  : {theirSharedStats.Wins || 0}
+                                </div>
+                              </div>
+                            )}
+
+                            {selectedConversationTopEvents.length > 0 && (
+                              <div className="sharedConversationEventRow">
+                                {selectedConversationTopEvents.map((row) => (
+                                  <div
+                                    key={`${selectedConversation.conversationID}-${row.eventKey}`}
+                                    className="sharedConversationEventPill"
+                                  >
+                                    <span>{currentEventToString(row.eventKey)}</span>
+                                    <span>{row.solves} solves</span>
+                                    {selectedConversation?.type === "DM" ? (
+                                      <span>{row.yourWins}-{row.theirWins} wins</span>
+                                    ) : (
+                                      <span>{row.wins} wins</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
-                    )}
-                  </div>
+                    </>
+                  )}
 
                   <div
                     className="messages"

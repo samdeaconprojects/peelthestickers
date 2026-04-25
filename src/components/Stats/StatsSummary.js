@@ -1223,14 +1223,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
       );
     }
 
-    const rows = Array.isArray(allEventsBreakdown) ? allEventsBreakdown : [];
-    return (
-      <section className={`ssCard ssCard--view ${loading ? "is-loading" : ""}`} aria-busy={loading}>
-        <div className="statsSummaryEmpty">
-          {rows.length ? `All events overview: ${rows.length} events cached.` : "No solves available"}
-        </div>
-      </section>
-    );
+    return null;
   }
 
   if (!view) {
@@ -1430,8 +1423,8 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
           <div className="ssViewCount">
             <div className="ssViewCountValue">{formatCount(view?.solveCount)}</div>
             <div className="ssViewCountLabel">solves</div>
-            <div className="ssViewMeta">{view?.dateRange || "—"}</div>
-            <div className="ssViewMeta">{view?.indexRange || "—"}</div>
+            <div className="ssViewMeta ssViewMeta--date">{view?.dateRange || "—"}</div>
+            <div className="ssViewMeta ssViewMeta--range">{view?.indexRange || "—"}</div>
             {Array.isArray(selectedTagPills) && selectedTagPills.length ? (
               <div className="ssViewTagList">
                 {selectedTagPills.map((tag) => (
@@ -1500,12 +1493,12 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
 
                   <div className="ssMetaGrid ssMetaGrid--currentRow">
                     <MetaStat label="+2 Count" value={formatCount(view?.plus2Count)} tone="lime" />
-                    <MetaStat label="+2 Best" value={formatStatTime(view?.plus2Best, { average: false })} tone="teal" />
+                    <MetaStat label="DNF Count" value={formatCount(view?.dnfCount)} tone="danger" />
                   </div>
 
                   <div className="ssMetaGrid ssMetaGrid--currentRow">
+                    <MetaStat label="+2 Best" value={formatStatTime(view?.plus2Best, { average: false })} tone="teal" />
                     <MetaStat label="Sum" value={formatDurationMs(view?.sum)} tone="blue" />
-                    <MetaStat label="DNF Count" value={formatCount(view?.dnfCount)} tone="danger" />
                   </div>
                 </div>
 
@@ -1691,7 +1684,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
                 <div className="ssCurrentSummaryCell ssCurrentSummaryCell--meta">
                   <div className="ssMetaGrid ssMetaGrid--currentRow">
                     <MetaStat label="+2 Count" value={formatCount(view?.plus2Count)} tone="lime" />
-                    <MetaStat label="Sum" value={formatDurationMs(view?.sum)} tone="blue" />
+                    <MetaStat label="DNF Count" value={formatCount(view?.dnfCount)} tone="danger" />
                   </div>
                 </div>
 
@@ -1728,12 +1721,8 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
 
                 <div className="ssCurrentSummaryCell ssCurrentSummaryCell--meta">
                   <div className="ssMetaGrid ssMetaGrid--currentRow">
-                    <MetaStat
-                      label="+2 Best"
-                      value={formatStatTime(view?.plus2Best, { average: false })}
-                      tone="teal"
-                    />
-                    <MetaStat label="DNF Count" value={formatCount(view?.dnfCount)} tone="danger" />
+                    <MetaStat label="+2 Best" value={formatStatTime(view?.plus2Best, { average: false })} tone="teal" />
+                    <MetaStat label="Sum" value={formatDurationMs(view?.sum)} tone="blue" />
                   </div>
                 </div>
 

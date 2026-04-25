@@ -387,7 +387,19 @@ function Timer({
 
     ignoreNextKeyUp.current = true;
 
-    addTimeRef.current?.(finalWithInspection);
+    Promise.resolve(addTimeRef.current?.(finalWithInspection))
+      .then((didKeepSolve) => {
+        if (didKeepSolve === false) {
+          // A confirm dialog can consume the original keyup; clear the one-shot
+          // guard so the next hold-release starts immediately.
+          ignoreNextKeyUp.current = false;
+          setIsSpacebarHeld(false);
+          setCanStart(false);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to save solve:', err);
+      });
   };
 
   // -------------------------
@@ -1198,6 +1210,8 @@ function Timer({
   // Keyboard handlers
   // -------------------------
   const handleKeyDown = (event) => {
+    if (event?.__ptsTagBindingConsumed || event.defaultPrevented) return;
+
     const target = event.target;
     const isTyping =
       target.tagName === 'INPUT' ||
@@ -1263,6 +1277,8 @@ function Timer({
   };
 
   const handleKeyUp = (event) => {
+    if (event?.__ptsTagBindingConsumed || event.defaultPrevented) return;
+
     const target = event.target;
     const isTyping =
       target.tagName === 'INPUT' ||

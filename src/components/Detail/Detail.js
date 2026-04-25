@@ -7,6 +7,11 @@ import { currentEventToString } from "../scrambleUtils";
 import { useDbStatus } from "../../contexts/DbStatusContext";
 import { updateSolve } from "../../services/updateSolve";
 import TagBar from "../TagBar/TagBar";
+import {
+  getVisibleSharedTagFields,
+  normalizeAlgorithmTagValue,
+  SHARED_TAG_FIELDS,
+} from "../TagBar/tagUtils";
 
 function Detail({
   solve,
@@ -194,6 +199,10 @@ function Detail({
       "CubeModel" in tagStateValue ||
       "CrossColor" in tagStateValue ||
       "Method" in tagStateValue ||
+      "Alg_OLL" in tagStateValue ||
+      "Alg_PLL" in tagStateValue ||
+      "Alg_CMLL" in tagStateValue ||
+      "Alg_CLL" in tagStateValue ||
       "SolveSource" in tagStateValue ||
       "TimerInput" in tagStateValue ||
       "Custom1" in tagStateValue ||
@@ -223,6 +232,10 @@ function Detail({
       CubeModel: t?.CubeModel ? String(t.CubeModel) : "",
       CrossColor: t?.CrossColor ? String(t.CrossColor) : "",
       Method: t?.Method ? String(t.Method) : "",
+      Alg_OLL: t?.Alg_OLL ? String(t.Alg_OLL) : "",
+      Alg_PLL: t?.Alg_PLL ? String(t.Alg_PLL) : "",
+      Alg_CMLL: t?.Alg_CMLL ? String(t.Alg_CMLL) : "",
+      Alg_CLL: t?.Alg_CLL ? String(t.Alg_CLL) : "",
       SolveSource: t?.SolveSource ? String(t.SolveSource) : "",
       TimerInput: t?.TimerInput ? String(t.TimerInput) : "",
       Custom1: t?.Custom1 ? String(t.Custom1) : "",
@@ -411,12 +424,20 @@ function Detail({
     const cube = String(tState?.CubeModel || "").trim();
     const cross = String(tState?.CrossColor || "").trim();
     const method = String(tState?.Method || "").trim();
+    const algOll = normalizeAlgorithmTagValue("Alg_OLL", tState?.Alg_OLL || "");
+    const algPll = normalizeAlgorithmTagValue("Alg_PLL", tState?.Alg_PLL || "");
+    const algCmll = normalizeAlgorithmTagValue("Alg_CMLL", tState?.Alg_CMLL || "");
+    const algCll = normalizeAlgorithmTagValue("Alg_CLL", tState?.Alg_CLL || "");
     const solveSource = String(tState?.SolveSource || "").trim();
     const timerInput = String(tState?.TimerInput || "").trim();
 
     if (cube) payload.CubeModel = cube;
     if (cross) payload.CrossColor = cross;
     if (method) payload.Method = method;
+    if (algOll) payload.Alg_OLL = algOll;
+    if (algPll) payload.Alg_PLL = algPll;
+    if (algCmll) payload.Alg_CMLL = algCmll;
+    if (algCll) payload.Alg_CLL = algCll;
     if (solveSource) payload.SolveSource = solveSource;
     if (timerInput) payload.TimerInput = timerInput;
     if (String(tState?.Custom1 || "").trim()) payload.Custom1 = String(tState.Custom1).trim();
@@ -626,48 +647,24 @@ function Detail({
     const t = isArray ? tagsState[index] : tagsState;
     const saveMeta = isArray ? saveState[index] : saveState;
     const readOnly = isReadOnlySolve(item);
+    const eventKey = String(getSolveEvent(item) || "").toUpperCase();
+    const visibleFields = getVisibleSharedTagFields(t || {}, eventKey);
 
     return (
       <div className="detailTagsBlock">
         <div className="detailTagSelector">
           <TagBar
-            tags={{
-              CubeModel: t?.CubeModel || "",
-              CrossColor: t?.CrossColor || "",
-              Method: t?.Method || "",
-              SolveSource: t?.SolveSource || "",
-              TimerInput: t?.TimerInput || "",
-              Custom1: t?.Custom1 || "",
-              Custom2: t?.Custom2 || "",
-              Custom3: t?.Custom3 || "",
-              Custom4: t?.Custom4 || "",
-              Custom5: t?.Custom5 || "",
-            }}
+            tags={Object.fromEntries(
+              SHARED_TAG_FIELDS.map((field) => [field, t?.[field] || ""])
+            )}
+            eventKey={eventKey}
             onChange={(next) => {
-              updateTagField("CubeModel", next?.CubeModel || "", index);
-              updateTagField("CrossColor", next?.CrossColor || "", index);
-              updateTagField("Method", next?.Method || "", index);
-              updateTagField("SolveSource", next?.SolveSource || "", index);
-              updateTagField("TimerInput", next?.TimerInput || "", index);
-              updateTagField("Custom1", next?.Custom1 || "", index);
-              updateTagField("Custom2", next?.Custom2 || "", index);
-              updateTagField("Custom3", next?.Custom3 || "", index);
-              updateTagField("Custom4", next?.Custom4 || "", index);
-              updateTagField("Custom5", next?.Custom5 || "", index);
+              SHARED_TAG_FIELDS.forEach((field) => {
+                updateTagField(field, next?.[field] || "", index);
+              });
             }}
             tagConfig={tagConfig}
-            fields={[
-              "CubeModel",
-              "CrossColor",
-              "Method",
-              "SolveSource",
-              "TimerInput",
-              "Custom1",
-              "Custom2",
-              "Custom3",
-              "Custom4",
-              "Custom5",
-            ]}
+            fields={visibleFields}
             cubeModelOptions={cubeModelOptions}
             discoveredOptions={discoveredTagOptions}
             tagColors={tagColors}

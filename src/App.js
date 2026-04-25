@@ -43,6 +43,7 @@ import { recomputeSessionStats as recomputeSessionStatsService } from "./service
 import { getCustomEvents } from "./services/getCustomEvents";
 import { addSolve as addSolveToDB } from "./services/addSolve";
 import { deleteSolve } from "./services/deleteSolve";
+import { updateSolve } from "./services/updateSolve";
 import { getPosts } from "./services/getPosts";
 import { createPost } from "./services/createPost";
 import { deletePost as deletePostFromDB } from "./services/deletePost";
@@ -82,6 +83,7 @@ import {
   getTagColorMapForEvent,
   getTagScopeEventKey,
   makeEmptyTagSelection,
+  normalizeAlgorithmTagValue,
   normalizeTagConfig,
   normalizeTagCatalog,
   normalizeTagColorCatalog,
@@ -105,6 +107,100 @@ const INITIAL_SESSIONS = {
   "333BLD": [],
   RELAY: [],
 };
+
+const POST_SOLVE_TAG_CHORD_TIMEOUT_MS = 1200;
+const POST_SOLVE_TAG_MODIFIER_CODE = "Comma";
+const POST_SOLVE_PLL_DIRECT_BINDINGS = {
+  E: "E Perm",
+  F: "F Perm",
+  H: "H Perm",
+  S: "Skip",
+  T: "T Perm",
+  V: "V Perm",
+  Y: "Y Perm",
+  Z: "Z Perm",
+};
+const POST_SOLVE_PLL_CHORD_BINDINGS = {
+  A: {
+    A: "Aa Perm",
+    B: "Ab Perm",
+  },
+  G: {
+    A: "Ga Perm",
+    B: "Gb Perm",
+    C: "Gc Perm",
+    D: "Gd Perm",
+  },
+  J: {
+    A: "Ja Perm",
+    B: "Jb Perm",
+  },
+  N: {
+    A: "Na Perm",
+    B: "Nb Perm",
+  },
+  R: {
+    A: "Ra Perm",
+    B: "Rb Perm",
+  },
+  U: {
+    A: "Ua Perm",
+    B: "Ub Perm",
+  },
+};
+
+function isPostSolveTagModifierEvent(event) {
+  return String(event?.code || "").trim() === POST_SOLVE_TAG_MODIFIER_CODE;
+}
+
+function consumePostSolveTagEvent(event) {
+  if (!event) return;
+  event.__ptsTagBindingConsumed = true;
+  event.preventDefault();
+  event.stopPropagation();
+  if (typeof event.stopImmediatePropagation === "function") {
+    event.stopImmediatePropagation();
+  }
+}
+
+function getPlainLetterKey(event) {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return "";
+  const code = String(event.code || "").trim();
+  const match = code.match(/^Key([A-Z])$/);
+  if (match) return match[1];
+
+  const key = String(event.key || "").trim().toUpperCase();
+  return /^[A-Z]$/.test(key) ? key : "";
+}
+
+function getPlainDigitKey(event) {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return "";
+
+  const code = String(event.code || "").trim();
+  const codeMatch = code.match(/^Digit([0-9])$/);
+  if (codeMatch) return codeMatch[1];
+
+  const key = String(event.key || "").trim();
+  return /^[0-9]$/.test(key) ? key : "";
+}
+
+function formatPostSolveTagToastLabel(updates = {}) {
+  const pll = String(updates?.Alg_PLL || "").trim();
+  if (pll) {
+    if (/^skip$/i.test(pll)) return "Tagged: PLL Skip";
+    return `Tagged: ${pll.replace(/\s+Perm$/i, "")}`;
+  }
+
+  const oll = String(updates?.Alg_OLL || "").trim();
+  if (oll) {
+    if (/^skip$/i.test(oll)) return "Tagged: OLL Skip";
+    const match = oll.match(/^OLL\s+#(\d{1,2})$/i);
+    if (match) return `Tagged: OLL ${match[1]}`;
+    return `Tagged: ${oll}`;
+  }
+
+  return "";
+}
 
 /* -------------------------------------------------------------------------- */
 /*                         SMART-CUBE SCRAMBLE HELPERS                         */
@@ -740,10 +836,7 @@ function findAverageWindowByValue(solves, count, targetAvg) {
 
   for (let i = 0; i <= items.length - size; i += 1) {
     const slice = items.slice(i, i + size);
-    const avg = calculateAverage(
-      slice.map((solve) => solve?.time),
-      true
-    )?.average;
+    const avg = computeWindowMetricValue(slice, size);
     if (typeof avg === "number" && Math.round(avg) === Math.round(target)) {
       return slice;
     }
@@ -772,6 +865,26 @@ function findBestSingleSolve(solves) {
   }, null);
 }
 
+function findWorstSingleSolve(solves) {
+  const items = (Array.isArray(solves) ? solves : []).filter((solve) =>
+    Number.isFinite(Number(solve?.time ?? solve?.finalTimeMs))
+  );
+  if (!items.length) return null;
+
+  return items.reduce((worst, solve) => {
+    if (!worst) return solve;
+    const worstTime = Number(worst?.time ?? worst?.finalTimeMs);
+    const solveTime = Number(solve?.time ?? solve?.finalTimeMs);
+    if (solveTime > worstTime) return solve;
+    if (solveTime < worstTime) return worst;
+    return String(solve?.createdAt || solve?.datetime || "").localeCompare(
+      String(worst?.createdAt || worst?.datetime || "")
+    ) < 0
+      ? solve
+      : worst;
+  }, null);
+}
+
 function findBestAverageWindow(solves, count) {
   const items = Array.isArray(solves) ? solves : [];
   const size = Number(count);
@@ -782,10 +895,7 @@ function findBestAverageWindow(solves, count) {
 
   for (let i = 0; i <= items.length - size; i += 1) {
     const slice = items.slice(i, i + size);
-    const avg = calculateAverage(
-      slice.map((solve) => solve?.time),
-      true
-    )?.average;
+    const avg = computeWindowMetricValue(slice, size);
     if (typeof avg === "number" && Number.isFinite(avg) && avg < bestValue) {
       bestValue = avg;
       bestWindow = slice;
@@ -793,6 +903,115 @@ function findBestAverageWindow(solves, count) {
   }
 
   return bestWindow;
+}
+
+function findWorstAverageWindow(solves, count) {
+  const items = Array.isArray(solves) ? solves : [];
+  const size = Number(count);
+  if (!Number.isFinite(size) || size <= 0 || items.length < size) return [];
+
+  let worstWindow = [];
+  let worstValue = -Infinity;
+
+  for (let i = 0; i <= items.length - size; i += 1) {
+    const slice = items.slice(i, i + size);
+    const avg = computeWindowMetricValue(slice, size);
+    if (typeof avg === "number" && Number.isFinite(avg) && avg > worstValue) {
+      worstValue = avg;
+      worstWindow = slice;
+    }
+  }
+
+  return worstWindow;
+}
+
+function computeWindowMetricValue(solves, count) {
+  const items = Array.isArray(solves) ? solves : [];
+  const size = Number(count);
+  if (!Number.isFinite(size) || size <= 0 || items.length < size) return null;
+
+  const times = items
+    .map((solve) => Number(solve?.time ?? solve?.finalTimeMs))
+    .filter((time) => Number.isFinite(time));
+
+  if (times.length !== size) return null;
+
+  if (size === 3) {
+    return times.reduce((sum, time) => sum + time, 0) / size;
+  }
+
+  return calculateAverage(times, true)?.average ?? null;
+}
+
+function toFiniteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeSolve(item) {
+  const baseTags = item?.Tags || {};
+
+  const relayLegsLocal = item?.RelayLegs || baseTags?.RelayLegs || null;
+  const relayScramblesLocal =
+    item?.RelayScrambles || baseTags?.RelayScrambles || null;
+  const relayLegTimesLocal =
+    item?.RelayLegTimes || baseTags?.RelayLegTimes || null;
+
+  const mergedTags =
+    relayLegsLocal || relayScramblesLocal || relayLegTimesLocal
+      ? {
+          ...baseTags,
+          IsRelay: baseTags.IsRelay ?? true,
+          RelayLegs: relayLegsLocal ?? baseTags.RelayLegs,
+          RelayScrambles: relayScramblesLocal ?? baseTags.RelayScrambles,
+          RelayLegTimes: relayLegTimesLocal ?? baseTags.RelayLegTimes,
+        }
+      : baseTags;
+
+  const isDNF =
+    item?.IsDNF === true ||
+    item?.isDNF === true ||
+    item?.Penalty === "DNF" ||
+    item?.penalty === "DNF";
+
+  const rawTimeMs = toFiniteNumber(
+    item?.RawTimeMs ??
+      item?.rawTimeMs ??
+      item?.Time ??
+      item?.time ??
+      item?.ms ??
+      item?.OriginalTime ??
+      item?.originalTime
+  );
+
+  const explicitFinal = toFiniteNumber(item?.FinalTimeMs ?? item?.finalTimeMs);
+  const finalTimeMs = isDNF
+    ? null
+    : explicitFinal !== null
+    ? explicitFinal
+    : rawTimeMs;
+
+  return {
+    solveRef: item?.SK || null,
+    createdAt: item?.CreatedAt || null,
+    datetime: item?.CreatedAt || item?.createdAt || null,
+    sessionID: item?.SessionID || item?.sessionID || "main",
+
+    time: isDNF ? Number.MAX_SAFE_INTEGER : finalTimeMs,
+    rawTimeMs,
+    finalTimeMs,
+    isDNF,
+
+    scramble: item?.Scramble || "",
+    event: item?.Event || "",
+    penalty: item?.Penalty ?? null,
+    note: item?.Note || "",
+    tags: mergedTags,
+
+    relayLegs: relayLegsLocal,
+    relayScrambles: relayScramblesLocal,
+    relayLegTimes: relayLegTimesLocal,
+  };
 }
 
 function App() {
@@ -831,6 +1050,7 @@ function App() {
   const [manualSolveSaving, setManualSolveSaving] = useState(false);
   const [deleteUndoState, setDeleteUndoState] = useState(null);
   const [showDeleteUndoToast, setShowDeleteUndoToast] = useState(false);
+  const [postSolveTagToast, setPostSolveTagToast] = useState("");
   const [statsSettingsContext, setStatsSettingsContext] = useState({
     eventLabel: currentEvent || "333",
     sessionLabel: currentSession || "main",
@@ -911,6 +1131,13 @@ function App() {
   const tagCatalogAutosaveTimeoutRef = useRef(null);
   const tagColorCatalogAutosaveTimeoutRef = useRef(null);
   const deleteUndoToastTimeoutRef = useRef(null);
+  const postSolveTagToastTimeoutRef = useRef(null);
+  const postSolveTagChordTimeoutRef = useRef(null);
+  const postSolveTagModifierHeldRef = useRef(false);
+  const pendingPostSolveTagChordRef = useRef("");
+  const pendingPostSolveOllDigitsRef = useRef("");
+  const currentSolvesRef = useRef([]);
+  const latestCreatedSolveRef = useRef({ event: "", solveRef: "" });
   const lastSavedSettingsJsonRef = useRef("");
   const skipNextSettingsAutosaveRef = useRef(false);
 
@@ -1378,18 +1605,13 @@ function App() {
     const t = currentTags || makeEmptyTagSelection();
     const payload = { ...(baseTags || {}) };
 
-    if (t.CubeModel) payload.CubeModel = t.CubeModel;
-    if (t.CrossColor) payload.CrossColor = t.CrossColor;
-    if (t.Method) payload.Method = t.Method;
+    for (const field of SHARED_TAG_FIELDS) {
+      if (field === "TimerInput" || field === "SolveSource") continue;
+      if (t[field]) payload[field] = t[field];
+    }
 
     payload.TimerInput =
       payload.TimerInput || t.TimerInput || settings.timerInput || "Keyboard";
-
-    if (t.Custom1) payload.Custom1 = t.Custom1;
-    if (t.Custom2) payload.Custom2 = t.Custom2;
-    if (t.Custom3) payload.Custom3 = t.Custom3;
-    if (t.Custom4) payload.Custom4 = t.Custom4;
-    if (t.Custom5) payload.Custom5 = t.Custom5;
 
     if (!payload.SolveSource) {
       if (payload.IsShared || payload.Shared) payload.SolveSource = "Shared";
@@ -1400,6 +1622,15 @@ function App() {
 
     return payload;
   };
+
+  const clearPendingPostSolveTagChord = useCallback(() => {
+    pendingPostSolveTagChordRef.current = "";
+    pendingPostSolveOllDigitsRef.current = "";
+    if (postSolveTagChordTimeoutRef.current) {
+      clearTimeout(postSolveTagChordTimeoutRef.current);
+      postSolveTagChordTimeoutRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!isSignedIn || !user?.UserID) return;
@@ -1911,77 +2142,6 @@ function App() {
     }
   }, [currentEvent, activeSessionObj, resetRelaySet, sharedSession]);
 
-  const toFiniteNumber = (value) => {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-  };
-
-  function normalizeSolve(item) {
-    const baseTags = item?.Tags || {};
-
-    const relayLegsLocal = item?.RelayLegs || baseTags?.RelayLegs || null;
-    const relayScramblesLocal =
-      item?.RelayScrambles || baseTags?.RelayScrambles || null;
-    const relayLegTimesLocal =
-      item?.RelayLegTimes || baseTags?.RelayLegTimes || null;
-
-    const mergedTags =
-      relayLegsLocal || relayScramblesLocal || relayLegTimesLocal
-        ? {
-            ...baseTags,
-            IsRelay: baseTags.IsRelay ?? true,
-            RelayLegs: relayLegsLocal ?? baseTags.RelayLegs,
-            RelayScrambles: relayScramblesLocal ?? baseTags.RelayScrambles,
-            RelayLegTimes: relayLegTimesLocal ?? baseTags.RelayLegTimes,
-          }
-        : baseTags;
-
-    const isDNF =
-      item?.IsDNF === true ||
-      item?.isDNF === true ||
-      item?.Penalty === "DNF" ||
-      item?.penalty === "DNF";
-
-    const rawTimeMs = toFiniteNumber(
-      item?.RawTimeMs ??
-        item?.rawTimeMs ??
-        item?.Time ??
-        item?.time ??
-        item?.ms ??
-        item?.OriginalTime ??
-        item?.originalTime
-    );
-
-    const explicitFinal = toFiniteNumber(item?.FinalTimeMs ?? item?.finalTimeMs);
-    const finalTimeMs = isDNF
-      ? null
-      : explicitFinal !== null
-      ? explicitFinal
-      : rawTimeMs;
-
-    return {
-      solveRef: item?.SK || null,
-      createdAt: item?.CreatedAt || null,
-      datetime: item?.CreatedAt || item?.createdAt || null,
-      sessionID: item?.SessionID || item?.sessionID || "main",
-
-      time: isDNF ? Number.MAX_SAFE_INTEGER : finalTimeMs,
-      rawTimeMs,
-      finalTimeMs,
-      isDNF,
-
-      scramble: item?.Scramble || "",
-      event: item?.Event || "",
-      penalty: item?.Penalty ?? null,
-      note: item?.Note || "",
-      tags: mergedTags,
-
-      relayLegs: relayLegsLocal,
-      relayScrambles: relayScramblesLocal,
-      relayLegTimes: relayLegTimesLocal,
-    };
-  }
-
   const mergeSharedSession = (session) => {
     console.log("Merging shared session:", session);
   };
@@ -2052,6 +2212,21 @@ function App() {
     deleteUndoToastTimeoutRef.current = setTimeout(() => {
       setShowDeleteUndoToast(false);
     }, 8000);
+  }, []);
+
+  const queuePostSolveTagToast = useCallback((label) => {
+    const message = String(label || "").trim();
+    if (!message) return;
+
+    setPostSolveTagToast(message);
+
+    if (postSolveTagToastTimeoutRef.current) {
+      clearTimeout(postSolveTagToastTimeoutRef.current);
+    }
+
+    postSolveTagToastTimeoutRef.current = setTimeout(() => {
+      setPostSolveTagToast("");
+    }, 2200);
   }, []);
 
   const deletePracticeTime = (index, options = {}) => {
@@ -2357,7 +2532,7 @@ function App() {
       const keepTinySolve = window.confirm(
         "That solve is under 0.30 seconds. Keep it?"
       );
-      if (!keepTinySolve) return;
+      if (!keepTinySolve) return false;
     }
 
     const hasManualScramble = Object.prototype.hasOwnProperty.call(
@@ -2464,8 +2639,9 @@ function App() {
         tags: buildTagPayload({ Practice: true }),
       };
 
+      rememberLatestCreatedSolve(currentEvent, newSolve.solveRef);
       setPracticeSolves((prev) => [...(prev || []), newSolve]);
-      return;
+      return true;
     }
 
     const isRelay =
@@ -2491,7 +2667,7 @@ function App() {
 
         if (!isLastLeg) {
           setRelayLegIndex(legIdx + 1);
-          return;
+          return true;
         }
 
         const totalMs = nextLegTimes.reduce((a, b) => a + b, 0);
@@ -2509,6 +2685,7 @@ function App() {
             event: currentEvent,
             tags: fullRelayTags,
           });
+          rememberLatestCreatedSolve(currentEvent, pendingSolve.solveRef);
           appendPendingSolve(currentEvent, pendingSolve);
 
           try {
@@ -2526,6 +2703,7 @@ function App() {
             );
 
             const savedSolve = normalizeSolve(res?.item);
+            rememberLatestCreatedSolve(currentEvent, savedSolve?.solveRef || pendingSolve.solveRef);
             replacePendingSolve(currentEvent, pendingSolve, savedSolve);
             if (res?.sessionStats) {
               mergeCanonicalSessionStats(currentEvent, currentSession, res.sessionStats);
@@ -2533,6 +2711,7 @@ function App() {
           } catch (err) {
             removePendingSolve(currentEvent, pendingSolve.solveRef);
             console.error("Error adding relay solve:", err);
+            return false;
           }
         } else {
           const localSolve = {
@@ -2551,6 +2730,7 @@ function App() {
             tags: fullRelayTags,
           };
 
+          rememberLatestCreatedSolve(currentEvent, localSolve.solveRef);
           setSessions((prev) => ({
             ...prev,
             [currentEvent]: [...(prev[currentEvent] || []), localSolve],
@@ -2558,7 +2738,7 @@ function App() {
         }
 
         await resetRelaySet();
-        return;
+        return true;
       }
 
       const totalMs = newTime;
@@ -2571,6 +2751,7 @@ function App() {
           event: currentEvent,
           tags: relayTags,
         });
+        rememberLatestCreatedSolve(currentEvent, pendingSolve.solveRef);
         appendPendingSolve(currentEvent, pendingSolve);
 
         try {
@@ -2588,6 +2769,7 @@ function App() {
           );
 
           const savedSolve = normalizeSolve(res?.item);
+          rememberLatestCreatedSolve(currentEvent, savedSolve?.solveRef || pendingSolve.solveRef);
           replacePendingSolve(currentEvent, pendingSolve, savedSolve);
           if (res?.sessionStats) {
             mergeCanonicalSessionStats(currentEvent, currentSession, res.sessionStats);
@@ -2595,6 +2777,7 @@ function App() {
         } catch (err) {
           removePendingSolve(currentEvent, pendingSolve.solveRef);
           console.error("Error adding relay solve:", err);
+          return false;
         }
       } else {
         const localSolve = {
@@ -2613,6 +2796,7 @@ function App() {
           tags: relayTags,
         };
 
+        rememberLatestCreatedSolve(currentEvent, localSolve.solveRef);
         setSessions((prev) => ({
           ...prev,
           [currentEvent]: [...(prev[currentEvent] || []), localSolve],
@@ -2620,7 +2804,7 @@ function App() {
       }
 
       await resetRelaySet();
-      return;
+      return true;
     }
 
     let scramble;
@@ -2749,6 +2933,7 @@ function App() {
         event: activeSolveEvent,
         tags: newTags,
       });
+      rememberLatestCreatedSolve(activeSolveEvent, pendingSolve.solveRef);
       appendPendingSolve(activeSolveEvent, pendingSolve);
 
       try {
@@ -2766,6 +2951,10 @@ function App() {
         );
 
         const savedSolve = normalizeSolve(res?.item);
+        rememberLatestCreatedSolve(
+          activeSolveEvent,
+          savedSolve?.solveRef || pendingSolve.solveRef
+        );
         replacePendingSolve(activeSolveEvent, pendingSolve, savedSolve);
         if (res?.sessionStats) {
           mergeCanonicalSessionStats(activeSolveEvent, currentSession, res.sessionStats);
@@ -2773,7 +2962,7 @@ function App() {
       } catch (err) {
         removePendingSolve(activeSolveEvent, pendingSolve.solveRef);
         console.error("Error adding solve (DB write failed):", err);
-        return;
+        return false;
       }
 
       if (activeSharedID) {
@@ -2827,6 +3016,7 @@ function App() {
         tags: newTags,
       };
 
+      rememberLatestCreatedSolve(activeSolveEvent, localSolve.solveRef);
       setSessions((prev) => ({
         ...prev,
         [activeSolveEvent]: [...(prev[activeSolveEvent] || []), localSolve],
@@ -2839,6 +3029,8 @@ function App() {
         setSharedIndex(nextSharedIndex);
       }
     }
+
+    return true;
   };
 
   const openManualSolveModal = () => {
@@ -3524,6 +3716,177 @@ function App() {
       fullIndex: startIndex + index,
     }));
   }, [baseCurrentSolves, currentSessionTotalSolveCount]);
+
+  useEffect(() => {
+    currentSolvesRef.current = currentSolves;
+  }, [currentSolves]);
+
+  const rememberLatestCreatedSolve = useCallback((eventCode, solveRef) => {
+    latestCreatedSolveRef.current = {
+      event: String(eventCode || "").trim().toUpperCase(),
+      solveRef: String(solveRef || "").trim(),
+    };
+  }, []);
+
+  const applyPostSolveTagBinding = useCallback(
+    async (updates = {}) => {
+      if (!isHomePage || sharedSession || isRelayActive || tagScopeEventKey !== "333") {
+        return false;
+      }
+
+      const latestSolveMarker = latestCreatedSolveRef.current;
+      const visibleSolves = Array.isArray(currentSolvesRef.current) ? currentSolvesRef.current : [];
+      const latestSolve =
+        (latestSolveMarker?.solveRef
+          ? visibleSolves.find((solve) => solve?.solveRef === latestSolveMarker.solveRef)
+          : null) || visibleSolves[visibleSolves.length - 1];
+      if (!latestSolve?.solveRef) return false;
+
+      const normalizedUpdates = {
+        ...(updates?.Method ? { Method: String(updates.Method || "").trim() } : {}),
+        ...(updates?.Alg_PLL
+          ? { Alg_PLL: normalizeAlgorithmTagValue("Alg_PLL", updates.Alg_PLL) }
+          : {}),
+        ...(updates?.Alg_OLL
+          ? { Alg_OLL: normalizeAlgorithmTagValue("Alg_OLL", updates.Alg_OLL) }
+          : {}),
+        ...(updates?.Alg_CMLL
+          ? { Alg_CMLL: normalizeAlgorithmTagValue("Alg_CMLL", updates.Alg_CMLL) }
+          : {}),
+        ...(updates?.Alg_CLL
+          ? { Alg_CLL: normalizeAlgorithmTagValue("Alg_CLL", updates.Alg_CLL) }
+          : {}),
+      };
+
+      if (!Object.keys(normalizedUpdates).length) return false;
+
+      const toastLabel = formatPostSolveTagToastLabel(normalizedUpdates);
+
+      const nextSolveTags = {
+        ...((latestSolve?.tags && typeof latestSolve.tags === "object") ? latestSolve.tags : {}),
+        ...normalizedUpdates,
+      };
+
+      if (!nextSolveTags.TimerInput) {
+        nextSolveTags.TimerInput =
+          latestSolve?.tags?.TimerInput ||
+          currentTags.TimerInput ||
+          settings?.timerInput ||
+          "Keyboard";
+      }
+      if (!nextSolveTags.SolveSource) {
+        nextSolveTags.SolveSource =
+          latestSolve?.tags?.SolveSource || currentTags.SolveSource || "Standard";
+      }
+
+      if (practiceMode) {
+        setPracticeSolves((prev) =>
+          (prev || []).map((solve) =>
+            solve?.solveRef === latestSolve.solveRef
+              ? {
+                  ...solve,
+                  tags: nextSolveTags,
+                }
+              : solve
+          )
+        );
+        queuePostSolveTagToast(toastLabel);
+        return true;
+      }
+
+      const normalizedEvent = String(
+        latestSolve?.event || latestSolveMarker?.event || eventKey || ""
+      ).toUpperCase();
+
+      setSessions((prev) => ({
+        ...(prev || {}),
+        [normalizedEvent]: (prev?.[normalizedEvent] || []).map((solve) =>
+          solve?.solveRef === latestSolve.solveRef
+            ? {
+                ...solve,
+                tags: nextSolveTags,
+              }
+            : solve
+        ),
+      }));
+      setStatsMutationTick((tick) => tick + 1);
+
+      if (isSignedIn && user?.UserID) {
+        try {
+          const res = await runDb(
+            "Updating solve tags",
+            () =>
+              updateSolve(user.UserID, latestSolve.solveRef, {
+                Tags: nextSolveTags,
+              }),
+            { showStatus: false }
+          );
+
+          const savedSolve = normalizeSolve(res);
+          if (savedSolve?.solveRef) {
+            rememberLatestCreatedSolve(
+              normalizedEvent,
+              savedSolve.solveRef || latestSolve.solveRef
+            );
+            setSessions((prev) => ({
+              ...(prev || {}),
+              [normalizedEvent]: (prev?.[normalizedEvent] || []).map((solve) =>
+                solve?.solveRef === latestSolve.solveRef ? savedSolve : solve
+              ),
+            }));
+          }
+        } catch (err) {
+          console.error("Failed to update solve tags:", err);
+        }
+      }
+
+      queuePostSolveTagToast(toastLabel);
+      return true;
+    },
+    [
+      currentTags,
+      eventKey,
+      isHomePage,
+      isRelayActive,
+      isSignedIn,
+      practiceMode,
+      queuePostSolveTagToast,
+      rememberLatestCreatedSolve,
+      runDb,
+      settings?.timerInput,
+      sharedSession,
+      tagScopeEventKey,
+      user?.UserID,
+    ]
+  );
+
+  const armPendingPostSolveTagChord = useCallback(
+    (prefix = "", ollDigits = "") => {
+      pendingPostSolveTagChordRef.current = prefix;
+      pendingPostSolveOllDigitsRef.current = ollDigits;
+      if (postSolveTagChordTimeoutRef.current) {
+        clearTimeout(postSolveTagChordTimeoutRef.current);
+      }
+      postSolveTagChordTimeoutRef.current = setTimeout(() => {
+        const pendingPrefix = pendingPostSolveTagChordRef.current;
+        const pendingOllDigits = String(pendingPostSolveOllDigitsRef.current || "");
+        pendingPostSolveTagChordRef.current = "";
+        pendingPostSolveOllDigitsRef.current = "";
+        postSolveTagChordTimeoutRef.current = null;
+
+        if (!pendingPrefix && pendingOllDigits) {
+          const pendingNumber = Number(pendingOllDigits);
+          if (Number.isInteger(pendingNumber) && pendingNumber >= 1 && pendingNumber <= 57) {
+            applyPostSolveTagBinding({
+              Method: "CFOP",
+              Alg_OLL: `OLL #${pendingNumber}`,
+            });
+          }
+        }
+      }, POST_SOLVE_TAG_CHORD_TIMEOUT_MS);
+    },
+    [applyPostSolveTagBinding]
+  );
   const solvesSourceForDetail = currentSolves;
   const undoDeletedSolve = useCallback(async () => {
     const pending = deleteUndoState;
@@ -3690,6 +4053,89 @@ function App() {
       if (event.repeat) return;
       if (hasBlockingOverlay || isEditableTarget(event.target)) return;
 
+      if (isPostSolveTagModifierEvent(event)) {
+        postSolveTagModifierHeldRef.current = true;
+        clearPendingPostSolveTagChord();
+        consumePostSolveTagEvent(event);
+        return;
+      }
+
+      const plainLetterKey = getPlainLetterKey(event);
+      const plainDigitKey = getPlainDigitKey(event);
+      if (plainLetterKey && postSolveTagModifierHeldRef.current) {
+        const pendingPrefix = pendingPostSolveTagChordRef.current;
+        if (pendingPrefix) {
+          const chordValue = POST_SOLVE_PLL_CHORD_BINDINGS?.[pendingPrefix]?.[plainLetterKey];
+          clearPendingPostSolveTagChord();
+
+          if (chordValue) {
+            consumePostSolveTagEvent(event);
+            applyPostSolveTagBinding({
+              Method: "CFOP",
+              Alg_PLL: chordValue,
+            });
+            return;
+          }
+        }
+
+        const directValue = POST_SOLVE_PLL_DIRECT_BINDINGS[plainLetterKey];
+        if (directValue) {
+          clearPendingPostSolveTagChord();
+          consumePostSolveTagEvent(event);
+          applyPostSolveTagBinding({
+            Method: "CFOP",
+            Alg_PLL: directValue,
+          });
+          return;
+        }
+
+        if (POST_SOLVE_PLL_CHORD_BINDINGS[plainLetterKey]) {
+          armPendingPostSolveTagChord(plainLetterKey);
+          consumePostSolveTagEvent(event);
+          return;
+        }
+      } else if (
+        plainDigitKey &&
+        postSolveTagModifierHeldRef.current &&
+        !pendingPostSolveTagChordRef.current
+      ) {
+        const existingDigits = String(pendingPostSolveOllDigitsRef.current || "");
+        const nextDigits = `${existingDigits}${plainDigitKey}`;
+
+        if (nextDigits === "0") {
+          clearPendingPostSolveTagChord();
+          consumePostSolveTagEvent(event);
+          applyPostSolveTagBinding({
+            Method: "CFOP",
+            Alg_OLL: "Skip",
+          });
+          return;
+        }
+
+        const nextNumber = Number(nextDigits);
+        if (!Number.isInteger(nextNumber) || nextNumber < 1 || nextNumber > 57) {
+          clearPendingPostSolveTagChord();
+          consumePostSolveTagEvent(event);
+          return;
+        }
+
+        if (nextDigits.length >= 2 || nextNumber >= 6) {
+          clearPendingPostSolveTagChord();
+          consumePostSolveTagEvent(event);
+          applyPostSolveTagBinding({
+            Method: "CFOP",
+            Alg_OLL: `OLL #${nextNumber}`,
+          });
+          return;
+        }
+
+        armPendingPostSolveTagChord("", nextDigits);
+        consumePostSolveTagEvent(event);
+        return;
+      } else if (pendingPostSolveTagChordRef.current && postSolveTagModifierHeldRef.current) {
+        clearPendingPostSolveTagChord();
+      }
+
       const eventBindings = settings.eventKeyBindings || {};
       for (const [eventCode, combo] of Object.entries(eventBindings)) {
         if (!eventMatchesEventBinding(event, combo)) continue;
@@ -3771,10 +4217,23 @@ function App() {
       }
     };
 
-    window.addEventListener("keydown", handleShortcutKeyDown);
-    return () => window.removeEventListener("keydown", handleShortcutKeyDown);
+    const handleShortcutKeyUp = (event) => {
+      if (!isPostSolveTagModifierEvent(event)) return;
+      postSolveTagModifierHeldRef.current = false;
+      clearPendingPostSolveTagChord();
+      consumePostSolveTagEvent(event);
+    };
+
+    window.addEventListener("keydown", handleShortcutKeyDown, true);
+    window.addEventListener("keyup", handleShortcutKeyUp, true);
+    return () => {
+      window.removeEventListener("keydown", handleShortcutKeyDown, true);
+      window.removeEventListener("keyup", handleShortcutKeyUp, true);
+    };
   }, [
+    applyPostSolveTagBinding,
     applyPenaltyToLatestSolve,
+    clearPendingPostSolveTagChord,
     deleteLatestSolve,
     undoDeletedSolve,
     location.pathname,
@@ -3791,6 +4250,17 @@ function App() {
     showSignInPopup,
     switchToEvent,
   ]);
+
+  useEffect(
+    () => () => {
+      postSolveTagModifierHeldRef.current = false;
+      if (postSolveTagToastTimeoutRef.current) {
+        clearTimeout(postSolveTagToastTimeoutRef.current);
+      }
+      clearPendingPostSolveTagChord();
+    },
+    [clearPendingPostSolveTagChord]
+  );
   const relaySelectorMarginTop = useMemo(() => {
     const ev = String(displayedSvgEvent || currentEvent || "").toUpperCase();
     if (["555", "666", "777", "MEGAMINX"].includes(ev)) return "88px";
@@ -4091,7 +4561,7 @@ function App() {
     user?.UserID,
   ]);
 
-  const requestBestAverageWindow = async (count, startSolveRef, targetAvg) => {
+  const requestAverageWindow = async (count, startSolveRef, targetAvg, variant = "best") => {
     if (
       !practiceMode &&
       isSignedIn &&
@@ -4115,11 +4585,11 @@ function App() {
         );
 
         const normalized = (items || []).map((it) => normalizeSolve(it)).filter(Boolean);
+        const apiWindowValue = computeWindowMetricValue(normalized, count);
         const exactApiMatch =
           normalized.length === count &&
-          typeof calculateAverage(normalized.map((solve) => solve?.time), true)?.average === "number" &&
-          Math.round(calculateAverage(normalized.map((solve) => solve?.time), true).average) ===
-            Math.round(Number(targetAvg));
+          typeof apiWindowValue === "number" &&
+          Math.round(apiWindowValue) === Math.round(Number(targetAvg));
 
         if (exactApiMatch) {
           setSelectedAverageSolves(normalized);
@@ -4135,10 +4605,7 @@ function App() {
     let selected = [];
     for (let i = 0; i <= currentSolves.length - count; i++) {
       const slice = currentSolves.slice(i, i + count);
-      const avg = calculateAverage(
-        slice.map((s) => s.time),
-        true
-      ).average;
+      const avg = computeWindowMetricValue(slice, count);
       if (typeof avg === "number" && Math.round(avg) === Math.round(Number(targetAvg))) {
         selected = slice;
         break;
@@ -4157,28 +4624,28 @@ function App() {
       return true;
     }
 
-    const bestWindow = findBestAverageWindow(fullSessionSolves, count);
-    if (bestWindow.length > 0) {
-      const correctedAverage = calculateAverage(
-        bestWindow.map((solve) => solve?.time),
-        true
-      )?.average;
+    const fallbackWindow =
+      variant === "worst"
+        ? findWorstAverageWindow(fullSessionSolves, count)
+        : findBestAverageWindow(fullSessionSolves, count);
+    if (fallbackWindow.length > 0) {
+      const correctedAverage = computeWindowMetricValue(fallbackWindow, count);
 
       const patch =
-        count === 3
+        variant === "best" && count === 3
           ? {
               BestMo3Ms: correctedAverage,
-              BestMo3StartSolveSK: bestWindow[0]?.solveRef || null,
+              BestMo3StartSolveSK: fallbackWindow[0]?.solveRef || null,
             }
-          : count === 5
+          : variant === "best" && count === 5
           ? {
               BestAo5Ms: correctedAverage,
-              BestAo5StartSolveSK: bestWindow[0]?.solveRef || null,
+              BestAo5StartSolveSK: fallbackWindow[0]?.solveRef || null,
             }
-          : count === 12
+          : variant === "best" && count === 12
           ? {
               BestAo12Ms: correctedAverage,
-              BestAo12StartSolveSK: bestWindow[0]?.solveRef || null,
+              BestAo12StartSolveSK: fallbackWindow[0]?.solveRef || null,
             }
           : {};
 
@@ -4188,7 +4655,7 @@ function App() {
 
       await refreshCanonicalCurrentSessionStats();
 
-      setSelectedAverageSolves(bestWindow);
+      setSelectedAverageSolves(fallbackWindow);
       return true;
     }
 
@@ -4198,9 +4665,13 @@ function App() {
   const handleHomeSummarySelect = useCallback(
     async (selection) => {
       if (!selection || selection.value == null) return;
+      const isWorst = selection.variant === "worst";
 
       if (selection.kind === "single") {
-        const solveRef = currentSessionStatsForEvent?.[selection.solveField] || null;
+        const solveRef =
+          currentSessionStatsForEvent?.[
+            isWorst ? selection.worstSolveField || selection.solveField : selection.solveField
+          ] || null;
         const target = Number(selection.value);
         let solve =
           currentSolves.find(
@@ -4236,10 +4707,12 @@ function App() {
           solve = findSingleByTime(fullSessionSolves, target);
 
           if (!solve) {
-            solve = findBestSingleSolve(fullSessionSolves);
+            solve = isWorst
+              ? findWorstSingleSolve(fullSessionSolves)
+              : findBestSingleSolve(fullSessionSolves);
           }
 
-          if (solve) {
+          if (solve && !isWorst) {
             applyLocalHomeMetricCorrection({
               BestSingleMs: Number(solve?.time ?? solve?.finalTimeMs) || null,
               BestSingleSolveSK: solve?.solveRef || null,
@@ -4254,10 +4727,13 @@ function App() {
         return;
       }
 
-      const handled = await requestBestAverageWindow(
+      const handled = await requestAverageWindow(
         selection.size,
-        currentSessionStatsForEvent?.[selection.startField] || null,
-        selection.value
+        currentSessionStatsForEvent?.[
+          isWorst ? selection.worstStartField || selection.startField : selection.startField
+        ] || null,
+        selection.value,
+        selection.variant
       );
 
       if (!handled) {
@@ -4275,7 +4751,7 @@ function App() {
       currentSessionStatsForEvent,
       practiceMode,
       refreshCanonicalCurrentSessionStats,
-      requestBestAverageWindow,
+      requestAverageWindow,
       user?.UserID,
     ]
   );
@@ -4594,6 +5070,7 @@ function App() {
                             <TagBar
                               key={`tagbar-${eventKey}`}
                               tags={currentTags}
+                              eventKey={eventKey}
                               tagColors={currentTagColors}
                               onChange={(next) => {
                                 setTagsByEvent((prev) => ({
@@ -4675,7 +5152,7 @@ function App() {
                         currentSolves={currentSolves}
                         overallSessionStats={currentSessionStatsForEvent}
                         setSelectedAverageSolves={setSelectedAverageSolves}
-                        onRequestBestAverageWindow={requestBestAverageWindow}
+                        onRequestBestAverageWindow={requestAverageWindow}
                       />
 
                       <TimeList
@@ -5253,6 +5730,20 @@ function App() {
             className="deleteUndoToastDismiss"
             onClick={() => setShowDeleteUndoToast(false)}
             aria-label="Dismiss undo message"
+          >
+            x
+          </button>
+        </div>
+      )}
+
+      {postSolveTagToast && (
+        <div className="deleteUndoToast" role="status" aria-live="polite">
+          <div className="deleteUndoToastText">{postSolveTagToast}</div>
+          <button
+            type="button"
+            className="deleteUndoToastDismiss"
+            onClick={() => setPostSolveTagToast("")}
+            aria-label="Dismiss tag message"
           >
             x
           </button>

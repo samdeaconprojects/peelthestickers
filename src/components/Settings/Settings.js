@@ -16,6 +16,7 @@ import {
   HOME_STAT_LINE_GROUP_OPTIONS,
   HOME_STAT_SLOT_META,
   HOME_STAT_SLOT_ORDER,
+  HOME_STAT_SUMMARY_LAYOUT_OPTIONS,
   HOME_STAT_SUMMARY_SURFACE_OPTIONS,
   normalizeHomeStatsSlots,
 } from "../HomeStats/homeStatsConfig";
@@ -74,6 +75,49 @@ const DEFAULT_TAG_CONFIG = {
       label: "Start Color",
       options: ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
     },
+    Method: {
+      label: "Method",
+      options: ["CFOP", "Roux", "ZZ", "Petrus", "LBL", "Other"],
+    },
+    Alg_OLL: {
+      label: "OLL",
+      options: ["Skip", ...Array.from({ length: 57 }, (_, index) => `OLL #${index + 1}`)],
+    },
+    Alg_PLL: {
+      label: "PLL",
+      options: [
+        "Skip",
+        "Aa Perm",
+        "Ab Perm",
+        "E Perm",
+        "H Perm",
+        "Ua Perm",
+        "Ub Perm",
+        "Z Perm",
+        "F Perm",
+        "Ga Perm",
+        "Gb Perm",
+        "Gc Perm",
+        "Gd Perm",
+        "Ja Perm",
+        "Jb Perm",
+        "Na Perm",
+        "Nb Perm",
+        "Ra Perm",
+        "Rb Perm",
+        "T Perm",
+        "V Perm",
+        "Y Perm",
+      ],
+    },
+    Alg_CMLL: {
+      label: "CMLL",
+      options: ["Skip"],
+    },
+    Alg_CLL: {
+      label: "CLL",
+      options: ["Skip"],
+    },
     TimerInput: {
       label: "Timer Input",
       options: ["Keyboard", "Type", "Stackmat", "GAN Timer", "Smart Cube"],
@@ -102,6 +146,11 @@ const TAG_KEY_OPTIONS = [
   { value: "SolveSource", label: "Solve Source" },
   { value: "CubeModel", label: "Cube Model" },
   { value: "CrossColor", label: "Start Color" },
+  { value: "Method", label: "Method" },
+  { value: "Alg_OLL", label: "OLL" },
+  { value: "Alg_PLL", label: "PLL" },
+  { value: "Alg_CMLL", label: "CMLL" },
+  { value: "Alg_CLL", label: "CLL" },
   { value: "TimerInput", label: "Timer Input" },
   { value: "Custom1", label: "Custom 1" },
   { value: "Custom2", label: "Custom 2" },
@@ -251,6 +300,36 @@ function normalizeTagConfig(input) {
           ? fixed.CrossColor.options
           : ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
       },
+      Method: {
+        label: fixed?.Method?.label || "Method",
+        options: Array.isArray(fixed?.Method?.options)
+          ? fixed.Method.options
+          : DEFAULT_TAG_CONFIG.Fixed.Method.options,
+      },
+      Alg_OLL: {
+        label: fixed?.Alg_OLL?.label || "OLL",
+        options: Array.isArray(fixed?.Alg_OLL?.options)
+          ? fixed.Alg_OLL.options
+          : DEFAULT_TAG_CONFIG.Fixed.Alg_OLL.options,
+      },
+      Alg_PLL: {
+        label: fixed?.Alg_PLL?.label || "PLL",
+        options: Array.isArray(fixed?.Alg_PLL?.options)
+          ? fixed.Alg_PLL.options
+          : DEFAULT_TAG_CONFIG.Fixed.Alg_PLL.options,
+      },
+      Alg_CMLL: {
+        label: fixed?.Alg_CMLL?.label || "CMLL",
+        options: Array.isArray(fixed?.Alg_CMLL?.options)
+          ? fixed.Alg_CMLL.options
+          : DEFAULT_TAG_CONFIG.Fixed.Alg_CMLL.options,
+      },
+      Alg_CLL: {
+        label: fixed?.Alg_CLL?.label || "CLL",
+        options: Array.isArray(fixed?.Alg_CLL?.options)
+          ? fixed.Alg_CLL.options
+          : DEFAULT_TAG_CONFIG.Fixed.Alg_CLL.options,
+      },
       TimerInput: {
         label: fixed?.TimerInput?.label || "Timer Input",
         options: Array.isArray(fixed?.TimerInput?.options)
@@ -348,7 +427,7 @@ function normalizeNavigationArrowStyleForUi(rawValue) {
 
 function normalizeStatsSummaryLayoutForUi(rawValue) {
   const raw = String(rawValue || "").trim().toLowerCase();
-  return raw === "tile" ? "tile" : "row";
+  return raw === "row" ? "row" : "tile";
 }
 
 function Settings({
@@ -1354,21 +1433,50 @@ function Settings({
                 )}
 
                 {slot.chartType === "summary" && (
-                  <div className="setting-item">
-                    <label>Surface Style</label>
-                    <select
-                      value={slot.summarySurface || "flat"}
-                      onChange={(e) =>
-                        updateHomeStatSlot(slotKey, { summarySurface: e.target.value })
-                      }
-                    >
-                      {HOME_STAT_SUMMARY_SURFACE_OPTIONS.map((option) => (
-                        <option key={`${slotKey}-summary-surface-${option.value}`} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <>
+                    <div className="setting-item">
+                      <label>Summary Layout</label>
+                      <select
+                        value={slot.summaryLayout || "tile"}
+                        onChange={(e) =>
+                          updateHomeStatSlot(slotKey, { summaryLayout: e.target.value })
+                        }
+                      >
+                        {HOME_STAT_SUMMARY_LAYOUT_OPTIONS.map((option) => (
+                          <option key={`${slotKey}-summary-layout-${option.value}`} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="setting-item">
+                      <label>Show Summary Meta</label>
+                      <input
+                        type="checkbox"
+                        checked={!!slot.summaryShowMeta}
+                        onChange={(e) =>
+                          updateHomeStatSlot(slotKey, { summaryShowMeta: e.target.checked })
+                        }
+                      />
+                    </div>
+
+                    <div className="setting-item">
+                      <label>Surface Style</label>
+                      <select
+                        value={slot.summarySurface || "flat"}
+                        onChange={(e) =>
+                          updateHomeStatSlot(slotKey, { summarySurface: e.target.value })
+                        }
+                      >
+                        {HOME_STAT_SUMMARY_SURFACE_OPTIONS.map((option) => (
+                          <option key={`${slotKey}-summary-surface-${option.value}`} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
                 )}
 
                 <div className="setting-item">

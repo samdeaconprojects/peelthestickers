@@ -217,8 +217,10 @@ const TimeTable = ({
   preserveInputOrder = false,
   showSolveAverages = true,
   containerClassName = "",
+  renderSolveFooter = null,
 }) => {
   const [selectedSolve, setSelectedSolve] = useState(null);
+  const resolvedProfileColor = user?.Color || user?.color || "#2EC4B6";
 
   const [displayMode, setDisplayMode] = useState(initialDisplayMode);
   const [sortBy, setSortBy] = useState(initialSortBy);
@@ -683,55 +685,67 @@ const TimeTable = ({
               >
                 <div className="time-items-rank">{solve.__displayNumber}</div>
 
-                <div className="time-items-main">
-                  <div className="time-items-time-wrap">
-                    <TimeItem
-                      ms={ms}
-                      time={ms == null ? formatTime(solve?.time, false, solve?.penalty) : undefined}
-                      penalty={solve?.penalty}
-                      rangeMin={timeRange.min}
-                      rangeMax={timeRange.max}
-                      className={`time-items-time ${isBest ? "dashed-border-min" : ""} ${
-                        isWorst ? "dashed-border-max" : ""
-                      }`}
-                      style={buildPerfBorderStyle(
-                        tablePerfClass,
-                        seriesStyle,
-                        isBest || isWorst ? "dashed" : "solid"
-                      )}
-                      disablePerformanceClass={true}
-                    />
-                  </div>
+                  <div className="time-items-main">
+                    <div className="time-items-main-content">
+                      <div className="time-items-topline">
+                        <div className="time-items-time-wrap">
+                          <TimeItem
+                            ms={ms}
+                            time={
+                              ms == null ? formatTime(solve?.time, false, solve?.penalty) : undefined
+                            }
+                            penalty={solve?.penalty}
+                            rangeMin={timeRange.min}
+                            rangeMax={timeRange.max}
+                            className={`time-items-time ${isBest ? "dashed-border-min" : ""} ${
+                              isWorst ? "dashed-border-max" : ""
+                            }`}
+                            style={buildPerfBorderStyle(
+                              tablePerfClass,
+                              seriesStyle,
+                              isBest || isWorst ? "dashed" : "solid"
+                            )}
+                            disablePerformanceClass={true}
+                          />
+                        </div>
 
-                  <div className="time-items-meta">
-                    <span className="time-items-date">
-                      {formatDateTime(solve?.datetime)}
-                    </span>
-                    <span className="time-items-scramble">
-                      {solve?.scramble || "—"}
-                    </span>
-                  </div>
+                        <div className="time-items-meta">
+                          <span className="time-items-date">
+                            {formatDateTime(solve?.datetime)}
+                          </span>
+                          <span className="time-items-scramble">
+                            {solve?.scramble || "—"}
+                          </span>
+                        </div>
 
-                  {showAverages && (
-                    <div className="time-items-averages">
-                      <div className="time-items-average-box">
-                        <span className="time-items-average-label">Ao5</span>
-                        <span className="time-items-average-value">
-                          {solve.__ao5 != null ? formatTime(solve.__ao5) : "—"}
-                        </span>
+                        {showAverages && (
+                          <div className="time-items-averages">
+                            <div className="time-items-average-box">
+                              <span className="time-items-average-label">Ao5</span>
+                              <span className="time-items-average-value">
+                                {solve.__ao5 != null ? formatTime(solve.__ao5) : "—"}
+                              </span>
+                            </div>
+
+                            <div className="time-items-average-box">
+                              <span className="time-items-average-label">Ao12</span>
+                              <span className="time-items-average-value">
+                                {solve.__ao12 != null ? formatTime(solve.__ao12) : "—"}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
 
-                      <div className="time-items-average-box">
-                        <span className="time-items-average-label">Ao12</span>
-                        <span className="time-items-average-value">
-                          {solve.__ao12 != null ? formatTime(solve.__ao12) : "—"}
-                        </span>
-                      </div>
+                      {typeof renderSolveFooter === "function" ? (
+                        <div className="time-items-footer">
+                          {renderSolveFooter(solve, { displayMode: "table", index })}
+                        </div>
+                      ) : null}
                     </div>
-                  )}
-                </div>
-              </button>
-            );
+                  </div>
+                </button>
+              );
           })}
         </div>
       ) : (
@@ -781,12 +795,29 @@ const TimeTable = ({
                       <div className="timelist-row-cell-index">
                         {solve.__displayNumber}
                       </div>
+
+                      {typeof renderSolveFooter === "function" ? (
+                        <div className="timelist-row-cell-footer">
+                          {renderSolveFooter(solve, {
+                            displayMode: "items",
+                            index: solve.__flatIndex,
+                          })}
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
 
                 {showAverages && (
-                  <div className="timelist-row-average">
+                  <div
+                    className="timelist-row-average"
+                    style={{
+                      borderColor: resolvedProfileColor,
+                      
+                      
+                      boxShadow: `inset 0 0 0 1px ${resolvedProfileColor}33`,
+                    }}
+                  >
                     <span className="timelist-row-average-label">AVG</span>
                     <span className="timelist-row-average-value">
                       {row.average != null ? formatTime(row.average) : "DNF"}
@@ -860,6 +891,7 @@ TimeTable.propTypes = {
   preserveInputOrder: PropTypes.bool,
   showSolveAverages: PropTypes.bool,
   containerClassName: PropTypes.string,
+  renderSolveFooter: PropTypes.func,
 };
 
 export default TimeTable;
