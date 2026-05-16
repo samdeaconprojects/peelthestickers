@@ -177,16 +177,18 @@
   place-items: center;
 }
 
-/* Controls column positioned to the LEFT of the timer (no layout shift) */
+/* Controls stack above the timer for Bluetooth timer input modes */
 .gan-side-controls {
   position: absolute;
-  right: 100%;             /* anchor to the left edge of the timer block */
-  top: 50%;
-  transform: translateY(-50%);
-  margin-right: 30px;      /* spacing between controls and timer */
+  left: calc(50% - 2.5%);
+  top: calc(50% - 20px);
+  transform: translate(-50%, -50%);
+  margin-top: -152px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  align-items: flex-end;
+  align-items: center;
   pointer-events: auto;
+  z-index: 20;
+  width: max-content;
 }

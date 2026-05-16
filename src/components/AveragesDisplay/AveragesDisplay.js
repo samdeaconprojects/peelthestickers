@@ -1,6 +1,7 @@
 import React from 'react';
 import { formatTime, calculateAverage, calculateBestAverageOfFive } from '../TimeList/TimeUtils';
 import { findBestStrictWindow } from '../../utils/strictAverageUtils';
+import { useSettings } from '../../contexts/SettingsContext';
 import './AveragesDisplay.css';
 
 function safeAverage(solves, count) {
@@ -14,6 +15,8 @@ function AveragesDisplay({
   setSelectedAverageSolves,
   onRequestBestAverageWindow = null,
 }) {
+  const { settings } = useSettings();
+  const showStrictAverages = settings?.showStrictAverages !== false;
   const avgOfFive = safeAverage(currentSolves, 5);
   const avgOfTwelve = safeAverage(currentSolves, 12);
 
@@ -105,11 +108,15 @@ function AveragesDisplay({
   }
 
   return (
-    <div className="averages-table">
+    <div
+      className={`averages-table ${
+        showStrictAverages ? 'averages-table--with-strict' : 'averages-table--without-strict'
+      }`}
+    >
       <div className="header"></div>
       <div className="header current-col">Current</div>
       <div className="header">Best</div>
-      <div className="header strict-header">Strict</div>
+      {showStrictAverages ? <div className="header strict-header">Strict</div> : null}
       <div className="header bpa-header">BPA</div>
       <div className="header wpa-header">WPA</div>
 
@@ -128,11 +135,13 @@ function AveragesDisplay({
       >
         {bestAvgOfFive === "N/A" ? "N/A" : bestAvgOfFive === "DNF" ? "DNF" : formatTime(bestAvgOfFive, true)}
       </div>
-      <div className="cell strict ao5" onClick={() => selectStrictWindow(strictAo5)}>
-        {strictAo5?.value == null ? "N/A" : formatTime(strictAo5.value, true)}
-      </div>
-      <div className="cell less-important">{bpa5}</div>
-      <div className="cell less-important">{wpa5}</div>
+      {showStrictAverages ? (
+        <div className="cell strict ao5" onClick={() => selectStrictWindow(strictAo5)}>
+          {strictAo5?.value == null ? "N/A" : formatTime(strictAo5.value, true)}
+        </div>
+      ) : null}
+      <div className="cell less-important bpa ao5-secondary">{bpa5}</div>
+      <div className="cell less-important wpa ao5-secondary">{wpa5}</div>
 
       {/* AO12 row */}
       <div className="row-title ao12" onClick={() => setSelectedAverageSolves(currentSolves.slice(-12))}>
@@ -149,11 +158,13 @@ function AveragesDisplay({
       >
         {bestAvgOfTwelve === "N/A" ? "N/A" : bestAvgOfTwelve === "DNF" ? "DNF" : formatTime(bestAvgOfTwelve, true)}
       </div>
-      <div className="cell strict ao12" onClick={() => selectStrictWindow(strictAo12)}>
-        {strictAo12?.value == null ? "N/A" : formatTime(strictAo12.value, true)}
-      </div>
-      <div className="cell less-important">{bpa12}</div>
-      <div className="cell less-important">{wpa12}</div>
+      {showStrictAverages ? (
+        <div className="cell strict ao12" onClick={() => selectStrictWindow(strictAo12)}>
+          {strictAo12?.value == null ? "N/A" : formatTime(strictAo12.value, true)}
+        </div>
+      ) : null}
+      <div className="cell less-important bpa ao12-secondary">{bpa12}</div>
+      <div className="cell less-important wpa ao12-secondary">{wpa12}</div>
     </div>
   );
 }

@@ -843,6 +843,37 @@ function shiftIsoDay(dayKey, offsetDays) {
   return `${year}-${month}-${day}`;
 }
 
+function buildDayBucketDirtySK({ dayKey, event = "", mainOnly = false } = {}) {
+  const day = String(dayKey || "").trim();
+  const ev = normalizeEvent(event);
+  if (!day) return "";
+
+  if (ev) {
+    return mainOnly
+      ? `DAYBUCKETDIRTY#EVENT#${ev}#MAIN#${day}`
+      : `DAYBUCKETDIRTY#EVENT#${ev}#${day}`;
+  }
+
+  return `DAYBUCKETDIRTY#ALL#${day}`;
+}
+
+function collectDayKeysInRange(startDay = "", endDay = "") {
+  const start = String(startDay || "").trim();
+  const end = String(endDay || "").trim();
+  if (!start || !end) return [];
+  if (start > end) return [];
+
+  const days = [];
+  let current = start;
+  let guard = 0;
+  while (current && current <= end && guard < 5000) {
+    days.push(current);
+    current = shiftIsoDay(current, 1);
+    guard += 1;
+  }
+  return days;
+}
+
 function getCreatedAtRangeForLocalDays({ startDay = "", endDay = "", timeZone = "" } = {}) {
   const resolvedTimeZone = getDayBucketTimeZone(timeZone);
   const startKey = String(startDay || "").trim();
@@ -1012,8 +1043,7 @@ async function recomputeAllEventsDayBucket(userID, dayKey) {
   );
 }
 
-async function recomputeDayBucketsForSolveMutation({ userID, oldSolve = null, newSolve = null }) {
-  const timeZone = await getUserDayBucketTimeZone(userID);
+function collectDayBucketScopesForSolveMutation({ oldSolve = null, newSolve = null, timeZone = "" } = {}) {
   const scopes = new Map();
   const addScope = (solve) => {
     if (!solve) return;
@@ -1025,8 +1055,120 @@ async function recomputeDayBucketsForSolveMutation({ userID, oldSolve = null, ne
 
   addScope(oldSolve);
   addScope(newSolve);
+  return scopes;
+}
 
-  if (!scopes.size) return [];
+function buildDirtyDayBucketScopesFromSolveMutation({ oldSolve = null, newSolve = null, timeZone = "" } = {}) {
+  const dirtyScopes = new Map();
+  const baseScopes = collectDayBucketScopesForSolveMutation({ oldSolve, newSolve, timeZone });
+  for (const scope of baseScopes.values()) {
+    dirtyScopes.set(`EVENT|${scope.event}|${scope.dayKey}`, {
+      event: scope.event,
+      dayKey: scope.dayKey,
+      mainOnly: false,
+      allEvents: false,
+    });
+    dirtyScopes.set(`MAIN|${scope.event}|${scope.dayKey}`, {
+      event: scope.event,
+      dayKey: scope.dayKey,
+      mainOnly: true,
+      allEvents: false,
+    });
+    dirtyScopes.set(`ALL|${scope.dayKey}`, {
+      event: "",
+      dayKey: scope.dayKey,
+      mainOnly: false,
+      allEvents: true,
+    });
+  }
+  return dirtyScopes;
+}
+
+async function markDayBucketScopesDirty(userID, scopes = new Map()) {
+  if (!userID || !scopes?.size) return [];
+
+  return Promise.all(
+    Array.from(scopes.values()).map((scope) => {
+      const sk = buildDayBucketDirtySK({
+        dayKey: scope.dayKey,
+        event: scope.allEvents ? "" : scope.event,
+        mainOnly: scope.mainOnly,
+      });
+      if (!sk) return null;
+      return ddb.send(
+        new PutCommand({
+          TableName: TABLE,
+          Item: {
+            PK: `USER#${userID}`,
+            SK: sk,
+            ItemType: "DAYBUCKETDIRTY",
+            DayKey: scope.dayKey,
+            ...(scope.allEvents ? {} : { Event: scope.event }),
+            ...(scope.mainOnly ? { MainOnly: true } : {}),
+            UpdatedAt: nowIso(),
+          },
+        })
+      );
+    })
+  );
+}
+
+async function clearDayBucketDirtyScopes(userID, scopes = []) {
+  const requests = (Array.isArray(scopes) ? scopes : [])
+    .map((scope) => ({
+      DeleteRequest: {
+        Key: {
+          PK: `USER#${userID}`,
+          SK: buildDayBucketDirtySK({
+            dayKey: scope.dayKey,
+            event: scope.allEvents ? "" : scope.event,
+            mainOnly: scope.mainOnly,
+          }),
+        },
+      },
+    }))
+    .filter((request) => Boolean(request?.DeleteRequest?.Key?.SK));
+
+  if (!requests.length) return 0;
+  return batchWriteRequestsWithRetry(requests);
+}
+
+async function recomputeDirtyDayBucketScopes(userID, scopes = [], timeZone = "") {
+  const requested = Array.isArray(scopes) ? scopes : [];
+  if (!userID || !requested.length) return [];
+
+  const groupedEventScopes = new Map();
+  const allDayKeys = new Set();
+
+  for (const scope of requested) {
+    if (scope?.allEvents) {
+      if (scope.dayKey) allDayKeys.add(scope.dayKey);
+      continue;
+    }
+    const event = normalizeEvent(scope?.event);
+    const dayKey = String(scope?.dayKey || "").trim();
+    if (!event || !dayKey) continue;
+    groupedEventScopes.set(`${event}|${dayKey}`, { event, dayKey });
+  }
+
+  if (groupedEventScopes.size) {
+    await recomputeDayBucketsForScopes({
+      userID,
+      scopes: groupedEventScopes,
+      timeZone,
+    });
+  }
+
+  for (const dayKey of allDayKeys) {
+    await recomputeAllEventsDayBucket(userID, dayKey);
+  }
+
+  await clearDayBucketDirtyScopes(userID, requested);
+  return requested;
+}
+
+async function recomputeDayBucketsForScopes({ userID, scopes = new Map(), timeZone = "" }) {
+  if (!userID || !scopes?.size) return [];
 
   const results = [];
   for (const scope of scopes.values()) {
@@ -1071,6 +1213,25 @@ async function recomputeDayBucketsForSolveMutation({ userID, oldSolve = null, ne
   }
 
   return results;
+}
+
+async function recomputeDayBucketsForSolveMutation({ userID, oldSolve = null, newSolve = null }) {
+  const timeZone = await getUserDayBucketTimeZone(userID);
+  const scopes = collectDayBucketScopesForSolveMutation({ oldSolve, newSolve, timeZone });
+  return recomputeDayBucketsForScopes({ userID, scopes, timeZone });
+}
+
+function markDayBucketsDirtyForSolveMutation({ userID, oldSolve = null, newSolve = null }) {
+  if (!userID) return false;
+  const pendingTimeZone = getDayBucketTimeZone();
+  const scopes = buildDirtyDayBucketScopesFromSolveMutation({
+    oldSolve,
+    newSolve,
+    timeZone: pendingTimeZone,
+  });
+  if (!scopes.size) return false;
+  runInBackground(`dayBuckets:dirty:${userID}`, () => markDayBucketScopesDirty(userID, scopes));
+  return true;
 }
 
 async function queryDayBucketItemsByPrefix(userID, prefix) {
@@ -1993,6 +2154,50 @@ function applyTopSinglesToStats(next, topSingles) {
   next.BestSingleAt = best?.CreatedAt || null;
 }
 
+function normalizeTopSinglesFromStats(stats, limit = 10) {
+  const max = Math.max(1, Math.min(50, Number(limit || 10)));
+  return (Array.isArray(stats?.TopSingles10) ? stats.TopSingles10 : [])
+    .map((item) => ({
+      SolveSK: item?.SolveSK || null,
+      FinalTimeMs: Number.isFinite(Number(item?.FinalTimeMs)) ? Number(item.FinalTimeMs) : null,
+      CreatedAt: item?.CreatedAt || null,
+      SessionID: item?.SessionID || null,
+    }))
+    .filter((item) => item.SolveSK && Number.isFinite(item.FinalTimeMs))
+    .sort(
+      (a, b) =>
+        Number(a.FinalTimeMs) - Number(b.FinalTimeMs) ||
+        String(a.CreatedAt || "").localeCompare(String(b.CreatedAt || ""))
+    )
+    .slice(0, max);
+}
+
+function mergeSolveIntoTopSingles(prevTopSingles, solve, limit = 10) {
+  const finalMs = getFinalTimeMs(solve);
+  if (!Number.isFinite(finalMs)) {
+    return normalizeTopSinglesFromStats({ TopSingles10: prevTopSingles }, limit);
+  }
+
+  const next = normalizeTopSinglesFromStats({ TopSingles10: prevTopSingles }, limit);
+  next.push({
+    SolveSK: solve?.SK || null,
+    FinalTimeMs: Number(finalMs),
+    CreatedAt: solve?.CreatedAt || null,
+    SessionID: solve?.SessionID || null,
+  });
+
+  const deduped = Array.from(
+    new Map(next.filter((item) => item.SolveSK).map((item) => [item.SolveSK, item])).values()
+  );
+
+  deduped.sort(
+    (a, b) =>
+      Number(a.FinalTimeMs) - Number(b.FinalTimeMs) ||
+      String(a.CreatedAt || "").localeCompare(String(b.CreatedAt || ""))
+  );
+  return deduped.slice(0, Math.max(1, Math.min(50, Number(limit || 10))));
+}
+
 function insertSolveIntoOrderedArray(solves, solve, sessionID = null) {
   const input = Array.isArray(solves) ? [...solves] : [];
   if (!solve) return input;
@@ -2467,14 +2672,23 @@ async function applyIncrementalStatsForScope({
     ? getScopeSortKeyFromSolve(anchorSolve, sid)
     : getScopeSortKeyFromSolve(removeSolve, sid);
 
+  const canUseAddFastPath = !removeSolve && !!addSolve;
   const [topSingles, lastSolveAt, neighborhood] = await Promise.all([
-    getTopSinglesForScope({
-      userID,
-      event: ev,
-      sessionID: isSession ? sid : null,
-      limit: 10,
-    }),
-    getLastSolveAtForScope({ userID, event: ev, sessionID: isSession ? sid : null }),
+    canUseAddFastPath
+      ? Promise.resolve(mergeSolveIntoTopSingles(prev?.TopSingles10, addSolve, 10))
+      : getTopSinglesForScope({
+          userID,
+          event: ev,
+          sessionID: isSession ? sid : null,
+          limit: 10,
+        }),
+    canUseAddFastPath
+      ? Promise.resolve(
+          String(addSolve?.CreatedAt || "") > String(prev?.LastSolveAt || "")
+            ? addSolve?.CreatedAt || null
+            : prev?.LastSolveAt || addSolve?.CreatedAt || null
+        )
+      : getLastSolveAtForScope({ userID, event: ev, sessionID: isSession ? sid : null }),
     anchorSortKey
       ? queryScopeNeighborhood({
           userID,
@@ -2831,6 +3045,21 @@ async function markTagStatsScopesStale(userID, tagScopeMutations) {
   );
 }
 
+function buildTagScopeMutationsForSolveMutation(oldSolve = null, newSolve = null) {
+  const tagScopeMutations = new Map();
+  addTagScopeMutation(tagScopeMutations, oldSolve, "remove");
+  addTagScopeMutation(tagScopeMutations, newSolve, "add");
+  return tagScopeMutations;
+}
+
+function queueTagStatsInvalidationInBackground(label, userID, tagScopeMutations) {
+  const scopes = Array.from(tagScopeMutations?.values?.() || []);
+  if (!userID || scopes.length === 0) return false;
+
+  runInBackground(`tagStats:${label}`, () => markTagStatsScopesStale(userID, tagScopeMutations));
+  return true;
+}
+
 async function applySolveMutationStats({ userID, oldSolve = null, newSolve = null }) {
   if (oldSolve && newSolve) {
     const sameScope =
@@ -2897,11 +3126,6 @@ async function applySolveMutationStats({ userID, oldSolve = null, newSolve = nul
       })
     );
   }
-
-  const tagScopeMutations = new Map();
-  addTagScopeMutation(tagScopeMutations, oldSolve, "remove");
-  addTagScopeMutation(tagScopeMutations, newSolve, "add");
-  jobs.push(markTagStatsScopesStale(userID, tagScopeMutations));
 
   await Promise.all(jobs);
 }
@@ -5111,8 +5335,7 @@ app.post("/api/solve", async (req, res) => {
       syncSingleRankItemsForMutation({ userID, oldSolve: null, newSolve: solveItem })
     );
 
-    const tagScopeMutations = new Map();
-    addTagScopeMutation(tagScopeMutations, solveItem, "add");
+    const tagScopeMutations = buildTagScopeMutationsForSolveMutation(null, solveItem);
 
     const [sessionStats, eventStats] = await Promise.all([
       withDbPhase("solve:add:session-stats", () =>
@@ -5130,14 +5353,12 @@ app.post("/api/solve", async (req, res) => {
           addSolve: solveItem,
         })
       ),
-      withDbPhase("solve:add:tag-stats", () => markTagStatsScopesStale(userID, tagScopeMutations)),
     ]);
-    runInBackground(`dayBuckets:add:${userID}:${solveItem.Event}`, () =>
-      recomputeDayBucketsForSolveMutation({
-        userID,
-        newSolve: solveItem,
-      })
-    );
+    queueTagStatsInvalidationInBackground(`add:${userID}:${solveItem.Event}`, userID, tagScopeMutations);
+    markDayBucketsDirtyForSolveMutation({
+      userID,
+      newSolve: solveItem,
+    });
 
     return res.json({
       ok: true,
@@ -5836,8 +6057,12 @@ app.post("/api/solves/move-session", async (req, res) => {
         recomputeSessionStats(ddb, TABLE, userID, scope.event, scope.sessionID)
       ),
       ...Array.from(eventScopes.values()).map((event) => recomputeEventStats(ddb, TABLE, userID, event)),
-      markTagStatsScopesStale(userID, tagScopeMutations),
     ]);
+    queueTagStatsInvalidationInBackground(
+      `move-session:${userID}:${fromEvent}:${toEvent}`,
+      userID,
+      tagScopeMutations
+    );
     const recomputeMs = Date.now() - recomputeStartedAt;
 
     return res.json({
@@ -5944,7 +6169,7 @@ app.post("/api/solves/bulk-tags", async (req, res) => {
 
     const wrote = await batchWriteRequestsWithRetry(writeRequests);
 
-    await markTagStatsScopesStale(userID, tagScopeMutations);
+    queueTagStatsInvalidationInBackground(`bulk-tags:${userID}`, userID, tagScopeMutations);
 
     return res.json({
       ok: true,
@@ -6058,22 +6283,67 @@ app.put("/api/solve/:userID/:solveRef", async (req, res) => {
       rebuilt[k] = v;
     }
 
-    await replaceSolveAndTagItems(ddb, TABLE, existing, rebuilt);
-    await syncSingleRankItemsForMutation({ userID, oldSolve: existing, newSolve: rebuilt });
+    const existingEvent = normalizeEvent(existing.Event);
+    const rebuiltEvent = normalizeEvent(rebuilt.Event);
+    const existingSessionID = normalizeSessionID(existing.SessionID);
+    const rebuiltSessionID = normalizeSessionID(rebuilt.SessionID);
+    const existingPenalty = normalizePenalty(existing.Penalty);
+    const rebuiltPenalty = normalizePenalty(rebuilt.Penalty);
+    const existingRawTimeMs = getRawTimeMs(existing);
+    const rebuiltRawTimeMs = getRawTimeMs(rebuilt);
+    const existingCreatedAt = String(existing.CreatedAt || "").trim();
+    const rebuiltCreatedAt = String(rebuilt.CreatedAt || "").trim();
+    const tagFingerprint = (solve) =>
+      getSolveTagPairsFromItem(solve)
+        .map((pair) => `${String(pair?.key || "").trim()}|${String(pair?.value || "").trim()}`)
+        .sort((a, b) => a.localeCompare(b))
+        .join("||");
+    const tagsChanged = tagFingerprint(existing) !== tagFingerprint(rebuilt);
+    const coreSolveShapeChanged =
+      existingEvent !== rebuiltEvent ||
+      existingSessionID !== rebuiltSessionID ||
+      existingPenalty !== rebuiltPenalty ||
+      existingRawTimeMs !== rebuiltRawTimeMs ||
+      existingCreatedAt !== rebuiltCreatedAt;
 
-    await applySolveMutationStats({
-      userID,
-      oldSolve: existing,
-      newSolve: rebuilt,
-    });
+    await withDbPhase("solve:edit:write-solve-and-tags", () =>
+      replaceSolveAndTagItems(ddb, TABLE, existing, rebuilt)
+    );
 
-    runInBackground(`dayBuckets:edit:${userID}:${rebuilt.Event}`, () =>
-      recomputeDayBucketsForSolveMutation({
+    if (!coreSolveShapeChanged) {
+      if (tagsChanged) {
+        queueTagStatsInvalidationInBackground(
+          `edit-tags:${userID}:${rebuilt.Event}`,
+          userID,
+          buildTagScopeMutationsForSolveMutation(existing, rebuilt)
+        );
+      }
+
+      return res.json({ ok: true, item: rebuilt });
+    }
+
+    await withDbPhase("solve:edit:single-ranks", () =>
+      syncSingleRankItemsForMutation({ userID, oldSolve: existing, newSolve: rebuilt })
+    );
+
+    await withDbPhase("solve:edit:stats", () =>
+      applySolveMutationStats({
         userID,
         oldSolve: existing,
         newSolve: rebuilt,
       })
     );
+    queueTagStatsInvalidationInBackground(
+      `edit:${userID}:${rebuilt.Event}`,
+      userID,
+      buildTagScopeMutationsForSolveMutation(existing, rebuilt)
+    );
+
+    markDayBucketsDirtyForSolveMutation({
+      userID,
+      oldSolve: existing,
+      newSolve: rebuilt,
+    });
 
     return res.json({ ok: true, item: rebuilt });
   } catch (e) {
@@ -6096,13 +6366,19 @@ app.put("/api/solvePenalty/:userID/:solveRef", async (req, res) => {
     const existing = await getSolveItem(userID, solveRef);
     if (!existing) return res.status(404).json({ error: "Solve not found" });
 
+    const existingRawTimeMs = getRawTimeMs(existing);
+    const existingPenalty = normalizePenalty(existing.Penalty);
     const rawTimeMs =
       Number.isFinite(Number(req.body?.rawTimeMs))
         ? Number(req.body.rawTimeMs)
-        : getRawTimeMs(existing);
+        : existingRawTimeMs;
 
     if (!Number.isFinite(rawTimeMs) || rawTimeMs < 0) {
       return res.status(400).json({ error: "Invalid rawTimeMs" });
+    }
+
+    if (rawTimeMs === existingRawTimeMs && penalty === existingPenalty) {
+      return res.json({ ok: true, item: existing, skipped: true });
     }
 
     const updated = buildSolveItem({
@@ -6119,7 +6395,12 @@ app.put("/api/solvePenalty/:userID/:solveRef", async (req, res) => {
       existing,
     });
 
-    await replaceSolveAndTagItems(ddb, TABLE, existing, updated);
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: updated,
+      })
+    );
     await syncSingleRankItemsForMutation({ userID, oldSolve: existing, newSolve: updated });
 
     await applySolveMutationStats({
@@ -6127,14 +6408,17 @@ app.put("/api/solvePenalty/:userID/:solveRef", async (req, res) => {
       oldSolve: existing,
       newSolve: updated,
     });
-
-    runInBackground(`dayBuckets:penalty:${userID}:${updated.Event}`, () =>
-      recomputeDayBucketsForSolveMutation({
-        userID,
-        oldSolve: existing,
-        newSolve: updated,
-      })
+    queueTagStatsInvalidationInBackground(
+      `penalty:${userID}:${updated.Event}`,
+      userID,
+      buildTagScopeMutationsForSolveMutation(existing, updated)
     );
+
+    markDayBucketsDirtyForSolveMutation({
+      userID,
+      oldSolve: existing,
+      newSolve: updated,
+    });
 
     return res.json({ ok: true, item: updated });
   } catch (e) {
@@ -6164,14 +6448,17 @@ app.delete("/api/solve/:userID/:solveRef", async (req, res) => {
       oldSolve: existing,
       newSolve: null,
     });
-
-    runInBackground(`dayBuckets:delete:${userID}:${existing.Event}`, () =>
-      recomputeDayBucketsForSolveMutation({
-        userID,
-        oldSolve: existing,
-        newSolve: null,
-      })
+    queueTagStatsInvalidationInBackground(
+      `delete:${userID}:${existing.Event}`,
+      userID,
+      buildTagScopeMutationsForSolveMutation(existing, null)
     );
+
+    markDayBucketsDirtyForSolveMutation({
+      userID,
+      oldSolve: existing,
+      newSolve: null,
+    });
 
     return res.json({ ok: true });
   } catch (e) {
@@ -6297,6 +6584,38 @@ app.get("/api/dayBuckets/:userID", async (req, res) => {
 
     const rangeStart = `${prefix}#${startDay || "0000-00-00"}`;
     const rangeEnd = `${prefix}#${endDay || "9999-99-99"}`;
+
+    const dirtyPrefix = event
+      ? mainOnly
+        ? `DAYBUCKETDIRTY#EVENT#${event}#MAIN`
+        : `DAYBUCKETDIRTY#EVENT#${event}`
+      : "DAYBUCKETDIRTY#ALL";
+    const dirtyRangeStart = `${dirtyPrefix}#${startDay || "0000-00-00"}`;
+    const dirtyRangeEnd = `${dirtyPrefix}#${endDay || "9999-99-99"}`;
+
+    const dirtyOut = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
+        ExpressionAttributeValues: {
+          ":pk": `USER#${userID}`,
+          ":start": dirtyRangeStart,
+          ":end": dirtyRangeEnd,
+        },
+        ScanIndexForward: true,
+      })
+    );
+
+    const dirtyScopes = (dirtyOut.Items || []).map((item) => ({
+      dayKey: String(item?.DayKey || "").trim(),
+      event: String(item?.Event || "").trim(),
+      mainOnly: item?.MainOnly === true,
+      allEvents: String(item?.SK || "").startsWith("DAYBUCKETDIRTY#ALL#"),
+    })).filter((scope) => scope.dayKey);
+
+    if (dirtyScopes.length) {
+      await recomputeDirtyDayBucketScopes(userID, dirtyScopes, timeZone);
+    }
 
     const out = await ddb.send(
       new QueryCommand({

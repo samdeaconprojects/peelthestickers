@@ -10,6 +10,7 @@
 .homeStatsSlot {
   position: absolute;
   pointer-events: auto;
+  --home-slot-center-shift-x: 0px;
 }
 
 .homeStatsSlot--pie {
@@ -24,21 +25,65 @@
   z-index: 7;
   --home-summary-offset-x: 0px;
   --home-summary-offset-y: 0px;
-  transform: translate(var(--home-summary-offset-x), var(--home-summary-offset-y));
+  --home-summary-expand-shift-x: 0px;
+  transform: translate(
+    calc(
+      var(--home-summary-offset-x) +
+      var(--home-summary-expand-shift-x) +
+      var(--home-slot-center-shift-x)
+    ),
+    var(--home-summary-offset-y)
+  );
 }
 
 .homeStatsSlot--summary.is-hovered {
   z-index: 9;
 }
 
+.homeStatsSummaryEdgeToggle {
+  position: absolute;
+  top: 8px;
+  right: 6px;
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 0.92rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease;
+}
+
+.homeStatsSummaryEdgeToggle:hover,
+.homeStatsSummaryEdgeToggle:focus-visible,
+.homeStatsSummaryEdgeToggle.is-expanded {
+  color: #ffffff;
+  transform: scale(1.02);
+  outline: none;
+}
+
 .homeStatsSlot--left {
   right: calc(70% + clamp(250px, 26vw, 440px));
   top: 455px;
+  transform: translateX(var(--home-slot-center-shift-x));
 }
 
 .homeStatsSlot--right {
   left: calc(50% + clamp(250px, 26vw, 440px));
   top: 455px;
+  transform: translateX(var(--home-slot-center-shift-x));
 }
 
 .homeStatsSlot--summary.homeStatsSlot--left,
@@ -46,14 +91,14 @@
 }
 
 .homeStatsSlot--summary.homeStatsSlot--right {
-  left: calc(50% + clamp(36px, 4vw, 84px));
+  left: calc(50% + clamp(260px, 26vw, 560px));
   top: 272px;
   --home-summary-offset-x: -495px;
   --home-summary-offset-y: 0px;
 }
 
 .homeStatsSlot--summary.homeStatsSlot--left {
-  right: calc(50% + clamp(28px, 3vw, 72px));
+  right: calc(50% + clamp(260px, 26vw, 560px));
   top: 272px;
   --home-summary-offset-x: -345px;
   --home-summary-offset-y: 0px;
@@ -130,7 +175,7 @@
   width: 84%;
   height: 72%;
   margin: 8px auto 0;
-  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease, width 220ms ease;
 }
 
 .homeStatsCard--summary::before {
@@ -146,9 +191,14 @@
 }
 
 .homeStatsCard--summaryCompact {
-  width: 72%;
+  width: 76%;
   height: 100%;
   margin: 0 auto;
+  transition: width 220ms ease;
+}
+
+.homeStatsCard--summaryCompactExpanded {
+  width: 88%;
 }
 
 .homeStatsCard--summaryTile {
@@ -490,18 +540,25 @@
 .homeStatsSummary {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   width: 100%;
   height: 100%;
-  padding: 6px 12px 4px;
+  box-sizing: border-box;
+  padding: 7px 14px 5px;
   justify-content: flex-start;
 }
 
 .homeStatsSummary--list {
-  gap: 10px;
-  padding: 5px 10px 11px;
+  gap: 2px;
+  padding: 10px 18px 11px 14px;
   overflow-y: hidden;
   justify-content: flex-start;
+}
+
+.homeStatsSummary--expanded {
+  gap: 0;
+  margin: 0;
+  padding: 9px 16px 0 14px;
 }
 
 .homeStatsSummaryGroup {
@@ -537,7 +594,7 @@
 .homeStatsSummaryRow {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
   padding: 0;
   border: 0;
@@ -550,11 +607,12 @@
 }
 
 .homeStatsSummaryRow--list {
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 4px 0;
+  column-gap: 5px;
+  row-gap: 0;
+  padding: 0;
 }
 
 .homeStatsSummaryRow:disabled {
@@ -572,7 +630,7 @@
 
 .homeStatsSummaryLabel {
   color: var(--home-summary-label, rgba(255, 255, 255, 0.66));
-  font-size: 0.5rem;
+  font-size: 0.56rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -580,21 +638,40 @@
 }
 
 .homeStatsSummaryRow--list .homeStatsSummaryLabel {
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.34);
+  color: rgba(255, 255, 255, 0.5);
   opacity: 1;
+}
+
+.homeStatsSummaryLabel--split {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.homeStatsSummaryLabelPrefix {
+  color: inherit;
+}
+
+.homeStatsSummaryLabelNumber {
+  color: #ffffff;
+  font-size: 1.08rem;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 0.95;
 }
 
 .homeStatsSummaryValue {
   color: rgba(255, 255, 255, 0.88);
-  font-size: 1rem;
+  font-size: 1.08rem;
   font-weight: 900;
   line-height: 1.02;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: right;
   transition: color 140ms ease;
   opacity: 1;
   text-shadow: 0 0 12px rgba(255, 255, 255, 0.14);
@@ -611,6 +688,7 @@
 .homeStatsSummaryValueButton {
   display: flex;
   align-items: baseline;
+  justify-content: flex-end;
   gap: 0;
   min-width: 0;
   padding: 0;
@@ -618,6 +696,7 @@
   background: transparent;
   color: inherit;
   cursor: pointer;
+  justify-self: end;
 }
 
 .homeStatsSummaryValueButton:disabled {
@@ -625,10 +704,103 @@
   opacity: 0.72;
 }
 
+.homeStatsSummaryValue--current {
+  color: #50B6FF;
+  text-shadow: 0 0 10px rgba(80, 182, 255, 0.18);
+}
+
 .homeStatsSummaryValue--best {
   color: rgba(86, 244, 224, 0.9);
   opacity: 1;
   text-shadow: 0 0 12px rgba(86, 244, 224, 0.18);
+}
+
+.homeStatsSummaryValue--worst {
+  color: rgba(255, 96, 120, 0.92);
+  text-shadow: 0 0 10px rgba(255, 96, 120, 0.18);
+}
+
+.homeStatsSummaryLabel--expanded {
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+}
+
+.homeStatsSummaryRow--expanded {
+  align-items: baseline;
+  grid-template-columns: minmax(38px, max-content) minmax(54px, max-content) 52px 52px;
+  justify-content: space-between;
+  column-gap: 5px;
+  padding: 0;
+  line-height: 0.94;
+}
+
+.homeStatsSummaryRow--expanded .homeStatsSummaryLabel {
+  min-width: 0;
+  font-size: 0.84rem;
+}
+
+.homeStatsSummaryRow--expanded .homeStatsSummaryValueButton {
+  opacity: 0;
+  transform: translateX(8px);
+  animation: homeStatsSummaryValueReveal 180ms ease forwards;
+}
+
+.homeStatsSummaryRow--expanded .homeStatsSummaryValueButton--best {
+  justify-content: flex-end;
+  justify-self: end;
+}
+
+.homeStatsSummaryRow--expanded .homeStatsSummaryValueButton--best {
+  animation-delay: 0ms;
+}
+
+.homeStatsSummaryRow--expanded .homeStatsSummaryValueButton--worst,
+.homeStatsSummaryRow--expanded .homeStatsSummaryValueButton--current {
+  width: 52px;
+  justify-content: flex-end;
+  justify-self: end;
+}
+
+.homeStatsSummaryRow--expanded .homeStatsSummaryValueButton--worst {
+  animation-delay: 35ms;
+}
+
+.homeStatsSummaryRow--expanded .homeStatsSummaryValueButton--current {
+  animation-delay: 70ms;
+}
+
+.homeStatsSummaryRow--expanded .homeStatsSummaryValue {
+  font-size: 0.98rem;
+  line-height: 0.98;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.homeStatsSummaryRow--expanded .homeStatsSummaryValueButton--worst .homeStatsSummaryValue,
+.homeStatsSummaryRow--expanded .homeStatsSummaryValueButton--current .homeStatsSummaryValue {
+  text-align: right;
+}
+
+.homeStatsSummary--expanded .homeStatsSummaryRow--expanded:last-child {
+  margin-bottom: 0;
+}
+
+.homeStatsSummaryValueButton--hidden {
+  display: none;
+}
+
+@keyframes homeStatsSummaryValueReveal {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .homeStatsSummaryValueButton:hover .homeStatsSummaryValue,
@@ -638,13 +810,33 @@
 }
 
 .homeStatsCard--summary.is-hovered .homeStatsSummaryLabel,
-.homeStatsCard--summary.is-hovered .homeStatsSummaryValue {
+.homeStatsCard--summary.is-hovered .homeStatsSummaryValuePair .homeStatsSummaryValue {
   color: #ffffff;
 }
 
 .homeStatsCard--summary.is-hovered .homeStatsSummaryRow:hover .homeStatsSummaryLabel,
-.homeStatsCard--summary.is-hovered .homeStatsSummaryRow:hover .homeStatsSummaryValue {
+.homeStatsCard--summary.is-hovered .homeStatsSummaryRow:hover .homeStatsSummaryValue,
+.homeStatsCard--summary.is-hovered .homeStatsSummaryValueButton:hover .homeStatsSummaryValue,
+.homeStatsCard--summary.is-hovered .homeStatsSummaryValueButton:focus-visible .homeStatsSummaryValue {
   color: #2EC4B6;
+}
+
+.homeStatsCard--summary.is-hovered .homeStatsSummaryRow--expanded .homeStatsSummaryValue--current,
+.homeStatsCard--summary.is-hovered .homeStatsSummaryRow--expanded .homeStatsSummaryValueButton:hover .homeStatsSummaryValue--current,
+.homeStatsCard--summary.is-hovered .homeStatsSummaryRow--expanded .homeStatsSummaryValueButton:focus-visible .homeStatsSummaryValue--current {
+  color: #50B6FF;
+}
+
+.homeStatsCard--summary.is-hovered .homeStatsSummaryRow--expanded .homeStatsSummaryValue--best,
+.homeStatsCard--summary.is-hovered .homeStatsSummaryRow--expanded .homeStatsSummaryValueButton:hover .homeStatsSummaryValue--best,
+.homeStatsCard--summary.is-hovered .homeStatsSummaryRow--expanded .homeStatsSummaryValueButton:focus-visible .homeStatsSummaryValue--best {
+  color: rgba(86, 244, 224, 0.9);
+}
+
+.homeStatsCard--summary.is-hovered .homeStatsSummaryRow--expanded .homeStatsSummaryValue--worst,
+.homeStatsCard--summary.is-hovered .homeStatsSummaryRow--expanded .homeStatsSummaryValueButton:hover .homeStatsSummaryValue--worst,
+.homeStatsCard--summary.is-hovered .homeStatsSummaryRow--expanded .homeStatsSummaryValueButton:focus-visible .homeStatsSummaryValue--worst {
+  color: rgba(255, 96, 120, 0.92);
 }
 
 .homeStatsCard:hover .homeStatsCardTitle {

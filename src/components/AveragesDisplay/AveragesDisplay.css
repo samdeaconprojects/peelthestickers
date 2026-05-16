@@ -1,6 +1,5 @@
 .averages-table {
   display: grid;
-  grid-template-columns: 80px repeat(5, 1fr);
   gap: 8px;
   align-items: center;
   text-align: center;
@@ -15,21 +14,29 @@
   pointer-events: auto;
 }
 
+.averages-table--with-strict {
+  grid-template-columns: 80px repeat(5, 1fr);
+}
+
+.averages-table--without-strict {
+  grid-template-columns: 80px repeat(4, 1fr);
+}
+
 /* Headers */
 .header {
-  font-size: 12pt;
+  font-size: calc(12pt * var(--home-averages-scale, 1));
   opacity: 0.7;
   color: #50B6FF;
 }
 
 .header.current-col {
-  font-size: 14pt;
+  font-size: calc(14pt * var(--home-averages-scale, 1));
   opacity: 1;
   color: #50B6FF;
 }
 
 .header.bpa-header {
-  color: #00FF00; /* green title */
+  color: #38d6c9;
 }
 
 .header.strict-header {
@@ -42,47 +49,74 @@
 
 /* Row titles */
 .row-title {
-  font-size: 14pt;
+  font-size: calc(14pt * var(--home-averages-scale, 1));
   opacity: 0.8;
   color: #50B6FF;
   cursor: pointer;
 }
 
 .row-title.ao5 {
-  font-size: 16pt;
+  font-size: calc(16pt * var(--home-averages-scale, 1));
   opacity: 1;
   color: #50B6FF; /* keep consistent color */
 }
 
 .row-title.ao12 {
-  font-size: 13pt;
+  font-size: calc(13pt * var(--home-averages-scale, 1));
   opacity: 0.7;
 }
 
 /* Cells */
 .cell {
   cursor: pointer;
-  font-size: 18pt;
+  font-size: calc(18pt * var(--home-averages-scale, 1));
 }
 
 .cell.current-col {
-  font-size: 28pt;  /* most important */
+  font-size: calc(28pt * var(--home-averages-scale, 1));  /* most important */
   font-weight: bold;
 }
 
 .cell.best {
-  font-size: 18pt;
+  font-size: calc(18pt * var(--home-averages-scale, 1));
   opacity: 0.8;
   color: #00FF00;
 }
 
 .cell.strict {
-  font-size: 16pt;
+  font-size: calc(16pt * var(--home-averages-scale, 1));
   opacity: 0.85;
   color: #38d6c9;
 }
 
 .cell.less-important {
-  font-size: 14pt;   /* BPA/WPA numbers smaller */
+  font-size: calc(14pt * var(--home-averages-scale, 1));   /* BPA/WPA numbers smaller */
   opacity: 0.6;
+}
+
+.cell.bpa {
+  color: #38d6c9;
+  opacity: 0.85;
+}
+
+.cell.wpa {
+  color: #FF7D7D;
+}
+
+.cell.best.ao5,
+.cell.ao5-secondary {
+  font-size: calc(22pt * var(--home-averages-scale, 1));
+}
+
+.cell.current-col.ao12 {
+  font-size: calc(24pt * var(--home-averages-scale, 1));
+}
+
+.cell.strict.ao12 {
+  font-size: calc(14pt * var(--home-averages-scale, 1));
+}
+
+.cell.best.ao12,
+.cell.ao12-secondary {
+  font-size: calc(17pt * var(--home-averages-scale, 1));
 }

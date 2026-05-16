@@ -1,4 +1,5 @@
 import { apiDelete } from "./api.js";
+import { invalidateSessionsCache } from "./getSessions.js";
 
 export const deleteSession = async (userID, event, sessionID) => {
   const id = String(userID || "").trim();
@@ -9,7 +10,9 @@ export const deleteSession = async (userID, event, sessionID) => {
   if (!ev) throw new Error("deleteSession: event required");
   if (!sid) throw new Error("deleteSession: sessionID required");
 
-  return apiDelete(
+  const result = await apiDelete(
     `/api/session/${encodeURIComponent(id)}/${encodeURIComponent(ev)}/${encodeURIComponent(sid)}`
   );
+  invalidateSessionsCache(id);
+  return result;
 };

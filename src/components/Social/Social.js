@@ -183,6 +183,16 @@ const buildConversationMembers = (memberIDs, profilesById, currentUser) =>
     })
     .filter(Boolean);
 
+const getGroupAvatarGridConfig = (memberCount) => {
+  const count = Math.max(1, Math.min(Number(memberCount) || 0, 9));
+
+  if (count === 1) return { cols: 1, rows: 1, densityClass: "groupAvatarCluster--solo" };
+  if (count === 2) return { cols: 2, rows: 1, densityClass: "groupAvatarCluster--wide" };
+  if (count <= 4) return { cols: 2, rows: 2, densityClass: "groupAvatarCluster--quad" };
+  if (count <= 6) return { cols: 3, rows: 2, densityClass: "groupAvatarCluster--compact" };
+  return { cols: 3, rows: 3, densityClass: "groupAvatarCluster--dense" };
+};
+
 const parseSharedAoNPayload = (text) => {
   if (!String(text || "").startsWith("[sharedAoN]")) return null;
   try {
@@ -1517,67 +1527,85 @@ function Social({
         {activeTab === 1 && (
           <div className="headerConversationStrip">
             {sortedConversations.map((conv) => (
-              <button
-                type="button"
-                key={conv.conversationID}
-                className={`conversationPreview ${
-                  selectedConversation?.conversationID === conv.conversationID
-                    ? "selected"
-                    : ""
-                }`}
-                onClick={() => {
-                  setSelectedConversation(conv);
-                  setActiveTab(1);
-                }}
-              >
-                <div className="avatarContainer">
-                  <div
-                    className="profilePicturePost"
-                    style={{ borderColor: conv.color || "#2EC4B6" }}
+              (() => {
+                const groupGrid = getGroupAvatarGridConfig((conv.memberProfiles || []).length);
+
+                return (
+                  <button
+                    type="button"
+                    key={conv.conversationID}
+                    className={`conversationPreview ${
+                      selectedConversation?.conversationID === conv.conversationID
+                        ? "selected"
+                        : ""
+                    }`}
+                    onClick={() => {
+                      setSelectedConversation(conv);
+                      setActiveTab(1);
+                    }}
                   >
-                    {conv.type === "GROUP" ? (
-                      <div className="groupAvatarCluster">
-                        {(conv.memberProfiles || []).slice(0, 4).map((member, idx) => (
-                          <div
-                            key={`${conv.conversationID}-${member.id}-${idx}`}
-                            className={`groupAvatarMini groupAvatarMini--${idx}`}
-                            style={{ borderColor: member.color || "#cccccc" }}
-                          >
-                            <div
-                              className={`groupAvatarMiniCube postNameCube postNameCube--${(
-                                member.profileEvent || "333"
-                              ).toLowerCase()}`}
-                            >
-                              <PuzzleSVG
-                                event={member.profileEvent || "333"}
-                                scramble={member.profileScramble || ""}
-                                isMusicPlayer={false}
-                                isTimerCube={false}
-                                isNameTagCube={true}
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
+                    <div className="avatarContainer">
                       <div
-                        className={`postNameCube postNameCube--${(
-                          conv.profileEvent || "333"
-                        ).toLowerCase()}`}
+                        className={`profilePicturePost ${
+                          conv.type === "GROUP" ? "profilePicturePost--group" : ""
+                        }`}
+                        style={
+                          conv.type === "GROUP"
+                            ? undefined
+                            : { borderColor: conv.color || "#2EC4B6" }
+                        }
                       >
-                        <PuzzleSVG
-                          event={conv.profileEvent || "333"}
-                          scramble={conv.profileScramble || ""}
-                          isMusicPlayer={false}
-                          isTimerCube={false}
-                          isNameTagCube={true}
-                        />
+                        {conv.type === "GROUP" ? (
+                          <div
+                            className={`groupAvatarCluster ${groupGrid.densityClass}`}
+                            style={{
+                              "--group-grid-cols": groupGrid.cols,
+                              "--group-grid-rows": groupGrid.rows,
+                            }}
+                          >
+                            {(conv.memberProfiles || []).slice(0, 9).map((member, idx) => (
+                              <div
+                                key={`${conv.conversationID}-${member.id}-${idx}`}
+                                className="groupAvatarMini"
+                                style={{ borderColor: member.color || "#cccccc" }}
+                              >
+                                <div
+                                  className={`groupAvatarMiniCube postNameCube postNameCube--${(
+                                    member.profileEvent || "333"
+                                  ).toLowerCase()}`}
+                                >
+                                  <PuzzleSVG
+                                    event={member.profileEvent || "333"}
+                                    scramble={member.profileScramble || ""}
+                                    isMusicPlayer={false}
+                                    isTimerCube={false}
+                                    isNameTagCube={true}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div
+                            className={`postNameCube postNameCube--${(
+                              conv.profileEvent || "333"
+                            ).toLowerCase()}`}
+                          >
+                            <PuzzleSVG
+                              event={conv.profileEvent || "333"}
+                              scramble={conv.profileScramble || ""}
+                              isMusicPlayer={false}
+                              isTimerCube={false}
+                              isNameTagCube={true}
+                            />
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <div className="avatarName">{conv.name}</div>
-                </div>
-              </button>
+                      <div className="avatarName">{conv.name}</div>
+                    </div>
+                  </button>
+                );
+              })()
             ))}
           </div>
         )}

@@ -194,6 +194,8 @@ function PlayerBar({
               handleEventChange={handleEventChange}
               currentSession={currentSession}
               setCurrentSession={setCurrentSession}
+              sessions={sessionsList}
+              customEvents={customEvents}
               userID={user?.UserID}
               onSessionChange={onSessionChange}
               onSelectSessionObj={onSelectSessionObj}

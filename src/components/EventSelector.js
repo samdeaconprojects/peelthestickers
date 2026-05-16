@@ -121,6 +121,8 @@ const EventSelector = forwardRef(function EventSelector(
     handleEventChange,
     currentSession,
     setCurrentSession,
+    sessions: providedSessions,
+    customEvents: providedCustomEvents,
     userID,
     onSessionChange,
     onSelectSessionObj, // lets App start relay mode using full session data
@@ -131,9 +133,27 @@ const EventSelector = forwardRef(function EventSelector(
   const { runDb } = useDbStatus();
   const [isOpen, setIsOpen] = useState(false);
 
-  // fetched data
-  const [sessions, setSessions] = useState([]);
-  const [customEvents, setCustomEvents] = useState([]);
+  const [sessionsState, setSessionsState] = useState(null);
+  const [customEventsState, setCustomEventsState] = useState(null);
+
+  const sessions = useMemo(
+    () =>
+      Array.isArray(sessionsState)
+        ? sessionsState
+        : Array.isArray(providedSessions)
+        ? providedSessions
+        : [],
+    [providedSessions, sessionsState]
+  );
+  const customEvents = useMemo(
+    () =>
+      Array.isArray(customEventsState)
+        ? customEventsState
+        : Array.isArray(providedCustomEvents)
+        ? providedCustomEvents
+        : [],
+    [providedCustomEvents, customEventsState]
+  );
 
   // add session + add event UIs
   const [showAddSession, setShowAddSession] = useState(false);
@@ -211,13 +231,22 @@ const EventSelector = forwardRef(function EventSelector(
   // -----------------------------
   // Fetch sessions & custom events
   // -----------------------------
-  const refreshData = useCallback(async () => {
+  const refreshData = useCallback(async ({ includeSessions = true, includeCustomEvents = true } = {}) => {
     if (!userID) return;
     try {
-      let [sess, cust] = await Promise.all([
-        getSessions(userID),
-        getCustomEvents(userID),
-      ]);
+      let sess = Array.isArray(sessions) ? sessions : [];
+      let cust = Array.isArray(customEvents) ? customEvents : [];
+
+      if (includeSessions && includeCustomEvents) {
+        [sess, cust] = await Promise.all([
+          getSessions(userID),
+          getCustomEvents(userID),
+        ]);
+      } else if (includeSessions) {
+        sess = await getSessions(userID);
+      } else if (includeCustomEvents) {
+        cust = await getCustomEvents(userID);
+      }
 
       const missingEvents = DEFAULT_EVENTS.filter(
         (eventId) =>
@@ -261,23 +290,58 @@ const EventSelector = forwardRef(function EventSelector(
         sess = await getSessions(userID);
       }
 
-      setSessions(sess || []);
-      setCustomEvents(cust || []);
+      if (includeSessions || missingEvents.length > 0 || relayEventsNeedingRepair.length > 0) {
+        setSessionsState(sess || []);
+      }
+      if (includeCustomEvents) {
+        setCustomEventsState(cust || []);
+      }
       return { sessions: sess || [], customEvents: cust || [] };
     } catch (err) {
       console.error("❌ Error fetching sessions/events:", err);
       return { sessions: [], customEvents: [] };
     }
-  }, [runDb, userID]);
+  }, [customEvents, runDb, sessions, userID]);
 
   useEffect(() => {
     if (!userID) {
-      setSessions([]);
-      setCustomEvents([]);
+      setSessionsState(null);
+      setCustomEventsState(null);
       return;
     }
-    refreshData();
-  }, [userID, refreshData]);
+  }, [userID]);
+
+  useEffect(() => {
+    if (!isOpen || !userID) return;
+
+    const shouldFetchSessions = sessions.length === 0;
+    const shouldFetchCustomEvents =
+      customEventsState == null && (!Array.isArray(providedCustomEvents) || providedCustomEvents.length === 0);
+
+    if (!shouldFetchSessions && !shouldFetchCustomEvents) return;
+
+    refreshData({
+      includeSessions: shouldFetchSessions,
+      includeCustomEvents: shouldFetchCustomEvents,
+    });
+  }, [
+    customEventsState,
+    isOpen,
+    providedCustomEvents,
+    refreshData,
+    sessions.length,
+    userID,
+  ]);
+
+  useEffect(() => {
+    if (!userID) return;
+
+    const ev = normalizeEventId(currentEvent);
+    if (!ev || DEFAULT_EVENTS.includes(ev) || isRelayEventId(ev)) return;
+    if (customEvents.some((event) => normalizeEventId(event?.EventID || event?.id) === ev)) return;
+
+    refreshData({ includeSessions: false, includeCustomEvents: true });
+  }, [currentEvent, customEvents, refreshData, userID]);
 
   const eventLookup = useMemo(() => {
     const lookup = new Map();

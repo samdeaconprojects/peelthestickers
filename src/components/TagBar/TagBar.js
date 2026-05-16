@@ -164,6 +164,9 @@ export default function TagBar({
   allowAdditions = false,
   activeField: controlledActiveField = null,
   onActiveFieldChange = null,
+  showFooterAction = false,
+  footerActionLabel = "",
+  onFooterAction = null,
 }) {
   const wrapRef = useRef(null);
   const safeTags = useMemo(
@@ -469,6 +472,18 @@ export default function TagBar({
                 <span className="tagHomeAddButtonPlus" aria-hidden="true">
                   +
                 </span>
+              </button>
+            </div>
+          )}
+
+          {showFooterAction && typeof onFooterAction === "function" && (
+            <div className="tagHomeFooterAction">
+              <button
+                type="button"
+                className="tagHomeFooterButton"
+                onClick={onFooterAction}
+              >
+                {footerActionLabel || "Load tags"}
               </button>
             </div>
           )}

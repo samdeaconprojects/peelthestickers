@@ -58,6 +58,27 @@
   display: inline-block;
 }
 
+@media (max-width: 1080px) {
+  .scramble-container {
+    width: 100% !important;
+  }
+
+  .scramble-content {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
+  .scramble-click-target {
+    display: block;
+    width: 100%;
+  }
+
+  .scramble-click-target .scramble-text {
+    display: block;
+    width: 100%;
+  }
+}
+
 /* =========================
    Override global App.css button
    ========================= */
@@ -73,8 +94,8 @@
   padding: 0 !important;            /* stop App.css padding effects */
   margin: 0 !important;
 
-  width: var(--nav-hit-size);       /* smaller hit box */
-  height: var(--nav-hit-size);
+  width: calc(var(--nav-hit-size) * var(--home-scramble-nav-scale, 1));       /* smaller hit box */
+  height: calc(var(--nav-hit-size) * var(--home-scramble-nav-scale, 1));
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -86,12 +107,12 @@
 
 .scramble-prev-button {
   --scramble-nav-shift-x: var(--scramble-prev-shift-x);
-  margin-right: 4px !important;
+  margin-right: 0 !important;
 }
 
 .scramble-next-button {
   --scramble-nav-shift-x: var(--scramble-next-shift-x);
-  margin-left: -6px !important;
+  margin-left: 0 !important;
 }
 
 /* 100% on hover */
@@ -114,8 +135,8 @@
 
 /* icon size */
 .scramble-nav-icon {
-  width: 20px;
-  height: 20px;
+  width: calc(20px * var(--home-scramble-nav-scale, 1));
+  height: calc(20px * var(--home-scramble-nav-scale, 1));
   display: block;
   pointer-events: none;
   user-select: none;
@@ -124,7 +145,7 @@
 .scramble-nav-glyph {
   display: block;
   color: #50b6ff;
-  font-size: 18px;
+  font-size: calc(18px * var(--home-scramble-nav-scale, 1));
   font-weight: 900;
   line-height: 1;
   pointer-events: none;

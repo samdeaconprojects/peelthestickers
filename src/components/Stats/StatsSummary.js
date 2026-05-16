@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
+import { useSettings } from "../../contexts/SettingsContext";
 import { findBestStrictWindow } from "../../utils/strictAverageUtils";
 import PieChartBuilder from "./PieChartBuilder";
 import tagBadge from "../../assets/Tag.svg";
@@ -1782,6 +1783,8 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
   profileColor = "#50B6FF",
   loading = false,
 }) {
+  const { settings } = useSettings();
+  const showStrictAverages = settings?.showStrictAverages !== false;
   const { view, overall, overallTitle } = useStatsSummaryData({
     solves,
     overallSolves,
@@ -1875,7 +1878,7 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
           <div className="ssOverallLegend">
             <span className="ssMetricLegendSpacer" aria-hidden="true" />
             <span className="ssMetricValue--best">Best</span>
-            <span className="ssMetricValue--strict">Strict</span>
+            {showStrictAverages ? <span className="ssMetricValue--strict">Strict</span> : null}
             <span className="ssMetricValue--worst">Worst</span>
           </div>
           <div className="ssOverallMetricGrid">
@@ -1893,7 +1896,7 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
               label="AO5"
               metricKey="ao5"
               best={overall.ao5}
-              strictBest={overall.ao5Strict}
+              strictBest={showStrictAverages ? overall.ao5Strict : null}
               worst={overall.ao5Worst}
               inlineStrictLabel={false}
               onStatSelect={onStatSelect}
@@ -1904,7 +1907,7 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
               label="AO12"
               metricKey="ao12"
               best={overall.ao12}
-              strictBest={overall.ao12Strict}
+              strictBest={showStrictAverages ? overall.ao12Strict : null}
               worst={overall.ao12Worst}
               inlineStrictLabel={false}
               onStatSelect={onStatSelect}
@@ -1915,7 +1918,7 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
               label="MO3"
               metricKey="mo3"
               best={overall.mo3}
-              strictBest={overall.mo3Strict}
+              strictBest={showStrictAverages ? overall.mo3Strict : null}
               worst={overall.mo3Worst}
               inlineStrictLabel={false}
               onStatSelect={onStatSelect}

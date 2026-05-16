@@ -765,6 +765,46 @@ function getSolveValueForAverage(solve) {
   return Number.isFinite(value) ? value : "DNF";
 }
 
+function getSolveIdentityKey(solve) {
+  if (!solve || typeof solve !== "object") return "";
+  const solveRef = String(solve?.solveRef || solve?.SK || solve?.SolveID || "").trim();
+  if (solveRef) return solveRef;
+
+  return [
+    String(solve?.event || solve?.Event || "").trim().toUpperCase(),
+    String(solve?.sessionID || solve?.SessionID || "main").trim(),
+    String(solve?.datetime || solve?.DateTime || solve?.CreatedAt || "").trim(),
+    String(solve?.scramble || solve?.Scramble || "").trim(),
+    String(solve?.rawTime ?? solve?.RawTimeMs ?? "").trim(),
+    String(solve?.time ?? solve?.FinalTimeMs ?? "").trim(),
+  ].join("::");
+}
+
+function withSolveFullIndices(solves, referenceSolves = solves) {
+  const reference = Array.isArray(referenceSolves) ? referenceSolves : [];
+  const indexMap = new Map();
+
+  reference.forEach((solve, index) => {
+    const key = getSolveIdentityKey(solve);
+    if (key && !indexMap.has(key)) {
+      indexMap.set(key, index);
+    }
+  });
+
+  return (Array.isArray(solves) ? solves : []).map((solve, index) => {
+    const key = getSolveIdentityKey(solve);
+    const resolvedIndex =
+      (key && indexMap.has(key) ? indexMap.get(key) : null) ??
+      solve?.fullIndex ??
+      index;
+
+    return {
+      ...solve,
+      fullIndex: resolvedIndex,
+    };
+  });
+}
+
 function computeMo3Average(solves) {
   const values = (Array.isArray(solves) ? solves : []).map(getSolveValueForAverage);
   if (values.length !== 3) return null;
@@ -1903,12 +1943,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     const ev = String(statsEvent || "").toUpperCase();
     const allForEvent = Array.isArray(sessions?.[ev]) ? sessions[ev] : [];
 
-    return allForEvent
+    return withSolveFullIndices(allForEvent
       .filter((s) => String(s?.sessionID || s?.SessionID || "main") === String(sessionId || "main"))
-      .map((solve, index) => ({
-        ...solve,
-        fullIndex: index,
-      }));
+    );
   }, [sessions, statsEvent, sessionId, statsViewMode]);
 
   const hasDateScopedSessionCache = useMemo(() => {
@@ -2010,10 +2047,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       ? base.filter((solve) => solveMatchesTagSelection(solve, tagFilterSelection))
       : base;
 
-    return filtered.map((solve, index) => ({
-      ...solve,
-      fullIndex: index,
-    }));
+    return withSolveFullIndices(filtered, standardBaseSolves);
   }, [
     canUseIndexedTagScope,
     dateScopedSessionSolves,
@@ -2346,51 +2380,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     isAllSessionsMode,
     hasActiveTagFilter,
     statsMutationTick,
-  ]);
-
-  const solveStatsRefreshKey = useMemo(() => {
-    if (!isSolveLevelMode || !Array.isArray(selectedSessionSolves) || selectedSessionSolves.length === 0) return "";
-    const first = selectedSessionSolves[0];
-    const latest = selectedSessionSolves[selectedSessionSolves.length - 1];
-    const firstKey = String(first?.solveRef || first?.datetime || "");
-    const lastKey = String(latest?.solveRef || latest?.datetime || "");
-    return `${selectedSessionSolves.length}|${firstKey}|${lastKey}`;
-  }, [selectedSessionSolves, isSolveLevelMode]);
-
-  useEffect(() => {
-    const userID = user?.UserID;
-    if (!userID) return;
-    if (!isSolveLevelMode) return;
-    if (hasActiveTagFilter) return;
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const item = await getSessionStats(
-          userID,
-          String(statsEvent || "").toUpperCase(),
-          String(sessionId || "main")
-        );
-        if (!cancelled) setOverallStatsForEvent(item || null);
-      } catch (e) {
-        if (!cancelled) {
-          console.error("Failed to refresh SESSIONSTATS after solve change:", e);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    user?.UserID,
-    statsEvent,
-    sessionId,
-    solveStatsRefreshKey,
-    statsMutationTick,
-    isSolveLevelMode,
-    hasActiveTagFilter,
   ]);
 
   const timeViewMatrixEvents = useMemo(() => {
@@ -3236,8 +3225,13 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       effectiveCompareDateFilterStart,
       effectiveCompareDateFilterEnd
     );
-    if (!hasActiveTagSelection(compareTagSelection)) return dateScoped;
-    return dateScoped.filter((solve) => solveMatchesTagSelection(solve, compareTagSelection));
+    if (!hasActiveTagSelection(compareTagSelection)) {
+      return withSolveFullIndices(dateScoped, dateScoped);
+    }
+    return withSolveFullIndices(
+      dateScoped.filter((solve) => solveMatchesTagSelection(solve, compareTagSelection)),
+      dateScoped
+    );
   }, [
     compareEnabled,
     compareTagScopeSolves,

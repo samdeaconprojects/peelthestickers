@@ -198,17 +198,22 @@ body {
 }
 
 .scramble-select-container {
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns:
+    var(--home-side-slot-width, clamp(220px, 16vw, 260px))
+    minmax(0, 1fr)
+    var(--home-side-slot-width, clamp(220px, 16vw, 260px));
   align-items: flex-start;
-  justify-content: space-between;
   width: 100%;
+  gap: 16px;
   padding-top: 6px;
   padding-bottom: 6px;
 }
 
 .left-slot-auth {
-  width: 13%;
+  width: 100%;
+  max-width: var(--home-side-slot-width, clamp(220px, 16vw, 260px));
+  justify-self: start;
   transform: translate(8px, -12px);
 }
 
@@ -265,14 +270,14 @@ body {
 
 .scramble-text {
   display: inline-block;
-  margin-left: 6%;
   font-size: 20pt;
   max-width: 50%;
   white-space: normal;
   word-wrap: break-word;
   overflow-wrap: break-word;
   text-align: center;
-  margin-right: 4vw;
+  margin-left: auto;
+  margin-right: auto;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -283,19 +288,22 @@ body {
   flex-direction: column;
   align-items: center;
   min-width: 0;
+  width: 100%;
   flex: 1;
   padding-top: 1em;
 }
 
 .cube-and-event {
-  width: 240px;
-  margin-right: -20px;
+  width: 100%;
+  max-width: var(--home-side-slot-width, clamp(220px, 16vw, 260px));
+  margin-right: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
-  flex: 0 0 240px;
+  flex: 0 0 auto;
+  justify-self: end;
 }
 
 .cube-and-event .puzzle-hud {
@@ -385,6 +393,15 @@ select {
   align-items: center;
   flex: 1 1 auto;
   position: relative;
+  --home-averages-scale: 1;
+  --home-timelist-scale: 1;
+  --home-timelist-padding-scale: 1;
+  --home-timelist-width: 1000px;
+  --home-horizontal-cell-width: 70px;
+  --home-horizontal-cell-height: 30px;
+  --home-scramble-scale: 1;
+  --home-scramble-nav-scale: 1;
+  --home-side-slot-width: clamp(220px, 16vw, 260px);
 }
 
 .home-screen > * {
@@ -438,6 +455,8 @@ select {
 .home-screen--shared .timer-display {
   margin-top: -52px;
   margin-bottom: -34px;
+  min-height: auto;
+  padding-block: 0;
 }
 
 .home-screen--shared .sharedAverageCard {
@@ -464,6 +483,77 @@ select {
 .left-slot-auth .auth-button:hover {
   opacity: 100%;
   cursor: pointer;
+}
+
+@media (min-width: 1360px) and (min-height: 820px) {
+  .home-screen {
+    --home-averages-scale: 1.18;
+    --home-timelist-scale: 1.16;
+    --home-timelist-padding-scale: 1.18;
+    --home-timelist-width: 1140px;
+    --home-horizontal-cell-width: 82px;
+    --home-horizontal-cell-height: 36px;
+    --home-scramble-scale: 1.18;
+    --home-scramble-nav-scale: 1.12;
+  }
+
+  .home-screen > .timer-display {
+    flex: 0 0 auto;
+    min-height: clamp(220px, 34vh, 420px);
+    padding-block: clamp(12px, 4vh, 32px);
+    display: grid;
+    place-items: center;
+  }
+
+  .home-screen > .timer-display .timer-center-wrap {
+    width: 100%;
+    display: grid;
+    place-items: center;
+  }
+
+  .home-screen > .timer-display:not(.timer-display--compact) .Timer,
+  .home-screen > .timer-display:not(.timer-display--compact) .Timer--with-minutes {
+    margin: 0;
+    transform: none;
+  }
+}
+
+@media (max-width: 1180px) {
+  .home-screen {
+    --home-side-slot-width: clamp(156px, 20vw, 220px);
+  }
+
+  .scramble-select-container {
+    gap: 10px;
+  }
+
+  .left-slot-auth {
+    transform: translate(0, -12px);
+  }
+}
+
+@media (max-width: 1080px) {
+  .home-screen {
+    --home-side-slot-width: clamp(72px, 8vw, 108px);
+    --home-scramble-max-width: 96%;
+  }
+
+  .scramble-select-container {
+    grid-template-columns:
+      var(--home-side-slot-width)
+      minmax(0, 1fr)
+      var(--home-side-slot-width);
+  }
+
+  .left-slot-auth {
+    visibility: hidden;
+    pointer-events: none;
+    transform: none;
+  }
+
+  .scramble-text {
+    max-width: 96%;
+  }
 }
 
 .manualSolvePopup {

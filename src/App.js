@@ -40,7 +40,6 @@ import { getSessions } from "./services/getSessions";
 import { getLastNSolvesBySession, getSolvesBySession } from "./services/getSolvesBySession";
 import { getSessionStats } from "./services/getSessionStats";
 import { recomputeSessionStats as recomputeSessionStatsService } from "./services/recomputeSessionStats";
-import { getCustomEvents } from "./services/getCustomEvents";
 import { addSolve as addSolveToDB } from "./services/addSolve";
 import { deleteSolve } from "./services/deleteSolve";
 import { updateSolve } from "./services/updateSolve";
@@ -108,7 +107,87 @@ const INITIAL_SESSIONS = {
   RELAY: [],
 };
 
+const DEFAULT_NAV_PREFS = Object.freeze({
+  lastEvent: "333",
+  lastSessionByEvent: {},
+  showPlayerBar: true,
+});
+
+function getNavPrefsStorageKey(userID) {
+  const id = String(userID || "").trim();
+  return id ? `pts.navPrefs.${id}` : "";
+}
+
+function readNavPrefs(userID, fallbackSettings = {}) {
+  const fallback = {
+    lastEvent:
+      String(fallbackSettings?.lastEvent || "").trim() || DEFAULT_NAV_PREFS.lastEvent,
+    lastSessionByEvent:
+      fallbackSettings?.lastSessionByEvent &&
+      typeof fallbackSettings.lastSessionByEvent === "object"
+        ? fallbackSettings.lastSessionByEvent
+        : DEFAULT_NAV_PREFS.lastSessionByEvent,
+    showPlayerBar:
+      typeof fallbackSettings?.showPlayerBar === "boolean"
+        ? fallbackSettings.showPlayerBar
+        : DEFAULT_NAV_PREFS.showPlayerBar,
+  };
+
+  if (typeof window === "undefined") return fallback;
+
+  try {
+    const key = getNavPrefsStorageKey(userID);
+    if (!key) return fallback;
+
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return fallback;
+
+    const parsed = JSON.parse(raw);
+    return {
+      lastEvent:
+        String(parsed?.lastEvent || "").trim() || fallback.lastEvent,
+      lastSessionByEvent:
+        parsed?.lastSessionByEvent && typeof parsed.lastSessionByEvent === "object"
+          ? parsed.lastSessionByEvent
+          : fallback.lastSessionByEvent,
+      showPlayerBar:
+        typeof parsed?.showPlayerBar === "boolean"
+          ? parsed.showPlayerBar
+          : fallback.showPlayerBar,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function writeNavPrefs(userID, prefs = {}) {
+  if (typeof window === "undefined") return;
+
+  try {
+    const key = getNavPrefsStorageKey(userID);
+    if (!key) return;
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        lastEvent:
+          String(prefs?.lastEvent || "").trim() || DEFAULT_NAV_PREFS.lastEvent,
+        lastSessionByEvent:
+          prefs?.lastSessionByEvent && typeof prefs.lastSessionByEvent === "object"
+            ? prefs.lastSessionByEvent
+            : {},
+        showPlayerBar:
+          typeof prefs?.showPlayerBar === "boolean"
+            ? prefs.showPlayerBar
+            : DEFAULT_NAV_PREFS.showPlayerBar,
+      })
+    );
+  } catch {
+    // ignore storage failures
+  }
+}
+
 const POST_SOLVE_TAG_CHORD_TIMEOUT_MS = 1200;
+const POST_SOLVE_TAG_SAVE_DEBOUNCE_MS = 450;
 const POST_SOLVE_TAG_MODIFIER_CODE = "Comma";
 const POST_SOLVE_PLL_DIRECT_BINDINGS = {
   E: "E Perm",
@@ -1037,7 +1116,9 @@ function App() {
   const [sessions, setSessions] = useState(INITIAL_SESSIONS);
   const currentSessionLoadTokenRef = useRef(0);
   const deletedSolveRefsRef = useRef(new Set());
+  const currentSessionSolveCountTotalRef = useRef(null);
   const [showPlayerBar, setShowPlayerBar] = useState(true);
+  const [navPrefs, setNavPrefs] = useState(DEFAULT_NAV_PREFS);
   const [showDetail, setShowDetail] = useState(false);
   const [user, setUser] = useState(null);
   const [isSignedIn, setIsSignedIn] = useState(false);
@@ -1133,9 +1214,11 @@ function App() {
   const deleteUndoToastTimeoutRef = useRef(null);
   const postSolveTagToastTimeoutRef = useRef(null);
   const postSolveTagChordTimeoutRef = useRef(null);
+  const postSolveTagSaveTimeoutRef = useRef(null);
   const postSolveTagModifierHeldRef = useRef(false);
   const pendingPostSolveTagChordRef = useRef("");
   const pendingPostSolveOllDigitsRef = useRef("");
+  const pendingPostSolveTagSavesRef = useRef(new Map());
   const currentSolvesRef = useRef([]);
   const latestCreatedSolveRef = useRef({ event: "", solveRef: "" });
   const lastSavedSettingsJsonRef = useRef("");
@@ -1206,47 +1289,45 @@ function App() {
       if (tagCatalogAutosaveTimeoutRef.current) clearTimeout(tagCatalogAutosaveTimeoutRef.current);
       if (tagColorCatalogAutosaveTimeoutRef.current) clearTimeout(tagColorCatalogAutosaveTimeoutRef.current);
       if (deleteUndoToastTimeoutRef.current) clearTimeout(deleteUndoToastTimeoutRef.current);
+      if (postSolveTagSaveTimeoutRef.current) clearTimeout(postSolveTagSaveTimeoutRef.current);
     };
   }, []);
 
   useEffect(() => {
     if (!isSignedIn || !user?.UserID) return;
 
-    if (settings.lastEvent !== currentEvent) {
-      updateSettings({ lastEvent: currentEvent });
-    }
-  }, [currentEvent, settings.lastEvent, updateSettings, isSignedIn, user?.UserID]);
-
-  useEffect(() => {
-    if (!isSignedIn || !user?.UserID) return;
-
-    if (settings.showPlayerBar !== showPlayerBar) {
-      updateSettings({ showPlayerBar });
-    }
-  }, [showPlayerBar, settings.showPlayerBar, updateSettings, isSignedIn, user?.UserID]);
-
-  useEffect(() => {
-    if (!isSignedIn || !user?.UserID) return;
-
-    const existing = settings.lastSessionByEvent || {};
-    const currentSaved = existing[currentEvent];
-
-    if ((currentSaved || "main") !== (currentSession || "main")) {
-      updateSettings({
+    setNavPrefs((prev) => {
+      const next = {
+        lastEvent: String(currentEvent || "").trim() || DEFAULT_NAV_PREFS.lastEvent,
         lastSessionByEvent: {
-          ...existing,
-          [currentEvent]: currentSession || "main",
+          ...(prev?.lastSessionByEvent && typeof prev.lastSessionByEvent === "object"
+            ? prev.lastSessionByEvent
+            : {}),
+          [String(currentEvent || "").trim() || DEFAULT_NAV_PREFS.lastEvent]:
+            String(currentSession || "main").trim() || "main",
         },
-      });
-    }
-  }, [
-    currentEvent,
-    currentSession,
-    settings.lastSessionByEvent,
-    updateSettings,
-    isSignedIn,
-    user?.UserID,
-  ]);
+        showPlayerBar,
+      };
+
+      const sameLastEvent = String(prev?.lastEvent || "") === next.lastEvent;
+      const sameShowPlayerBar = Boolean(prev?.showPlayerBar) === Boolean(next.showPlayerBar);
+      const prevSession =
+        prev?.lastSessionByEvent?.[next.lastEvent] || "main";
+      const nextSession =
+        next.lastSessionByEvent?.[next.lastEvent] || "main";
+
+      if (sameLastEvent && sameShowPlayerBar && String(prevSession) === String(nextSession)) {
+        return prev;
+      }
+
+      return next;
+    });
+  }, [currentEvent, currentSession, isSignedIn, showPlayerBar, user?.UserID]);
+
+  useEffect(() => {
+    if (!isSignedIn || !user?.UserID) return;
+    writeNavPrefs(user.UserID, navPrefs);
+  }, [isSignedIn, navPrefs, user?.UserID]);
 
   useEffect(() => {
     if (!isSignedIn || !user?.UserID) return;
@@ -1583,6 +1664,10 @@ function App() {
     );
   }, [currentSession, eventKey, sessionStats]);
 
+  useEffect(() => {
+    currentSessionSolveCountTotalRef.current = currentSessionSolveCountTotal;
+  }, [currentSessionSolveCountTotal]);
+
   const homeTagConfig = useMemo(
     () => ({
       ...tagConfig,
@@ -1657,7 +1742,7 @@ function App() {
             const solveRef = String(solve?.solveRef || solve?.SK || "").trim();
             return !solveRef || !deletedSolveRefsRef.current.has(solveRef);
           });
-        const existingTotalCount = currentSessionSolveCountTotal;
+        const existingTotalCount = currentSessionSolveCountTotalRef.current;
 
         setSessions((prev) => {
           const existingForEvent = Array.isArray(prev?.[eventKey]) ? prev[eventKey] : [];
@@ -1709,7 +1794,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [currentSession, currentSessionSolveCountTotal, eventKey, isSignedIn, normalizeSolve, user?.UserID]);
+  }, [currentSession, eventKey, isSignedIn, normalizeSolve, user?.UserID]);
 
   useEffect(() => {
     if (!isSignedIn || !user?.UserID || practiceMode) return;
@@ -1842,27 +1927,6 @@ function App() {
 
         if (!cancelled) {
           setHomeDiscoveredTagOptions(valuesByField || {});
-
-          let nextCatalog = tagCatalog;
-          let changed = false;
-
-          for (const field of SHARED_TAG_FIELDS) {
-            for (const value of Array.isArray(valuesByField?.[field]) ? valuesByField[field] : []) {
-              const updated = addTagCatalogValue(nextCatalog, tagScopeEventKey, field, value);
-              if (JSON.stringify(updated) !== JSON.stringify(nextCatalog)) {
-                nextCatalog = updated;
-                changed = true;
-              }
-            }
-          }
-
-          if (changed) {
-            setUser((prev) => ({
-              ...(prev || {}),
-              TagCatalog: nextCatalog,
-            }));
-            queueTagCatalogSave(nextCatalog);
-          }
         }
       } catch (err) {
         console.error("Failed loading tag values for home selector:", err);
@@ -1873,7 +1937,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [isSignedIn, user?.UserID, eventKey, currentSession, tagCatalog, queueTagCatalogSave, tagScopeEventKey]);
+  }, [isSignedIn, user?.UserID, eventKey, currentSession]);
 
   useEffect(() => {
     if (!sharedSession) return;
@@ -2393,15 +2457,15 @@ function App() {
       setIsSignedIn(true);
       setShowSignInPopup(false);
 
-      setCurrentEvent(profile?.Settings?.lastEvent || "333");
+      const restoredNavPrefs = readNavPrefs(userID, profile?.Settings || {});
+      setNavPrefs(restoredNavPrefs);
+      setCurrentEvent(restoredNavPrefs.lastEvent || "333");
       setCurrentSession(
-        profile?.Settings?.lastSessionByEvent?.[
-          profile?.Settings?.lastEvent || "333"
-        ] || "main"
+        restoredNavPrefs.lastSessionByEvent?.[restoredNavPrefs.lastEvent || "333"] || "main"
       );
       setShowPlayerBar(
-        typeof profile?.Settings?.showPlayerBar === "boolean"
-          ? profile.Settings.showPlayerBar
+        typeof restoredNavPrefs.showPlayerBar === "boolean"
+          ? restoredNavPrefs.showPlayerBar
           : true
       );
     } catch (error) {
@@ -2417,11 +2481,10 @@ function App() {
 
       const userID = profile.PK?.split("#")[1] || username;
 
-      const posts = await getPosts(userID);
       const userWithData = {
         ...profile,
         UserID: userID,
-        Posts: posts,
+        Posts: Array.isArray(profile?.Posts) ? profile.Posts : [],
         Friends: profile.Friends || [],
       };
 
@@ -2444,27 +2507,23 @@ function App() {
       setShowSignInPopup(false);
 
       let sessionItems = await getSessions(userID);
-      const eventItems = await getCustomEvents(userID);
 
       setSessionsList(sessionItems);
-      setCustomEvents(eventItems);
+      setCustomEvents([]);
 
-      const restoredEvent =
-        profile?.Settings?.lastEvent && String(profile.Settings.lastEvent).trim()
-          ? profile.Settings.lastEvent
-          : "333";
-
+      const restoredNavPrefs = readNavPrefs(userID, profile?.Settings || {});
+      setNavPrefs(restoredNavPrefs);
+      const restoredEvent = restoredNavPrefs.lastEvent || "333";
       const restoredSession =
-        profile?.Settings?.lastSessionByEvent?.[restoredEvent] || "main";
+        restoredNavPrefs.lastSessionByEvent?.[restoredEvent] || "main";
 
       setCurrentEvent(restoredEvent);
       setCurrentSession(restoredSession);
-
-      if (typeof profile?.Settings?.showPlayerBar === "boolean") {
-        setShowPlayerBar(profile.Settings.showPlayerBar);
-      } else {
-        setShowPlayerBar(true);
-      }
+      setShowPlayerBar(
+        typeof restoredNavPrefs.showPlayerBar === "boolean"
+          ? restoredNavPrefs.showPlayerBar
+          : true
+      );
 
       const missingEvents = DEFAULT_EVENTS.filter(
         (event) =>
@@ -3100,6 +3159,9 @@ function App() {
       const targetSolve = eventSolves.find((solve) => solve.solveRef === solveRef);
       if (!targetSolve) return;
 
+      const currentPenalty = String(
+        targetSolve?.penalty ?? targetSolve?.Penalty ?? ""
+      ).trim().toUpperCase() || null;
       const rawTimeMs =
         Number.isFinite(Number(targetSolve?.rawTimeMs))
           ? Number(targetSolve.rawTimeMs)
@@ -3108,6 +3170,22 @@ function App() {
           : Number.isFinite(Number(targetSolve?.time))
           ? Number(targetSolve.time)
           : null;
+      const currentEffectiveTime =
+        currentPenalty === "DNF"
+          ? Number.MAX_SAFE_INTEGER
+          : Number.isFinite(Number(targetSolve?.finalTimeMs))
+          ? Number(targetSolve.finalTimeMs)
+          : Number.isFinite(Number(targetSolve?.time))
+          ? Number(targetSolve.time)
+          : rawTimeMs;
+
+      if (
+        currentPenalty === (penalty || null) &&
+        Number.isFinite(currentEffectiveTime) &&
+        currentEffectiveTime === updatedTime
+      ) {
+        return;
+      }
 
       const updatedSolves = eventSolves.map((solve) => {
         if (solve.solveRef === solveRef) {
@@ -3158,7 +3236,7 @@ function App() {
 
       const savedSession =
         isSignedIn && user?.UserID
-          ? settings.lastSessionByEvent?.[normalizedEvent] || "main"
+          ? navPrefs.lastSessionByEvent?.[normalizedEvent] || "main"
           : "main";
 
       setCurrentEvent(normalizedEvent);
@@ -3172,7 +3250,7 @@ function App() {
       setRelayScrambles([]);
       setRelayLegs([]);
     },
-    [isSignedIn, user?.UserID, settings.lastSessionByEvent]
+    [isSignedIn, navPrefs.lastSessionByEvent, user?.UserID]
   );
 
   const deleteTime = async (eventKeyParam, solveOrIndex, options = {}) => {
@@ -3263,7 +3341,12 @@ function App() {
 
     if (isSignedIn && user) {
       try {
-        await runDb("Deleting solve", () => deleteSolve(user.UserID, solveRefToDelete));
+        await runDb("Deleting solve", () =>
+          deleteSolve(user.UserID, solveRefToDelete, {
+            event: ev,
+            sessionID: String(targetSolve?.sessionID || targetSolve?.SessionID || currentSession || "main"),
+          })
+        );
         setStatsMutationTick((t) => t + 1);
       } catch (err) {
         deletedSolveRefsRef.current.delete(solveRefToDelete);
@@ -3491,6 +3574,7 @@ function App() {
     setStatsMutationTick(0);
     setCurrentEvent("333");
     setCurrentSession("main");
+    setNavPrefs(DEFAULT_NAV_PREFS);
     setTagConfig(DEFAULT_TAG_CONFIG);
     setStatsSettingsContext({
       eventLabel: "333",
@@ -3717,6 +3801,63 @@ function App() {
     }));
   }, [baseCurrentSolves, currentSessionTotalSolveCount]);
 
+  const latestSolveRestorableTags = useMemo(() => {
+    const latestSolve = currentSolves[currentSolves.length - 1];
+    const rawTags =
+      latestSolve?.tags && typeof latestSolve.tags === "object" ? latestSolve.tags : null;
+    if (!rawTags) return null;
+
+    const nextSelection = makeEmptyTagSelection();
+    let hasRestorableTag = false;
+
+    for (const field of SHARED_TAG_FIELDS) {
+      if (
+        field === "TimerInput" ||
+        field === "SolveSource" ||
+        field === "Alg_OLL" ||
+        field === "Alg_PLL" ||
+        field === "Alg_CMLL" ||
+        field === "Alg_CLL"
+      ) {
+        continue;
+      }
+      const rawValue = String(rawTags?.[field] || "").trim();
+      if (!rawValue) continue;
+
+      nextSelection[field] = String(normalizeAlgorithmTagValue(field, rawValue) || "").trim();
+      if (nextSelection[field]) hasRestorableTag = true;
+    }
+
+    return hasRestorableTag ? nextSelection : null;
+  }, [currentSolves]);
+
+  const hasManualCurrentTags = useMemo(
+    () =>
+      SHARED_TAG_FIELDS.some((field) => {
+        if (field === "TimerInput" || field === "SolveSource") return false;
+        return !!String(currentTags?.[field] || "").trim();
+      }),
+    [currentTags]
+  );
+
+  const showLoadLastSolveTagsButton =
+    isHomePage &&
+    !sharedSession &&
+    !isRelayActive &&
+    !practiceMode &&
+    !hasManualCurrentTags &&
+    !!latestSolveRestorableTags;
+
+  const loadTagsFromLastSolve = useCallback(() => {
+    if (!latestSolveRestorableTags) return;
+
+    setTagsByEvent((prev) => ({
+      ...(prev || {}),
+      [tagScopeEventKey]: latestSolveRestorableTags,
+    }));
+    rememberTagSelectionValues(latestSolveRestorableTags);
+  }, [latestSolveRestorableTags, rememberTagSelectionValues, tagScopeEventKey]);
+
   useEffect(() => {
     currentSolvesRef.current = currentSolves;
   }, [currentSolves]);
@@ -3727,6 +3868,79 @@ function App() {
       solveRef: String(solveRef || "").trim(),
     };
   }, []);
+
+  const flushPendingPostSolveTagSaves = useCallback(async () => {
+    if (postSolveTagSaveTimeoutRef.current) {
+      clearTimeout(postSolveTagSaveTimeoutRef.current);
+      postSolveTagSaveTimeoutRef.current = null;
+    }
+
+    const pendingEntries = Array.from(pendingPostSolveTagSavesRef.current.values());
+    pendingPostSolveTagSavesRef.current = new Map();
+
+    if (!pendingEntries.length || !isSignedIn || !user?.UserID) return;
+
+    for (const pendingSave of pendingEntries) {
+      try {
+        const res = await runDb(
+          "Updating solve tags",
+          () =>
+            updateSolve(
+              user.UserID,
+              pendingSave.solveRef,
+              {
+                Tags: pendingSave.tags,
+              },
+              {
+                existingItem:
+                  currentSolvesRef.current.find((solve) => solve?.solveRef === pendingSave.solveRef) || null,
+              }
+            ),
+          { showStatus: false }
+        );
+
+        const savedSolve = normalizeSolve(res);
+        if (savedSolve?.solveRef) {
+          rememberLatestCreatedSolve(
+            pendingSave.event,
+            savedSolve.solveRef || pendingSave.solveRef
+          );
+          setSessions((prev) => ({
+            ...(prev || {}),
+            [pendingSave.event]: (prev?.[pendingSave.event] || []).map((solve) =>
+              solve?.solveRef === pendingSave.solveRef ? savedSolve : solve
+            ),
+          }));
+        }
+      } catch (err) {
+        console.error("Failed to update solve tags:", err);
+      }
+    }
+  }, [isSignedIn, rememberLatestCreatedSolve, runDb, user?.UserID]);
+
+  const schedulePostSolveTagSave = useCallback(
+    (eventCode, solveRef, tags) => {
+      const normalizedSolveRef = String(solveRef || "").trim();
+      const normalizedEvent = String(eventCode || "").trim().toUpperCase();
+
+      if (!normalizedSolveRef || !normalizedEvent) return;
+
+      pendingPostSolveTagSavesRef.current.set(normalizedSolveRef, {
+        event: normalizedEvent,
+        solveRef: normalizedSolveRef,
+        tags: { ...(tags || {}) },
+      });
+
+      if (postSolveTagSaveTimeoutRef.current) {
+        clearTimeout(postSolveTagSaveTimeoutRef.current);
+      }
+
+      postSolveTagSaveTimeoutRef.current = setTimeout(() => {
+        flushPendingPostSolveTagSaves();
+      }, POST_SOLVE_TAG_SAVE_DEBOUNCE_MS);
+    },
+    [flushPendingPostSolveTagSaves]
+  );
 
   const applyPostSolveTagBinding = useCallback(
     async (updates = {}) => {
@@ -3811,34 +4025,7 @@ function App() {
       }));
       setStatsMutationTick((tick) => tick + 1);
 
-      if (isSignedIn && user?.UserID) {
-        try {
-          const res = await runDb(
-            "Updating solve tags",
-            () =>
-              updateSolve(user.UserID, latestSolve.solveRef, {
-                Tags: nextSolveTags,
-              }),
-            { showStatus: false }
-          );
-
-          const savedSolve = normalizeSolve(res);
-          if (savedSolve?.solveRef) {
-            rememberLatestCreatedSolve(
-              normalizedEvent,
-              savedSolve.solveRef || latestSolve.solveRef
-            );
-            setSessions((prev) => ({
-              ...(prev || {}),
-              [normalizedEvent]: (prev?.[normalizedEvent] || []).map((solve) =>
-                solve?.solveRef === latestSolve.solveRef ? savedSolve : solve
-              ),
-            }));
-          }
-        } catch (err) {
-          console.error("Failed to update solve tags:", err);
-        }
-      }
+      schedulePostSolveTagSave(normalizedEvent, latestSolve.solveRef, nextSolveTags);
 
       queuePostSolveTagToast(toastLabel);
       return true;
@@ -3848,15 +4035,12 @@ function App() {
       eventKey,
       isHomePage,
       isRelayActive,
-      isSignedIn,
       practiceMode,
       queuePostSolveTagToast,
-      rememberLatestCreatedSolve,
-      runDb,
+      schedulePostSolveTagSave,
       settings?.timerInput,
       sharedSession,
       tagScopeEventKey,
-      user?.UserID,
     ]
   );
 
@@ -5106,6 +5290,9 @@ function App() {
                               profileColor={user?.Color || user?.color || "#2EC4B6"}
                               variant="home"
                               allowAdditions
+                              showFooterAction={showLoadLastSolveTagsButton}
+                              footerActionLabel="Load tags from last solve"
+                              onFooterAction={loadTagsFromLastSolve}
                             />
                           </div>
                         </div>

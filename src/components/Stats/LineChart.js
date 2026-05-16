@@ -405,7 +405,8 @@ function buildProcessedChartData(
   style = null,
   useHeatmap = true,
   xScaleMode = "ordinal",
-  bucketItems = []
+  bucketItems = [],
+  ordinalIndexMode = "timeline"
 ) {
   const hasBucketItems = Array.isArray(bucketItems) && bucketItems.length > 0;
   const baseValid = hasBucketItems
@@ -458,7 +459,13 @@ function buildProcessedChartData(
     const timestamp = item.isBucket
       ? item.timestamp ?? getSolveTimestamp(solveForDetail)
       : getSolveTimestamp(solveForDetail);
-    const fallbackLabel = item.isBucket ? item.bucketLabel : `${index + 1}`;
+    const ordinalSolveIndex =
+      ordinalIndexMode === "timeline" &&
+      !item.isBucket &&
+      Number.isFinite(Number(item?.fullIndex))
+        ? Number(item.fullIndex)
+        : index;
+    const fallbackLabel = item.isBucket ? item.bucketLabel : `${ordinalSolveIndex + 1}`;
     const label =
       xScaleMode === "datetime"
         ? formatXAxisLabel(groupMode, timestamp, fallbackLabel)
@@ -467,7 +474,7 @@ function buildProcessedChartData(
 
     return {
       label,
-      x: xScaleMode === "datetime" && timestamp != null ? timestamp : index,
+      x: xScaleMode === "datetime" && timestamp != null ? timestamp : ordinalSolveIndex,
       y: baseTimeMs / 1000,
       color: getColor(baseTimeMs),
       time: formatPointTime(baseTimeMs, solveForDetail, groupMode),
@@ -610,7 +617,8 @@ function LineChart({
       seriesStyle,
       shouldUseHeatmap,
       xScaleMode,
-      bucketItems
+      bucketItems,
+      hasComparison ? "sample" : "timeline"
     );
     const data = primary.data;
     const extraSeries = [];
@@ -643,7 +651,8 @@ function LineChart({
         series?.style || null,
         false,
         xScaleMode,
-        series?.bucketItems || []
+        series?.bucketItems || [],
+        hasComparison ? "sample" : "timeline"
       );
       return {
         id: series?.id || `compare-${index}`,

@@ -456,6 +456,38 @@
   line-height: 1;
 }
 
+.tagHomeFooterAction {
+  display: flex;
+  justify-content: stretch;
+  padding-top: 2px;
+}
+
+.tagHomeFooterButton {
+  width: 100%;
+  min-height: 26px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  opacity: 0.78;
+  transition:
+    opacity 140ms ease,
+    background 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.tagHomeFooterButton:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.07);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.14);
+}
+
 @media (max-width: 720px) {
   .tagHomePopover {
     top: calc(100% + 10px);

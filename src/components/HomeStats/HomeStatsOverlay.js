@@ -11,6 +11,7 @@ import {
   resolvePaletteColor,
 } from "../../utils/profileChartStyle";
 import {
+  HOME_STAT_SLOT_META,
   HOME_STAT_SLOT_ORDER,
   normalizeHomeStatsSlots,
   normalizeHomeStatsSolveLimit,
@@ -143,9 +144,37 @@ function computeWindowExtremeValue(solves, spec, mode = "best") {
   return extreme;
 }
 
+function computeCurrentMetricValue(solves, spec) {
+  const source = Array.isArray(solves) ? solves : [];
+  if (!source.length) return null;
+
+  if (spec.kind === "single") {
+    return getAdjustedSolveTimeMs(source[source.length - 1]);
+  }
+
+  if (source.length < spec.size) return null;
+
+  const window = source.slice(-spec.size);
+
+  if (spec.kind === "mo3") {
+    const numeric = window.map(getAdjustedSolveTimeMs).filter((item) => Number.isFinite(item));
+    return numeric.length === spec.size
+      ? numeric.reduce((sum, item) => sum + item, 0) / numeric.length
+      : null;
+  }
+
+  if (spec.kind === "ao") {
+    const result = calculateAverage(window.map(getSolveValueForAverage), true)?.average;
+    return Number.isFinite(result) ? result : null;
+  }
+
+  return null;
+}
+
 function buildCompactSummary(solves) {
   return HOME_SUMMARY_METRICS.map((metric) => ({
     ...metric,
+    currentValue: computeCurrentMetricValue(solves, metric),
     value: computeWindowExtremeValue(solves, metric, "best"),
     bestValue: computeWindowExtremeValue(solves, metric, "best"),
     worstValue: computeWindowExtremeValue(solves, metric, "worst"),
@@ -189,6 +218,7 @@ function buildCompactSummaryFromCache(overallStats) {
     const rawWorst = Number(source[metric.key]?.worst);
     return {
       ...metric,
+      currentValue: null,
       value: Number.isFinite(rawBest) ? rawBest : null,
       bestValue: Number.isFinite(rawBest) ? rawBest : null,
       worstValue: Number.isFinite(rawWorst) ? rawWorst : null,
@@ -537,6 +567,7 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
   const defaultSummaryStyle = useMemo(() => getDefaultHomeSummaryStyle(), []);
   const defaultChartPalette = useMemo(() => getDefaultHomeChartPalette(), []);
   const [hoveredSlot, setHoveredSlot] = useState(null);
+  const [expandedSummarySlots, setExpandedSummarySlots] = useState({});
 
   return (
     <div className="homeStatsOverlay">
@@ -578,13 +609,22 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
             : [];
         const pieData =
           config.chartType === "pie" ? buildPieData(solves, config.pieBreakdown) : [];
+        const summarySolveWindow =
+          config.chartType === "summary" ? getSolveWindow(solves, solveLimit) : [];
+        const liveSummaryRows =
+          config.chartType === "summary" ? buildCompactSummary(summarySolveWindow) : [];
         const summaryRows =
           config.chartType === "summary"
             ? (() => {
                 const cachedRows = buildCompactSummaryFromCache(overallStats);
-                return cachedRows.some((row) => row.value != null)
+                const baseRows = cachedRows.some((row) => row.value != null)
                   ? cachedRows
-                  : buildCompactSummary(getSolveWindow(solves, solveLimit));
+                  : liveSummaryRows;
+                const liveByKey = new Map(liveSummaryRows.map((row) => [row.key, row]));
+                return baseRows.map((row) => ({
+                  ...row,
+                  currentValue: liveByKey.get(row.key)?.currentValue ?? row.currentValue ?? null,
+                }));
               })()
             : [];
         const summaryGroups =
@@ -595,10 +635,36 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
                 summaryRows.find((row) => row.key === metric.key)
               ).filter(Boolean)
             : [];
-        const summarySolveWindow =
-          config.chartType === "summary" ? getSolveWindow(solves, solveLimit) : [];
         const isSummaryTile =
           config.chartType === "summary" && (config.summaryLayout || "tile") === "tile";
+        const isSummaryExpanded =
+          config.chartType === "summary" && !isSummaryTile && !!expandedSummarySlots[slotKey];
+        const renderedSlotWidth =
+          slotKey === "background"
+            ? config.width
+            : config.chartType === "summary"
+              ? isSummaryTile
+                ? Math.round(config.width * 1.46)
+                : Math.round(config.width * (isSummaryExpanded ? 1.18 : 0.8))
+              : config.width;
+        const defaultSlotWidth = HOME_STAT_SLOT_META[slotKey]?.defaultWidth ?? config.width;
+        const baselineSlotWidth =
+          slotKey === "background"
+            ? config.width
+            : config.chartType === "summary"
+              ? isSummaryTile
+                ? Math.round(defaultSlotWidth * 1.46)
+                : Math.round(defaultSlotWidth * (isSummaryExpanded ? 1.18 : 0.8))
+              : defaultSlotWidth;
+        const sideCenterShift =
+          slotKey !== "background"
+            ? Math.round((renderedSlotWidth - baselineSlotWidth) / 2) *
+              (slotKey === "left" ? -1 : 1)
+            : 0;
+        const summaryExpandedWidthShift =
+          config.chartType === "summary" && !isSummaryTile && isSummaryExpanded
+            ? Math.round(config.width * 0.19) * (slotKey === "left" ? -1 : slotKey === "right" ? 1 : 0)
+            : 0;
         const summaryMeta =
           config.chartType === "summary" && isSummaryTile
             ? buildSummaryMeta(summarySolveWindow, overallStats)
@@ -634,17 +700,13 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
                   }
                 : {
                     width: `${
-                      config.chartType === "summary"
-                        ? isSummaryTile
-                          ? Math.round(config.width * 1.46)
-                          : Math.round(config.width * 0.8)
-                        : config.width
+                      renderedSlotWidth
                     }px`,
                     height: `${
                       config.chartType === "summary"
                         ? isSummaryTile
-                          ? Math.round(config.height * 0.94)
-                          : Math.round(config.height * 1.62)
+                          ? Math.round(config.height * 1.02)
+                          : Math.round(config.height * (isSummaryExpanded ? 1.76 : 1.74))
                         : config.height
                     }px`,
                     "--home-stat-rest-opacity": `${
@@ -655,15 +717,38 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
                     "--home-stat-hover-opacity": `${
                       config.chartType === "summary" ? Math.max(0.94, config.opacity) : config.opacity
                     }`,
+                    "--home-slot-center-shift-x": `${sideCenterShift}px`,
+                    "--home-summary-expand-shift-x": `${summaryExpandedWidthShift}px`,
                   }),
             }}
           >
+            {config.chartType === "summary" && !isSummaryTile ? (
+              <button
+                type="button"
+                className={`homeStatsSummaryEdgeToggle${
+                  isSummaryExpanded ? " is-expanded" : ""
+                }`}
+                onClick={() =>
+                  setExpandedSummarySlots((current) => ({
+                    ...current,
+                    [slotKey]: !current[slotKey],
+                  }))
+                }
+                aria-label={isSummaryExpanded ? "Collapse stats details" : "Expand stats details"}
+                aria-pressed={isSummaryExpanded}
+              >
+                {isSummaryExpanded ? "−" : "+"}
+              </button>
+            ) : null}
+
             <div
-              className={`homeStatsCard homeStatsCard--${config.chartType}${
+                className={`homeStatsCard homeStatsCard--${config.chartType}${
                 config.chartType === "summary"
                   ? isSummaryTile
                     ? " homeStatsCard--summaryTile"
-                    : " homeStatsCard--summaryCompact"
+                    : ` homeStatsCard--summaryCompact${
+                        isSummaryExpanded ? " homeStatsCard--summaryCompactExpanded" : ""
+                      }`
                   : ""
               } ${slotKey === "background" ? "is-background" : ""}${
                 isSideSlot ? " is-side-slot" : ""
@@ -901,33 +986,76 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
                       </div>
                     </div>
                   ) : (
-                    <div className="homeStatsSummary homeStatsSummary--list">
-                      {summaryListRows.map((row) => (
-                        <button
-                          type="button"
-                          className="homeStatsSummaryRow homeStatsSummaryRow--list"
-                          key={`${slotKey}-${row.key}`}
-                          onClick={() =>
-                            onSummarySelect?.({
-                              ...row,
-                              variant: "best",
-                              value: row.bestValue,
-                            })
-                          }
-                          disabled={row.bestValue == null}
-                        >
-                          <span className="homeStatsSummaryLabel">{row.label}</span>
-                          <div className="homeStatsSummaryValuePair">
-                            <span className="homeStatsSummaryValueButton homeStatsSummaryValueButton--best">
-                              <span className="homeStatsSummaryValue homeStatsSummaryValue--best">
-                                {row.bestValue == null
-                                  ? "—"
-                                  : formatTime(row.bestValue, row.kind !== "single")}
-                              </span>
+                    <div
+                      className={`homeStatsSummary homeStatsSummary--list${
+                        isSummaryExpanded ? " homeStatsSummary--expanded" : ""
+                      }`}
+                    >
+                      {summaryListRows.map((row) => {
+                        const metric = HOME_SUMMARY_METRIC_BY_KEY.get(row.key) || row;
+                        const { prefix, value, single } = formatTileMetricParts(row.label);
+                        const renderSummaryValueButton = (variant, metricValue, tone, extraClass = "") => (
+                          <button
+                            type="button"
+                            className={`homeStatsSummaryValueButton homeStatsSummaryValueButton--${tone}${extraClass}`}
+                            onClick={() =>
+                              onSummarySelect?.({
+                                ...metric,
+                                variant,
+                                value: metricValue,
+                              })
+                            }
+                            disabled={metricValue == null}
+                          >
+                            <span className={`homeStatsSummaryValue homeStatsSummaryValue--${tone}`}>
+                              {metricValue == null
+                                ? "—"
+                                : formatTime(metricValue, row.kind !== "single")}
                             </span>
+                          </button>
+                        );
+
+                        return (
+                          <div
+                            className={`homeStatsSummaryRow homeStatsSummaryRow--list${
+                              isSummaryExpanded ? " homeStatsSummaryRow--expanded" : ""
+                            }`}
+                            key={`${slotKey}-${row.key}`}
+                          >
+                            {single ? (
+                              <span
+                                className={`homeStatsSummaryLabel${
+                                  isSummaryExpanded ? " homeStatsSummaryLabel--expanded" : ""
+                                }`}
+                              >
+                                {prefix}
+                              </span>
+                            ) : (
+                              <span
+                                className={`homeStatsSummaryLabel homeStatsSummaryLabel--split${
+                                  isSummaryExpanded ? " homeStatsSummaryLabel--expanded" : ""
+                                }`}
+                              >
+                                <span className="homeStatsSummaryLabelPrefix">{prefix}</span>
+                                <span className="homeStatsSummaryLabelNumber">{value}</span>
+                              </span>
+                            )}
+                            {renderSummaryValueButton("best", row.bestValue, "best")}
+                            {renderSummaryValueButton(
+                              "worst",
+                              row.worstValue,
+                              "worst",
+                              isSummaryExpanded ? "" : " homeStatsSummaryValueButton--hidden"
+                            )}
+                            {renderSummaryValueButton(
+                              "current",
+                              row.currentValue,
+                              "current",
+                              isSummaryExpanded ? "" : " homeStatsSummaryValueButton--hidden"
+                            )}
                           </div>
-                        </button>
-                      ))}
+                        );
+                      })}
                     </div>
                   )
                 ) : (

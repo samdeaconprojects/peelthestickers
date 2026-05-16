@@ -1,6 +1,7 @@
 import { apiPut } from "./api.js";
+import { buildSolveMutationScopes, invalidateSolveMutationCaches } from "./solveMutationCache.js";
 
-export const updateSolve = async (userID, solveRef, updates) => {
+export const updateSolve = async (userID, solveRef, updates, options = {}) => {
   const id = String(userID || "").trim();
   const ref = String(solveRef || "").trim();
 
@@ -15,5 +16,9 @@ export const updateSolve = async (userID, solveRef, updates) => {
     { updates }
   );
 
+  invalidateSolveMutationCaches(
+    id,
+    buildSolveMutationScopes(options?.existingItem, data?.item)
+  );
   return data?.item ?? data;
 };

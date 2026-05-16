@@ -965,12 +965,6 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
 
                 <aside className="profileStatsRail">
                   <div className="profileStatsMatrixCard">
-                    <div className="profileStatsMatrixCardHeader">
-                      <div>
-                        <h3>Best Time Matrix</h3>
-                        <p>Single, AO5, and AO12 across profile events.</p>
-                      </div>
-                    </div>
                     {profileTimeMatrixItems.length > 0 ? (
                       <AllEventsTimeMatrix
                         items={profileTimeMatrixItems}

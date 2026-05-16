@@ -16,7 +16,7 @@
 
 .TimeList {
   width: 100%;
-  max-width: 1000px;
+  max-width: var(--home-timelist-width, 1000px);
   table-layout: fixed;
   border-collapse: collapse;
   margin: 0 auto;
@@ -38,10 +38,11 @@
 
 .TimeList td {
   margin: 0;
-  padding: 5px;
+  padding: calc(5px * var(--home-timelist-padding-scale, 1));
   text-align: center;
   border: 1px solid #50B6FF;
   border-radius: 5px;
+  font-size: calc(1rem * var(--home-timelist-scale, 1));
 
   display: grid;
   place-items: center;
@@ -231,7 +232,7 @@
 
 .horizontal-row {
   display: grid;
-  grid-template-columns: repeat(var(--cols), 70px) 70px;
+  grid-template-columns: repeat(var(--cols), var(--home-horizontal-cell-width, 70px)) var(--home-horizontal-cell-width, 70px);
   column-gap: 4px;
   justify-content: center;
   margin-bottom: 4px;
@@ -239,8 +240,8 @@
 }
 
 .horizontal-row > .TimeItem {
-  width: 70px;
-  height: 30px;
+  width: var(--home-horizontal-cell-width, 70px);
+  height: var(--home-horizontal-cell-height, 30px);
   display: grid;
   place-items: center;
   padding: 0;
@@ -251,6 +252,7 @@
   border: 1px solid transparent;
   opacity: 1;
   box-sizing: border-box;
+  font-size: calc(1rem * var(--home-timelist-scale, 1));
 }
 
 .times-row > .TimeItem {
@@ -274,8 +276,8 @@
 .row-label {
   font-weight: bold;
   text-align: center;
-  width: 70px;
-  height: 30px;
+  width: var(--home-horizontal-cell-width, 70px);
+  height: var(--home-horizontal-cell-height, 30px);
   display: grid;
   place-items: center;
   border-radius: 5px;
@@ -284,7 +286,7 @@
   pointer-events: none;
   color: #50B6FF;
   opacity: 70%;
-  font-size: small;
+  font-size: calc(0.875rem * var(--home-timelist-scale, 1));
 }
 
 .row-label.time-label {
@@ -313,7 +315,7 @@
 }
 
 .solve-count {
-  font-size: 0.7em;
+  font-size: calc(0.7em * var(--home-timelist-scale, 1));
   color: #999;
 }
 

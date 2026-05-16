@@ -1,5 +1,6 @@
 // src/services/addSolve.js
 import { apiPost } from "./api.js";
+import { invalidateSolveMutationCaches } from "./solveMutationCache.js";
 
 /**
  * NEW canonical signature:
@@ -56,5 +57,12 @@ function normalizeArgs(userID, a1, a2, a3, a4, a5, a6, a7) {
 
 export const addSolve = async (userID, a1, a2, a3, a4, a5, a6, a7) => {
   const payload = normalizeArgs(userID, a1, a2, a3, a4, a5, a6, a7);
-  return apiPost("/api/solve", payload);
+  const result = await apiPost("/api/solve", payload);
+  invalidateSolveMutationCaches(payload.userID, [
+    {
+      event: payload.event,
+      sessionID: payload.sessionID,
+    },
+  ]);
+  return result;
 };

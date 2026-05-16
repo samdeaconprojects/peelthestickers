@@ -1,4 +1,10 @@
 import { apiGet } from "./api.js";
+import { createCachedRequestLoader } from "./requestCache.js";
+
+const sessionsLoader = createCachedRequestLoader(async (path) => {
+  const data = await apiGet(path);
+  return Array.isArray(data?.items) ? data.items.map(normalizeSession) : [];
+});
 
 function normalizeSession(item) {
   if (!item || typeof item !== "object") return item;
@@ -20,10 +26,17 @@ function normalizeSession(item) {
   return item;
 }
 
-export const getSessions = async (userID) => {
+export const getSessions = async (userID, options = {}) => {
   const id = String(userID || "").trim();
   if (!id) throw new Error("getSessions: userID required");
 
-  const data = await apiGet(`/api/sessions/${encodeURIComponent(id)}`);
-  return Array.isArray(data?.items) ? data.items.map(normalizeSession) : [];
+  return sessionsLoader.run(`sessions::${id}`, {
+    force: options?.force === true,
+    loadArg: `/api/sessions/${encodeURIComponent(id)}`,
+  });
 };
+
+export function invalidateSessionsCache(userID = "") {
+  const id = String(userID || "").trim();
+  sessionsLoader.invalidate(id ? `sessions::${id}` : undefined);
+}

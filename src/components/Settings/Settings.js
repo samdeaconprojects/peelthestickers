@@ -1192,6 +1192,20 @@ function Settings({
           </div>
 
           <div className="setting-item">
+            <label>Show Strict Averages</label>
+            <input
+              type="checkbox"
+              checked={settings.showStrictAverages !== false}
+              onChange={(e) => updateSettings({ showStrictAverages: e.target.checked })}
+            />
+          </div>
+
+          <div className="settingsHintText settingsHintText--tight">
+            Controls the Strict column on the home page averages table and the Strict values in
+            overall stats summaries.
+          </div>
+
+          <div className="setting-item">
             <label>Non-Rolling Time List</label>
             <input
               type="checkbox"

@@ -1,4 +1,5 @@
 import { apiPost } from "./api.js";
+import { invalidateSessionsCache } from "./getSessions.js";
 
 /**
  * Supports BOTH:
@@ -40,5 +41,6 @@ export const createSession = async (userID, event, a3, a4, opts = {}) => {
     opts,
   });
 
+  invalidateSessionsCache(id);
   return data?.item;
 };

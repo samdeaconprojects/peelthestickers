@@ -175,7 +175,10 @@ function Scramble({
         >
           <div
             className={`scramble-text ${isSingleLineEvent ? "scramble-text--single-line" : ""}`}
-            style={{ fontSize: `${fontSize}pt`, maxWidth: `${maxWidth}%` }}
+            style={{
+              fontSize: `calc(${fontSize}pt * var(--home-scramble-scale, 1))`,
+              maxWidth: `max(${maxWidth}%, var(--home-scramble-max-width, 0%))`,
+            }}
           >
             {tokens.length ? (
               (() => {

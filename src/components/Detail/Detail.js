@@ -13,6 +13,8 @@ import {
   SHARED_TAG_FIELDS,
 } from "../TagBar/tagUtils";
 
+const DETAIL_TAG_AUTOSAVE_DEBOUNCE_MS = 2500;
+
 function Detail({
   solve,
   userID,
@@ -319,7 +321,7 @@ function Detail({
 
       autosaveTimeoutsRef.current[key] = window.setTimeout(() => {
         saveSolveEdits(isArray ? idx : null);
-      }, 500);
+      }, DETAIL_TAG_AUTOSAVE_DEBOUNCE_MS);
     });
 
     return () => {
@@ -501,6 +503,8 @@ function Detail({
           updateSolve(resolved, solveRef, {
             Note: noteValue,
             Tags: tagsPayload,
+          }, {
+            existingItem: s,
           }),
         { minLoadingMs: 500 }
       );

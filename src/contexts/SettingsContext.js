@@ -68,6 +68,7 @@ export const defaultSettings = {
   disableKeypad: false,
   timeColorMode: "index",
   sharedTimeColorMode: "profile",
+  showStrictAverages: false,
 
   eventKeyBindings: defaultEventBindings,
   pageKeyBindings: defaultPageBindings,
