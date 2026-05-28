@@ -1440,14 +1440,47 @@ function App() {
         ...(prev || {}),
         [ev]: cached,
       }));
+
+      if (cached.length >= minCount) {
+        return cached;
+      }
+
+      warmScrambleQueue(ev, minCount)
+        .then((refilled) => {
+          setScrambles((prev) => ({
+            ...(prev || {}),
+            [ev]: refilled,
+          }));
+        })
+        .catch((err) => {
+          console.error(`Failed to refill scramble queue for ${ev}:`, err);
+        });
+
+      return cached;
     }
 
-    const queue = await warmScrambleQueue(ev, minCount);
+    // Only block on the next visible scramble so slower generators like 4x4
+    // can populate the UI quickly while the rest of the queue warms in back.
+    const immediateQueue = await warmScrambleQueue(ev, 1);
     setScrambles((prev) => ({
       ...(prev || {}),
-      [ev]: queue,
+      [ev]: immediateQueue,
     }));
-    return queue;
+
+    if (minCount > 1) {
+      warmScrambleQueue(ev, minCount)
+        .then((refilled) => {
+          setScrambles((prev) => ({
+            ...(prev || {}),
+            [ev]: refilled,
+          }));
+        })
+        .catch((err) => {
+          console.error(`Failed to refill scramble queue for ${ev}:`, err);
+        });
+    }
+
+    return immediateQueue;
   }, []);
 
   useEffect(() => {

@@ -38,6 +38,12 @@
   margin-top: 19%;
 }
 
+.Timer--home-long {
+  font-size: clamp(2rem, 12.4vw, 15.25rem);
+  letter-spacing: 4px;
+  margin-right: 7%;
+}
+
 .Timer--compact {
   font-size: clamp(1.9rem, 8.6vw, 8.1rem);
   margin-top: 0;

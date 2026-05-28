@@ -2,45 +2,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './Timer.css';
 import { useSettings } from '../../contexts/SettingsContext';
+import { useGanTimer } from '../../contexts/GanTimerContext';
 
-import { GanTimerClient, GanTimerState } from '../../smart/ganTimerClient';
 import { createSmartCubeClient } from '../../smart/createSmartCubeClient';
 import { getSmartCubeProviderLabel } from '../../smart/smartCubeProviderMeta';
 import { computeBasicCFOPSplits } from '../../smart/solveSplits';
-
-function parseDisplayTimeToMs(displayTime) {
-  if (displayTime == null) return null;
-
-  const n = Number(displayTime);
-  if (Number.isFinite(n)) {
-    if (n > 1000) return Math.round(n);
-    return Math.round(n * 1000);
-  }
-
-  const s = String(displayTime).trim();
-  if (!s) return null;
-
-  if (s.includes(':')) {
-    const [mStr, secStrRaw] = s.split(':');
-    const m = Number(mStr);
-    const sec = Number(secStrRaw);
-    if (!Number.isFinite(m) || !Number.isFinite(sec)) return null;
-    return Math.round(m * 60000 + sec * 1000);
-  }
-
-  const sec = Number(s);
-  if (!Number.isFinite(sec)) return null;
-  return Math.round(sec * 1000);
-}
-
-function normalizeGanRecordedTimeToMs(ev) {
-  const raw = ev?.recordedTime ?? ev?.time ?? ev?.ms;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return null;
-
-  if (n > 1000) return Math.round(n);
-  return Math.round(n * 1000);
-}
 
 function normalizePenaltyValue(penalty) {
   const value = String(penalty || '').trim().toUpperCase();
@@ -157,6 +123,20 @@ function Timer({
   latestSolve = null,
 }) {
   const { settings } = useSettings();
+  const {
+    ganConnected,
+    ganConnecting,
+    ganReady,
+    ganDot,
+    timerOn: ganTimerOn,
+    elapsedTime: ganElapsedTime,
+    lastTime: ganLastTime,
+    lastPenalty: ganLastPenalty,
+    connectGan,
+    disconnectGan,
+    registerAddTimeHandler,
+    syncLatestSolve,
+  } = useGanTimer();
 
   // ✅ keep latest addTime in a ref so Bluetooth callbacks always save
   // to the CURRENT session/event (not whatever it was when you connected).
@@ -177,16 +157,6 @@ function Timer({
   // GAN TIMER
   // -------------------------
   const isGanMode = settings?.timerInput === 'GAN Bluetooth';
-  const [ganConnected, setGanConnected] = useState(false);
-  const [ganConnecting, setGanConnecting] = useState(false);
-  const [ganStatus, setGanStatus] = useState('');
-  const [ganAwaitingFinal, setGanAwaitingFinal] = useState(false);
-  const [ganReady, setGanReady] = useState(false);
-  const [ganDot, setGanDot] = useState('disconnected');
-
-  const ganClientRef = useRef(null);
-  const ganSaveLockRef = useRef(false);
-  const ganReadFallbackLockRef = useRef(false);
 
   // -------------------------
   // SMART CUBE
@@ -270,6 +240,11 @@ function Timer({
   }, [settings.inspectionBeeps]);
 
   useEffect(() => {
+    if (isGanMode) {
+      syncLatestSolve(latestSolve);
+      return;
+    }
+
     if (timerOn || isInspecting) return;
 
     const signature = getSolveDisplaySignature(latestSolve);
@@ -279,7 +254,11 @@ function Timer({
     lastSyncedSolveSignatureRef.current = signature;
     setLastTime(timeMs);
     setLastPenalty(penalty);
-  }, [latestSolve, timerOn, isInspecting]);
+  }, [isGanMode, isInspecting, latestSolve, syncLatestSolve, timerOn]);
+
+  useEffect(() => {
+    registerAddTimeHandler(addTimeRef.current);
+  }, [registerAddTimeHandler, addTime]);
 
   const holdTimeoutRef = useRef(null);
 
@@ -464,170 +443,6 @@ function Timer({
     if (!isNaN(ms)) addTimeRef.current?.(ms);
     setManualTime('');
   };
-
-  // -------------------------
-  // GAN TIMER finalization helper
-  // -------------------------
-  const finalizeGanSolve = (ms) => {
-    if (!Number.isFinite(ms) || ms < 0) return;
-
-    setGanAwaitingFinal(false);
-    stopLocalStopwatch();
-
-    setElapsedTime(ms);
-    setLastTime(ms);
-    setLastPenalty(null);
-
-    if (!ganSaveLockRef.current) {
-      ganSaveLockRef.current = true;
-      addTimeRef.current?.(ms);
-    }
-  };
-
-  const tryFallbackReadFromTimer = async () => {
-    if (ganReadFallbackLockRef.current) return;
-    ganReadFallbackLockRef.current = true;
-
-    try {
-      const rec = await ganClientRef.current?.getRecordedTimes?.();
-      const ms = parseDisplayTimeToMs(rec?.displayTime);
-
-      if (ms != null) {
-        finalizeGanSolve(ms);
-      } else {
-        const pt0 = rec?.previousTimes?.[0];
-        const ms2 = parseDisplayTimeToMs(pt0);
-        if (ms2 != null) finalizeGanSolve(ms2);
-      }
-    } catch (e) {
-      console.error("GAN getRecordedTimes fallback failed:", e);
-    }
-  };
-
-  // -------------------------
-  // GAN TIMER connect / disconnect
-  // -------------------------
-  const connectGan = async () => {
-    if (ganConnecting) return;
-
-    setGanStatus('');
-    setGanConnecting(true);
-    setGanDot('connecting');
-
-    try {
-      if (!ganClientRef.current) ganClientRef.current = new GanTimerClient();
-
-      await ganClientRef.current.connect({
-        onState: async (ev) => {
-          if (ev?.state === GanTimerState.IDLE) setGanStatus('Idle');
-          if (ev?.state === GanTimerState.RUNNING) setGanStatus('Solving…');
-          if (ev?.state === GanTimerState.STOPPED) setGanStatus('Stopped');
-          if (ev?.state === GanTimerState.FINISHED) setGanStatus('Finished');
-
-          if (ev?.state === GanTimerState.GET_SET) setGanReady(true);
-          if (
-            ev?.state === GanTimerState.HANDS_ON ||
-            ev?.state === GanTimerState.HANDS_OFF ||
-            ev?.state === GanTimerState.IDLE
-          ) {
-            setGanReady(false);
-          }
-
-          if (ev?.state === GanTimerState.RUNNING) {
-            ganSaveLockRef.current = false;
-            ganReadFallbackLockRef.current = false;
-
-            setGanReady(false);
-
-            stopInspectionInterval();
-            setIsInspecting(false);
-            setInspectionElapsed(0);
-            inspectionExtraMsRef.current = 0;
-
-            setGanAwaitingFinal(false);
-            startLocalStopwatch();
-          }
-
-          if (ev?.state === GanTimerState.STOPPED || ev?.state === GanTimerState.FINISHED) {
-            stopLocalStopwatch();
-
-            const ms = normalizeGanRecordedTimeToMs(ev);
-
-            if (ms != null) {
-              finalizeGanSolve(ms);
-            } else {
-              setGanAwaitingFinal(true);
-              await tryFallbackReadFromTimer();
-            }
-          }
-        },
-
-        onSolve: ({ ms }) => {
-          finalizeGanSolve(ms);
-        },
-
-        onDisconnect: () => {
-          setGanStatus('Disconnected');
-          setGanConnected(false);
-          setGanConnecting(false);
-          setGanAwaitingFinal(false);
-          setGanReady(false);
-          setGanDot('disconnected');
-
-          ganSaveLockRef.current = false;
-          ganReadFallbackLockRef.current = false;
-          stopLocalStopwatch();
-        },
-
-        onError: (err) => {
-          console.error('GAN timer error:', err);
-          setGanStatus('Error');
-          setGanConnected(false);
-          setGanConnecting(false);
-          setGanAwaitingFinal(false);
-          setGanReady(false);
-          setGanDot('error');
-
-          ganSaveLockRef.current = false;
-          ganReadFallbackLockRef.current = false;
-          stopLocalStopwatch();
-        }
-      });
-
-      setGanConnected(true);
-      setGanStatus('Connected');
-      setGanDot('connected');
-    } catch (e) {
-      console.error('GAN connect failed:', e);
-      setGanStatus('Connect failed');
-      setGanConnected(false);
-      setGanDot('error');
-    } finally {
-      setGanConnecting(false);
-    }
-  };
-
-  const disconnectGan = async () => {
-    try {
-      await ganClientRef.current?.disconnect?.();
-    } catch (_) {}
-
-    setGanConnected(false);
-    setGanConnecting(false);
-    setGanStatus('');
-    setGanAwaitingFinal(false);
-    setGanReady(false);
-    setGanDot('disconnected');
-
-    ganSaveLockRef.current = false;
-    ganReadFallbackLockRef.current = false;
-    stopLocalStopwatch();
-  };
-
-  useEffect(() => {
-    if (!isGanMode && ganConnected) disconnectGan();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isGanMode]);
 
   // -------------------------
   // Cube scramble tokens update (from displayed scramble)
@@ -1350,7 +1165,6 @@ function Timer({
       stopInspectionInterval();
       if (holdTimeoutRef.current) clearTimeout(holdTimeoutRef.current);
 
-      try { ganClientRef.current?.disconnect?.(); } catch (_) {}
       try { cubeClientRef.current?.disconnect?.(); } catch (_) {}
       clearCubeIdleTimer();
     };
@@ -1382,16 +1196,22 @@ function Timer({
     return `${remainingSecs}`;
   };
 
+  const effectiveTimerOn = isGanMode ? ganTimerOn : timerOn;
+  const effectiveElapsedTime = isGanMode ? ganElapsedTime : elapsedTime;
+  const effectiveLastTime = isGanMode ? ganLastTime : lastTime;
+  const effectiveLastPenalty = isGanMode ? ganLastPenalty : lastPenalty;
+
   const formatTime = () => {
     if (isInspecting) return formatInspection();
-    if (!timerOn && lastPenalty === 'DNF') return 'DNF';
-    const timeToDisplay = timerOn ? elapsedTime : lastTime;
+    if (!effectiveTimerOn && effectiveLastPenalty === 'DNF') return 'DNF';
+    const timeToDisplay = effectiveTimerOn ? effectiveElapsedTime : effectiveLastTime;
     const formatted = formatMs(timeToDisplay);
-    return !timerOn && lastPenalty === '+2' ? `${formatted}+` : formatted;
+    return !effectiveTimerOn && effectiveLastPenalty === '+2' ? `${formatted}+` : formatted;
   };
 
   const displayTime = formatTime();
   const displayHasMinutes = displayTime.includes(':');
+  const useHomeLongTimeLayout = displayHasMinutes && !compact && !inPlayerBar;
 
   const getInspectionColor = () => {
     const ms = inspectionElapsed;
@@ -1416,12 +1236,12 @@ function Timer({
     : { opacity: 0.35, transition: "opacity 120ms linear" };
 
   const ganGreenStyle =
-    isGanMode && ganConnected && ganReady && !timerOn
+    isGanMode && ganConnected && ganReady && !effectiveTimerOn
       ? { color: "#2EC4B6", transition: "color 120ms linear" }
       : undefined;
 
   const cubeGreenStyle =
-    isCubeMode && cubeConnected && cubeArmed && !timerOn
+    isCubeMode && cubeConnected && cubeArmed && !effectiveTimerOn
       ? { color: "#2EC4B6", transition: "color 120ms linear" }
       : undefined;
 
@@ -1549,7 +1369,7 @@ function Timer({
           ) : (
             <>
               <p
-                className={`Timer ${displayHasMinutes ? "Timer--with-minutes" : ""} ${(isGanMode || isCubeMode || settings.timerInput === "Keyboard") ? "Timer--static" : ""} ${compact ? "Timer--compact" : ""} ${inPlayerBar ? "Timer--playerbar" : ""}`}
+                className={`Timer ${displayHasMinutes ? "Timer--with-minutes" : ""} ${useHomeLongTimeLayout ? "Timer--home-long" : ""} ${(isGanMode || isCubeMode || settings.timerInput === "Keyboard") ? "Timer--static" : ""} ${compact ? "Timer--compact" : ""} ${inPlayerBar ? "Timer--playerbar" : ""}`}
                 style={
                   isGanMode
                     ? ganGreenStyle

@@ -39,7 +39,7 @@ const isInteractiveFeedTarget = (target) =>
     "button, input, select, textarea, a, .statsToggleBtn, .statsMiniBtn, .chartScaleInput, .lineChartDot, [data-interactive='solve-point'], svg .timeLineSegment, .timeLineSegment"
   );
 
-function normalizeSolve(item) {
+function normalizeSolve(item, fallbackIndex = null) {
   if (!item) return null;
 
   const created =
@@ -58,7 +58,11 @@ function normalizeSolve(item) {
 
   return {
     solveRef: item?.SK || null,
-    fullIndex: null,
+    fullIndex: Number.isFinite(Number(item?.fullIndex))
+      ? Number(item.fullIndex)
+      : Number.isFinite(Number(fallbackIndex))
+        ? Number(fallbackIndex)
+        : null,
     time: isDNF ? Number.MAX_SAFE_INTEGER : finalTimeMs,
     rawTime: rawTimeMs,
     originalTime: rawTimeMs,
@@ -461,7 +465,9 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
             if (Array.isArray(prev[cacheKey])) return prev;
             return {
               ...prev,
-              [cacheKey]: (solves || []).map(normalizeSolve).filter(Boolean),
+              [cacheKey]: (solves || [])
+                .map((solve, index) => normalizeSolve(solve, index))
+                .filter(Boolean),
             };
           });
         } catch (err) {

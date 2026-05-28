@@ -24,6 +24,18 @@ function interpolateHexColor(a, b, ratio) {
   return `#${parts.join("")}`;
 }
 
+function hexToRgba(hex, alpha) {
+  const value = String(hex || "").replace("#", "").trim();
+  if (value.length !== 6) return `rgba(46, 196, 182, ${alpha})`;
+
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+
+  if (![r, g, b].every(Number.isFinite)) return `rgba(46, 196, 182, ${alpha})`;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function resolvePaletteColor(style, ratio, fallback = "#2EC4B6") {
   const safeRatio = Math.min(1, Math.max(0, Number(ratio) || 0));
   if (!style) return fallback;
@@ -148,6 +160,7 @@ function BarChart({
   showLegend = true,
 }) {
   const containerRef = useRef(null);
+  const [showCountLabels, setShowCountLabels] = useState(false);
 
   const [tooltip, setTooltip] = useState({
     visible: false,
@@ -266,6 +279,34 @@ function BarChart({
 
   const innerW = Math.max(1, chartWidth - padding * 2);
   const innerH = Math.max(1, chartHeight - padding * 2);
+  const controlAccentColor =
+    seriesStyle?.primary || legendItems[0]?.color || resolvePaletteColor(seriesStyle, 0.5, "#2EC4B6");
+  const renderCountLabel = (x, y, width, height, count, key) => {
+    if (!showCountLabels) return null;
+
+    const numericCount = Number(count || 0);
+    if (numericCount <= 0) return null;
+
+    const isTallBar = height >= 24;
+    const labelY = isTallBar ? y + 14 : Math.max(padding + 10, y - 6);
+
+    return (
+      <text
+        key={key}
+        x={x + width / 2}
+        y={labelY}
+        textAnchor="middle"
+        fontSize="10px"
+        fontWeight="700"
+        fill={isTallBar ? "#081c15" : "white"}
+        stroke={isTallBar ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.6)"}
+        strokeWidth="0.75"
+        paintOrder="stroke"
+      >
+        {numericCount}
+      </text>
+    );
+  };
 
   const items = computed.mode === "compare" ? computed.groups : computed.buckets;
   const labelEvery = items.length > 24 ? Math.ceil(items.length / 12) : 1;
@@ -273,10 +314,14 @@ function BarChart({
   return (
     <div
       ref={containerRef}
+      className="barChart"
       style={{
         position: "relative",
         width: "100%",
         height: "100%",
+        "--line-chart-accent": controlAccentColor,
+        "--line-chart-accent-soft": hexToRgba(controlAccentColor, 0.18),
+        "--line-chart-accent-strong": hexToRgba(controlAccentColor, 0.55),
       }}
     >
       {showLegend && hasComparison && legendItems.length > 0 && (
@@ -292,6 +337,17 @@ function BarChart({
           ))}
         </div>
       )}
+
+      <div className="barChartControls">
+        <button
+          type="button"
+          aria-pressed={showCountLabels}
+          className={`statsToggleBtn barChartToggleBtn ${showCountLabels ? "is-active" : ""}`}
+          onClick={() => setShowCountLabels((current) => !current)}
+        >
+          Labels
+        </button>
+      </div>
 
       <svg width={chartWidth} height={chartHeight}>
         {showAxes && (
@@ -339,6 +395,8 @@ function BarChart({
                   }
                 />
 
+                {renderCountLabel(x, y, Math.max(1, barWidth - 2), h, bucket.count, `count-${bucket.key}`)}
+
                 {showLabels && index % labelEvery === 0 && (
                   <text
                     x={x + barWidth / 2}
@@ -368,29 +426,38 @@ function BarChart({
                   const y = chartHeight - padding - h;
 
                   return (
-                    <rect
-                      key={bar.id}
-                      x={x}
-                      y={y}
-                      width={Math.max(1, barWidth - 2)}
-                      height={h}
-                      rx={4}
-                      ry={4}
-                      fill={bar.color}
-                      onMouseOver={() =>
-                        setTooltip({
-                          visible: true,
-                          x: x + barWidth / 2,
-                          y: y - 8,
-                          count: bar.count,
-                          label: group.label,
-                          series: bar.seriesLabel,
-                        })
-                      }
-                      onMouseOut={() =>
-                        setTooltip({ visible: false, x: 0, y: 0, count: 0, label: "", series: "" })
-                      }
-                    />
+                    <g key={bar.id}>
+                      <rect
+                        x={x}
+                        y={y}
+                        width={Math.max(1, barWidth - 2)}
+                        height={h}
+                        rx={4}
+                        ry={4}
+                        fill={bar.color}
+                        onMouseOver={() =>
+                          setTooltip({
+                            visible: true,
+                            x: x + barWidth / 2,
+                            y: y - 8,
+                            count: bar.count,
+                            label: group.label,
+                            series: bar.seriesLabel,
+                          })
+                        }
+                        onMouseOut={() =>
+                          setTooltip({ visible: false, x: 0, y: 0, count: 0, label: "", series: "" })
+                        }
+                      />
+                      {renderCountLabel(
+                        x,
+                        y,
+                        Math.max(1, barWidth - 2),
+                        h,
+                        bar.count,
+                        `count-${bar.id}`
+                      )}
+                    </g>
                   );
                 })}
 

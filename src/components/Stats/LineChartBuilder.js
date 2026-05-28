@@ -212,8 +212,8 @@ const LineChartBuilder = ({
     const digits = parseFloat(niceScale.max.toString()).toFixed(precision).length + 3;
     const yLabelRoom = digits * (FONT_SIZE * 0.62);
 
-    const computedLeftPadding = Math.ceil(Math.max(FONT_SIZE * 2.05, yLabelRoom)) + 10;
-    const computedRightPadding = Math.max(13, Math.ceil(FONT_SIZE * 1.0));
+    const computedLeftPadding = Math.ceil(Math.max(FONT_SIZE * 1.9, yLabelRoom)) + 2;
+    const computedRightPadding = Math.max(18, Math.ceil(FONT_SIZE * 1.4));
     const computedTopPadding = Math.max(13, Math.ceil(FONT_SIZE * 1.0));
     const computedBottomPadding = showAxisLabels
       ? Math.max(28, Math.ceil(FONT_SIZE * 2.4))
@@ -317,7 +317,7 @@ const LineChartBuilder = ({
   };
 
   const LabelsXAxis = () => {
-    const y = resolvedHeight - bottomPadding + FONT_SIZE * 1.35;
+    const y = resolvedHeight - bottomPadding + FONT_SIZE * 1.7;
     const tickEntries = getXTickEntries(safeData);
 
     return tickEntries.map(({ item: element, index }) => {
@@ -339,7 +339,7 @@ const LineChartBuilder = ({
   const LabelsYAxis = () => {
     const shouldUseWholeSeconds = (yTicks?.[1] ?? 1) - (yTicks?.[0] ?? 0) >= 1;
     return (yTicks || []).map((tickValue) => {
-      const x = leftPadding - FONT_SIZE * 0.8;
+      const x = leftPadding - FONT_SIZE * 0.7;
       const ratio = (tickValue - minimumYFromData) / yDenom;
       const yCoordinate = chartHeight - chartHeight * ratio + topPadding + FONT_SIZE / 3;
       return (
@@ -348,7 +348,11 @@ const LineChartBuilder = ({
           x={x}
           y={yCoordinate}
           textAnchor="end"
-          style={{ fill: "rgba(128, 128, 128, 0.72)", fontSize: FONT_SIZE, fontFamily: "Helvetica" }}
+          style={{
+            fill: "rgba(219, 221, 225, 0.82)",
+            fontSize: FONT_SIZE + 1,
+            fontFamily: "Helvetica",
+          }}
         >
           {formatAxisTimeLabel(tickValue, shouldUseWholeSeconds)}
         </text>
@@ -434,34 +438,6 @@ const LineChartBuilder = ({
             strokeDasharray={line.dashed ? "6 5" : undefined}
             opacity={0.95}
           />
-        </g>
-      );
-    });
-
-  const renderedReferenceLabels = (Array.isArray(referenceLines) ? referenceLines : [])
-    .filter((line) => typeof line?.y === "number" && isFinite(line.y))
-    .map((line, index) => {
-      const rawY =
-        chartHeight - ((line.y - minimumYFromData) / yDenom) * chartHeight + topPadding;
-      const y = clamp(rawY, topPadding, chartHeight + topPadding);
-      const labelY = Math.max(topPadding + FONT_SIZE, y - 6);
-      const labelX = leftPadding - 8;
-
-      return (
-        <g key={`${line.id || `reference-${index}`}-label`}>
-          <text
-            x={labelX}
-            y={labelY}
-            textAnchor="end"
-            style={{
-              fill: line.stroke || "#FFD54A",
-              fontSize: Math.max(10, FONT_SIZE - 1),
-              fontWeight: 800,
-              fontFamily: "Helvetica",
-            }}
-          >
-            {line.label}
-          </text>
         </g>
       );
     });
@@ -559,8 +535,6 @@ const LineChartBuilder = ({
             );
           })
         )}
-
-        {renderedReferenceLabels}
       </svg>
 
       {tooltip.visible && (

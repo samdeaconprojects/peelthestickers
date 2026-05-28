@@ -58,6 +58,10 @@
   height: 42px;
 }
 
+.name-tag--iconOnly .name-tag-link {
+  width: auto;
+}
+
 /* ✅ Default behavior (NxN should look exactly like before) */
 .nametagCube {
   flex: 0 0 auto;               /* fixed size, no stretching */

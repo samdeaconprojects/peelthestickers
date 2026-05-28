@@ -6,15 +6,13 @@ export const formatTime = (timeToDisplay, isAverage = false, penalty = null) => 
     return 'N/A';
   }
 
-  let minutes = Math.floor(timeToDisplay / 60000);
-  let seconds = Math.floor((timeToDisplay % 60000) / 1000);
+  const numericTime = Number(timeToDisplay);
+  const displayTime = isAverage ? Math.round(numericTime / 10) * 10 : numericTime;
 
-  let milliseconds;
-  if (isAverage) {
-    milliseconds = ((timeToDisplay % 1000) / 1000).toFixed(2).slice(2);
-  } else {
-    milliseconds = Math.floor((timeToDisplay % 1000) / 10).toString().padStart(2, '0');
-  }
+  let minutes = Math.floor(displayTime / 60000);
+  let seconds = Math.floor((displayTime % 60000) / 1000);
+
+  const milliseconds = Math.floor((displayTime % 1000) / 10).toString().padStart(2, '0');
 
   const formattedSeconds = seconds.toString().padStart(2, '0');
 

@@ -14,6 +14,7 @@ function NameTag({
   size = "sm",
   variant = "default",
   reverse = false,
+  hideName = false,
 }) {
   if (isSignedIn === false) {
     return (
@@ -56,11 +57,17 @@ function NameTag({
         };
 
   return (
-    <div className={`name-tag name-tag--${size} ${nameLengthClass}`.trim()}>
+    <div
+      className={`name-tag name-tag--${size} ${nameLengthClass} ${
+        hideName ? "name-tag--iconOnly" : ""
+      }`.trim()}
+    >
       <Link
         to={linkTo}
         className={linkClassName}
         style={linkStyle}
+        aria-label={`Open ${displayName}'s profile`}
+        title={`@${displayName}`}
       >
         <div
           className="name-tag-cubeFrame"
@@ -76,9 +83,11 @@ function NameTag({
           </div>
         </div>
 
-        <div className="nametagText">
-          <span className="name-tag-text">@{displayName}</span>
-        </div>
+        {!hideName ? (
+          <div className="nametagText">
+            <span className="name-tag-text">@{displayName}</span>
+          </div>
+        ) : null}
       </Link>
     </div>
   );

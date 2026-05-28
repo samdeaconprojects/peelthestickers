@@ -8,6 +8,7 @@ import StatsSummary, { StatsSummaryCurrent, StatsSummaryOverall } from "./StatsS
 import BarChart from "./BarChart";
 import BucketTable from "./BucketTable";
 import PieChart from "./PieChart";
+import TagBreakdownPie from "./TagBreakdownPie";
 import StatFocusModal from "./StatFocusModal";
 import AllEventsTimeMatrix from "./AllEventsTimeMatrix";
 import Detail from "../Detail/Detail";
@@ -15,7 +16,6 @@ import AverageDetailModal from "../Detail/AverageDetailModal";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
 import TagBar from "../TagBar/TagBar";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
-import NameTag from "../Profile/NameTag";
 import PtsLinkStatsIcon from "../../assets/ptsLinkStats.svg";
 import tagBadge from "../../assets/Tag.svg";
 
@@ -1458,7 +1458,6 @@ function Stats({
   onSessionsListRefresh = null,
 }) {
   const { runDb } = useDbStatus();
-  const profileLinkTarget = user?.UserID ? `/profile/${user.UserID}` : "/profile";
   const viewerDisplayName = viewerUser?.Name || viewerUser?.UserID || "you";
   const statsOwnerDisplayName = user?.Name || user?.UserID || "this user";
   const DEFAULT_IN_VIEW = 100;
@@ -1554,6 +1553,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const importRequestRef = useRef(null);
   const exportRequestRef = useRef(null);
   const [statsViewMode, setStatsViewMode] = useState("standard");
+  const [standardSubview, setStandardSubview] = useState("solves");
   const [timeViewMainSessionsOnly, setTimeViewMainSessionsOnly] = useState(true);
   const summaryLayout =
     String(settings?.statsSummaryLayout || "tile").trim().toLowerCase() === "row"
@@ -3346,6 +3346,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const comparisonPrimarySolves = useMemo(() => {
     return compareEnabled ? visiblePageFilteredRawSolves : [];
   }, [compareEnabled, visiblePageFilteredRawSolves]);
+  const isTagBreakdownView = statsViewMode === "standard" && standardSubview === "tags";
 
   useEffect(() => {
     if (!compareEnabled && tableCompareView !== "primary") {
@@ -4319,6 +4320,22 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       session: prev?.session || currentSession || "main",
     }));
   }, [currentEvent, currentSession, statsViewMode]);
+
+  const handleSetStatsDisplayMode = useCallback(
+    async (nextMode) => {
+      if (nextMode === "time") {
+        setStandardSubview("solves");
+        await handleSetViewMode("time");
+        return;
+      }
+
+      setStandardSubview(nextMode === "tags" ? "tags" : "solves");
+      if (statsViewMode !== "standard") {
+        await handleSetViewMode("standard");
+      }
+    },
+    [handleSetViewMode, statsViewMode]
+  );
 
   const handleDeleteSolve = useCallback(
     async (solveRefOrIndex) => {
@@ -6907,6 +6924,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   });
 
   const canCompare = statsViewMode === "standard" && showSolveCharts;
+  const showStatsSummaryHeader = !isTagBreakdownView;
 
   const closeScopeModal = useCallback(() => {
     setScopeModalState(null);
@@ -7400,8 +7418,13 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         +1
       </button>
 
-      <button onClick={controls.showAll} disabled={!controls.canShowAll} title="Load all solves">
-        {controls.loadingShowAll ? "Loading…" : controls.showAllActive ? "All Loaded" : "Show All"}
+      <button
+        onClick={controls.showAll}
+        disabled={!controls.canShowAll}
+        className="statsToggleBtn statsTopOverviewBtn"
+        title="Load all solves"
+      >
+        {controls.loadingShowAll ? "Loading…" : controls.showAllActive ? "All Loaded" : "Overview"}
       </button>
         </>
       )}
@@ -7415,6 +7438,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     sessionValue,
     sessionDisplay,
     tagSelection,
+    tagPills = [],
     dateSummary,
     loading = false,
     scopeModalKey,
@@ -7422,29 +7446,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     sourceSummary = "",
   }) => {
     const { label: eventLabel, puzzleEvent } = getEventDisplayMeta(eventValue);
-    const resolvedTagEvent = eventValue === ALL_EVENTS ? "" : eventValue;
-    const scopeTagColors = getTagColorMapForEvent(tagColorCatalog, resolvedTagEvent);
-    const tagLabels = getSharedTagLabels(safeTagConfig);
-    const activeTagPills = Object.entries(sanitizeTagSelection(tagSelection))
-      .map(([field, value]) => [field, String(value || "").trim()])
-      .filter(([, value]) => value)
-      .map(([field, value]) => {
-        const tone =
-          scopeTagColors?.[field]?.[value] ||
-          (field === "CrossColor"
-            ? resolveHeaderCrossColorTone(value, user?.Color || user?.color || "#2EC4B6")
-            : user?.Color || user?.color || "#2EC4B6");
-        return {
-          field,
-          value,
-          label: tagLabels?.[field] || field,
-          style: {
-            "--tag-chip-color": tone,
-            "--tag-chip-border": tone,
-            "--tag-chip-bg": `${tone}22`,
-          },
-        };
-      });
+    const hasActiveTags = Object.values(sanitizeTagSelection(tagSelection)).some((value) =>
+      String(value || "").trim()
+    );
+    const activeTone = hasActiveTags ? tagPills[0]?.color || rowAccentColor : rowAccentColor;
 
     return (
       <div
@@ -7454,8 +7459,15 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         role="button"
         tabIndex={0}
         style={{
-          borderColor: loading ? undefined : `${rowAccentColor}66`,
-          boxShadow: loading ? undefined : `inset 0 0 0 1px ${rowAccentColor}22`,
+          "--stats-scope-active-accent": activeTone,
+          "--stats-scope-active-accent-soft": `${activeTone}22`,
+          "--stats-scope-active-accent-strong": `${activeTone}66`,
+          borderColor: loading ? undefined : `${activeTone}66`,
+          background:
+            loading || !hasActiveTags
+              ? undefined
+              : `color-mix(in srgb, ${activeTone} 16%, rgba(255,255,255,0.06))`,
+          boxShadow: loading ? undefined : `inset 0 0 0 1px ${activeTone}22`,
         }}
         onClick={() => openScopeModal(scopeModalKey, "event")}
         onKeyDown={(event) => {
@@ -7510,32 +7522,27 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             </span>
           </button>
 
-          <button
-            type="button"
-            className="statsScopeSummaryChip statsScopeSummaryChip--date"
-            onClick={(e) => {
-              e.stopPropagation();
-              openScopeModal(scopeModalKey, "date");
-            }}
-          >
-            <span className="statsScopeSummaryChipValue">{dateSummary}</span>
-          </button>
-
-          <button
-            type="button"
-            className="statsScopeSummaryChip statsScopeSummaryChip--tags"
-            onClick={(e) => {
-              e.stopPropagation();
-              openScopeModal(scopeModalKey, "tags");
-            }}
-          >
-            <span className="statsScopeTagList">
-              {activeTagPills.length ? (
-                activeTagPills.map((tag) => (
+          {hasActiveTags ? (
+            <button
+              type="button"
+              className="statsScopeSummaryChip statsScopeSummaryChip--tags"
+              onClick={(e) => {
+                e.stopPropagation();
+                openScopeModal(scopeModalKey, "tags");
+              }}
+              aria-label="Edit tag filters"
+              title="Edit tag filters"
+            >
+              <span className="statsScopeTagList">
+                {tagPills.map((tag) => (
                   <span
                     key={`${scopeModalKey}-${tag.field}-${tag.value}`}
                     className="statsScopeTagPill"
-                    style={tag.style}
+                    style={{
+                      "--tag-chip-color": tag.color,
+                      "--tag-chip-border": tag.color,
+                      "--tag-chip-bg": `${tag.color}22`,
+                    }}
                     title={`${tag.label}: ${tag.value}`}
                   >
                     <span className="statsScopeTagPillIconWrap" aria-hidden="true">
@@ -7543,14 +7550,23 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     </span>
                     <span className="statsScopeTagPillText">{tag.value}</span>
                   </span>
-                ))
-              ) : (
-                <span className="statsScopeTagPill statsScopeTagPill--any" title="Add tag filter">
-                  <span className="statsScopeTagPillText">+ tag</span>
-                </span>
-              )}
-            </span>
-          </button>
+                ))}
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="statsScopeSummaryChip statsScopeSummaryChip--tagIcon"
+              onClick={(e) => {
+                e.stopPropagation();
+                openScopeModal(scopeModalKey, "tags");
+              }}
+              aria-label="Add tag filter"
+              title="Add tag filter"
+            >
+              <img src={tagBadge} alt="" className="statsScopeTagIconButtonImg" />
+            </button>
+          )}
 
           {sourceSummary ? (
             <div
@@ -7564,6 +7580,16 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         </div>
 
         <div className="statsScopeRowActions">
+          <button
+            type="button"
+            className="statsScopeSummaryChip statsScopeSummaryChip--date"
+            onClick={(e) => {
+              e.stopPropagation();
+              openScopeModal(scopeModalKey, "date");
+            }}
+          >
+            <span className="statsScopeSummaryChipValue">{dateSummary}</span>
+          </button>
           {renderViewportControls(scopeModalKey)}
         </div>
       </div>
@@ -7591,32 +7617,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         <div
           className={`statsTopLeft ${statsViewMode === "standard" ? "statsTopLeft--standard" : "statsTopLeft--time"}`}
         >
-          <div className="statsTopIdentity">
-            <NameTag
-              isSignedIn={!!user}
-              user={user}
-              to={profileLinkTarget}
-              size="xs"
-            />
-            <div className="statsViewToggle" role="group" aria-label="Stats view">
-              <button
-                type="button"
-                className={`statsToggleBtn ${statsViewMode === "standard" ? "is-active" : ""}`}
-                onClick={() => handleSetViewMode("standard")}
-              >
-                Event
-              </button>
-              <span className="statsViewToggleDivider" aria-hidden="true">|</span>
-              <button
-                type="button"
-                className={`statsToggleBtn ${statsViewMode === "time" ? "is-active" : ""}`}
-                onClick={() => handleSetViewMode("time")}
-              >
-                Time
-              </button>
-            </div>
-          </div>
-
           <div
             className={`statsCompareShell ${
               useSharedCompareRail ? "statsCompareShell--linked" : ""
@@ -7636,6 +7636,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                 sessionValue: statsSession,
                 sessionDisplay: selectedSessionDisplay,
                 tagSelection: tagFilterSelection,
+                tagPills: selectedTagPills,
                 dateSummary: dateFilterLabel,
                 sourceSummary: !compareEnabled && useBucketBackedRange ? bucketSourceLabel : "",
                 scopeModalKey: "primary",
@@ -7648,6 +7649,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   sessionValue: compareSessionId,
                   sessionDisplay: compareSessionDisplay,
                   tagSelection: compareTagSelection,
+                  tagPills: compareSelectedTagPills,
                   dateSummary: compareDateFilterLabel,
                   loading: compareLoading,
                   scopeModalKey: "compare",
@@ -7700,6 +7702,40 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                 </button>
               </div>
             ) : null}
+          </div>
+        </div>
+
+        <div className="statsTopIdentity statsTopIdentity--header">
+          <div className="statsViewToggle statsViewToggle--modeGrid" role="group" aria-label="Stats view">
+            <div className="statsViewToggleStack">
+              <button
+                type="button"
+                className={`statsToggleBtn ${
+                  statsViewMode === "standard" && standardSubview === "solves" ? "is-active" : ""
+                }`}
+                onClick={() => void handleSetStatsDisplayMode("solves")}
+              >
+                Solves
+              </button>
+              <button
+                type="button"
+                className={`statsToggleBtn ${statsViewMode === "time" ? "is-active" : ""}`}
+                onClick={() => void handleSetStatsDisplayMode("time")}
+              >
+                Time
+              </button>
+            </div>
+            <button
+              type="button"
+              className={`statsToggleBtn statsToggleBtn--iconOnly ${
+                statsViewMode === "standard" && standardSubview === "tags" ? "is-active" : ""
+              }`}
+              onClick={() => void handleSetStatsDisplayMode("tags")}
+              aria-label="Tags"
+              title="Tags"
+            >
+              <img src={tagBadge} alt="" className="statsToggleBtnIcon" />
+            </button>
           </div>
         </div>
 
@@ -7788,8 +7824,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         <div
           className={`stats-grid stats-grid--figma ${statsViewMode === "time" ? "stats-grid--time" : ""} ${
             showAllEventsTimeMatrixCard ? "" : "stats-grid--noEventMatrix"
-          }`}
+          } ${showStatsSummaryHeader ? "" : "stats-grid--tagBreakdownOnly"}`}
         >
+          {showStatsSummaryHeader && (
           <div
             className={`stats-item stats-item--header stats-item--minh stats-item--headerSplit${
               isAllEventsMode || (!compareEnabled && statsViewMode === "time") ? " stats-item--headerSplitSingle" : ""
@@ -8024,6 +8061,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               </div>
             )}
           </div>
+          )}
 
           {showAllEventsTimeMatrixCard && (
             <div className="stats-item stats-item--eventMatrix statsCardShell">
@@ -8041,7 +8079,21 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             </div>
           )}
 
-          {showSolveCharts && (
+          {showSolveCharts && isTagBreakdownView && (
+            <div
+              className={`stats-item stats-item--tagBreakdown statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
+              aria-busy={chartCardsLoading}
+            >
+              <TagBreakdownPie
+                solves={visiblePageFilteredRawSolves}
+                tagConfig={safeTagConfig}
+                eventKey={statsEvent}
+                onSolveOpen={openSolveDetail}
+              />
+            </div>
+          )}
+
+          {showSolveCharts && !isTagBreakdownView && (
             <>
               <div
                 className={`stats-item stats-item--line stats-item--minh statsCardShell ${statsViewMode === "time" ? "stats-item--lineWide" : ""} ${chartCardsLoading ? "is-loading" : ""}`}

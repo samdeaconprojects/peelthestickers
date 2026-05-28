@@ -8,14 +8,17 @@ import App from './App';
 import reportWebVitals from './reportWebVitals';
 import { BrowserRouter as Router } from 'react-router-dom';
 import { SettingsProvider } from './contexts/SettingsContext'; // ✅ import the provider
+import { GanTimerProvider } from './contexts/GanTimerContext';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <SettingsProvider> {/* wrap App in SettingsProvider */}
-      <Router>
-        <App />
-      </Router>
+      <GanTimerProvider>
+        <Router>
+          <App />
+        </Router>
+      </GanTimerProvider>
     </SettingsProvider>
   </React.StrictMode>
 );

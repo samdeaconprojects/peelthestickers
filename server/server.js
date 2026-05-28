@@ -71,6 +71,8 @@ const ENABLE_SPARSE_TAG_READS =
 const ENABLE_DB_LOGS = String(process.env.PTS_LOG_DB || "false").toLowerCase() === "true";
 const ENABLE_VERBOSE_DB_LOGS =
   String(process.env.PTS_LOG_DB_VERBOSE || "false").toLowerCase() === "true";
+const DB_READ_COST_PER_MILLION = Number(process.env.PTS_DB_READ_COST_PER_MILLION || 0.25);
+const DB_WRITE_COST_PER_MILLION = Number(process.env.PTS_DB_WRITE_COST_PER_MILLION || 1.25);
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }), {
   marshallOptions: { removeUndefinedValues: true },
@@ -114,8 +116,167 @@ function createDbMetricsContext(label, meta = {}) {
     startedAt: Date.now(),
     operations: [],
     counts: {},
+    capacity: {
+      total: 0,
+      read: 0,
+      write: 0,
+      tables: {},
+      indexes: {},
+    },
     totalDurationMs: 0,
   };
+}
+
+function roundDbMetric(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round(num * 1000) / 1000;
+}
+
+function roundUsdMetric(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round(num * 1000000) / 1000000;
+}
+
+function addCapacityBucket(target, key, delta = {}) {
+  if (!key) return;
+  const existing = target[key] || { total: 0, read: 0, write: 0 };
+  existing.total += Number(delta.total || 0);
+  existing.read += Number(delta.read || 0);
+  existing.write += Number(delta.write || 0);
+  target[key] = existing;
+}
+
+function summarizeConsumedCapacityEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return { total: 0, read: 0, write: 0, tables: {}, indexes: {} };
+  }
+
+  const read =
+    Number.isFinite(Number(entry.ReadCapacityUnits)) ? Number(entry.ReadCapacityUnits) : 0;
+  const write =
+    Number.isFinite(Number(entry.WriteCapacityUnits)) ? Number(entry.WriteCapacityUnits) : 0;
+  const totalExplicit =
+    Number.isFinite(Number(entry.CapacityUnits)) ? Number(entry.CapacityUnits) : null;
+  const total = totalExplicit != null ? totalExplicit : read + write;
+  const summary = {
+    total,
+    read,
+    write,
+    tables: {},
+    indexes: {},
+  };
+
+  const tableName = String(entry.TableName || "").trim();
+  if (tableName) {
+    addCapacityBucket(summary.tables, tableName, { total, read, write });
+  }
+
+  for (const [indexName, indexMetrics] of Object.entries(entry.GlobalSecondaryIndexes || {})) {
+    const indexRead = Number(indexMetrics?.ReadCapacityUnits || 0);
+    const indexWrite = Number(indexMetrics?.WriteCapacityUnits || 0);
+    const indexTotal =
+      Number.isFinite(Number(indexMetrics?.CapacityUnits))
+        ? Number(indexMetrics.CapacityUnits)
+        : indexRead + indexWrite;
+    addCapacityBucket(summary.indexes, `GSI:${indexName}`, {
+      total: indexTotal,
+      read: indexRead,
+      write: indexWrite,
+    });
+  }
+
+  for (const [indexName, indexMetrics] of Object.entries(entry.LocalSecondaryIndexes || {})) {
+    const indexRead = Number(indexMetrics?.ReadCapacityUnits || 0);
+    const indexWrite = Number(indexMetrics?.WriteCapacityUnits || 0);
+    const indexTotal =
+      Number.isFinite(Number(indexMetrics?.CapacityUnits))
+        ? Number(indexMetrics.CapacityUnits)
+        : indexRead + indexWrite;
+    addCapacityBucket(summary.indexes, `LSI:${indexName}`, {
+      total: indexTotal,
+      read: indexRead,
+      write: indexWrite,
+    });
+  }
+
+  return summary;
+}
+
+function mergeConsumedCapacitySummary(target, delta) {
+  if (!target || !delta) return;
+
+  target.total += Number(delta.total || 0);
+  target.read += Number(delta.read || 0);
+  target.write += Number(delta.write || 0);
+
+  for (const [tableName, values] of Object.entries(delta.tables || {})) {
+    addCapacityBucket(target.tables, tableName, values);
+  }
+
+  for (const [indexName, values] of Object.entries(delta.indexes || {})) {
+    addCapacityBucket(target.indexes, indexName, values);
+  }
+}
+
+function summarizeConsumedCapacity(consumedCapacity) {
+  const entries = Array.isArray(consumedCapacity)
+    ? consumedCapacity
+    : consumedCapacity
+      ? [consumedCapacity]
+      : [];
+  const summary = { total: 0, read: 0, write: 0, tables: {}, indexes: {} };
+
+  for (const entry of entries) {
+    mergeConsumedCapacitySummary(summary, summarizeConsumedCapacityEntry(entry));
+  }
+
+  return summary;
+}
+
+function inferCapacitySplit(commandName, capacitySummary) {
+  const total = Number(capacitySummary?.total || 0);
+  if (!Number.isFinite(total) || total <= 0) {
+    return capacitySummary || { total: 0, read: 0, write: 0, tables: {}, indexes: {} };
+  }
+
+  const read = Number(capacitySummary?.read || 0);
+  const write = Number(capacitySummary?.write || 0);
+  if (read > 0 || write > 0) return capacitySummary;
+
+  const summary = {
+    ...(capacitySummary || {}),
+    read: 0,
+    write: 0,
+  };
+
+  if (["Get", "BatchGet", "Query", "Scan"].includes(commandName)) {
+    summary.read = total;
+    return summary;
+  }
+
+  if (["Put", "Update", "Delete", "BatchWrite"].includes(commandName)) {
+    summary.write = total;
+    return summary;
+  }
+
+  return summary;
+}
+
+function formatCapacityBreakdown(map = {}, limit = 6) {
+  const entries = Object.entries(map)
+    .map(([name, values]) => ({
+      name,
+      total: roundDbMetric(values?.total),
+      read: roundDbMetric(values?.read),
+      write: roundDbMetric(values?.write),
+    }))
+    .filter((entry) => entry.total || entry.read || entry.write)
+    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
+    .slice(0, limit);
+
+  return entries.map((entry) => `${entry.name}:${entry.total}/${entry.read}/${entry.write}`);
 }
 
 function recordDbOperation(entry) {
@@ -126,6 +287,9 @@ function recordDbOperation(entry) {
   store.operations.push(entry);
   store.totalDurationMs += Number(entry?.durationMs || 0);
   store.counts[entry.command] = Number(store.counts[entry.command] || 0) + 1;
+  if (entry?.capacity) {
+    mergeConsumedCapacitySummary(store.capacity, entry.capacity);
+  }
 }
 
 function formatDbMetricsSummary(store) {
@@ -135,6 +299,16 @@ function formatDbMetricsSummary(store) {
     .join(" ");
   const requestMs = Math.max(0, Date.now() - Number(store?.startedAt || Date.now()));
   const meta = compactDbMeta(store?.meta || {});
+  const readUnits = roundDbMetric(store?.capacity?.read);
+  const writeUnits = roundDbMetric(store?.capacity?.write);
+  const totalUnits = roundDbMetric(store?.capacity?.total);
+  const estimatedCostUsd =
+    Number.isFinite(DB_READ_COST_PER_MILLION) && Number.isFinite(DB_WRITE_COST_PER_MILLION)
+      ? roundUsdMetric(
+          (readUnits / 1000000) * DB_READ_COST_PER_MILLION +
+            (writeUnits / 1000000) * DB_WRITE_COST_PER_MILLION
+        )
+      : null;
 
   return {
     label: store?.label || "db",
@@ -142,6 +316,12 @@ function formatDbMetricsSummary(store) {
     dbMs: Math.round(Number(store?.totalDurationMs || 0)),
     opCount: Array.isArray(store?.operations) ? store.operations.length : 0,
     counts,
+    capacityTotal: totalUnits,
+    capacityRead: readUnits,
+    capacityWrite: writeUnits,
+    capacityTables: formatCapacityBreakdown(store?.capacity?.tables),
+    capacityIndexes: formatCapacityBreakdown(store?.capacity?.indexes),
+    ...(estimatedCostUsd != null ? { estimatedCostUsd } : {}),
     ...meta,
   };
 }
@@ -168,6 +348,7 @@ async function withDbPhase(label, fn) {
 
       parent.operations.push(...(phaseStore.operations || []));
       parent.totalDurationMs += Number(phaseStore.totalDurationMs || 0);
+      mergeConsumedCapacitySummary(parent.capacity, phaseStore.capacity);
       for (const [command, count] of Object.entries(phaseStore.counts || {})) {
         parent.counts[command] = Number(parent.counts[command] || 0) + Number(count || 0);
       }
@@ -182,6 +363,7 @@ async function withDbPhase(label, fn) {
 
       parent.operations.push(...(phaseStore.operations || []));
       parent.totalDurationMs += Number(phaseStore.totalDurationMs || 0);
+      mergeConsumedCapacitySummary(parent.capacity, phaseStore.capacity);
       for (const [command, count] of Object.entries(phaseStore.counts || {})) {
         parent.counts[command] = Number(parent.counts[command] || 0) + Number(count || 0);
       }
@@ -212,17 +394,32 @@ ddb.send = async function instrumentedSend(command, ...args) {
   const startedAt = Date.now();
   const commandName =
     String(command?.constructor?.name || "UnknownCommand").replace(/Command$/, "") || "Unknown";
+  if (command?.input && command.input.ReturnConsumedCapacity == null) {
+    command.input.ReturnConsumedCapacity = "INDEXES";
+  }
 
   try {
     const result = await originalDdbSend(command, ...args);
     const durationMs = Date.now() - startedAt;
+    const capacity = inferCapacitySplit(
+      commandName,
+      summarizeConsumedCapacity(result?.ConsumedCapacity)
+    );
     recordDbOperation({
       command: commandName,
       durationMs,
       ok: true,
+      capacity,
     });
     if (ENABLE_DB_LOGS && ENABLE_VERBOSE_DB_LOGS) {
-      console.log("[db-op]", { command: commandName, durationMs, ok: true });
+      console.log("[db-op]", {
+        command: commandName,
+        durationMs,
+        ok: true,
+        capacityTotal: roundDbMetric(capacity.total),
+        capacityRead: roundDbMetric(capacity.read),
+        capacityWrite: roundDbMetric(capacity.write),
+      });
     }
     return result;
   } catch (error) {
@@ -2964,6 +3161,19 @@ async function applyIncrementalTagStatsForScope({
   return item;
 }
 
+function buildTagStatsDirtySK(event, sessionID = null, tagKey, tagValue) {
+  const ev = normalizeEvent(event);
+  const sid = sessionID ? normalizeSessionID(sessionID) : null;
+  const key = String(tagKey || "").trim();
+  const valueNorm = normalizeTagIndexValue(tagValue);
+
+  if (!ev || !key || !valueNorm) return "";
+
+  return sid
+    ? `TAGSTATSDIRTY#${ev}#${sid}#${key}#${valueNorm}`
+    : `TAGSTATSDIRTY#${ev}#${key}#${valueNorm}`;
+}
+
 function addTagScopeMutation(plan, solve, direction) {
   if (!solve) return;
   const event = normalizeEvent(solve.Event);
@@ -2995,46 +3205,41 @@ function addTagScopeMutation(plan, solve, direction) {
   }
 }
 
-async function markTagStatsScopeStale({ userID, event, sessionID = null, tagKey, tagValue }) {
+async function markTagStatsScopeDirty({ userID, event, sessionID = null, tagKey, tagValue }) {
   const ev = normalizeEvent(event);
   const sid = sessionID ? normalizeSessionID(sessionID) : null;
   const key = String(tagKey || "").trim();
   const value = String(tagValue || "").trim();
+  const dirtySK = buildTagStatsDirtySK(ev, sid, key, value);
 
-  if (!userID || !ev || !key || !value) return null;
+  if (!userID || !ev || !key || !value || !dirtySK) return null;
 
-  try {
-    await ddb.send(
-      new UpdateCommand({
-        TableName: TABLE,
-        Key: {
-          PK: `USER#${userID}`,
-          SK: buildTagStatsSK(ev, sid, key, value),
-        },
-        UpdateExpression: "SET stale = :stale, UpdatedAt = :updated",
-        ConditionExpression: "attribute_exists(PK) AND attribute_exists(SK)",
-        ExpressionAttributeValues: {
-          ":stale": true,
-          ":updated": nowIso(),
-        },
-      })
-    );
-    return true;
-  } catch (error) {
-    if (String(error?.name || "") === "ConditionalCheckFailedException") {
-      return false;
-    }
-    throw error;
-  }
+  await ddb.send(
+    new PutCommand({
+      TableName: TABLE,
+      Item: {
+        PK: `USER#${userID}`,
+        SK: dirtySK,
+        ItemType: "TAGSTATSDIRTY",
+        Event: ev,
+        ...(sid ? { SessionID: sid } : {}),
+        TagKey: key,
+        TagValue: value,
+        TagValueNorm: normalizeTagIndexValue(value),
+        UpdatedAt: nowIso(),
+      },
+    })
+  );
+  return true;
 }
 
-async function markTagStatsScopesStale(userID, tagScopeMutations) {
+async function markTagStatsScopesDirty(userID, tagScopeMutations) {
   const scopes = Array.from(tagScopeMutations?.values?.() || []);
   if (!userID || scopes.length === 0) return [];
 
   return Promise.all(
     scopes.map((scope) =>
-      markTagStatsScopeStale({
+      markTagStatsScopeDirty({
         userID,
         event: scope.event,
         sessionID: scope.sessionID,
@@ -3043,6 +3248,22 @@ async function markTagStatsScopesStale(userID, tagScopeMutations) {
       })
     )
   );
+}
+
+async function clearTagStatsScopeDirty({ userID, event, sessionID = null, tagKey, tagValue }) {
+  const dirtySK = buildTagStatsDirtySK(event, sessionID, tagKey, tagValue);
+  if (!userID || !dirtySK) return false;
+
+  await ddb.send(
+    new DeleteCommand({
+      TableName: TABLE,
+      Key: {
+        PK: `USER#${userID}`,
+        SK: dirtySK,
+      },
+    })
+  );
+  return true;
 }
 
 function buildTagScopeMutationsForSolveMutation(oldSolve = null, newSolve = null) {
@@ -3056,7 +3277,7 @@ function queueTagStatsInvalidationInBackground(label, userID, tagScopeMutations)
   const scopes = Array.from(tagScopeMutations?.values?.() || []);
   if (!userID || scopes.length === 0) return false;
 
-  runInBackground(`tagStats:${label}`, () => markTagStatsScopesStale(userID, tagScopeMutations));
+  runInBackground(`tagStats:${label}`, () => markTagStatsScopesDirty(userID, tagScopeMutations));
   return true;
 }
 
@@ -4755,7 +4976,7 @@ app.delete("/api/session/:userID/:event/:sessionID", async (req, res) => {
       runInBackground(`sessionDelete:cleanup:${userID}:${event}:${sessionID}`, () =>
         Promise.all([
           recomputeEventStats(ddb, TABLE, userID, event),
-          markTagStatsScopesStale(
+          markTagStatsScopesDirty(
             userID,
             new Map(
               Array.from(affectedEventTagScopes.values()).map(({ tagKey, tagValue }) => [
@@ -4924,17 +5145,30 @@ app.get("/api/tagStats/:userID", async (req, res) => {
 
   try {
     const statsKey = buildTagStatsSK(event, sessionID, tagKey, tagValue);
+    const dirtyKey = buildTagStatsDirtySK(event, sessionID, tagKey, tagValue);
     const out = await ddb.send(
-      new GetCommand({
-        TableName: TABLE,
-        Key: { PK: `USER#${userID}`, SK: statsKey },
-        ConsistentRead: true,
+      new BatchGetCommand({
+        RequestItems: {
+          [TABLE]: {
+            Keys: [
+              { PK: `USER#${userID}`, SK: statsKey },
+              { PK: `USER#${userID}`, SK: dirtyKey },
+            ],
+            ConsistentRead: true,
+          },
+        },
       })
     );
 
-    let item = out.Item || null;
-    if (!item || item?.stale === true || !hasCurrentStrictWindowVersion(item)) {
+    const items = out?.Responses?.[TABLE] || [];
+    let item = items.find((entry) => String(entry?.SK || "") === statsKey) || null;
+    const dirtyItem = items.find((entry) => String(entry?.SK || "") === dirtyKey) || null;
+
+    if (!item || dirtyItem || item?.stale === true || !hasCurrentStrictWindowVersion(item)) {
       item = await recomputeTagStats(ddb, TABLE, userID, event, sessionID, tagKey, tagValue);
+      if (dirtyItem) {
+        await clearTagStatsScopeDirty({ userID, event, sessionID, tagKey, tagValue });
+      }
     }
 
     return res.json({ ok: true, item });
@@ -6661,6 +6895,7 @@ app.post("/api/recomputeTagStats", async (req, res) => {
     if (!tagValue) return res.status(400).json({ error: "Missing tagValue" });
 
     const item = await recomputeTagStats(ddb, TABLE, userID, event, sessionID, tagKey, tagValue);
+    await clearTagStatsScopeDirty({ userID, event, sessionID, tagKey, tagValue });
     return res.json({ ok: true, item });
   } catch (e) {
     console.error("POST /api/recomputeTagStats error:", e);
