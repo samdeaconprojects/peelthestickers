@@ -16,6 +16,7 @@ import AverageDetailModal from "../Detail/AverageDetailModal";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
 import TagBar from "../TagBar/TagBar";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
+import StatsIcon from "../../assets/Stats.svg";
 import PtsLinkStatsIcon from "../../assets/ptsLinkStats.svg";
 import tagBadge from "../../assets/Tag.svg";
 
@@ -991,6 +992,8 @@ function aggregateStatsList(statsList) {
   let dnfCount = 0;
   let plus2Count = 0;
   let sumFinalTimeMs = 0;
+  let sumFinalTimeSqMs = 0;
+  let plus2BestMs = null;
 
   let bestSingleMs = null;
   let bestMo3Ms = null;
@@ -1048,6 +1051,8 @@ function aggregateStatsList(statsList) {
     dnfCount += num(s.DNFCount);
     plus2Count += num(s.Plus2Count);
     sumFinalTimeMs += num(s.SumFinalTimeMs);
+    sumFinalTimeSqMs += num(s.SumFinalTimeSqMs);
+    plus2BestMs = updateBestMetric(plus2BestMs, null, s.Plus2BestMs, null).value;
 
     ({ value: bestSingleMs, ref: bestSingleSolveSK } = updateBestMetric(
       bestSingleMs,
@@ -1132,7 +1137,9 @@ function aggregateStatsList(statsList) {
     DNFCount: dnfCount,
     Plus2Count: plus2Count,
     SumFinalTimeMs: sumFinalTimeMs,
+    SumFinalTimeSqMs: sumFinalTimeSqMs,
     MeanMs: solveCountIncluded > 0 ? Math.round(sumFinalTimeMs / solveCountIncluded) : null,
+    Plus2BestMs: plus2BestMs,
     BestSingleMs: bestSingleMs,
     BestSingleSolveSK: bestSingleSolveSK,
     WorstSingleMs: worstSingleMs,
@@ -1446,6 +1453,7 @@ function Stats({
   readOnly = false,
   deleteTime,
   addPost,
+  saveToProfile,
   onTagColorsChange = null,
   onSettingsContextChange,
   recomputeRequest = 0,
@@ -1519,6 +1527,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const [timeScopeCacheKey, setTimeScopeCacheKey] = useState("");
   const [overallScopeSolves, setOverallScopeSolves] = useState([]);
   const [overallScopeCacheKey, setOverallScopeCacheKey] = useState("");
+  const [sessionOverallFallbackSolves, setSessionOverallFallbackSolves] = useState([]);
+  const [sessionOverallFallbackCacheKey, setSessionOverallFallbackCacheKey] = useState("");
   const [tagScopeSolves, setTagScopeSolves] = useState([]);
   const [tagScopeCacheKey, setTagScopeCacheKey] = useState("");
   const [dateScopedSessionSolves, setDateScopedSessionSolves] = useState([]);
@@ -1710,7 +1720,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const [expensiveStatsPrompt, setExpensiveStatsPrompt] = useState(null);
   const [tableCompareView, setTableCompareView] = useState("primary");
   const expensiveStatsPromptResolverRef = useRef(null);
-  const promptedRecomputeScopesRef = useRef(new Set());
   const profileChartStyle = useMemo(() => getProfileChartStyle(user), [user]);
   const safeTagConfig = useMemo(() => normalizeTagConfig(tagConfig || DEFAULT_TAG_CONFIG), [tagConfig]);
   const paletteOptions = useMemo(() => getPaletteOptions(), []);
@@ -3720,6 +3729,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const stableOverallSolves = useMemo(() => {
     if (statsViewMode === "time") return allLoadedFilteredRawSolves;
     if (hasActiveTagFilter) return activeStandardSolves || [];
+    if (!isAllEventsMode && !isAllSessionsMode && sessionOverallFallbackSolves.length > 0) {
+      return withSolveFullIndices(sessionOverallFallbackSolves);
+    }
     if (overallScopeSolves.length > 0) return overallScopeSolves;
     if (isAllEventsMode) return allLoadedSolves || [];
     if (isAllSessionsMode) {
@@ -3736,6 +3748,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     isAllEventsMode,
     isAllSessionsMode,
     overallScopeSolves,
+    sessionOverallFallbackSolves,
     selectedSessionSolves,
     sessionCachedSolves,
     statsEvent,
@@ -3754,6 +3767,76 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       : statsViewMode === "time"
         ? summaryCurrentSolves.length
         : activeStandardSolves.length;
+  const overallStatsMissingPlus2Best = useMemo(() => {
+    if (!overallStatsForEvent) return false;
+    const plus2Count = Number(overallStatsForEvent?.Plus2Count || 0);
+    if (plus2Count <= 0) return false;
+    return !Number.isFinite(Number(overallStatsForEvent?.Plus2BestMs));
+  }, [overallStatsForEvent]);
+
+  useEffect(() => {
+    const userID = user?.UserID;
+    const shouldLoadFullSessionFallback =
+      !!userID &&
+      statsViewMode === "standard" &&
+      !hasActiveTagFilter &&
+      !hasActiveDateFilter &&
+      !isAllEventsMode &&
+      !isAllSessionsMode &&
+      overallStatsMissingPlus2Best;
+
+    if (!shouldLoadFullSessionFallback) {
+      setSessionOverallFallbackSolves([]);
+      setSessionOverallFallbackCacheKey("");
+      return;
+    }
+
+    const cacheKey = `${userID}::${String(statsEvent || "").toUpperCase()}::${String(sessionId || "main")}`;
+    if (sessionOverallFallbackCacheKey === cacheKey && sessionOverallFallbackSolves.length > 0) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const items = await getSolvesBySession(
+          userID,
+          String(statsEvent || "").toUpperCase(),
+          String(sessionId || "main"),
+          effectiveTimeZone ? { timeZone: effectiveTimeZone } : {}
+        );
+        if (cancelled) return;
+        const normalized = (items || [])
+          .map(normalizeSolve)
+          .filter(Boolean)
+          .sort((a, b) => new Date(a?.datetime || "").getTime() - new Date(b?.datetime || "").getTime());
+        setSessionOverallFallbackSolves(normalized);
+        setSessionOverallFallbackCacheKey(cacheKey);
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Failed to load full session solves for +2 fallback:", error);
+        setSessionOverallFallbackSolves([]);
+        setSessionOverallFallbackCacheKey("");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    effectiveTimeZone,
+    hasActiveDateFilter,
+    hasActiveTagFilter,
+    isAllEventsMode,
+    isAllSessionsMode,
+    normalizeSolve,
+    overallStatsMissingPlus2Best,
+    sessionId,
+    sessionOverallFallbackCacheKey,
+    sessionOverallFallbackSolves.length,
+    statsEvent,
+    statsViewMode,
+    user?.UserID,
+  ]);
 
   const overallCount = useMemo(() => {
     if (stableOverallStats?.SolveCountTotal != null) return stableOverallStats.SolveCountTotal;
@@ -4791,51 +4874,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     statsEvent,
     user?.UserID,
     warnBeforeSolveScan,
-  ]);
-
-  useEffect(() => {
-    if (!overallStatsForEvent?.NeedsRecompute) return;
-    if (hasActiveTagFilter || isAllEventsMode) return;
-
-    const scopeKey = `${statsEvent}::${isAllSessionsMode ? ALL_SESSIONS : sessionId}`;
-    if (promptedRecomputeScopesRef.current.has(scopeKey)) return;
-    promptedRecomputeScopesRef.current.add(scopeKey);
-
-    let cancelled = false;
-
-    (async () => {
-      const approved = await requestExpensiveStatsPrompt({
-        title: "Cached stats need a one-time repair",
-        confirmLabel: "Recompute Stats",
-        lines: [
-          "This scope is missing some cached stats fields, so the displayed overall stats may be incomplete until it is repaired.",
-          `Scope: ${describeStatsScope({ event: statsEvent, sessionID: isAllSessionsMode ? ALL_SESSIONS : sessionId })}.`,
-          `Estimated solves touched: ${formatSolveEstimate(
-            estimateSolveCountForScope(sessionsList, {
-              event: statsEvent,
-              sessionID: isAllSessionsMode ? ALL_SESSIONS : sessionId,
-            })
-          )}.`,
-          "Recomputing will rescan this scope once and refresh the cached stats.",
-        ],
-      });
-      if (!approved || cancelled) return;
-      await runOverallRecompute();
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    hasActiveTagFilter,
-    isAllEventsMode,
-    isAllSessionsMode,
-    overallStatsForEvent?.NeedsRecompute,
-    requestExpensiveStatsPrompt,
-    runOverallRecompute,
-    sessionId,
-    sessionsList,
-    statsEvent,
   ]);
 
   const slugify = (s) =>
@@ -7665,6 +7703,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     title="Add another stat group"
                   >
                     <span className="statsAddComparePlus" aria-hidden="true">+</span>
+                    <span className="statsAddCompareLabel" aria-hidden="true">Add stat group</span>
                   </button>
                   <span className="statsAddCompareHint">Add stat group</span>
                 </div>
@@ -7734,7 +7773,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               aria-label="Tags"
               title="Tags"
             >
-              <img src={tagBadge} alt="" className="statsToggleBtnIcon" />
+              <span className="statsToggleBtnIconStack" aria-hidden="true">
+                <img
+                  src={StatsIcon}
+                  alt=""
+                  className="statsToggleBtnIcon statsToggleBtnIcon--background"
+                />
+                <img src={tagBadge} alt="" className="statsToggleBtnIcon statsToggleBtnIcon--foreground" />
+              </span>
             </button>
           </div>
         </div>
@@ -7829,7 +7875,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           {showStatsSummaryHeader && (
           <div
             className={`stats-item stats-item--header stats-item--minh stats-item--headerSplit${
-              isAllEventsMode || (!compareEnabled && statsViewMode === "time") ? " stats-item--headerSplitSingle" : ""
+              isAllEventsMode || (!compareEnabled && statsViewMode === "time") || (!compareEnabled && summaryLayout === "row")
+                ? " stats-item--headerSplitSingle"
+                : ""
             }${compareEnabled ? " stats-item--headerSplitSingle" : ""}`}
           >
             {!compareEnabled ? (
@@ -7889,6 +7937,38 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   />
                 </div>
               ) : (
+                summaryLayout === "row" ? (
+                  <div
+                    className={`statsSummaryPanel statsCardShell ${primaryOverallSummaryLoading ? "is-loading" : ""}`}
+                    aria-busy={primaryOverallSummaryLoading}
+                    {...bindCardFocus(cardDefinitions[0]?.id)}
+                  >
+                    <StatsSummary
+                      solves={summaryCurrentSolves}
+                      overallSolves={stableOverallSolves}
+                      overallStats={stableOverallStats}
+                      bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
+                      bucketItems={useBucketBackedRange ? activeBucketItems : []}
+                      allEventsBreakdown={null}
+                      eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
+                      allowOverallDerived={allowOverallDerivedMetrics}
+                      mode={summaryMode}
+                      selectedEvent={eventSelectLabel}
+                      selectedSession={selectedSessionDisplay}
+                      selectedTagLabel={selectedTagLabel}
+                      selectedTagPills={selectedTagPills}
+                      loadedSolveCount={loadedSolveCountForSummary}
+                      showCurrentMetrics={currentPage === 0}
+                      viewMode={statsViewMode}
+                      summaryLayout={summaryLayout}
+                      selectedDay={selectedTimeDay}
+                      profileColor={primaryAccentColor}
+                      summarySource="primary"
+                      onStatSelect={handleSummaryStatSelect}
+                      loading={primaryOverallSummaryLoading}
+                    />
+                  </div>
+                ) : (
                 <>
                   <div
                     className={`statsSummaryPanel statsCardShell ${primarySummaryLoading ? "is-loading" : ""}`}
@@ -7937,6 +8017,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     />
                   </div>
                 </>
+                )
               )
             ) : (
               <div className="statsSummaryRows is-compare">
@@ -7950,7 +8031,40 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   >
                     A
                   </div>
-                  <div className="statsSummaryRowPanels">
+                  <div className={`statsSummaryRowPanels ${summaryLayout === "row" ? "statsSummaryRowPanels--single" : ""}`}>
+                    {summaryLayout === "row" ? (
+                      <div
+                        className={`statsSummaryPanel statsCardShell ${primaryOverallSummaryLoading ? "is-loading" : ""}`}
+                        aria-busy={primaryOverallSummaryLoading}
+                        {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-compare-primary-current")?.id)}
+                      >
+                        <StatsSummary
+                        solves={summaryCurrentSolves}
+                        overallSolves={stableOverallSolves}
+                        overallStats={useBucketBackedRange ? activeBucketSummary : stableOverallStats}
+                        bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
+                        bucketItems={useBucketBackedRange ? activeBucketItems : []}
+                        allEventsBreakdown={null}
+                        eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
+                        allowOverallDerived={allowOverallDerivedMetrics}
+                        mode={summaryMode}
+                        selectedEvent={eventSelectLabel}
+                        selectedSession={selectedSessionDisplay}
+                        selectedTagLabel={selectedTagLabel}
+                        selectedTagPills={selectedTagPills}
+                        loadedSolveCount={loadedSolveCountForSummary}
+                        showCurrentMetrics={currentPage === 0}
+                        viewMode={statsViewMode}
+                        summaryLayout={summaryLayout}
+                        selectedDay={selectedTimeDay}
+                        summarySource="primary"
+                        onStatSelect={handleSummaryStatSelect}
+                        profileColor={primaryAccentColor}
+                        loading={primaryOverallSummaryLoading}
+                      />
+                      </div>
+                    ) : (
+                      <>
                     <div
                       className={`statsSummaryPanel statsCardShell ${primarySummaryLoading ? "is-loading" : ""}`}
                       aria-busy={primarySummaryLoading}
@@ -7995,6 +8109,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         loading={primaryOverallSummaryLoading}
                       />
                     </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -8009,52 +8125,87 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     >
                       B
                     </div>
-                    <div className="statsSummaryRowPanels">
-                      <div
-                        className={`statsSummaryPanel statsCardShell ${compareSummaryLoading ? "is-loading" : ""}`}
-                        aria-busy={compareSummaryLoading}
-                        {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-compare-secondary-current")?.id)}
-                      >
-                        <StatsSummaryCurrent
+                    <div className={`statsSummaryRowPanels ${summaryLayout === "row" ? "statsSummaryRowPanels--single" : ""}`}>
+                      {summaryLayout === "row" ? (
+                        <div
+                          className={`statsSummaryPanel statsCardShell ${compareSummaryLoading ? "is-loading" : ""}`}
+                          aria-busy={compareSummaryLoading}
+                          {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-compare-secondary-current")?.id)}
+                        >
+                          <StatsSummary
                           solves={compareVisiblePageFilteredRawSolves}
+                          overallSolves={compareFilteredRawSolves}
                           overallStats={useBucketBackedRange ? activeCompareBucketSummary : null}
                           bucketSummary={useBucketBackedRange ? activeCompareBucketSummary : null}
                           bucketItems={useBucketBackedRange ? activeCompareBucketItems : []}
                           allEventsBreakdown={null}
+                          eventBreakdownData={[]}
+                          allowOverallDerived={true}
                           mode="session"
                           loadedSolveCount={compareFilteredRawSolves.length}
                           showCurrentMetrics={currentPage === 0}
                           viewMode="standard"
                           summaryLayout={summaryLayout}
                           selectedDay=""
-                          selectedTagPills={compareSelectedTagPills}
-                          summarySource="compare"
-                          onStatSelect={handleSummaryStatSelect}
-                          loading={compareSummaryLoading}
-                        />
-                      </div>
-                      <div
-                        className={`statsSummaryPanel statsCardShell ${compareSummaryLoading ? "is-loading" : ""}`}
-                        aria-busy={compareSummaryLoading}
-                        {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-compare-secondary-overall")?.id)}
-                      >
-                        <StatsSummaryOverall
-                          solves={compareVisiblePageFilteredRawSolves}
-                          overallSolves={compareFilteredRawSolves}
-                          overallStats={useBucketBackedRange ? activeCompareBucketSummary : null}
-                          allowOverallDerived={true}
-                          mode="session"
                           selectedEvent={compareEventLabel}
                           selectedSession={compareSessionDisplay}
                           selectedTagLabel={compareSelectedTagSummaryLabel}
                           selectedTagPills={compareSelectedTagPills}
                           summarySource="compare"
-                          loadedSolveCount={compareFilteredRawSolves.length}
                           onStatSelect={handleSummaryStatSelect}
                           profileColor={compareStyle?.primary || "#7c8cff"}
                           loading={compareSummaryLoading}
                         />
-                      </div>
+                        </div>
+                      ) : (
+                        <>
+                        <div
+                          className={`statsSummaryPanel statsCardShell ${compareSummaryLoading ? "is-loading" : ""}`}
+                          aria-busy={compareSummaryLoading}
+                          {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-compare-secondary-current")?.id)}
+                        >
+                          <StatsSummaryCurrent
+                            solves={compareVisiblePageFilteredRawSolves}
+                            overallStats={useBucketBackedRange ? activeCompareBucketSummary : null}
+                            bucketSummary={useBucketBackedRange ? activeCompareBucketSummary : null}
+                            bucketItems={useBucketBackedRange ? activeCompareBucketItems : []}
+                            allEventsBreakdown={null}
+                            mode="session"
+                            loadedSolveCount={compareFilteredRawSolves.length}
+                            showCurrentMetrics={currentPage === 0}
+                            viewMode="standard"
+                            summaryLayout={summaryLayout}
+                            selectedDay=""
+                            selectedTagPills={compareSelectedTagPills}
+                            summarySource="compare"
+                            onStatSelect={handleSummaryStatSelect}
+                            loading={compareSummaryLoading}
+                          />
+                        </div>
+                        <div
+                          className={`statsSummaryPanel statsCardShell ${compareSummaryLoading ? "is-loading" : ""}`}
+                          aria-busy={compareSummaryLoading}
+                          {...bindCardFocus(cardDefinitions.find((item) => item.key === "summary-compare-secondary-overall")?.id)}
+                        >
+                          <StatsSummaryOverall
+                            solves={compareVisiblePageFilteredRawSolves}
+                            overallSolves={compareFilteredRawSolves}
+                            overallStats={useBucketBackedRange ? activeCompareBucketSummary : null}
+                            allowOverallDerived={true}
+                            mode="session"
+                            selectedEvent={compareEventLabel}
+                            selectedSession={compareSessionDisplay}
+                            selectedTagLabel={compareSelectedTagSummaryLabel}
+                            selectedTagPills={compareSelectedTagPills}
+                            summarySource="compare"
+                            loadedSolveCount={compareFilteredRawSolves.length}
+                            onStatSelect={handleSummaryStatSelect}
+                            profileColor={compareStyle?.primary || "#7c8cff"}
+                            loading={compareSummaryLoading}
+                          />
+                        </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
@@ -8282,6 +8433,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             if (solveRef) handleDeleteSolve(solveRef);
           }}
           addPost={addPost}
+          saveToProfile={saveToProfile}
           setSessions={setSessions}
           sessionsList={sessionsList}
           tagConfig={safeTagConfig}
@@ -8298,6 +8450,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         subtitle={selectedAverageDetail?.subtitle || ""}
         solves={selectedAverageDetail?.solves || []}
         addPost={addPost}
+        saveToProfile={saveToProfile}
         tagConfig={safeTagConfig}
         tagColors={selectedSolveTagColors}
         profileColor={user?.Color || user?.color || "#2EC4B6"}

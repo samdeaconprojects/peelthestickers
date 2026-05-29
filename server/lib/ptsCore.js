@@ -913,7 +913,9 @@ function buildStatsFromSolves(solves = []) {
       DNFCount: 0,
       Plus2Count: 0,
       SumFinalTimeMs: 0,
+      SumFinalTimeSqMs: 0,
       MeanMs: null,
+      Plus2BestMs: null,
 
       BestSingleMs: null,
       BestSingleSolveSK: null,
@@ -967,6 +969,8 @@ function buildStatsFromSolves(solves = []) {
   let DNFCount = 0;
   let Plus2Count = 0;
   let SumFinalTimeMs = 0;
+  let SumFinalTimeSqMs = 0;
+  let Plus2BestMs = null;
 
   let BestSingleMs = null;
   let BestSingleSolveSK = null;
@@ -986,6 +990,11 @@ function buildStatsFromSolves(solves = []) {
     if (Number.isFinite(finalMs)) {
       SolveCountIncluded += 1;
       SumFinalTimeMs += finalMs;
+      SumFinalTimeSqMs += finalMs * finalMs;
+
+      if (penalty === "+2" && (Plus2BestMs === null || finalMs < Plus2BestMs)) {
+        Plus2BestMs = finalMs;
+      }
 
       if (BestSingleMs === null || finalMs < BestSingleMs) {
         BestSingleMs = finalMs;
@@ -1044,7 +1053,9 @@ function buildStatsFromSolves(solves = []) {
     DNFCount,
     Plus2Count,
     SumFinalTimeMs,
+    SumFinalTimeSqMs,
     MeanMs,
+    Plus2BestMs,
 
     BestSingleMs,
     BestSingleSolveSK,
@@ -1341,6 +1352,11 @@ async function buildStatsFromSolveIterator(iterable) {
     if (Number.isFinite(finalMs)) {
       stats.SolveCountIncluded += 1;
       stats.SumFinalTimeMs += finalMs;
+      stats.SumFinalTimeSqMs += finalMs * finalMs;
+
+      if (penalty === "+2" && (stats.Plus2BestMs === null || finalMs < stats.Plus2BestMs)) {
+        stats.Plus2BestMs = finalMs;
+      }
 
       if (stats.BestSingleMs === null || finalMs < stats.BestSingleMs) {
         stats.BestSingleMs = finalMs;

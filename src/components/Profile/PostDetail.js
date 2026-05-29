@@ -124,7 +124,7 @@ function PostDetail({
   }, [comments, commentProfilesById]);
 
   const handleAdd = () => {
-    if (!newComment.trim()) return;
+    if (typeof onAddComment !== "function" || !newComment.trim()) return;
     onAddComment(newComment.trim());
     setNewComment("");
   };
@@ -332,16 +332,18 @@ function PostDetail({
             )}
           </div>
 
-          <div className="postDetailCommentComposer">
-            <input
-              type="text"
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
-              placeholder="Add a comment…"
-              className="postDetailCommentInput"
-            />
-            <button onClick={handleAdd}>Post</button>
-          </div>
+          {typeof onAddComment === "function" ? (
+            <div className="postDetailCommentComposer">
+              <input
+                type="text"
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+                placeholder="Add a comment…"
+                className="postDetailCommentInput"
+              />
+              <button onClick={handleAdd}>Post</button>
+            </div>
+          ) : null}
         </div>
 
         {typeof onDelete === "function" ? (

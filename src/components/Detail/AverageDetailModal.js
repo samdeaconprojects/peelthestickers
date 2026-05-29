@@ -152,6 +152,7 @@ function AverageDetailModal({
   onClose,
   onSolveOpen,
   addPost,
+  saveToProfile,
   tagConfig = DEFAULT_TAG_CONFIG,
   tagColors = {},
   profileColor = "#2EC4B6",
@@ -159,6 +160,8 @@ function AverageDetailModal({
 }) {
   const [displayMode, setDisplayMode] = useState("items");
   const [activeTagFilters, setActiveTagFilters] = useState({});
+  const [actionBusy, setActionBusy] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
 
   const detail = useMemo(() => {
     const items = Array.isArray(solves) ? solves.filter(Boolean) : [];
@@ -218,6 +221,8 @@ function AverageDetailModal({
 
   useEffect(() => {
     setActiveTagFilters({});
+    setActionBusy("");
+    setActionMessage("");
   }, [solves, isOpen]);
 
   const filteredRows = useMemo(() => {
@@ -238,6 +243,7 @@ function AverageDetailModal({
 
   const itemRowSize = filteredRows.length <= 5 ? 5 : 12;
   const canShare = !embedded && typeof addPost === "function" && filteredRows.length > 0;
+  const canSaveToProfile = !embedded && typeof saveToProfile === "function" && filteredRows.length > 0;
   const hasActiveFilters = Object.values(activeTagFilters).some(Boolean);
 
   const toggleTagFilter = (field, value) => {
@@ -257,6 +263,28 @@ function AverageDetailModal({
       comments: [],
     });
     onClose?.();
+  };
+
+  const handleSaveToProfile = async () => {
+    if (!canSaveToProfile) return;
+
+    setActionBusy("profile");
+    setActionMessage("");
+
+    try {
+      const result = await saveToProfile({
+        note: "",
+        event: detail.event || "333",
+        solveList: filteredRows.map((row) => row.solve),
+        comments: [],
+      });
+      setActionMessage(result?.status === "exists" ? "Already on your profile." : "Added to your profile.");
+    } catch (error) {
+      console.error("Failed to add average to profile:", error);
+      setActionMessage("Failed to add to your profile.");
+    } finally {
+      setActionBusy("");
+    }
   };
 
   const algorithmTagsByKey = useMemo(
@@ -412,8 +440,19 @@ function AverageDetailModal({
                 Share
               </button>
             ) : null}
+            {canSaveToProfile ? (
+              <button
+                type="button"
+                className="averageDetailShareButton"
+                onClick={handleSaveToProfile}
+                disabled={actionBusy === "profile"}
+              >
+                {actionBusy === "profile" ? "Adding..." : "Add to Profile"}
+              </button>
+            ) : null}
           </div>
         </div>
+        {actionMessage ? <div className="detailTagsError">{actionMessage}</div> : null}
 
         <div className={`averageDetailList averageDetailList--${displayMode}`}>
           <TimeTable
@@ -454,6 +493,7 @@ AverageDetailModal.propTypes = {
   onClose: PropTypes.func,
   onSolveOpen: PropTypes.func,
   addPost: PropTypes.func,
+  saveToProfile: PropTypes.func,
   tagConfig: PropTypes.object,
   tagColors: PropTypes.object,
   profileColor: PropTypes.string,

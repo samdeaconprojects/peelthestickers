@@ -249,7 +249,7 @@ td:nth-child(13) {
 
 .statsTopIdentity--header .statsViewToggle .statsToggleBtn {
   width: 100%;
-  min-width: 74px;
+  min-width: 66px;
   justify-content: center;
 }
 
@@ -260,16 +260,16 @@ td:nth-child(13) {
 .statsViewToggle--modeGrid {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  gap: 6px;
-  min-width: 138px;
-  width: 146px;
+  gap: 4px;
+  min-width: 126px;
+  width: 132px;
   align-items: stretch;
 }
 
 .statsViewToggleStack {
   display: grid;
   grid-template-rows: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -454,35 +454,63 @@ td:nth-child(13) {
 }
 
 .statsAddCompareRow {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 0;
   width: 100%;
   position: relative;
+  margin-top: -2px;
+  min-height: 22px;
+  padding-top: 2px;
 }
 
 .statsAddCompareBtn {
-  width: 28px;
-  min-width: 28px;
-  min-height: var(--stats-selector-add-height);
-  height: var(--stats-selector-add-height);
+  width: 64px;
+  min-width: 64px;
+  min-height: 16px;
+  height: 16px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0;
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: 5px;
+  border-style: solid;
+  border-color: rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.05);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.03) inset,
+    0 5px 14px rgba(0,0,0,0.18);
+  font-size: 13px;
   line-height: 1;
-  opacity: 0.76;
-  transition: opacity 0.16s ease, background 0.16s ease, border-color 0.16s ease,
+  opacity: 0.88;
+  overflow: hidden;
+  transition:
+    width 0.18s ease,
+    min-width 0.18s ease,
+    height 0.18s ease,
+    min-height 0.18s ease,
+    opacity 0.16s ease,
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
     transform 0.16s ease;
 }
 
-.statsAddCompareBtn:hover {
+.statsAddCompareRow:hover .statsAddCompareBtn,
+.statsAddCompareBtn:hover,
+.statsAddCompareBtn:focus-visible {
   opacity: 1;
-  background: rgba(255,255,255,0.07);
-  border-color: rgba(255,255,255,0.34);
+  width: 150px;
+  min-width: 150px;
+  min-height: 22px;
+  height: 22px;
+  background: color-mix(in srgb, var(--stats-profile-accent, #2EC4B6) 18%, rgba(255,255,255,0.08));
+  border-color: color-mix(in srgb, var(--stats-profile-accent, #2EC4B6) 62%, rgba(255,255,255,0.28));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--stats-profile-accent, #2EC4B6) 26%, transparent) inset,
+    0 8px 18px rgba(0,0,0,0.22);
   transform: translateY(-1px);
 }
 
@@ -496,28 +524,62 @@ td:nth-child(13) {
 .statsAddComparePlus {
   font-size: 16px;
   font-weight: 800;
+  transform: translateY(-0.5px);
+  flex: 0 0 auto;
+}
+
+.statsAddCompareLabel {
+  max-width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: max-width 0.18s ease, margin-left 0.18s ease, opacity 0.16s ease;
+}
+
+.statsAddCompareRow:hover .statsAddCompareLabel,
+.statsAddCompareBtn:hover .statsAddCompareLabel,
+.statsAddCompareBtn:focus-visible .statsAddCompareLabel {
+  max-width: 120px;
+  margin-left: 8px;
+  opacity: 1;
 }
 
 .statsAddCompareHint {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 6px);
+  z-index: 1;
   opacity: 0;
-  transform: translateX(-4px);
+  transform: translateX(-50%) translateY(-4px);
   color: rgba(255,255,255,0.62);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.02em;
-  transition: opacity 0.16s ease, transform 0.16s ease;
+  white-space: nowrap;
+  transition: opacity 0.16s ease, transform 0.16s ease, color 0.16s ease;
   pointer-events: none;
 }
 
 .statsAddCompareRow:hover .statsAddCompareHint {
   opacity: 1;
-  transform: translateX(0);
+  transform: translateX(-50%) translateY(0);
+  color: rgba(255,255,255,0.78);
+}
+
+.statsAddCompareBtn:hover + .statsAddCompareHint,
+.statsAddCompareBtn:focus-visible + .statsAddCompareHint {
+  opacity: 1;
 }
 
 .statsCompareControls--standard .statsAddCompareRow {
-  align-self: center;
+  align-self: stretch;
   flex-basis: 100%;
-  min-height: var(--stats-selector-add-height);
+  min-height: 22px;
   padding-left: 0;
   white-space: nowrap;
 }
@@ -1307,7 +1369,7 @@ td:nth-child(13) {
   width: 100%;
   min-width: 0;
   height: 34px;
-  padding: 0 10px;
+  padding: 0 8px;
   font-size: 12px;
   opacity: 0.7;
   transition: opacity 0.16s ease, background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
@@ -1327,6 +1389,35 @@ td:nth-child(13) {
   height: 24px;
   display: block;
   object-fit: contain;
+}
+
+.statsToggleBtnIconStack {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.statsToggleBtnIcon--background,
+.statsToggleBtnIcon--foreground {
+  position: absolute;
+  inset: 0;
+}
+
+.statsToggleBtnIcon--background {
+  width: 58px;
+  height: 58px;
+  opacity: 0.09;
+  transform: translate(-13px, -12px);
+}
+
+.statsToggleBtnIcon--foreground {
+  width: 30px;
+  height: 30px;
+  opacity: 0.98;
+  transform: translateX(3px);
 }
 
 .statsViewToggle .statsToggleBtn:hover {
@@ -1859,6 +1950,10 @@ td:nth-child(13) {
   grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
   gap: 12px;
   align-items: stretch;
+}
+
+.statsSummaryRowPanels--single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .statsSummaryRow {

@@ -22,6 +22,7 @@ function Detail({
   onClose,
   deleteTime,
   addPost,
+  saveToProfile,
   showNavButtons,
   onPrev,
   onNext,
@@ -260,6 +261,8 @@ function Detail({
   const [tagsState, setTagsState] = useState(
     isArray ? solve.map((s) => initTagState(s)) : initTagState(solve)
   );
+  const [actionBusy, setActionBusy] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
   const tagsStateRef = useRef(tagsState);
 
   useEffect(() => {
@@ -647,6 +650,29 @@ function Detail({
     onClose();
   };
 
+  const handleSaveToProfile = async (index) => {
+    const item = isArray ? solve[index] : solve;
+    if (typeof saveToProfile !== "function" || !item) return;
+
+    setActionBusy("profile");
+    setActionMessage("");
+
+    try {
+      const result = await saveToProfile({
+        note: isArray ? notes[index] : notes,
+        event: getSolveEvent(item),
+        solveList: [item],
+        comments: [],
+      });
+      setActionMessage(result?.status === "exists" ? "Already on your profile." : "Added to your profile.");
+    } catch (error) {
+      console.error("Failed to add solve to profile:", error);
+      setActionMessage("Failed to add to your profile.");
+    } finally {
+      setActionBusy("");
+    }
+  };
+
   const renderTagsEditor = (item, index) => {
     const t = isArray ? tagsState[index] : tagsState;
     const saveMeta = isArray ? saveState[index] : saveState;
@@ -791,6 +817,15 @@ function Detail({
                 <button className="share-button" onClick={() => handleShare(index)}>
                   Share
                 </button>
+                {typeof saveToProfile === "function" ? (
+                  <button
+                    className="share-button"
+                    onClick={() => handleSaveToProfile(index)}
+                    disabled={actionBusy === "profile"}
+                  >
+                    {actionBusy === "profile" ? "Adding..." : "Add to Profile"}
+                  </button>
+                ) : null}
 
                 {canDelete && typeof deleteTime === "function" && (
                   <button className="delete-button" onClick={() => handleDelete(index)}>
@@ -798,6 +833,7 @@ function Detail({
                   </button>
                 )}
               </div>
+              {actionMessage ? <div className="detailTagsError">{actionMessage}</div> : null}
             </div>
           ) : null}
         </div>
@@ -874,6 +910,15 @@ function Detail({
               <button className="share-button" onClick={() => handleShare()}>
                 Share
               </button>
+              {typeof saveToProfile === "function" ? (
+                <button
+                  className="share-button"
+                  onClick={() => handleSaveToProfile()}
+                  disabled={actionBusy === "profile"}
+                >
+                  {actionBusy === "profile" ? "Adding..." : "Add to Profile"}
+                </button>
+              ) : null}
 
               {singleCanDelete && typeof deleteTime === "function" && (
                 <button className="delete-button" onClick={() => handleDelete()}>
@@ -881,6 +926,7 @@ function Detail({
                 </button>
               )}
             </div>
+            {actionMessage ? <div className="detailTagsError">{actionMessage}</div> : null}
           </div>
         ) : null}
       </div>

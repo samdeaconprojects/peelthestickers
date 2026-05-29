@@ -3465,6 +3465,113 @@ function App() {
     });
   };
 
+  const addPostToProfile = async (post) => {
+    if (!user || !post) return { status: "error" };
+
+    const serializeProfileSolve = (solve, fallbackIndex = null) => {
+      if (!solve || typeof solve !== "object") return null;
+
+      const fullIndex = Number(solve?.fullIndex);
+      return {
+        solveRef: solve?.solveRef || solve?.SK || solve?.SolveID || null,
+        fullIndex: Number.isFinite(fullIndex) ? fullIndex : fallbackIndex,
+        time: Number.isFinite(Number(solve?.time)) ? Number(solve.time) : null,
+        rawTimeMs: Number.isFinite(Number(solve?.rawTimeMs))
+          ? Number(solve.rawTimeMs)
+          : Number.isFinite(Number(solve?.RawTimeMs))
+            ? Number(solve.RawTimeMs)
+            : null,
+        finalTimeMs: Number.isFinite(Number(solve?.finalTimeMs))
+          ? Number(solve.finalTimeMs)
+          : Number.isFinite(Number(solve?.FinalTimeMs))
+            ? Number(solve.FinalTimeMs)
+            : Number.isFinite(Number(solve?.time))
+              ? Number(solve.time)
+              : null,
+        originalTime: Number.isFinite(Number(solve?.originalTime))
+          ? Number(solve.originalTime)
+          : Number.isFinite(Number(solve?.rawTimeMs))
+            ? Number(solve.rawTimeMs)
+            : null,
+        scramble: solve?.scramble || solve?.Scramble || "",
+        event: solve?.event || solve?.Event || post?.event || "333",
+        penalty: solve?.penalty ?? solve?.Penalty ?? null,
+        note: solve?.note ?? solve?.Note ?? "",
+        datetime: solve?.datetime || solve?.createdAt || solve?.CreatedAt || null,
+        createdAt: solve?.createdAt || solve?.CreatedAt || solve?.datetime || null,
+        sessionID:
+          solve?.sessionID || solve?.SessionID || solve?.SessionId || solve?.sessionId || "main",
+        sessionName:
+          solve?.sessionName || solve?.SessionName || solve?.session || solve?.Session || "",
+        tags: solve?.tags || solve?.Tags || {},
+      };
+    };
+
+    const buildProfileItemKey = (item) => {
+      if (!item || typeof item !== "object") return "";
+      if (item.chart === "solveCard") {
+        const solve = item.solve || {};
+        return `solve::${solve.solveRef || solve.datetime || solve.createdAt || solve.time || ""}`;
+      }
+      if (item.chart === "averageCard") {
+        const solves = Array.isArray(item.solves) ? item.solves : [];
+        const solveKey = solves
+          .map((solve) => solve?.solveRef || solve?.datetime || solve?.createdAt || solve?.time || "")
+          .join("|");
+        return `average::${solveKey}::${solves.length}`;
+      }
+      return JSON.stringify(item);
+    };
+
+    const solveList = (Array.isArray(post?.solveList) ? post.solveList : [])
+      .map((solve, index) => serializeProfileSolve(solve, index))
+      .filter(Boolean);
+
+    if (!solveList.length) return { status: "error" };
+
+    const createdAt = new Date().toISOString();
+    const nextItem =
+      solveList.length === 1
+        ? {
+            chart: "solveCard",
+            event: post?.event || solveList[0]?.event || "333",
+            note: String(post?.note || solveList[0]?.note || "").trim(),
+            createdAt,
+            solve: solveList[0],
+          }
+        : {
+            chart: "averageCard",
+            event: post?.event || solveList[0]?.event || "333",
+            note: String(post?.note || "").trim(),
+            createdAt,
+            solves: solveList,
+          };
+
+    const fallbackVisibleStats = [
+      { chart: "statsSummary", scope: "all-events", viewMode: "standard" },
+      { chart: "lineChart", event: "333", session: "all" },
+      { chart: "pieChart" },
+    ];
+    const current =
+      Array.isArray(user?.VisibleStats) && user.VisibleStats.length > 0
+        ? user.VisibleStats
+        : fallbackVisibleStats;
+
+    const nextKey = buildProfileItemKey(nextItem);
+    const exists = current.some((item) => buildProfileItemKey(item) === nextKey);
+    if (exists) return { status: "exists" };
+
+    const nextVisibleStats = [...current, nextItem];
+    await runDb("Saving profile stats", () =>
+      updateUser(user.UserID, { VisibleStats: nextVisibleStats })
+    );
+    setUser((prev) => ({
+      ...(prev || {}),
+      VisibleStats: nextVisibleStats,
+    }));
+    return { status: "added" };
+  };
+
   const handleConfirmShareComposer = async () => {
     if (!shareComposer.post || shareComposer.isSubmitting) return;
 
@@ -5386,6 +5493,7 @@ function App() {
                             : deleteTime(eventKey, index)
                         }
                         addPost={addPost}
+                        saveToProfile={addPostToProfile}
                         rowsToShow={3}
                         onAverageClick={(solveArray) => {
                           setSelectedAverageSolves(solveArray);
@@ -5438,6 +5546,7 @@ function App() {
                       subtitle={`${eventKey === "333" ? "3x3" : eventKey} · ${currentSession}`}
                       solves={selectedAverageSolves}
                       addPost={addPost}
+                      saveToProfile={addPostToProfile}
                       tagConfig={homeTagConfig}
                       tagColors={currentTagColors}
                       profileColor={user?.Color || user?.color || "#2EC4B6"}
@@ -5471,6 +5580,7 @@ function App() {
                         }
                       }}
                       addPost={addPost}
+                      saveToProfile={addPostToProfile}
                       applyPenalty={applyPenalty}
                       userID={user?.UserID}
                       setSessions={setSessions}
@@ -5569,6 +5679,7 @@ function App() {
                         : (eventKeyParam, index) => deleteTime(eventKeyParam, index)
                     }
                     addPost={isViewingSharedStats ? null : addPost}
+                    saveToProfile={isViewingSharedStats ? null : addPostToProfile}
                     onTagColorsChange={
                       isViewingSharedStats
                         ? null

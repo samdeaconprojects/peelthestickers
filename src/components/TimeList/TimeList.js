@@ -148,6 +148,7 @@ function TimeList({
   rowsToShow = 3,
   inPlayerBar,
   addPost,
+  saveToProfile,
   setSessions,
   sessionsList = [],
   currentEvent,
@@ -1116,6 +1117,7 @@ function TimeList({
                   }
                 }}
                 addPost={addPost}
+                saveToProfile={saveToProfile}
                 applyPenalty={canMutateSolve(selectedSolve) ? applyPenalty : null}
                 setSessions={setSessions}
                 sessionsList={sessionsList}
@@ -1142,6 +1144,17 @@ function TimeList({
                     solveList: selectedSolveList,
                     comments: [],
                   })
+                }
+                saveToProfile={
+                  typeof saveToProfile === "function"
+                    ? () =>
+                        saveToProfile({
+                          note: "Average solve group",
+                          event: selectedSolveList[0]?.event,
+                          solveList: selectedSolveList,
+                          comments: [],
+                        })
+                    : null
                 }
                 setSessions={setSessions}
                 sessionsList={sessionsList}
@@ -1270,6 +1283,7 @@ function TimeList({
                 }
               }}
               addPost={addPost}
+              saveToProfile={saveToProfile}
               applyPenalty={canMutateSolve(selectedSolve) ? applyPenalty : null}
               setSessions={setSessions}
               sessionsList={sessionsList}
@@ -1295,6 +1309,17 @@ function TimeList({
                   solveList: selectedSolveList,
                   comments: [],
                 })
+              }
+              saveToProfile={
+                typeof saveToProfile === "function"
+                  ? () =>
+                      saveToProfile({
+                        note: "Average solve group",
+                        event: selectedSolveList[0]?.event,
+                        solveList: selectedSolveList,
+                        comments: [],
+                      })
+                  : null
               }
               applyPenalty={selectedSolveListIsMutable ? applyPenalty : null}
               setSessions={setSessions}

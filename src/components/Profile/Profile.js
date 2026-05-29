@@ -190,6 +190,18 @@ function createStatConfig(type, fallbackEvent = DEFAULT_STAT_EVENT) {
   }
 }
 
+function isSavedSolveCard(item) {
+  return item?.chart === "solveCard";
+}
+
+function isSavedAverageCard(item) {
+  return item?.chart === "averageCard";
+}
+
+function isSavedProfileCard(item) {
+  return isSavedSolveCard(item) || isSavedAverageCard(item);
+}
+
 function finiteMetric(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -279,6 +291,10 @@ const STAT_LIBRARY = [
 function getStatCardTitle(item) {
   if (!item) return "Stat Card";
   switch (item.chart) {
+    case "solveCard":
+      return `${item.event || DEFAULT_STAT_EVENT} Solve`;
+    case "averageCard":
+      return `${item.event || DEFAULT_STAT_EVENT} Average`;
     case "statsSummary":
       return item.scope === "all-events" ? "Overview Summary" : `${item.event || DEFAULT_STAT_EVENT} Summary`;
     case "lineChart":
@@ -298,6 +314,10 @@ function getStatCardTitle(item) {
 
 function getProfileStatItemClass(chart) {
   switch (chart) {
+    case "solveCard":
+      return "profileStatsItem profileStatsItem--savedSolve";
+    case "averageCard":
+      return "profileStatsItem profileStatsItem--savedAverage";
     case "statsSummary":
       return "profileStatsItem profileStatsItem--summary";
     case "lineChart":
@@ -329,6 +349,7 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
   const [viewedSessionStats, setViewedSessionStats] = useState({});
   const [posts, setPosts] = useState([]);
   const [selectedPost, setSelectedPost] = useState(null);
+  const [selectedProfileCard, setSelectedProfileCard] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
 
   const [visibleStats, setVisibleStats] = useState(DEFAULT_VISIBLE_STATS);
@@ -429,6 +450,7 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
 
     const needsSolves = (item) =>
       item &&
+      !isSavedProfileCard(item) &&
       item.chart !== "pieChart" &&
       item.chart !== "statsSummary" &&
       item.scope !== "all-events" &&
@@ -645,6 +667,10 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
     () => [...posts].sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a)),
     [posts]
   );
+  const openSavedProfileCard = (item) => {
+    if (!item) return;
+    setSelectedProfileCard(item);
+  };
 
   if (!viewedProfile) return null;
   if (!viewedProfile.UserID) return <div>Loading profile…</div>;
@@ -734,24 +760,35 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
                   </div>
 
                   <div className="statsEditorControls">
-                    <label className="statsEditorField">
-                      <span>Chart type</span>
-                      <select
-                        value={item.chart}
-                        onChange={(e) =>
-                          updateDraftStat(idx, () => createStatConfig(e.target.value, item.event || defaultStatEvent))
-                        }
-                      >
-                        <option value="lineChart">Line Chart</option>
-                        <option value="statsSummary">Stats Summary</option>
-                        <option value="percentBar">Distribution</option>
-                        <option value="pieChart">Event Breakdown</option>
-                        <option value="barChart">Bar Chart</option>
-                        <option value="timeTable">Time Table</option>
-                      </select>
-                    </label>
+                    {isSavedProfileCard(item) ? (
+                      <div className="statsEditorField">
+                        <span>Saved item</span>
+                        <div className="statsEditorStaticValue">
+                          {isSavedSolveCard(item)
+                            ? "Saved from solve detail. You can reorder or remove it here."
+                            : "Saved from average detail. You can reorder or remove it here."}
+                        </div>
+                      </div>
+                    ) : (
+                      <label className="statsEditorField">
+                        <span>Chart type</span>
+                        <select
+                          value={item.chart}
+                          onChange={(e) =>
+                            updateDraftStat(idx, () => createStatConfig(e.target.value, item.event || defaultStatEvent))
+                          }
+                        >
+                          <option value="lineChart">Line Chart</option>
+                          <option value="statsSummary">Stats Summary</option>
+                          <option value="percentBar">Distribution</option>
+                          <option value="pieChart">Event Breakdown</option>
+                          <option value="barChart">Bar Chart</option>
+                          <option value="timeTable">Time Table</option>
+                        </select>
+                      </label>
+                    )}
 
-                    {chartNeedsSummaryEvent(item) && (
+                    {!isSavedProfileCard(item) && chartNeedsSummaryEvent(item) && (
                       <label className="statsEditorField">
                         <span>Event</span>
                         <select
@@ -779,7 +816,7 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
                       </label>
                     )}
 
-                    {chartNeedsEventSession(item) && (
+                    {!isSavedProfileCard(item) && chartNeedsEventSession(item) && (
                       <>
                         <label className="statsEditorField">
                           <span>Event</span>
@@ -867,6 +904,46 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
                   <div className="profileStatsGrid">
                     {visibleStats.map((item, idx) => {
                       const cardClassName = getProfileStatItemClass(item.chart);
+
+                      if (item.chart === "solveCard") {
+                        const solve = item.solve ? { ...item.solve, __readOnly: true } : null;
+                        if (!solve) return null;
+
+                        return (
+                          <div key={idx} className={cardClassName}>
+                            <Post
+                              user={viewedProfile}
+                              name={viewedProfile.Name || viewedProfile.name}
+                              date={item.createdAt || solve.datetime || solve.createdAt}
+                              solveList={[solve]}
+                              postColor={viewedProfile.Color || viewedProfile.color}
+                              note={item.note || ""}
+                              onClick={() => openSavedProfileCard(item)}
+                            />
+                          </div>
+                        );
+                      }
+
+                      if (item.chart === "averageCard") {
+                        const solves = (Array.isArray(item.solves) ? item.solves : [])
+                          .map((solve) => ({ ...solve, __readOnly: true }))
+                          .filter(Boolean);
+                        if (!solves.length) return null;
+
+                        return (
+                          <div key={idx} className={cardClassName}>
+                            <Post
+                              user={viewedProfile}
+                              name={viewedProfile.Name || viewedProfile.name}
+                              date={item.createdAt || solves[0]?.datetime || solves[0]?.createdAt}
+                              solveList={solves}
+                              postColor={viewedProfile.Color || viewedProfile.color}
+                              note={item.note || ""}
+                              onClick={() => openSavedProfileCard(item)}
+                            />
+                          </div>
+                        );
+                      }
 
                       if (item.chart === "statsSummary") {
                         const solves =
@@ -1102,6 +1179,30 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
             handleDeletePost(selectedPost.DateTime || selectedPost.date)
           }
           onAddComment={handleAddComment}
+        />
+      )}
+
+      {selectedProfileCard && (
+        <PostDetail
+          author={viewedProfile.Name || viewedProfile.name}
+          authorUser={viewedProfile}
+          date={formatPostDate(selectedProfileCard.createdAt || new Date().toISOString())}
+          solveList={
+            isSavedSolveCard(selectedProfileCard)
+              ? selectedProfileCard.solve
+                ? [{ ...selectedProfileCard.solve, __readOnly: true }]
+                : []
+              : (Array.isArray(selectedProfileCard.solves) ? selectedProfileCard.solves : []).map((solve) => ({
+                  ...solve,
+                  __readOnly: true,
+                }))
+          }
+          comments={[]}
+          note={selectedProfileCard.note || ""}
+          postType="solve"
+          statShare={null}
+          postColor={viewedProfile.Color || viewedProfile.color || ""}
+          onClose={() => setSelectedProfileCard(null)}
         />
       )}
     </div>

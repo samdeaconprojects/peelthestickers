@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from "react";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
-import { useSettings } from "../../contexts/SettingsContext";
 import { findBestStrictWindow } from "../../utils/strictAverageUtils";
 import PieChartBuilder from "./PieChartBuilder";
 import tagBadge from "../../assets/Tag.svg";
@@ -126,6 +125,59 @@ function withAlpha(hex, alpha) {
   const g = parseInt(raw.slice(2, 4), 16);
   const b = parseInt(raw.slice(4, 6), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function interpolateHexColor(a, b, ratio) {
+  const safeRatio = Math.max(0, Math.min(1, Number(ratio) || 0));
+  const parseHex = (input) => {
+    const value = String(input || "").replace("#", "").trim();
+    if (value.length !== 6) return [255, 255, 255];
+    return [
+      parseInt(value.slice(0, 2), 16),
+      parseInt(value.slice(2, 4), 16),
+      parseInt(value.slice(4, 6), 16),
+    ];
+  };
+  const [ar, ag, ab] = parseHex(a);
+  const [br, bg, bb] = parseHex(b);
+  const mix = (start, end) => Math.round(start + (end - start) * safeRatio);
+  return `#${[mix(ar, br), mix(ag, bg), mix(ab, bb)]
+    .map((channel) => channel.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function getGraphScaleColor(ratio) {
+  const safeRatio = Math.max(0, Math.min(1, Number(ratio) || 0));
+  if (safeRatio <= 0.25) {
+    return interpolateHexColor("#00ff00", "#00e676", safeRatio / 0.25);
+  }
+  if (safeRatio <= 0.7) {
+    return interpolateHexColor("#00e676", "#ffff00", (safeRatio - 0.25) / 0.45);
+  }
+  if (safeRatio <= 0.95) {
+    return interpolateHexColor("#ffff00", "#ffa500", (safeRatio - 0.7) / 0.25);
+  }
+  return interpolateHexColor("#ffa500", "#ff0000", (safeRatio - 0.95) / 0.05);
+}
+
+function getRelativeStatColor(currentValue, baselineValue, spreadValue) {
+  if (![currentValue, baselineValue].every((value) => Number.isFinite(Number(value)))) {
+    return null;
+  }
+
+  const current = Number(currentValue);
+  const baseline = Number(baselineValue);
+  const spread = Math.max(
+    Number.isFinite(Number(spreadValue)) ? Number(spreadValue) : 0,
+    Math.abs(current - baseline),
+    baseline * 0.12,
+    500
+  );
+  if (!(spread > 0)) return null;
+
+  const normalized = (current - (baseline - spread)) / (spread * 2);
+  const ratio = Math.max(0, Math.min(1, normalized));
+  return getGraphScaleColor(ratio);
 }
 
 function formatDateRange(solves) {
@@ -772,108 +824,38 @@ function StatValueButton({ children, onClick, disabled = false }) {
   );
 }
 
-function MetricRow({
+const SHARED_METRIC_COLUMNS = [
+  { key: "single", label: "Single", average: false },
+  { key: "mo3", label: "MO3", average: true },
+  { key: "ao5", label: "AO5", average: true },
+  { key: "ao12", label: "AO12", average: true },
+  { key: "ao25", label: "AO25", average: true },
+  { key: "ao50", label: "AO50", average: true },
+  { key: "ao100", label: "AO100", average: true },
+  { key: "ao1000", label: "AO1000", average: true },
+];
+
+function SharedMetricColumn({
   label,
   metricKey,
-  scope,
-  current,
   best,
-  strictBest = null,
   worst,
-  showWorst = true,
-  showCurrent = true,
-  collapseHiddenSlots = false,
-  onStatSelect,
+  average = true,
+  showHeader = true,
+  scope,
   summarySource = "primary",
+  onStatSelect,
 }) {
+  const { prefix, value, single } = formatTileMetricParts(label);
   const isAoMetric = /^AO\d+$/i.test(String(label || "").trim());
   const isSingleMetric = metricKey === "single" || /^single$/i.test(String(label || "").trim());
-
+  const metricNumberClass =
+    value === "100" || value === "1000" ? "ssSharedMetricNumber ssSharedMetricNumber--wide" : "ssSharedMetricNumber";
   const selectValue = (variant, value) => {
     if (typeof onStatSelect !== "function") return;
     onStatSelect({
       source: summarySource,
       scope,
-      kind: "window",
-      metricKey,
-      label,
-      variant,
-      value,
-    });
-  };
-
-  const renderValueSlot = ({ variant, value, className, visible = true }) => {
-    if (!visible && collapseHiddenSlots) {
-      return null;
-    }
-
-    if (!visible) {
-      return <span className="ssMetricSlot ssMetricSlot--empty" aria-hidden="true" />;
-    }
-
-    return (
-      <span className="ssMetricSlot">
-        <StatValueButton onClick={() => selectValue(variant, value)} disabled={value == null}>
-          <span
-            className={`ssMetricValue ${className} ${isAoMetric ? "ssMetricValue--ao" : ""} ${
-              isSingleMetric ? "ssMetricValue--singleMetric" : ""
-            }`}
-          >
-            {formatStatTime(value)}
-          </span>
-        </StatValueButton>
-      </span>
-    );
-  };
-
-  return (
-    <div className="ssMetricRow">
-      <div className={`ssMetricLabel ${isAoMetric ? "ssMetricLabel--ao" : ""}`}>{label}</div>
-      <div className={`ssMetricValues ${collapseHiddenSlots ? "ssMetricValues--compact" : ""}`}>
-        {renderValueSlot({
-          variant: "best",
-          value: best,
-          className: "ssMetricValue--best",
-        })}
-        {renderValueSlot({
-          variant: "strict-best",
-          value: strictBest,
-          className: "ssMetricValue--strict",
-          visible: strictBest !== null,
-        })}
-        {renderValueSlot({
-          variant: "worst",
-          value: worst,
-          className: "ssMetricValue--worst",
-          visible: showWorst,
-        })}
-        {renderValueSlot({
-          variant: "current",
-          value: current,
-          className: "ssMetricValue--current",
-          visible: showCurrent,
-        })}
-      </div>
-    </div>
-  );
-}
-
-function OverallMetricRow({
-  label,
-  metricKey,
-  best,
-  strictBest = null,
-  worst = null,
-  average = true,
-  inlineStrictLabel = true,
-  onStatSelect,
-  summarySource = "primary",
-}) {
-  const selectValue = (variant, value) => {
-    if (typeof onStatSelect !== "function") return;
-    onStatSelect({
-      source: summarySource,
-      scope: "overall",
       kind: metricKey === "single" ? "single" : "window",
       metricKey,
       label,
@@ -883,40 +865,88 @@ function OverallMetricRow({
   };
 
   return (
-    <div className="ssOverallMetricRow">
-      <div className="ssOverallMetricLabel">{label}</div>
-      <div className="ssOverallMetricValues">
-        <StatValueButton onClick={() => selectValue("best", best)} disabled={best == null}>
-          <span className="ssMetricValue ssMetricValue--best">
-            {formatStatTime(best, { average })}
-          </span>
-        </StatValueButton>
-        {strictBest !== null && (
-          <>
-            <span className="ssMetricSpacer" />
-            <StatValueButton
-              onClick={() => selectValue("strict-best", strictBest)}
-              disabled={strictBest == null}
-            >
-              <span className="ssMetricValue ssMetricValue--strict">
-                {inlineStrictLabel
-                  ? `Strict ${formatStatTime(strictBest, { average })}`
-                  : formatStatTime(strictBest, { average })}
-              </span>
-            </StatValueButton>
-          </>
-        )}
-        {worst !== null && (
-          <>
-            <span className="ssMetricSpacer" />
-            <StatValueButton onClick={() => selectValue("worst", worst)} disabled={worst == null}>
-              <span className="ssMetricValue ssMetricValue--worst">
-                {formatStatTime(worst, { average })}
-              </span>
-            </StatValueButton>
-          </>
-        )}
+    <div className="ssSharedMetricColumn">
+      {showHeader ? (!single ? (
+        <div className="ssMetricTileHeader ssSharedMetricHeader">
+          <span className="ssMetricTilePrefix">{prefix}</span>
+          <span className={`ssMetricTileNumber ${metricNumberClass}`}>{value}</span>
+        </div>
+      ) : (
+        <div className="ssSharedColumnTitle ssSharedColumnTitle--single">Single</div>
+      )) : null}
+      <div className="ssSharedMetricStack">
+        <SummaryTileValue
+          label="BEST"
+          value={best}
+          className="ssMetricValue--best"
+          average={average}
+          emphasizeValue={isAoMetric || isSingleMetric}
+          showLabel={false}
+          onClick={() => selectValue("best", best)}
+        />
+        <SummaryTileValue
+          label="WORST"
+          value={worst}
+          className="ssMetricValue--worst"
+          average={average}
+          emphasizeValue={false}
+          showLabel={false}
+          onClick={() => selectValue("worst", worst)}
+        />
       </div>
+    </div>
+  );
+}
+
+function SharedMetaColumn({ rows = [] }) {
+  return (
+    <div className="ssSharedMetricColumn ssSharedMetricColumn--meta">
+      <div className="ssSharedMetaStack">
+        {rows.map((row) => (
+          <div key={row.label} className="ssSharedMetaRow">
+            <span className="ssSharedMetaLabel">{row.label}</span>
+            <span className={`ssSharedMetaValue ${row.tone || ""}`} style={row.style || undefined}>
+              {row.value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SharedSummaryGrid({
+  left,
+  metricValues,
+  metaRows,
+  extraRows,
+  scope,
+  variant = "current",
+  summarySource = "primary",
+  onStatSelect,
+}) {
+  return (
+    <div className={`ssSharedSummaryGrid ssSharedSummaryGrid--${variant}`}>
+      <div className="ssSharedSummaryLead">{left}</div>
+      {SHARED_METRIC_COLUMNS.map((column) => {
+        const values = metricValues?.[column.key] || {};
+        return (
+          <SharedMetricColumn
+            key={column.key}
+            label={column.label}
+            metricKey={column.key}
+            best={values.best}
+            worst={values.worst}
+            average={column.average}
+            showHeader={variant !== "overall"}
+            scope={scope}
+            summarySource={summarySource}
+            onStatSelect={onStatSelect}
+          />
+        );
+      })}
+      <SharedMetaColumn rows={metaRows} />
+      <SharedMetaColumn rows={extraRows} />
     </div>
   );
 }
@@ -1113,6 +1143,11 @@ function useStatsSummaryData({
     [overallSolves, overallStats?.SolveCountTotal]
   );
   const overallDerived = useMemo(() => buildOverallDerived(overallSolves), [overallSolves]);
+  const hasFullOverallSolveCoverage = useMemo(() => {
+    const total = Number(overallStats?.SolveCountTotal);
+    const loaded = Number(overallFallback?.solveCount);
+    return Number.isFinite(total) && total >= 0 && Number.isFinite(loaded) && loaded === total;
+  }, [overallFallback?.solveCount, overallStats?.SolveCountTotal]);
 
   const overall = useMemo(
     () => ({
@@ -1135,6 +1170,7 @@ function useStatsSummaryData({
         overallStats?.BestAo12StrictMs ??
         (allowOverallDerived ? overallDerived?.ao12Strict ?? null : null),
       mean: overallStats?.MeanMs ?? (allowOverallDerived ? overallDerived?.mean ?? null : null),
+      median: overallStats?.MedianMs ?? overallFallback?.median ?? null,
       stdDev:
         overallStats?.SumFinalTimeSqMs != null
           ? stdDevFromAggregate(overallStats)
@@ -1145,6 +1181,7 @@ function useStatsSummaryData({
       plus2Count: overallStats?.Plus2Count ?? null,
       plus2Best:
         overallStats?.Plus2BestMs ??
+        (hasFullOverallSolveCoverage ? overallFallback?.plus2Best ?? null : null) ??
         (allowOverallDerived ? overallDerived?.plus2Best ?? null : null),
       dnfCount: overallStats?.DNFCount ?? null,
       singleWorst:
@@ -1160,13 +1197,17 @@ function useStatsSummaryData({
         finiteStatOrNull(overallStats?.WorstAo12Ms) ??
         (allowOverallDerived ? overallDerived?.ao12Worst ?? null : null),
     }),
-    [overallStats, overallFallback, overallDerived, overallSolves, allowOverallDerived]
+    [
+      overallStats,
+      overallFallback,
+      overallDerived,
+      overallSolves,
+      allowOverallDerived,
+      hasFullOverallSolveCoverage,
+    ]
   );
 
-  const compactSession = String(selectedSession || "").replace(/\s+session$/i, "").trim();
-  const overallTitle = `Overall ${selectedEvent || "Event"}${compactSession ? ` · ${compactSession}` : ""}`;
-
-  return { view, overall, overallTitle };
+  return { view, overall };
 }
 
 export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
@@ -1211,6 +1252,17 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
   const effectiveViewMode = viewMode === "time" ? "time" : bucketSummary ? "standard" : viewMode;
   const isTileLayout = effectiveViewMode === "standard" && summaryLayout === "tile";
   const hasEventBreakdownData = Array.isArray(eventBreakdownData) && eventBreakdownData.length > 0;
+  const overallSpread = useMemo(() => {
+    const stdDev = Number(overallStats?.SumFinalTimeSqMs != null ? stdDevFromAggregate(overallStats) : overallStats?.StdDevMs);
+    if (Number.isFinite(stdDev) && stdDev > 0) return stdDev * 1.5;
+    return null;
+  }, [overallStats]);
+  const currentMeanColor = useMemo(() => {
+    return getRelativeStatColor(view?.mean, overallStats?.MeanMs, overallSpread);
+  }, [overallSpread, overallStats?.MeanMs, view?.mean]);
+  const currentMedianColor = useMemo(() => {
+    return getRelativeStatColor(view?.median, overallStats?.MedianMs, overallSpread);
+  }, [overallSpread, overallStats?.MedianMs, view?.median]);
 
   if (mode === "all-events") {
     if (effectiveViewMode === "time") {
@@ -1258,7 +1310,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
           ? "ssCard--time"
           : isTileLayout
             ? "ssCard--view ssCard--viewTile"
-            : "ssCard--view"
+            : "ssCard--view ssCard--viewRow"
       } ${loading ? "is-loading" : ""}`}
       aria-busy={loading}
     >
@@ -1421,33 +1473,35 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
             </div>
           )}
 
-          <div className="ssViewCount">
-            <div className="ssViewCountValue">{formatCount(view?.solveCount)}</div>
-            <div className="ssViewCountLabel">solves</div>
-            <div className="ssViewMeta ssViewMeta--date">{view?.dateRange || "—"}</div>
-            <div className="ssViewMeta ssViewMeta--range">{view?.indexRange || "—"}</div>
-            {Array.isArray(selectedTagPills) && selectedTagPills.length ? (
-              <div className="ssViewTagList">
-                {selectedTagPills.map((tag) => (
-                  <span
-                    key={`${tag.field || "tag"}-${tag.value || ""}`}
-                    className="ssOverallTagPill"
-                    style={{
-                      "--ss-tag-color": tag.color || "#2EC4B6",
-                      "--ss-tag-border": tag.color || "#2EC4B6",
-                      "--ss-tag-bg": `${tag.color || "#2EC4B6"}22`,
-                    }}
-                    title={`${tag.label || tag.field || "Tag"}: ${tag.value || ""}`}
-                  >
-                    <span className="ssOverallTagPillIconWrap" aria-hidden="true">
-                      <img src={tagBadge} alt="" className="ssOverallTagPillIcon" />
+          {isTileLayout ? (
+            <div className="ssViewCount">
+              <div className="ssViewCountValue">{formatCount(view?.solveCount)}</div>
+              <div className="ssViewCountLabel">solves</div>
+              <div className="ssViewMeta ssViewMeta--date">{view?.dateRange || "—"}</div>
+              <div className="ssViewMeta ssViewMeta--range">{view?.indexRange || "—"}</div>
+              {Array.isArray(selectedTagPills) && selectedTagPills.length ? (
+                <div className="ssViewTagList">
+                  {selectedTagPills.map((tag) => (
+                    <span
+                      key={`${tag.field || "tag"}-${tag.value || ""}`}
+                      className="ssOverallTagPill"
+                      style={{
+                        "--ss-tag-color": tag.color || "#2EC4B6",
+                        "--ss-tag-border": tag.color || "#2EC4B6",
+                        "--ss-tag-bg": `${tag.color || "#2EC4B6"}22`,
+                      }}
+                      title={`${tag.label || tag.field || "Tag"}: ${tag.value || ""}`}
+                    >
+                      <span className="ssOverallTagPillIconWrap" aria-hidden="true">
+                        <img src={tagBadge} alt="" className="ssOverallTagPillIcon" />
+                      </span>
+                      <span className="ssOverallTagPillText">{tag.value}</span>
                     </span>
-                    <span className="ssOverallTagPillText">{tag.value}</span>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-          </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className={`ssViewBody ${isTileLayout ? "ssViewBody--tile" : ""}`}>
             {isTileLayout ? (
@@ -1552,212 +1606,50 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
                 </div>
               </div>
             ) : (
-              <div className="ssCurrentSummaryGrid">
-                <div className="ssCurrentSummaryCell ssCurrentSummaryCell--meta">
-                  <div className="ssSingleRow">
-                    <div className="ssSingleLabel">Single</div>
-                    <div className="ssSingleValues">
-                      <StatValueButton
-                        onClick={() =>
-                          onStatSelect?.({
-                            source: summarySource,
-                            scope: "current",
-                            kind: "single",
-                            metricKey: "single",
-                            label: "Single",
-                            variant: "best",
-                            value: view?.single?.best,
-                          })
-                        }
-                        disabled={view?.single?.best == null}
-                      >
-                        <span className="ssMetricValue ssMetricValue--best">
-                          {formatStatTime(view?.single?.best, { average: false })}
-                        </span>
-                      </StatValueButton>
-                      <StatValueButton
-                        onClick={() =>
-                          onStatSelect?.({
-                            source: summarySource,
-                            scope: "current",
-                            kind: "single",
-                            metricKey: "single",
-                            label: "Single",
-                            variant: "worst",
-                            value: view?.single?.worst,
-                          })
-                        }
-                        disabled={view?.single?.worst == null}
-                      >
-                        <span className="ssMetricValue ssMetricValue--worst">
-                          {formatStatTime(view?.single?.worst, { average: false })}
-                        </span>
-                      </StatValueButton>
-                      {showCurrentMetrics && (
-                        <StatValueButton
-                          onClick={() =>
-                            onStatSelect?.({
-                              source: summarySource,
-                              scope: "current",
-                              kind: "single",
-                              metricKey: "single",
-                              label: "Single",
-                              variant: "current",
-                              value: view?.single?.current,
-                            })
-                          }
-                          disabled={view?.single?.current == null}
-                        >
-                          <span className="ssMetricValue ssMetricValue--current">
-                            {formatStatTime(view?.single?.current, { average: false })}
-                          </span>
-                        </StatValueButton>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="ssCurrentSummaryCell ssCurrentSummaryCell--legend">
-                  <div className="ssViewLegend">
-                    <span className="ssMetricLegendSpacer" aria-hidden="true" />
-                    <span className="ssMetricValue--best">Best</span>
-                    <span className="ssMetricValue--strict">Strict</span>
-                    <span className="ssMetricValue--worst">Worst</span>
-                    {showCurrentMetrics && <span className="ssMetricValue--current">Current</span>}
-                  </div>
-                </div>
-
-                <div className="ssCurrentSummaryCell">
-                  <MetricRow
-                    label="AO25"
-                    metricKey="ao25"
-                    scope="current"
-                    current={view?.metrics?.ao25?.current}
-                    best={view?.metrics?.ao25?.best}
-                    worst={view?.metrics?.ao25?.worst}
-                    showWorst={false}
-                    showCurrent={showCurrentMetrics}
-                    collapseHiddenSlots
-                    onStatSelect={onStatSelect}
-                    summarySource={summarySource}
-                  />
-                </div>
-
-                <div className="ssCurrentSummaryCell ssCurrentSummaryCell--meta">
-                  <div className="ssTopMetaRow">
-                    <MetaStat label="Mean" value={formatStatTime(view?.mean)} tone="accent" stacked />
-                    <MetaStat label="Median" value={formatStatTime(view?.median)} tone="accent" stacked />
-                    <MetaStat label="σ" value={formatStatTime(view?.stdDev)} tone="accent" stacked />
-                  </div>
-                </div>
-
-                <div className="ssCurrentSummaryCell">
-                  <MetricRow
-                    label="AO5"
-                    metricKey="ao5"
-                    scope="current"
-                    current={view?.metrics?.ao5?.current}
-                    best={view?.metrics?.ao5?.best}
-                    strictBest={view?.metrics?.ao5?.strictBest}
-                    worst={view?.metrics?.ao5?.worst}
-                    showCurrent={showCurrentMetrics}
-                    onStatSelect={onStatSelect}
-                    summarySource={summarySource}
-                  />
-                </div>
-
-                <div className="ssCurrentSummaryCell">
-                  <MetricRow
-                    label="AO50"
-                    metricKey="ao50"
-                    scope="current"
-                    current={view?.metrics?.ao50?.current}
-                    best={view?.metrics?.ao50?.best}
-                    worst={view?.metrics?.ao50?.worst}
-                    showWorst={false}
-                    showCurrent={showCurrentMetrics}
-                    collapseHiddenSlots
-                    onStatSelect={onStatSelect}
-                    summarySource={summarySource}
-                  />
-                </div>
-
-                <div className="ssCurrentSummaryCell ssCurrentSummaryCell--meta">
-                  <div className="ssMetaGrid ssMetaGrid--currentRow">
-                    <MetaStat label="+2 Count" value={formatCount(view?.plus2Count)} tone="lime" />
-                    <MetaStat label="DNF Count" value={formatCount(view?.dnfCount)} tone="danger" />
-                  </div>
-                </div>
-
-                <div className="ssCurrentSummaryCell">
-                  <MetricRow
-                    label="AO12"
-                    metricKey="ao12"
-                    scope="current"
-                    current={view?.metrics?.ao12?.current}
-                    best={view?.metrics?.ao12?.best}
-                    strictBest={view?.metrics?.ao12?.strictBest}
-                    worst={view?.metrics?.ao12?.worst}
-                    showCurrent={showCurrentMetrics}
-                    onStatSelect={onStatSelect}
-                    summarySource={summarySource}
-                  />
-                </div>
-
-                <div className="ssCurrentSummaryCell">
-                  <MetricRow
-                    label="AO100"
-                    metricKey="ao100"
-                    scope="current"
-                    current={view?.metrics?.ao100?.current}
-                    best={view?.metrics?.ao100?.best}
-                    worst={view?.metrics?.ao100?.worst}
-                    showWorst={false}
-                    showCurrent={showCurrentMetrics}
-                    collapseHiddenSlots
-                    onStatSelect={onStatSelect}
-                    summarySource={summarySource}
-                  />
-                </div>
-
-                <div className="ssCurrentSummaryCell ssCurrentSummaryCell--meta">
-                  <div className="ssMetaGrid ssMetaGrid--currentRow">
-                    <MetaStat label="+2 Best" value={formatStatTime(view?.plus2Best, { average: false })} tone="teal" />
-                    <MetaStat label="Sum" value={formatDurationMs(view?.sum)} tone="blue" />
-                  </div>
-                </div>
-
-                <div className="ssCurrentSummaryCell">
-                  <MetricRow
-                    label="MO3"
-                    metricKey="mo3"
-                    scope="current"
-                    current={view?.metrics?.mo3?.current}
-                    best={view?.metrics?.mo3?.best}
-                    strictBest={view?.metrics?.mo3?.strictBest}
-                    worst={view?.metrics?.mo3?.worst}
-                    showCurrent={showCurrentMetrics}
-                    onStatSelect={onStatSelect}
-                    summarySource={summarySource}
-                  />
-                </div>
-
-                <div className="ssCurrentSummaryCell">
-                  <MetricRow
-                    label="AO1000"
-                    metricKey="ao1000"
-                    scope="current"
-                    current={view?.metrics?.ao1000?.current}
-                    best={view?.metrics?.ao1000?.best}
-                    worst={view?.metrics?.ao1000?.worst}
-                    showWorst={false}
-                    showCurrent={showCurrentMetrics}
-                    collapseHiddenSlots
-                    summarySource={summarySource}
-                    onStatSelect={onStatSelect}
-                  />
-                </div>
-              </div>
+              <SharedSummaryGrid
+                scope="current"
+                summarySource={summarySource}
+                onStatSelect={onStatSelect}
+                left={
+                  <>
+                    <div className="ssViewCountValue">{formatCount(view?.solveCount)}</div>
+                    <div className="ssViewCountLabel">solves</div>
+                    <div className="ssViewMeta ssViewMeta--date">{view?.dateRange || "—"}</div>
+                    <div className="ssViewMeta ssViewMeta--range">{view?.indexRange || "—"}</div>
+                  </>
+                }
+                metricValues={{
+                  single: { best: view?.single?.best, worst: view?.single?.worst },
+                  mo3: { best: view?.metrics?.mo3?.best, worst: view?.metrics?.mo3?.worst },
+                  ao5: { best: view?.metrics?.ao5?.best, worst: view?.metrics?.ao5?.worst },
+                  ao12: { best: view?.metrics?.ao12?.best, worst: view?.metrics?.ao12?.worst },
+                  ao25: { best: view?.metrics?.ao25?.best, worst: view?.metrics?.ao25?.worst },
+                  ao50: { best: view?.metrics?.ao50?.best, worst: view?.metrics?.ao50?.worst },
+                  ao100: { best: view?.metrics?.ao100?.best, worst: view?.metrics?.ao100?.worst },
+                  ao1000: { best: view?.metrics?.ao1000?.best, worst: view?.metrics?.ao1000?.worst },
+                }}
+                metaRows={[
+                  {
+                    label: "Mean",
+                    value: formatStatTime(view?.mean),
+                    tone: "ssMetricValue--current",
+                    style: currentMeanColor ? { color: currentMeanColor } : undefined,
+                  },
+                  {
+                    label: "Med",
+                    value: formatStatTime(view?.median),
+                    tone: "ssMetricValue--current",
+                    style: currentMedianColor ? { color: currentMedianColor } : undefined,
+                  },
+                  { label: "SD", value: formatStatTime(view?.stdDev), tone: "ssMetricValue--strict" },
+                ]}
+                extraRows={[
+                  { label: "+2 Count", value: formatCount(view?.plus2Count), tone: "ssMetricValue--strict" },
+                  { label: "+2 Best", value: formatStatTime(view?.plus2Best, { average: false }), tone: "ssMetricValue--best" },
+                  { label: "DNF Count", value: formatCount(view?.dnfCount), tone: "ssMetricValue--worst" },
+                  { label: "Sum", value: formatDurationMs(view?.sum), tone: "ssMetricValue--current" },
+                ]}
+              />
             )}
           </div>
         </>
@@ -1783,9 +1675,7 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
   profileColor = "#50B6FF",
   loading = false,
 }) {
-  const { settings } = useSettings();
-  const showStrictAverages = settings?.showStrictAverages !== false;
-  const { view, overall, overallTitle } = useStatsSummaryData({
+  const { view, overall } = useStatsSummaryData({
     solves,
     overallSolves,
     overallStats,
@@ -1802,9 +1692,9 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
   const resolvedProfileColor = normalizeHexColor(profileColor, "#50B6FF");
   const overallCardStyle = useMemo(
     () => ({
-      background: `linear-gradient(135deg, ${withAlpha(resolvedProfileColor, 0.26)}, ${withAlpha(
+      background: `linear-gradient(135deg, ${withAlpha(resolvedProfileColor, 0.16)}, ${withAlpha(
         resolvedProfileColor,
-        0.14
+        0.16
       )})`,
       borderColor: withAlpha(resolvedProfileColor, 0.82),
       boxShadow: `inset 0 1px 0 ${withAlpha(resolvedProfileColor, 0.18)}`,
@@ -1826,34 +1716,6 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
 
   return (
     <section className={`ssCard ssCard--overall ${loading ? "is-loading" : ""}`} style={overallCardStyle} aria-busy={loading}>
-      <div className="ssOverallHeader">
-        <div className="ssOverallTitle">
-          <span>{overallTitle}</span>
-          {Array.isArray(selectedTagPills) && selectedTagPills.length ? (
-            <span className="ssOverallTagList">
-              {selectedTagPills.map((tag) => (
-                <span
-                  key={`${tag.field || "tag"}-${tag.value || ""}`}
-                  className="ssOverallTagPill"
-                  style={{
-                    "--ss-tag-color": tag.color || "#2EC4B6",
-                    "--ss-tag-border": tag.color || "#2EC4B6",
-                    "--ss-tag-bg": `${tag.color || "#2EC4B6"}22`,
-                  }}
-                  title={`${tag.label || tag.field || "Tag"}: ${tag.value || ""}`}
-                >
-                  <span className="ssOverallTagPillIconWrap" aria-hidden="true">
-                    <img src={tagBadge} alt="" className="ssOverallTagPillIcon" />
-                  </span>
-                  <span className="ssOverallTagPillText">{tag.value}</span>
-                </span>
-              ))}
-            </span>
-          ) : null}
-        </div>
-        <div className="ssOverallCount">{formatCount(overall.solveCountTotal)} solves</div>
-      </div>
-
       {compareOverall && (
         <div className="ssOverallCompare">
           <div className="ssComparePill">
@@ -1874,94 +1736,72 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
       )}
 
       <div className="ssOverallBody">
-        <div className="ssOverallMetricsSection">
-          <div className="ssOverallLegend">
-            <span className="ssMetricLegendSpacer" aria-hidden="true" />
-            <span className="ssMetricValue--best">Best</span>
-            {showStrictAverages ? <span className="ssMetricValue--strict">Strict</span> : null}
-            <span className="ssMetricValue--worst">Worst</span>
-          </div>
-          <div className="ssOverallMetricGrid">
-            <OverallMetricRow
-              label="Single"
-              metricKey="single"
-              best={overall.single}
-              worst={overall.singleWorst}
-              average={false}
-              onStatSelect={onStatSelect}
-              summarySource={summarySource}
-            />
-            <OverallMetricRow label="AO25" metricKey="ao25" best={overall.ao25} onStatSelect={onStatSelect} summarySource={summarySource} />
-            <OverallMetricRow
-              label="AO5"
-              metricKey="ao5"
-              best={overall.ao5}
-              strictBest={showStrictAverages ? overall.ao5Strict : null}
-              worst={overall.ao5Worst}
-              inlineStrictLabel={false}
-              onStatSelect={onStatSelect}
-              summarySource={summarySource}
-            />
-            <OverallMetricRow label="AO50" metricKey="ao50" best={overall.ao50} onStatSelect={onStatSelect} summarySource={summarySource} />
-            <OverallMetricRow
-              label="AO12"
-              metricKey="ao12"
-              best={overall.ao12}
-              strictBest={showStrictAverages ? overall.ao12Strict : null}
-              worst={overall.ao12Worst}
-              inlineStrictLabel={false}
-              onStatSelect={onStatSelect}
-              summarySource={summarySource}
-            />
-            <OverallMetricRow label="AO100" metricKey="ao100" best={overall.ao100} onStatSelect={onStatSelect} summarySource={summarySource} />
-            <OverallMetricRow
-              label="MO3"
-              metricKey="mo3"
-              best={overall.mo3}
-              strictBest={showStrictAverages ? overall.mo3Strict : null}
-              worst={overall.mo3Worst}
-              inlineStrictLabel={false}
-              onStatSelect={onStatSelect}
-              summarySource={summarySource}
-            />
-            <OverallMetricRow label="AO1000" metricKey="ao1000" best={overall.ao1000} onStatSelect={onStatSelect} summarySource={summarySource} />
-          </div>
-        </div>
-
-        <div className="ssOverallMeta">
-          <div className="ssOverallMetaRow ssOverallMetaRow--pair">
-            <MetaStat label="Mean" value={formatStatTime(overall.mean)} tone="accent" />
-            <MetaStat label="σ" value={formatStatTime(overall.stdDev)} tone="accent" />
-          </div>
-          <div className="ssOverallMetaRow">
-            <MetaStat label="Sum" value={formatDurationMs(overall.sum)} tone="blue" />
-          </div>
-          <div className="ssOverallMetaRow">
-            <MetaStat label="+2 Count" value={formatCount(overall.plus2Count)} tone="lime" />
-          </div>
-          <div className="ssOverallMetaRow">
-            <MetaStat
-              label="+2 Best"
-              value={formatStatTime(overall.plus2Best, { average: false })}
-              tone="teal"
-            />
-          </div>
-          <div className="ssOverallMetaRow">
-            <MetaStat label="DNF Count" value={formatCount(overall.dnfCount)} tone="danger" />
-          </div>
-        </div>
+        <SharedSummaryGrid
+          scope="overall"
+          variant="overall"
+          summarySource={summarySource}
+          onStatSelect={onStatSelect}
+          left={
+            <div className="ssOverviewLead">
+              <div className="ssOverviewLeadTitle">Overview</div>
+              <div className="ssOverviewLeadCount">{formatCount(overall.solveCountTotal)} solves</div>
+              {Array.isArray(selectedTagPills) && selectedTagPills.length ? (
+                <span className="ssOverallTagList ssOverviewTagList">
+                  {selectedTagPills.map((tag) => (
+                    <span
+                      key={`${tag.field || "tag"}-${tag.value || ""}`}
+                      className="ssOverallTagPill"
+                      style={{
+                        "--ss-tag-color": tag.color || "#2EC4B6",
+                        "--ss-tag-border": tag.color || "#2EC4B6",
+                        "--ss-tag-bg": `${tag.color || "#2EC4B6"}22`,
+                      }}
+                      title={`${tag.label || tag.field || "Tag"}: ${tag.value || ""}`}
+                    >
+                      <span className="ssOverallTagPillIconWrap" aria-hidden="true">
+                        <img src={tagBadge} alt="" className="ssOverallTagPillIcon" />
+                      </span>
+                      <span className="ssOverallTagPillText">{tag.value}</span>
+                    </span>
+                  ))}
+                </span>
+              ) : null}
+            </div>
+          }
+          metricValues={{
+            single: { best: overall.single, worst: overall.singleWorst },
+            mo3: { best: overall.mo3, worst: overall.mo3Worst },
+            ao5: { best: overall.ao5, worst: overall.ao5Worst },
+            ao12: { best: overall.ao12, worst: overall.ao12Worst },
+            ao25: { best: overall.ao25, worst: null },
+            ao50: { best: overall.ao50, worst: null },
+            ao100: { best: overall.ao100, worst: null },
+            ao1000: { best: overall.ao1000, worst: null },
+          }}
+          metaRows={[
+            { label: "Mean", value: formatStatTime(overall.mean), tone: "ssMetricValue--strict" },
+            { label: "Med", value: formatStatTime(overall.median), tone: "ssMetricValue--strict" },
+            { label: "DNF #", value: formatCount(overall.dnfCount), tone: "ssMetricValue--worst" },
+          ]}
+          extraRows={[
+            { label: "+2 Count", value: formatCount(overall.plus2Count), tone: "ssMetricValue--strict" },
+            { label: "+2 Best", value: formatStatTime(overall.plus2Best, { average: false }), tone: "ssMetricValue--best" },
+            { label: "Sum", value: formatDurationMs(overall.sum), tone: "ssMetricValue--current" },
+          ]}
+        />
       </div>
     </section>
   );
 });
 
 function StatsSummary(props) {
+  const isRowLayout = (props.summaryLayout || "row") === "row";
   if (props.mode === "all-events") {
     return <StatsSummaryCurrent {...props} />;
   }
 
   return (
-    <div className="statsSummaryShell">
+    <div className={`statsSummaryShell ${isRowLayout ? "statsSummaryShell--stacked" : ""}`}>
       <StatsSummaryCurrent {...props} />
       <StatsSummaryOverall {...props} />
     </div>

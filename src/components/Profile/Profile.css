@@ -173,6 +173,20 @@
   grid-column: 1 / -1;
 }
 
+.profileStatsItem--savedSolve,
+.profileStatsItem--savedAverage {
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.profileStatsItem--savedAverage {
+  grid-column: 1 / -1;
+}
+
 .profileStatsItem--line {
   height: 360px;
 }
@@ -209,6 +223,16 @@
 .profileStatsItem--pie .pieChartSvg {
   width: 84%;
   height: 84%;
+}
+
+.statsEditorStaticValue {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.8);
+  font-size: 0.9rem;
+  line-height: 1.4;
 }
 
 /* Make only the posts tab scroll */

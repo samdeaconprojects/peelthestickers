@@ -124,6 +124,8 @@ const LineChartBuilder = ({
   showAxisLabels = true,
 }) => {
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, time: "" });
+  const [hoveredDotId, setHoveredDotId] = useState(null);
+  const [hoveredDot, setHoveredDot] = useState(null);
   const containerRef = useRef(null);
   const [size, setSize] = useState({
     width: Math.max(1, Number(width) || 1),
@@ -360,12 +362,18 @@ const LineChartBuilder = ({
     });
   };
 
-  const handleMouseOver = (event, time) => {
+  const handleMouseOver = (event, time, dotId = null, dotMeta = null) => {
     const { clientX, clientY } = event;
     setTooltip({ visible: true, x: clientX, y: clientY, time });
+    setHoveredDotId(dotId);
+    setHoveredDot(dotMeta);
   };
 
-  const handleMouseOut = () => setTooltip({ visible: false, x: 0, y: 0, time: "" });
+  const handleMouseOut = () => {
+    setTooltip({ visible: false, x: 0, y: 0, time: "" });
+    setHoveredDotId(null);
+    setHoveredDot(null);
+  };
 
   const extraPolylines = (Array.isArray(extraSeries) ? extraSeries : []).map((s) => {
     const pts = (s.points || [])
@@ -472,6 +480,7 @@ const LineChartBuilder = ({
         {comparisonPolylines}
 
         {safeData.map((element, index) => {
+          const dotId = `main-${index}`;
           const x = ((element.x - minX) / xDenom) * chartWidth + leftPadding;
           const rawY =
             chartHeight - ((element.y - minimumYFromData) / yDenom) * chartHeight + topPadding;
@@ -479,6 +488,14 @@ const LineChartBuilder = ({
 
           const isSelected =
             element.selectionIndex != null && selectedIndices?.has?.(element.selectionIndex);
+          const isHovered = hoveredDotId === dotId;
+          const baseRadius = isSelected ? selectedDotRadius : Math.max(2, dotRadius);
+          const baseOpacity = multiSeriesOpacity;
+          const hoverStroke =
+            element.isDNF ? "#FF6B6B" : element.color || primaryStroke || safeData[0]?.color || "#2EC4B6";
+          const hoverFilter = element.isDNF
+            ? "drop-shadow(0 0 5px rgba(255, 107, 107, 0.7))"
+            : `drop-shadow(0 0 6px ${hoverStroke})`;
 
           return (
             <circle
@@ -487,18 +504,34 @@ const LineChartBuilder = ({
               data-interactive="solve-point"
               cx={x}
               cy={y}
-              r={isSelected ? selectedDotRadius : Math.max(2, dotRadius)}
+              r={isHovered ? baseRadius + 2.5 : baseRadius}
               fill={element.isDNF ? "none" : element.color}
-              opacity={multiSeriesOpacity}
+              opacity={isHovered ? Math.min(1, baseOpacity + 0.18) : baseOpacity}
               stroke={
                 isSelected
                   ? "#2EC4B6"
+                  : isHovered
+                    ? hoverStroke
                   : element.isDNF
                     ? "red"
                     : "none"
               }
-              strokeWidth={isSelected ? 3 : element.isDNF ? 2 : 0}
-              onMouseOver={(e) => handleMouseOver(e, element.time)}
+              strokeWidth={isSelected ? 3 : isHovered ? 2 : element.isDNF ? 2 : 0}
+              style={{
+                cursor: "pointer",
+                filter: isHovered ? hoverFilter : "none",
+                transition: "r 140ms ease, opacity 140ms ease, filter 140ms ease, stroke-width 140ms ease",
+              }}
+              onMouseOver={(e) =>
+                handleMouseOver(e, element.time, dotId, {
+                  x,
+                  y,
+                  color: hoverStroke,
+                  fill: element.isDNF ? "rgba(255, 107, 107, 0.2)" : element.color || hoverStroke,
+                  isDNF: element.isDNF,
+                  radius: baseRadius,
+                })
+              }
               onMouseOut={handleMouseOut}
               onClick={(event) => onDotClick(event, element.solve, element.fullIndex, element)}
             />
@@ -511,10 +544,15 @@ const LineChartBuilder = ({
           (series.points || []).map((element, index) => {
             if (!element || typeof element.y !== "number" || !isFinite(element.y)) return null;
 
+            const dotId = `${series.id || series.label || "compare"}-${index}`;
             const x = ((element.x - minX) / xDenom) * chartWidth + leftPadding;
             const rawY =
               chartHeight - ((element.y - minimumYFromData) / yDenom) * chartHeight + topPadding;
             const y = clamp(rawY, topPadding, chartHeight + topPadding);
+            const baseRadius = Math.max(2, dotRadius - 1);
+            const baseOpacity = multiSeriesOpacity;
+            const isHovered = hoveredDotId === dotId;
+            const hoverColor = element.color || series.stroke || "#7c8cff";
 
             return (
               <circle
@@ -523,18 +561,53 @@ const LineChartBuilder = ({
                 data-interactive="solve-point"
                 cx={x}
                 cy={y}
-                r={Math.max(2, dotRadius - 1)}
+                r={isHovered ? baseRadius + 2.5 : baseRadius}
                 fill={element.color || series.stroke || "#7c8cff"}
-                opacity={multiSeriesOpacity}
-                stroke="rgba(5,10,14,0.6)"
-                strokeWidth={1}
-                onMouseOver={(e) => handleMouseOver(e, `${series.label || "Compare"} · ${element.time}`)}
+                opacity={isHovered ? Math.min(1, baseOpacity + 0.18) : baseOpacity}
+                stroke={isHovered ? hoverColor : "rgba(5,10,14,0.6)"}
+                strokeWidth={isHovered ? 2 : 1}
+                style={{
+                  cursor: "pointer",
+                  filter: isHovered ? `drop-shadow(0 0 6px ${hoverColor})` : "none",
+                  transition: "r 140ms ease, opacity 140ms ease, filter 140ms ease, stroke-width 140ms ease",
+                }}
+                onMouseOver={(e) =>
+                  handleMouseOver(e, `${series.label || "Compare"} · ${element.time}`, dotId, {
+                    x,
+                    y,
+                    color: hoverColor,
+                    fill: element.color || series.stroke || "#7c8cff",
+                    isDNF: false,
+                    radius: baseRadius,
+                  })
+                }
                 onMouseOut={handleMouseOut}
                 onClick={(event) => onDotClick(event, element.solve, element.fullIndex, element)}
               />
             );
           })
         )}
+
+        {hoveredDot ? (
+          <g pointerEvents="none">
+            <circle
+              cx={hoveredDot.x}
+              cy={hoveredDot.y}
+              r={hoveredDot.radius + 5}
+              fill={hoveredDot.color}
+              opacity={0.18}
+            />
+            <circle
+              cx={hoveredDot.x}
+              cy={hoveredDot.y}
+              r={hoveredDot.radius + 2.5}
+              fill={hoveredDot.isDNF ? "none" : hoveredDot.fill}
+              stroke={hoveredDot.color}
+              strokeWidth={2.5}
+              opacity={1}
+            />
+          </g>
+        ) : null}
       </svg>
 
       {tooltip.visible && (
