@@ -1,12 +1,12 @@
 import React from "react";
 import PieChart from "./PieChart";
 
-function EventCountPieChart({ sessions, sessionStats }) {
+function EventCountPieChart({ sessions, sessionStats, profileColor }) {
   const hasStats = sessionStats && typeof sessionStats === "object";
   const hasSessions = sessions && typeof sessions === "object";
 
   if (!hasStats && !hasSessions) {
-    return <PieChart data={[]} title="Event Breakdown" />;
+    return <PieChart data={[]} title="Event Breakdown" profileColor={profileColor} />;
   }
 
   const eventCounts = {};
@@ -41,7 +41,7 @@ function EventCountPieChart({ sessions, sessionStats }) {
     solves: [],
   }));
 
-  return <PieChart data={data} title="Event Breakdown" />;
+  return <PieChart data={data} title="Event Breakdown" profileColor={profileColor} />;
 }
 
 export default EventCountPieChart;

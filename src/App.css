@@ -421,6 +421,7 @@ select {
   order: 1;
   margin-top: auto;
   margin-bottom: auto;
+  transform: translateY(-8px);
 }
 
 .home-bottom-stack .time-list-container {
@@ -466,7 +467,7 @@ select {
 
 .home-tag-dock--shared {
   top: 68px !important;
-  right: 10px !important;
+  right: 4px !important;
   width: min(340px, 32vw);
   max-width: 340px;
 }

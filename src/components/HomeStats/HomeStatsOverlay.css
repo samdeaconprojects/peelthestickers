@@ -76,7 +76,7 @@
 
 .homeStatsSlot--left {
   right: calc(70% + clamp(250px, 26vw, 440px));
-  top: 455px;
+  top: 433px;
   transform: translateX(var(--home-slot-center-shift-x));
 }
 
@@ -99,7 +99,7 @@
 
 .homeStatsSlot--summary.homeStatsSlot--left {
   right: calc(50% + clamp(260px, 26vw, 560px));
-  top: 272px;
+  top: 248px;
   --home-summary-offset-x: -345px;
   --home-summary-offset-y: 0px;
 }

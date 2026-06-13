@@ -143,6 +143,13 @@ function compareBucketsByCount(a, b) {
   return compareBucketsByAverage(a, b);
 }
 
+function assignBucketColorIndices(buckets) {
+  return buckets.map((bucket, index) => ({
+    ...bucket,
+    colorIndex: index,
+  }));
+}
+
 function TagBreakdownPie({
   solves,
   tagConfig,
@@ -180,6 +187,7 @@ function TagBreakdownPie({
   const [hideUnknown, setHideUnknown] = useState(false);
   const [sortMode, setSortMode] = useState("average");
   const [sortDirection, setSortDirection] = useState("asc");
+  const [hiddenBucketKeys, setHiddenBucketKeys] = useState([]);
 
   useEffect(() => {
     if (!availableFields.some((item) => item.field === activeField)) {
@@ -207,12 +215,36 @@ function TagBreakdownPie({
     return buckets.filter((bucket) => bucket.key !== "Unknown" && bucket.label !== "Unknown");
   }, [buckets, hideUnknown]);
 
-  const orderedBuckets = useMemo(() => {
+  const rankedBuckets = useMemo(() => {
     const comparator = sortMode === "count" ? compareBucketsByCount : compareBucketsByAverage;
     const next = [...visibleBuckets].sort(comparator);
     if (sortDirection === "desc") next.reverse();
-    return next;
+    return assignBucketColorIndices(next);
   }, [visibleBuckets, sortDirection, sortMode]);
+
+  const orderedBuckets = useMemo(() => {
+    if (!hiddenBucketKeys.length) return rankedBuckets;
+    const hiddenSet = new Set(hiddenBucketKeys);
+    return rankedBuckets.filter((bucket) => !hiddenSet.has(bucket.key));
+  }, [hiddenBucketKeys, rankedBuckets]);
+
+  useEffect(() => {
+    const visibleKeys = new Set(rankedBuckets.map((bucket) => bucket.key));
+    setHiddenBucketKeys((current) => current.filter((key) => visibleKeys.has(key)));
+  }, [rankedBuckets]);
+
+  const canResetHiddenBuckets = hiddenBucketKeys.length > 0;
+
+  const handleBucketHide = (entry) => {
+    const bucketKey = String(entry?.key || "").trim();
+    if (!bucketKey) return;
+
+    setHiddenBucketKeys((current) => {
+      if (current.includes(bucketKey)) return current;
+      if (orderedBuckets.length <= 1) return current;
+      return [...current, bucketKey];
+    });
+  };
 
   useEffect(() => {
     if (!orderedBuckets.some((bucket) => bucket.key === activeBucketKey)) {
@@ -226,7 +258,7 @@ function TagBreakdownPie({
     }
   }, [hoveredBucketKey, orderedBuckets]);
 
-  const palette = useMemo(() => makeRankPalette(orderedBuckets.length), [orderedBuckets.length]);
+  const palette = useMemo(() => makeRankPalette(rankedBuckets.length), [rankedBuckets.length]);
   const topAverageBucketKeys = useMemo(() => {
     const limit = Math.max(1, Math.ceil(orderedBuckets.length * 0.25));
     return new Set(
@@ -243,6 +275,7 @@ function TagBreakdownPie({
         key: bucket.key,
         label: bucket.label,
         value: bucket.value,
+        colorIndex: bucket.colorIndex,
         solves: bucket.solves,
         calloutLines: [bucket.label, `Avg ${formatBucketAverage(bucket.averageMs)}`, `${bucket.value} solves`],
         alwaysShowCallout: topAverageBucketKeys.has(bucket.key),
@@ -250,7 +283,7 @@ function TagBreakdownPie({
     [orderedBuckets, topAverageBucketKeys]
   );
 
-  const totalCount = visibleBuckets.reduce((sum, bucket) => sum + bucket.value, 0);
+  const totalCount = orderedBuckets.reduce((sum, bucket) => sum + bucket.value, 0);
   const displayBucketKey = hoveredBucketKey || activeBucketKey;
   const activeBucket =
     orderedBuckets.find((bucket) => bucket.key === displayBucketKey) || orderedBuckets[0] || null;
@@ -325,6 +358,17 @@ function TagBreakdownPie({
         <div className="tagBreakdownBody">
           <div className="tagBreakdownChartCard">
             <div className="tagBreakdownChartStage">
+              {canResetHiddenBuckets ? (
+                <div className="tagBreakdownChartReset">
+                  <button
+                    type="button"
+                    className="statsToggleBtn barChartToggleBtn pieChartResetButton"
+                    onClick={() => setHiddenBucketKeys([])}
+                  >
+                    Reset chart
+                  </button>
+                </div>
+              ) : null}
               <PieChartBuilder
                 width="100%"
                 height="100%"
@@ -335,7 +379,7 @@ function TagBreakdownPie({
                 maxCallouts={10}
                 promoteHoveredOverflowItem
                 sortMode="none"
-                onSliceClick={(_, entry) => setActiveBucketKey(entry?.key || "")}
+                onSliceClick={(_, entry) => handleBucketHide(entry)}
                 onSliceHover={(entry) => setHoveredBucketKey(entry?.key || "")}
                 onSliceLeave={() => setHoveredBucketKey("")}
               />
@@ -350,9 +394,7 @@ function TagBreakdownPie({
                     className="tagBreakdownFocusSwatch"
                     style={{
                       backgroundColor:
-                        palette[
-                          Math.max(0, orderedBuckets.findIndex((bucket) => bucket.key === activeBucket.key))
-                        ] ||
+                        palette[activeBucket.colorIndex] ||
                         "#2EC4B6",
                     }}
                   />
@@ -454,7 +496,7 @@ function TagBreakdownPie({
               </div>
 
               <div className="tagBreakdownLegendList">
-                {orderedBuckets.map((bucket, index) => {
+                {orderedBuckets.map((bucket) => {
                   const percent = totalCount > 0 ? Math.round((bucket.value / totalCount) * 100) : 0;
                   const isActive = bucket.key === activeBucket?.key;
                   const primaryMetric = getPrimaryMetricMeta(sortMode, bucket, percent);
@@ -464,7 +506,7 @@ function TagBreakdownPie({
                       type="button"
                       className={`tagBreakdownLegendRow ${isActive ? "is-active" : ""}`}
                       style={{
-                        "--tag-breakdown-accent": palette[index] || "#2EC4B6",
+                        "--tag-breakdown-accent": palette[bucket.colorIndex] || "#2EC4B6",
                       }}
                       onClick={() => setActiveBucketKey(bucket.key)}
                       onMouseEnter={() => setHoveredBucketKey(bucket.key)}

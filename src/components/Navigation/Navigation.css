@@ -291,9 +291,13 @@
 
 .nav-icon {
   display: inline-flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
+  position: relative;
+  width: 30px;
+  min-height: 46px;
+  padding-bottom: 16px;
+  box-sizing: content-box;
   /*transition: transform 0.1s ease-out, box-shadow 0.1s ease-out; /* Smooth transition */
 }
 
@@ -318,11 +322,14 @@
 
 .nav-icon--active::after {
   content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
   width: 6px;
   height: 6px;
-  margin-top: 8px;
   border-radius: 999px;
   background: var(--nav-active-dot-color);
+  transform: translateX(-50%);
   box-shadow:
     0 0 10px var(--nav-active-dot-glow-color),
     0 0 18px var(--nav-active-dot-glow-color);

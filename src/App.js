@@ -50,10 +50,12 @@ import { updatePostComments } from "./services/updatePostComments";
 import { createSession } from "./services/createSession";
 import { createUser } from "./services/createUser";
 import { getMessages } from "./services/getMessages";
+import { getConversations } from "./services/getConversations";
 import { updateSolvePenalty } from "./services/updateSolvePenalty";
 import { getSolveWindowFromStart } from "./services/getSolveWindow";
 import { sendMessage } from "./services/sendMessage";
 import { getTagValues } from "./services/getTagValues";
+import { getGroups } from "./services/getGroups";
 import { setGanCurrentScramble } from "./smart/ganScrambleProgress";
 import {
   clearScrambleQueue,
@@ -116,6 +118,22 @@ const DEFAULT_NAV_PREFS = Object.freeze({
 function getNavPrefsStorageKey(userID) {
   const id = String(userID || "").trim();
   return id ? `pts.navPrefs.${id}` : "";
+}
+
+function buildLegacyDmConversationID(a, b) {
+  return [String(a || "").trim(), String(b || "").trim()]
+    .filter(Boolean)
+    .sort()
+    .join("#");
+}
+
+function encodeSharedPostPayload(payload = {}) {
+  try {
+    return `[sharedPost]${encodeURIComponent(JSON.stringify(payload))}`;
+  } catch (error) {
+    console.warn("Failed to encode shared post payload", error);
+    return "[Shared post]";
+  }
 }
 
 function readNavPrefs(userID, fallbackSettings = {}) {
@@ -1158,7 +1176,11 @@ function App() {
     isOpen: false,
     post: null,
     caption: "",
+    targetType: "feed",
+    availableConversations: [],
+    selectedConversationID: "",
     isSubmitting: false,
+    isLoadingDestinations: false,
     error: "",
   });
   const shareComposerResolveRef = useRef(null);
@@ -1873,7 +1895,15 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [isSignedIn, user?.UserID, eventKey, currentSession, practiceMode, statsMutationTick]);
+  }, [
+    isSignedIn,
+    user?.UserID,
+    eventKey,
+    currentSession,
+    practiceMode,
+    statsMutationTick,
+    location.pathname,
+  ]);
 
   useEffect(() => {
     if (!sharedSession?.sharedID) return;
@@ -3437,6 +3467,45 @@ function App() {
     }
   };
 
+  const publishConversationPost = async ({
+    conversationID,
+    note,
+    event,
+    solveList = [],
+    postType,
+    statShare,
+  }) => {
+    if (!user) return;
+
+    try {
+      const payloadText = encodeSharedPostPayload({
+        note: String(note || "").trim(),
+        postType: postType || (statShare ? "stat-share" : "solve"),
+        solveList,
+        statShare,
+      });
+
+      await runDb("Sending shared post", () =>
+        sendMessage(
+          conversationID,
+          user.UserID,
+          payloadText,
+          {
+            note: String(note || "").trim(),
+            messageType: "SHARED_POST",
+            postType: postType || (statShare ? "stat-share" : "solve"),
+            solveList,
+            statShare,
+          }
+        )
+      );
+      setSocialRefreshTick((t) => t + 1);
+    } catch (err) {
+      console.error("Error sending shared post to conversation:", err);
+      throw err;
+    }
+  };
+
   const closeShareComposer = (published = false) => {
     const resolve = shareComposerResolveRef.current;
     shareComposerResolveRef.current = null;
@@ -3444,7 +3513,11 @@ function App() {
       isOpen: false,
       post: null,
       caption: "",
+      targetType: "feed",
+      availableConversations: [],
+      selectedConversationID: "",
       isSubmitting: false,
+      isLoadingDestinations: false,
       error: "",
     });
     if (typeof resolve === "function") resolve(published);
@@ -3459,9 +3532,113 @@ function App() {
         isOpen: true,
         post,
         caption: String(post.note || ""),
+        targetType: "feed",
+        availableConversations: [],
+        selectedConversationID: "",
         isSubmitting: false,
+        isLoadingDestinations: true,
         error: "",
       });
+
+      Promise.all([
+        getConversations(user.UserID, 200).catch((err) => {
+          console.warn("Failed to load conversations for share composer", err);
+          return [];
+        }),
+        getGroups(user.UserID).catch((err) => {
+          console.warn("Failed to load groups for share composer", err);
+          return [];
+        }),
+        Promise.all(
+          (Array.isArray(user.Friends) ? user.Friends : []).map(async (friendID) => {
+            try {
+              const profile = await getUser(friendID);
+              return [friendID, profile];
+            } catch (err) {
+              console.warn("Failed to load friend profile for share composer", friendID, err);
+              return [friendID, null];
+            }
+          })
+        ).catch(() => []),
+      ])
+        .then(([conversations, groups, friendProfiles]) => {
+          const groupsByConversationID = Object.fromEntries(
+            (Array.isArray(groups) ? groups : [])
+              .map((group) => [String(group?.ConversationID || "").trim(), group])
+              .filter(([conversationID]) => conversationID)
+          );
+
+          const friendProfilesByID = Object.fromEntries(
+            (Array.isArray(friendProfiles) ? friendProfiles : []).filter(
+              (entry) => Array.isArray(entry) && entry[0]
+            )
+          );
+
+          const conversationOptions = [];
+          const seen = new Set();
+
+          (Array.isArray(conversations) ? conversations : []).forEach((conversation) => {
+            const conversationID = String(conversation?.ConversationID || "").trim();
+            if (!conversationID || seen.has(conversationID)) return;
+
+            const conversationType = String(conversation?.ConversationType || "DM").toUpperCase();
+            const otherUserID = String(conversation?.OtherUserID || "").trim();
+            const group = groupsByConversationID[conversationID] || null;
+            const friendProfile = friendProfilesByID[otherUserID] || null;
+            const baseName =
+              conversationType === "GROUP"
+                ? group?.Name ||
+                  conversation?.Name ||
+                  conversation?.DisplayName ||
+                  conversationID
+                : friendProfile?.Name ||
+                  friendProfile?.name ||
+                  conversation?.DisplayName ||
+                  otherUserID ||
+                  conversationID;
+
+            conversationOptions.push({
+              conversationID,
+              label: `${baseName}${conversationType === "GROUP" ? " (Group)" : ""}`,
+              type: conversationType,
+            });
+            seen.add(conversationID);
+          });
+
+          (Array.isArray(user.Friends) ? user.Friends : []).forEach((friendID) => {
+            const conversationID = buildLegacyDmConversationID(user.UserID, friendID);
+            if (!conversationID || seen.has(conversationID)) return;
+            const friendProfile = friendProfilesByID[friendID] || null;
+            conversationOptions.push({
+              conversationID,
+              label: friendProfile?.Name || friendProfile?.name || friendID,
+              type: "DM",
+            });
+            seen.add(conversationID);
+          });
+
+          conversationOptions.sort((a, b) => a.label.localeCompare(b.label));
+
+          setShareComposer((prev) => {
+            if (!prev.isOpen || prev.post !== post) return prev;
+            return {
+              ...prev,
+              availableConversations: conversationOptions,
+              isLoadingDestinations: false,
+            };
+          });
+        })
+        .catch((err) => {
+          console.warn("Failed to load share destinations", err);
+          setShareComposer((prev) => {
+            if (!prev.isOpen || prev.post !== post) return prev;
+            return {
+              ...prev,
+              availableConversations: [],
+              isLoadingDestinations: false,
+            };
+          });
+        });
     });
   };
 
@@ -3573,7 +3750,15 @@ function App() {
   };
 
   const handleConfirmShareComposer = async () => {
-    if (!shareComposer.post || shareComposer.isSubmitting) return;
+    if (!shareComposer.post || shareComposer.isSubmitting || shareComposer.isLoadingDestinations) return;
+
+    if (shareComposer.targetType === "message" && !shareComposer.selectedConversationID) {
+      setShareComposer((prev) => ({
+        ...prev,
+        error: "Choose a conversation to share to.",
+      }));
+      return;
+    }
 
     setShareComposer((prev) => ({
       ...prev,
@@ -3582,10 +3767,18 @@ function App() {
     }));
 
     try {
-      await publishPost({
-        ...shareComposer.post,
-        note: shareComposer.caption.trim(),
-      });
+      if (shareComposer.targetType === "message") {
+        await publishConversationPost({
+          ...shareComposer.post,
+          conversationID: shareComposer.selectedConversationID,
+          note: shareComposer.caption.trim(),
+        });
+      } else {
+        await publishPost({
+          ...shareComposer.post,
+          note: shareComposer.caption.trim(),
+        });
+      }
       closeShareComposer(true);
     } catch (err) {
       setShareComposer((prev) => ({
@@ -3854,10 +4047,64 @@ function App() {
       (solve) => String(solve?.sessionID || solve?.SessionID || "main") === sid
     );
   }, [currentSession, eventKey, practiceMode, practiceSolves, sessions]);
-  const currentSessionStatsForEvent =
-    sessionStats?.[String(eventKey || "").toUpperCase()]?.[
-      String(currentSession || "main")
-    ] || null;
+  const currentSessionStatsForEvent = useMemo(() => {
+    const ev = String(eventKey || "").toUpperCase();
+    const sid = String(currentSession || "main");
+    const cached = sessionStats?.[ev]?.[sid] || null;
+
+    if (practiceMode) return cached;
+
+    const cachedSolveCountTotal = Number(
+      cached?.SolveCountTotal ??
+        cached?.solveCountTotal ??
+        cached?.SolveCount ??
+        cached?.solveCount
+    );
+    const hasFullCurrentSessionCoverage =
+      Number.isFinite(cachedSolveCountTotal) &&
+      cachedSolveCountTotal >= 0 &&
+      baseCurrentSolves.length >= cachedSolveCountTotal;
+
+    if (cached && !hasFullCurrentSessionCoverage) {
+      return cached;
+    }
+
+    const bestSolve = findBestSingleSolve(baseCurrentSolves);
+    const worstSolve = findWorstSingleSolve(baseCurrentSolves);
+    const cachedBestMs = Number(cached?.BestSingleMs);
+    const cachedWorstMs = Number(cached?.WorstSingleMs);
+    const bestSolveMs = Number(bestSolve?.time ?? bestSolve?.finalTimeMs);
+    const worstSolveMs = Number(worstSolve?.time ?? worstSolve?.finalTimeMs);
+
+    if (
+      !bestSolve &&
+      !worstSolve
+    ) {
+      return cached;
+    }
+
+    const next = { ...(cached || {}) };
+
+    if (
+      Number.isFinite(bestSolveMs) &&
+      (!Number.isFinite(cachedBestMs) || bestSolveMs < cachedBestMs)
+    ) {
+      next.BestSingleMs = bestSolveMs;
+      next.BestSingleSolveSK = bestSolve?.solveRef || bestSolve?.SK || null;
+      next.BestSingleAt =
+        bestSolve?.createdAt || bestSolve?.datetime || bestSolve?.CreatedAt || bestSolve?.DateTime || null;
+    }
+
+    if (
+      Number.isFinite(worstSolveMs) &&
+      (!Number.isFinite(cachedWorstMs) || worstSolveMs > cachedWorstMs)
+    ) {
+      next.WorstSingleMs = worstSolveMs;
+      next.WorstSingleSolveSK = worstSolve?.solveRef || worstSolve?.SK || null;
+    }
+
+    return Object.keys(next).length ? next : null;
+  }, [baseCurrentSolves, currentSession, eventKey, practiceMode, sessionStats]);
   const currentSessionTotalSolveCount = Number(
     currentSessionStatsForEvent?.SolveCountTotal ??
       currentSessionStatsForEvent?.solveCountTotal ??
@@ -4502,6 +4749,18 @@ function App() {
         return;
       }
 
+      if (eventMatchesShortcut(event, settings.uiKeyBindings?.previousScramble)) {
+        event.preventDefault();
+        goBackwardScramble();
+        return;
+      }
+
+      if (eventMatchesShortcut(event, settings.uiKeyBindings?.nextScramble)) {
+        event.preventDefault();
+        goForwardScramble();
+        return;
+      }
+
       if (eventMatchesShortcut(event, settings.solveKeyBindings?.clearPenalty)) {
         event.preventDefault();
         applyPenaltyToLatestSolve("clear");
@@ -4559,6 +4818,8 @@ function App() {
     applyPenaltyToLatestSolve,
     clearPendingPostSolveTagChord,
     deleteLatestSolve,
+    goBackwardScramble,
+    goForwardScramble,
     undoDeletedSolve,
     location.pathname,
     navigate,
@@ -5384,7 +5645,7 @@ function App() {
                             style={{
                               position: "absolute",
                               top: "76px",
-                              right: "28px",
+                              right: "12px",
                               left: "auto",
                               display: "flex",
                               pointerEvents: "auto",
@@ -5429,6 +5690,11 @@ function App() {
                               discoveredOptions={mergedHomeTagOptions}
                               profileColor={user?.Color || user?.color || "#2EC4B6"}
                               variant="home"
+                              collapsible
+                              hideAutomaticFields={!!settings.hideAutomaticHomeTags}
+                              collapseToggleTop={
+                                settings.hideAutomaticHomeTags ? "36px" : "92px"
+                              }
                               allowAdditions
                               showFooterAction={showLoadLastSolveTagsButton}
                               footerActionLabel="Load tags from last solve"
@@ -5714,6 +5980,39 @@ function App() {
                     onImportModalOpenHandled={() => setShowStatsImportModal(false)}
                     onExportModalOpenHandled={() => setShowStatsExportModal(false)}
                     onSessionsListRefresh={isViewingSharedStats ? null : setSessionsList}
+                    onOverallStatsRecomputed={
+                      isViewingSharedStats
+                        ? null
+                        : ({ scope, event, sessionID, item }) => {
+                            const ev = String(event || "").toUpperCase();
+                            if (!ev || !item || typeof item !== "object") return;
+
+                            if (scope === "session") {
+                              const sid = String(sessionID || "main");
+                              setSessionStats((prev) => ({
+                                ...(prev || {}),
+                                [ev]: {
+                                  ...(prev?.[ev] || {}),
+                                  [sid]: item,
+                                },
+                              }));
+
+                              setSessionsList((prev) =>
+                                Array.isArray(prev)
+                                  ? prev.map((session) =>
+                                      String(session?.Event || "").toUpperCase() === ev &&
+                                      String(session?.SessionID || "main") === sid
+                                        ? {
+                                            ...session,
+                                            Stats: item,
+                                          }
+                                        : session
+                                    )
+                                  : prev
+                              );
+                            }
+                          }
+                    }
                   />
                 )
               }
@@ -6083,8 +6382,25 @@ function App() {
 
       <SharePostModal
         isOpen={shareComposer.isOpen}
-        title="Share to Social"
+        title="Share Post"
         caption={shareComposer.caption}
+        targetType={shareComposer.targetType}
+        onTargetTypeChange={(targetType) =>
+          setShareComposer((prev) => ({
+            ...prev,
+            targetType,
+            error: "",
+          }))
+        }
+        availableConversations={shareComposer.availableConversations}
+        selectedConversationID={shareComposer.selectedConversationID}
+        onSelectedConversationChange={(selectedConversationID) =>
+          setShareComposer((prev) => ({
+            ...prev,
+            selectedConversationID,
+            error: "",
+          }))
+        }
         onCaptionChange={(caption) =>
           setShareComposer((prev) => ({
             ...prev,
@@ -6095,6 +6411,7 @@ function App() {
         onCancel={() => closeShareComposer(false)}
         onConfirm={handleConfirmShareComposer}
         isSubmitting={shareComposer.isSubmitting}
+        isLoadingDestinations={shareComposer.isLoadingDestinations}
         error={shareComposer.error}
       />
       </div>

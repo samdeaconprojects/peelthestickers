@@ -9,7 +9,8 @@ const sessionsLoader = createCachedRequestLoader(async (path) => {
 function normalizeSession(item) {
   if (!item || typeof item !== "object") return item;
 
-  const sessionID = String(item.SessionID || item.sessionID || "").trim();
+  const rawSessionID = String(item.SessionID || item.sessionID || "").trim();
+  const sessionID = rawSessionID && rawSessionID.toLowerCase() === "main" ? "main" : rawSessionID;
   const sessionName = String(
     item.SessionName || item.sessionName || item.Name || item.name || ""
   ).trim();
@@ -19,11 +20,15 @@ function normalizeSession(item) {
   if (!sessionName || sessionName === "Main Session") {
     return {
       ...item,
+      SessionID: "main",
       SessionName: "Main",
     };
   }
 
-  return item;
+  return {
+    ...item,
+    SessionID: "main",
+  };
 }
 
 export const getSessions = async (userID, options = {}) => {

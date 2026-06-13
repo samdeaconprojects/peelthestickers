@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import "./TimeTable.css";
-import { formatTime, calculateAverage } from "../TimeList/TimeUtils";
+import { formatTime, calculateAverage, getExtremeIndexes } from "../TimeList/TimeUtils";
 import TimeItem from "../TimeList/TimeItem";
 import Detail from "../Detail/Detail";
 import useSolveSelection from "../../hooks/useSolveSelection";
@@ -221,6 +221,9 @@ const TimeTable = ({
 }) => {
   const [selectedSolve, setSelectedSolve] = useState(null);
   const resolvedProfileColor = user?.Color || user?.color || "#2EC4B6";
+  const isAverageDetailEmbedded = String(containerClassName || "")
+    .split(/\s+/)
+    .includes("averageDetailEmbeddedTable");
 
   const [displayMode, setDisplayMode] = useState(initialDisplayMode);
   const [sortBy, setSortBy] = useState(initialSortBy);
@@ -368,29 +371,12 @@ const TimeTable = ({
   }, [sortedSolves]);
 
   const tableBestWorst = useMemo(() => {
-    const bestIdxSet = new Set();
-    const worstIdxSet = new Set();
-    if (!sortedSolves.length) return { bestIdxSet, worstIdxSet };
-
-    const comparable = sortedSolves.map((solve, idx) => ({
-      idx,
-      time: getComparableSolveTime(solve),
-    }));
-
-    const finite = comparable.filter((entry) => Number.isFinite(entry.time));
-    if (finite.length) {
-      const minTime = Math.min(...finite.map((entry) => entry.time));
-      finite.forEach((entry) => {
-        if (entry.time === minTime) bestIdxSet.add(entry.idx);
-      });
-    }
-
-    const maxTime = Math.max(...comparable.map((entry) => entry.time));
-    comparable.forEach((entry) => {
-      if (entry.time === maxTime) worstIdxSet.add(entry.idx);
-    });
-
-    return { bestIdxSet, worstIdxSet };
+    const comparable = sortedSolves.map((solve) => getComparableSolveTime(solve));
+    const { minIndex, maxIndex } = getExtremeIndexes(comparable);
+    return {
+      bestIndex: minIndex,
+      worstIndex: maxIndex,
+    };
   }, [sortedSolves]);
 
   const tableRows = useMemo(() => {
@@ -457,29 +443,16 @@ const TimeTable = ({
               }))
             );
 
-      const numeric = solvesWithDisplay
-        .map((s, idx) => ({ idx, time: getSolveMs(s) }))
-        .filter((x) => Number.isFinite(x.time));
-
-      const bestIdxSet = new Set();
-      const worstIdxSet = new Set();
-
-      if (numeric.length > 0) {
-        const minTime = Math.min(...numeric.map((x) => x.time));
-        const maxTime = Math.max(...numeric.map((x) => x.time));
-
-        numeric.forEach((item) => {
-          if (item.time === minTime) bestIdxSet.add(item.idx);
-          if (item.time === maxTime) worstIdxSet.add(item.idx);
-        });
-      }
+      const { minIndex, maxIndex } = getExtremeIndexes(
+        solvesWithDisplay.map((solve) => getSolveMs(solve))
+      );
 
       return {
         rowIndex,
         average,
         rankMap: rowRankMap,
-        bestIdxSet,
-        worstIdxSet,
+        bestIndex: minIndex,
+        worstIndex: maxIndex,
         solves: solvesWithDisplay,
       };
     });
@@ -493,6 +466,8 @@ const TimeTable = ({
     overallVisibleRankMap,
     preserveInputOrder,
   ]);
+
+  const hasMultipleItemRows = itemRows.length > 1;
 
   const handleSolvePrimaryAction = (solve) => {
     if (typeof onSolveOpen === "function") {
@@ -659,8 +634,8 @@ const TimeTable = ({
           {tableRows.map((solve, index) => {
             const ms = getSolveMs(solve);
             const tablePerfClass = getPerfClassByRank01(overallVisibleRankMap[index]);
-            const isBest = tableBestWorst.bestIdxSet.has(index);
-            const isWorst = tableBestWorst.worstIdxSet.has(index);
+            const isBest = tableBestWorst.bestIndex === index;
+            const isWorst = tableBestWorst.worstIndex === index;
 
             const selected = selection.isIndexSelected(index);
             const selectStyleInline = selected
@@ -683,7 +658,32 @@ const TimeTable = ({
                   }
                 }}
               >
-                <div className="time-items-rank">{solve.__displayNumber}</div>
+                {isAverageDetailEmbedded ? (
+                  <div className="time-items-left-rail">
+                    <div className="time-items-rank time-items-rank--detail">
+                      <span className="time-items-rank-value">{solve.__displayNumber}</span>
+                    </div>
+                    {showAverages && (
+                      <div className="time-items-averages time-items-averages--detail">
+                        <div className="time-items-average-box time-items-average-box--detail">
+                          <span className="time-items-average-label">Ao5</span>
+                          <span className="time-items-average-value">
+                            {solve.__ao5 != null ? formatTime(solve.__ao5) : "—"}
+                          </span>
+                        </div>
+
+                        <div className="time-items-average-box time-items-average-box--detail">
+                          <span className="time-items-average-label">Ao12</span>
+                          <span className="time-items-average-value">
+                            {solve.__ao12 != null ? formatTime(solve.__ao12) : "—"}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="time-items-rank">{solve.__displayNumber}</div>
+                )}
 
                   <div className="time-items-main">
                     <div className="time-items-main-content">
@@ -718,30 +718,36 @@ const TimeTable = ({
                           </span>
                         </div>
 
-                        {showAverages && (
-                          <div className="time-items-averages">
-                            <div className="time-items-average-box">
-                              <span className="time-items-average-label">Ao5</span>
-                              <span className="time-items-average-value">
-                                {solve.__ao5 != null ? formatTime(solve.__ao5) : "—"}
-                              </span>
-                            </div>
+                        {((!isAverageDetailEmbedded && showAverages) ||
+                          typeof renderSolveFooter === "function") && (
+                          <div className="time-items-side">
+                            {typeof renderSolveFooter === "function" ? (
+                              <div className="time-items-footer">
+                                {renderSolveFooter(solve, { displayMode: "table", index })}
+                              </div>
+                            ) : null}
 
-                            <div className="time-items-average-box">
-                              <span className="time-items-average-label">Ao12</span>
-                              <span className="time-items-average-value">
-                                {solve.__ao12 != null ? formatTime(solve.__ao12) : "—"}
-                              </span>
-                            </div>
+                            {!isAverageDetailEmbedded && showAverages && (
+                              <div className="time-items-averages">
+                                <div className="time-items-average-box">
+                                  <span className="time-items-average-label">Ao5</span>
+                                  <span className="time-items-average-value">
+                                    {solve.__ao5 != null ? formatTime(solve.__ao5) : "—"}
+                                  </span>
+                                </div>
+
+                                <div className="time-items-average-box">
+                                  <span className="time-items-average-label">Ao12</span>
+                                  <span className="time-items-average-value">
+                                    {solve.__ao12 != null ? formatTime(solve.__ao12) : "—"}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
 
-                      {typeof renderSolveFooter === "function" ? (
-                        <div className="time-items-footer">
-                          {renderSolveFooter(solve, { displayMode: "table", index })}
-                        </div>
-                      ) : null}
                     </div>
                   </div>
                 </button>
@@ -756,8 +762,16 @@ const TimeTable = ({
                 {row.solves.map((solve, solveIndex) => {
                   const perfKey = sortBy === "time" ? solve.__flatIndex : solveIndex;
                   const perfClass = getPerfClassByRank01(row.rankMap[perfKey]);
-                  const isBest = sortBy !== "time" && row.bestIdxSet.has(solveIndex);
-                  const isWorst = sortBy !== "time" && row.worstIdxSet.has(solveIndex);
+                  const isOverallBest =
+                    hasMultipleItemRows && tableBestWorst.bestIndex === solve.__flatIndex;
+                  const isOverallWorst =
+                    hasMultipleItemRows && tableBestWorst.worstIndex === solve.__flatIndex;
+                  const isRowBest =
+                    !isOverallBest && sortBy !== "time" && row.bestIndex === solveIndex;
+                  const isRowWorst =
+                    !isOverallWorst && sortBy !== "time" && row.worstIndex === solveIndex;
+                  const useOverallHighlight = hasMultipleItemRows && (isOverallBest || isOverallWorst);
+                  const useRowBorder = isRowBest || isRowWorst;
 
                   const selected = selection.isIndexSelected(solve.__flatIndex);
                   const selectStyleInline = selected
@@ -768,7 +782,11 @@ const TimeTable = ({
                       }
                     : null;
                   const cellStyle = {
-                    ...(buildPerfBorderStyle(perfClass, seriesStyle, isBest || isWorst ? "dashed" : "solid") || {}),
+                    ...(buildPerfBorderStyle(
+                      perfClass,
+                      seriesStyle,
+                      useRowBorder ? "dashed" : "solid"
+                    ) || {}),
                     ...(selectStyleInline || {}),
                   };
 
@@ -779,7 +797,17 @@ const TimeTable = ({
                     >
                       <button
                         type="button"
-                        className="timelist-row-cell TimeItem"
+                        className={`timelist-row-cell TimeItem ${perfClass} ${
+                          useOverallHighlight && isOverallBest
+                            ? "overall-border-min dashed-border-min"
+                            : ""
+                        } ${
+                          useOverallHighlight && isOverallWorst
+                            ? "overall-border-max dashed-border-max"
+                            : ""
+                        } ${useRowBorder && isRowBest ? "dashed-border-min" : ""} ${
+                          useRowBorder && isRowWorst ? "dashed-border-max" : ""
+                        }`.trim()}
                         style={cellStyle}
                         onClick={(e) => onSolveClick(e, solve, solve.__flatIndex)}
                         onMouseDown={(e) => {

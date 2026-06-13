@@ -179,6 +179,11 @@
   line-height: 1.05;
   margin-top: 0;
   width: 72px;
+  max-width: 72px;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  hyphens: none;
 }
 
 /* Make the whole Social page a flex column that fills its area */
@@ -218,7 +223,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 44px;
   padding: 10px;
   overflow-y: auto;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0px, black 48px);
@@ -265,6 +270,11 @@
   border-color: transparent !important;
 }
 
+.socialPage .postNameAndPicture .name-tag-link--profileCorner .name-tag-cubeFrame .puzzle-svg-wrap,
+.socialPage .postNameAndPicture .name-tag-link--profileCorner .name-tag-cubeFrame .puzzle-svg-inner {
+  transform: translate(-10px, 2px);
+}
+
 .socialPage .postNameAndPicture .name-tag-link--profileCorner:hover::before,
 .socialPage .postNameAndPicture .name-tag-link--profileCorner:focus-visible::before {
   width: 100%;
@@ -297,11 +307,36 @@
     margin-right: 10px;
   }
 
-  .socialPage .postCaption {
+.socialPage .postCaption {
     max-width: 1000px;
     margin-left: 10px;
     margin-right: 10px;
   }
+
+  .socialPage .postCaption--attached {
+    display: inline-block;
+    align-self: auto;
+    width: fit-content;
+    max-width: min(1000px, calc(100% - 28px));
+    margin: 0;
+  }
+}
+
+.socialPage .postShell--withCaption {
+  padding-top: 18px;
+}
+
+.socialPage .postCaption--attached {
+  position: absolute;
+  top: 0;
+  left: 6px;
+  display: inline-flex;
+  align-self: auto;
+  width: fit-content;
+  max-width: min(1000px, calc(100% - 28px));
+  margin: 0;
+  padding: 8px 12px;
+  transform: translate(-6px, -24px);
 }
 
 .messagesPanel {
@@ -701,6 +736,47 @@
   border-radius: 16px;
   font-size: 14pt;
   line-height: 1.4;
+}
+
+.chatMessage--sharedPost {
+  max-width: min(1120px, calc(100% - 32px));
+  width: min(1120px, calc(100% - 32px));
+  min-width: min(680px, calc(100% - 32px));
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: white;
+}
+
+.chatMessage--sharedPost .postShell,
+.chatMessage--sharedPost .statFeedPost {
+  width: 100%;
+  max-width: 100%;
+}
+
+.chatMessage--sharedPost.sent,
+.chatMessage--sharedPost.received {
+  color: white;
+}
+
+.chatMessage--sharedPost .time-item,
+.chatMessage--sharedPost .postAverageSnapshotTime.time-item,
+.chatMessage--sharedPost .titleText,
+.chatMessage--sharedPost .titleTextValue,
+.chatMessage--sharedPost .titleTextLabel {
+  color: white;
+}
+
+.chatMessage--sharedPost .postAverageSnapshot {
+  width: min(720px, 100%);
+}
+
+.chatSharedPostSender {
+  margin: 0 0 8px 4px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .sent {

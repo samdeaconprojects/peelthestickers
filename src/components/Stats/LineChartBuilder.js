@@ -122,6 +122,8 @@ const LineChartBuilder = ({
   showAxes = true,
   showGuides = true,
   showAxisLabels = true,
+  hideTopYAxisLabel = false,
+  trimTopYAxis = false,
 }) => {
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, time: "" });
   const [hoveredDotId, setHoveredDotId] = useState(null);
@@ -272,6 +274,12 @@ const LineChartBuilder = ({
     yDenom,
   ]);
 
+  const trimmedTopBoundary = useMemo(() => {
+    if (!trimTopYAxis || (yTicks || []).length < 2) return topPadding;
+    const tickStep = chartHeight / (Math.max(1, (yTicks || []).length - 1));
+    return topPadding + tickStep * 0.22;
+  }, [trimTopYAxis, yTicks, chartHeight, topPadding]);
+
   const Axis = ({ points }) => (
     <polyline fill="none" stroke="rgba(204, 204, 204, 0.58)" strokeWidth=".7" points={points} />
   );
@@ -280,11 +288,13 @@ const LineChartBuilder = ({
       points={`${leftPadding},${resolvedHeight - bottomPadding} ${resolvedWidth - rightPadding},${resolvedHeight - bottomPadding}`}
     />;
   const YAxis = () =>
-    <Axis points={`${leftPadding},${topPadding} ${leftPadding},${resolvedHeight - bottomPadding}`} />;
+    <Axis
+      points={`${leftPadding},${trimmedTopBoundary} ${leftPadding},${resolvedHeight - bottomPadding}`}
+    />;
 
   const VerticalGuides = () => {
     const tickEntries = getXTickEntries(safeData);
-    const startY = topPadding;
+    const startY = trimmedTopBoundary;
     const endY = resolvedHeight - bottomPadding;
     return tickEntries.slice(1, -1).map(({ item, index }) => {
       const xCoordinate = ((item.x - minX) / xDenom) * chartWidth + leftPadding;
@@ -340,7 +350,9 @@ const LineChartBuilder = ({
 
   const LabelsYAxis = () => {
     const shouldUseWholeSeconds = (yTicks?.[1] ?? 1) - (yTicks?.[0] ?? 0) >= 1;
-    return (yTicks || []).map((tickValue) => {
+    const visibleTicks =
+      hideTopYAxisLabel || trimTopYAxis ? (yTicks || []).slice(0, -1) : yTicks || [];
+    return visibleTicks.map((tickValue) => {
       const x = leftPadding - FONT_SIZE * 0.7;
       const ratio = (tickValue - minimumYFromData) / yDenom;
       const yCoordinate = chartHeight - chartHeight * ratio + topPadding + FONT_SIZE / 3;
@@ -650,6 +662,8 @@ LineChartBuilder.defaultProps = {
   showAxes: true,
   showGuides: true,
   showAxisLabels: true,
+  hideTopYAxisLabel: false,
+  trimTopYAxis: false,
 };
 
 LineChartBuilder.propTypes = {
@@ -714,6 +728,8 @@ LineChartBuilder.propTypes = {
   showAxes: PropTypes.bool,
   showGuides: PropTypes.bool,
   showAxisLabels: PropTypes.bool,
+  hideTopYAxisLabel: PropTypes.bool,
+  trimTopYAxis: PropTypes.bool,
 };
 
 export default LineChartBuilder;

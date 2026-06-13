@@ -9,7 +9,8 @@ export const getSolveWindowFromStart = async (
 ) => {
   const id = String(userID || "").trim();
   const ev = String(event || "").toUpperCase().trim();
-  const sid = String(sessionID || "main").trim() || "main";
+  const hasSessionScope = sessionID != null && String(sessionID).trim() !== "";
+  const sid = hasSessionScope ? String(sessionID).trim() : "";
   const ref = String(startSolveRef || "").trim();
   const count = Math.max(1, Math.min(1000, Number(n || 5)));
 
@@ -19,10 +20,10 @@ export const getSolveWindowFromStart = async (
 
   const qs = new URLSearchParams({
     event: ev,
-    sessionID: sid,
     startSolveRef: ref,
     n: String(count),
   });
+  if (sid) qs.set("sessionID", sid);
 
   const out = await apiGet(`/api/solveWindow/${encodeURIComponent(id)}?${qs.toString()}`);
   return out?.items || [];

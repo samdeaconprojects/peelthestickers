@@ -197,8 +197,43 @@
 }
 
 .tagHomeWrap {
+  --tag-home-toggle-width: 28px;
+  --tag-home-toggle-gap: 6px;
+  --tag-home-toggle-top: 52px;
   position: relative;
   z-index: 220;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+}
+
+.tagHomeWrap--collapsible {
+  padding-right: calc(var(--tag-home-toggle-width) + var(--tag-home-toggle-gap));
+}
+
+.tagHomeWrap.is-collapsed {
+  min-height: 92px;
+}
+
+.tagHomeContent {
+  position: relative;
+  overflow: visible;
+  max-width: 100%;
+  opacity: 1;
+  transform: translateX(0);
+  transform-origin: right top;
+  transition:
+    opacity 150ms ease,
+    transform 180ms ease,
+    max-width 180ms ease;
+}
+
+.tagHomeWrap.is-collapsed .tagHomeContent {
+  max-width: 0;
+  opacity: 0;
+  transform: translateX(8px);
+  pointer-events: none;
+  overflow: hidden;
 }
 
 .tagHomeSummary {
@@ -207,6 +242,41 @@
   flex-wrap: nowrap;
   gap: 4px;
   align-items: stretch;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.tagHomeCollapseToggle {
+  position: absolute;
+  top: var(--tag-home-toggle-top);
+  right: -6px;
+  width: var(--tag-home-toggle-width);
+  min-height: 92px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  transition:
+    color 140ms ease,
+    transform 140ms ease,
+    opacity 140ms ease;
+}
+
+.tagHomeCollapseToggle:hover {
+  color: rgba(255, 255, 255, 1);
+  transform: translateX(1px);
+}
+
+.tagHomeCollapseToggleIcon {
+  font-size: 22px;
+  line-height: 1;
+  transform: translateX(0.5px);
 }
 
 .tagHomeItem {
@@ -256,6 +326,8 @@
   text-align: left;
   opacity: 0.62;
   width: 100%;
+  -webkit-user-select: none;
+  user-select: none;
   transition:
     opacity 140ms ease,
     transform 140ms ease,
@@ -492,6 +564,22 @@
   .tagHomePopover {
     top: calc(100% + 10px);
     right: 0;
+  }
+
+  .tagHomeWrap--collapsible {
+    --tag-home-toggle-width: 24px;
+    --tag-home-toggle-top: 40px;
+  }
+
+  .tagHomeCollapseToggle {
+    top: var(--tag-home-toggle-top);
+    right: -4px;
+    width: 24px;
+    min-height: 72px;
+  }
+
+  .tagHomeWrap.is-collapsed {
+    min-height: 72px;
   }
 
   .tagHomeChip {

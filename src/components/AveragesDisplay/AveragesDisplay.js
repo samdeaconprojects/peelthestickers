@@ -4,9 +4,36 @@ import { findBestStrictWindow } from '../../utils/strictAverageUtils';
 import { useSettings } from '../../contexts/SettingsContext';
 import './AveragesDisplay.css';
 
+function getPenalty(solve) {
+  return String(solve?.penalty ?? solve?.Penalty ?? "").trim().toUpperCase();
+}
+
+function getComparableSolveTime(solve) {
+  if (!solve) return null;
+
+  const penalty = getPenalty(solve);
+  if (penalty === "DNF") return Number.MAX_SAFE_INTEGER;
+
+  const explicitFinal = Number(solve?.finalTimeMs ?? solve?.FinalTimeMs);
+  if (Number.isFinite(explicitFinal) && explicitFinal >= 0) {
+    return explicitFinal;
+  }
+
+  const base = Number(
+    solve?.rawTimeMs ??
+      solve?.RawTimeMs ??
+      solve?.rawTime ??
+      solve?.originalTime ??
+      solve?.time
+  );
+  if (!Number.isFinite(base) || base < 0) return null;
+
+  return penalty === "+2" ? base + 2000 : base;
+}
+
 function safeAverage(solves, count) {
   if (solves.length < count) return "N/A";
-  return calculateAverage(solves.slice(-count).map(s => s.time), true).average;
+  return calculateAverage(solves.slice(-count).map(getComparableSolveTime), true).average;
 }
 
 function AveragesDisplay({
@@ -20,7 +47,9 @@ function AveragesDisplay({
   const avgOfFive = safeAverage(currentSolves, 5);
   const avgOfTwelve = safeAverage(currentSolves, 12);
 
-  const fallbackBestAvgOfFive = calculateBestAverageOfFive(currentSolves.map((s) => s.time));
+  const fallbackBestAvgOfFive = calculateBestAverageOfFive(
+    currentSolves.map(getComparableSolveTime)
+  );
   const bestAvgOfFiveOverall = Number(overallSessionStats?.BestAo5Ms);
   const bestAvgOfFive = Number.isFinite(bestAvgOfFiveOverall)
     ? bestAvgOfFiveOverall
@@ -32,7 +61,10 @@ function AveragesDisplay({
   if (currentSolves.length >= 12) {
     let best = Infinity;
     for (let i = 0; i <= currentSolves.length - 12; i++) {
-      const avgResult = calculateAverage(currentSolves.slice(i, i + 12).map(s => s.time), true).average;
+      const avgResult = calculateAverage(
+        currentSolves.slice(i, i + 12).map(getComparableSolveTime),
+        true
+      ).average;
       if (typeof avgResult === "number" && isFinite(avgResult) && avgResult < best) {
         best = avgResult;
       }
@@ -53,7 +85,7 @@ function AveragesDisplay({
     let selected = [];
     for (let i = 0; i <= currentSolves.length - count; i++) {
       const slice = currentSolves.slice(i, i + count);
-      const avg = calculateAverage(slice.map((s) => s.time), true).average;
+      const avg = calculateAverage(slice.map(getComparableSolveTime), true).average;
       if (typeof avg === "number" && Math.round(avg) === Math.round(Number(targetAvg))) {
         selected = slice;
         break;
@@ -68,7 +100,10 @@ function AveragesDisplay({
   };
 
   // BPA/WPA
-  const lastFour = currentSolves.slice(-4).map(s => s.time).filter(t => typeof t === "number");
+  const lastFour = currentSolves
+    .slice(-4)
+    .map(getComparableSolveTime)
+    .filter((t) => typeof t === "number");
   let bpa5 = "N/A", wpa5 = "N/A";
   let bpa12 = "N/A", wpa12 = "N/A";
 
@@ -90,7 +125,10 @@ function AveragesDisplay({
 
   if (currentSolves.length >= 11) {
     // AO12 BPA/WPA
-    const lastEleven = currentSolves.slice(-11).map(s => s.time).filter(t => typeof t === "number");
+    const lastEleven = currentSolves
+      .slice(-11)
+      .map(getComparableSolveTime)
+      .filter((t) => typeof t === "number");
     if (lastEleven.length === 11) {
       const sorted12 = [...lastEleven].sort((a, b) => a - b);
       const bestHypo12 = sorted12[0];

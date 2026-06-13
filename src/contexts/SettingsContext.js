@@ -99,6 +99,7 @@ export const defaultSettings = {
   smartCubeProvider: "gan",
   navigationArrowStyle: "scramble",
   showAddSolveButton: true,
+  hideAutomaticHomeTags: false,
   statsSummaryLayout: "tile",
 
   // random-state = cubing.js default

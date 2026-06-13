@@ -514,6 +514,7 @@ function LineChart({
   eventKey,
   practiceMode = false,
   allowViewPicker = true,
+  initialShowControls = false,
   initialControlState = null,
   controlsSyncKey = "",
   viewMode = "standard",
@@ -534,6 +535,7 @@ function LineChart({
     showAo12: initialControlState?.showAo12 !== false,
     showMean: initialControlState?.showMean !== false,
     showGrid: initialControlState?.showGrid !== false,
+    showTitle: initialControlState?.showTitle !== false,
     groupMode: initialControlState?.groupMode || "solve",
     xScaleMode: initialControlState?.xScaleMode || "ordinal",
     dotSize: Math.min(
@@ -547,12 +549,17 @@ function LineChart({
     useTightAutoScale: initialControlState?.useTightAutoScale !== false,
     yMinInput: String(initialControlState?.yMinInput || ""),
     yMaxInput: String(initialControlState?.yMaxInput || ""),
-  }), [initialControlState, solves]);
+    showControls:
+      typeof initialControlState?.showControls === "boolean"
+        ? initialControlState.showControls
+        : initialShowControls,
+  }), [initialControlState, initialShowControls, solves]);
 
   const [showAo5, setShowAo5] = useState(() => resolvedInitialControlState.showAo5);
   const [showAo12, setShowAo12] = useState(() => resolvedInitialControlState.showAo12);
   const [showMean, setShowMean] = useState(() => resolvedInitialControlState.showMean);
   const [showGrid, setShowGrid] = useState(() => resolvedInitialControlState.showGrid);
+  const [showTitle, setShowTitle] = useState(() => resolvedInitialControlState.showTitle);
   const [groupMode, setGroupMode] = useState(() => resolvedInitialControlState.groupMode);
   const [xScaleMode, setXScaleMode] = useState(() => resolvedInitialControlState.xScaleMode);
   const [dotSize, setDotSize] = useState(() => resolvedInitialControlState.dotSize);
@@ -561,6 +568,8 @@ function LineChart({
   );
   const [yMinInput, setYMinInput] = useState(() => resolvedInitialControlState.yMinInput);
   const [yMaxInput, setYMaxInput] = useState(() => resolvedInitialControlState.yMaxInput);
+  const [showControls, setShowControls] = useState(() => resolvedInitialControlState.showControls);
+  const isTitleOnlyMode = !showControls && showTitle && Boolean(title);
 
   const selection = useSolveSelection();
   const hasComparison = Array.isArray(comparisonSeries) && comparisonSeries.length > 0;
@@ -709,12 +718,14 @@ function LineChart({
     setShowAo12(next.showAo12);
     setShowMean(next.showMean);
     setShowGrid(next.showGrid);
+    setShowTitle(next.showTitle);
     setGroupMode(next.groupMode);
     setXScaleMode(next.xScaleMode);
     setDotSize(next.dotSize);
     setUseTightAutoScale(next.useTightAutoScale);
     setYMinInput(next.yMinInput);
     setYMaxInput(next.yMaxInput);
+    setShowControls(next.showControls);
   }, [controlsSyncKey, resolvedInitialControlState]);
 
   useEffect(() => {
@@ -724,12 +735,14 @@ function LineChart({
       showAo12,
       showMean,
       showGrid,
+      showTitle,
       groupMode,
       xScaleMode,
       dotSize,
       useTightAutoScale,
       yMinInput,
       yMaxInput,
+      showControls,
     });
   }, [
     dotSize,
@@ -739,10 +752,12 @@ function LineChart({
     showAo12,
     showGrid,
     showMean,
+    showTitle,
     useTightAutoScale,
     xScaleMode,
     yMaxInput,
     yMinInput,
+    showControls,
   ]);
 
   const scaleValues = useMemo(
@@ -770,15 +785,34 @@ function LineChart({
 
   const parsedYMin = Number(yMinInput);
   const parsedYMax = Number(yMaxInput);
-  const hasCustomYRange =
-    yMinInput !== "" &&
-    yMaxInput !== "" &&
-    Number.isFinite(parsedYMin) &&
-    Number.isFinite(parsedYMax) &&
-    parsedYMax > parsedYMin;
   const activeScale = useTightAutoScale ? tightAutoScale : baselineScale;
-  const resolvedYMin = hasCustomYRange ? parsedYMin : activeScale.min;
-  const resolvedYMax = hasCustomYRange ? parsedYMax : activeScale.max;
+  const hasCustomYMin = yMinInput !== "" && Number.isFinite(parsedYMin);
+  const hasCustomYMax = yMaxInput !== "" && Number.isFinite(parsedYMax);
+  const candidateYMin = hasCustomYMin ? parsedYMin : activeScale.min;
+  const candidateYMax = hasCustomYMax ? parsedYMax : activeScale.max;
+  const hasValidResolvedYRange = candidateYMax > candidateYMin;
+  const resolvedYMin = hasValidResolvedYRange ? candidateYMin : activeScale.min;
+  const resolvedYMax = hasValidResolvedYRange ? candidateYMax : activeScale.max;
+
+  const beginManualScaleEdit = (bound, nextValue) => {
+    const normalizedValue = String(nextValue);
+    const shouldSeedInputs = useTightAutoScale || (yMinInput === "" && yMaxInput === "");
+
+    setUseTightAutoScale(false);
+
+    if (bound === "min") {
+      setYMinInput(normalizedValue);
+      if (shouldSeedInputs && yMaxInput === "") {
+        setYMaxInput(String(activeScale.max));
+      }
+      return;
+    }
+
+    setYMaxInput(normalizedValue);
+    if (shouldSeedInputs && yMinInput === "") {
+      setYMinInput(String(activeScale.min));
+    }
+  };
 
   const openSolveDetail = (solve) => {
     if (typeof onSolveOpen === "function") {
@@ -913,197 +947,222 @@ function LineChart({
       )}
 
       {allowViewPicker && (
-        <div className="lineChartControls">
-          <div className="chartControlGroup chartControlGroup--mode">
-            <div className="chartModeGrid">
-              {!isTimeView && !hasBucketItems && (
-                <button
-                  type="button"
-                  className={`statsToggleBtn ${groupMode === "solve" ? "is-active" : ""}`}
-                  onClick={() => {
-                    selection.clearSelection();
-                    setGroupMode("solve");
-                  }}
-                >
-                  Idx
-                </button>
-              )}
-              <button
-                type="button"
-                className={`statsToggleBtn ${groupMode === "day" ? "is-active" : ""}`}
-                onClick={() => {
-                  selection.clearSelection();
-                  setGroupMode("day");
-                }}
-              >
-                D
-              </button>
-              <button
-                type="button"
-                className={`statsToggleBtn ${groupMode === "week" ? "is-active" : ""}`}
-                onClick={() => {
-                  selection.clearSelection();
-                  setGroupMode("week");
-                }}
-              >
-                W
-              </button>
-              <button
-                type="button"
-                className={`statsToggleBtn ${groupMode === "month" ? "is-active" : ""}`}
-                onClick={() => {
-                  selection.clearSelection();
-                  setGroupMode("month");
-                }}
-              >
-                M
-              </button>
-              <button
-                type="button"
-                className={`statsToggleBtn ${groupMode === "year" ? "is-active" : ""}`}
-                onClick={() => {
-                  selection.clearSelection();
-                  setGroupMode("year");
-                }}
-              >
-                Y
-              </button>
-            </div>
-          </div>
-
-          <div className="chartControlGroup chartControlGroup--toggleSet">
-            <button
-              type="button"
-              className={`statsToggleBtn ${showAo5 ? "is-active" : ""}`}
-              disabled={!solveLevel || isTimeView || hasComparison}
-              onClick={() => setShowAo5((value) => !value)}
-            >
-              Ao5
-            </button>
-
-            <button
-              type="button"
-              className={`statsToggleBtn ${showAo12 ? "is-active" : ""}`}
-              disabled={!solveLevel || isTimeView || hasComparison}
-              onClick={() => setShowAo12((value) => !value)}
-            >
-              Ao12
-            </button>
-
-            <button
-              type="button"
-              className={`statsToggleBtn ${xScaleMode === "datetime" ? "is-active" : ""}`}
-              onClick={() =>
-                setXScaleMode((value) => (value === "datetime" ? "ordinal" : "datetime"))
-              }
-            >
-              Date Gaps
-            </button>
-
-            <button
-              type="button"
-              className={`statsToggleBtn ${showMean ? "is-active" : ""}`}
-              onClick={() => setShowMean((value) => !value)}
-            >
-              Mean
-            </button>
-
-            <button
-              type="button"
-              className={`statsToggleBtn ${showGrid ? "is-active" : ""}`}
-              onClick={() => setShowGrid((value) => !value)}
-            >
-              Grid
-            </button>
-          </div>
-
-          <div className="chartControlGroup chartControlGroup--inline">
-            <span className="chartControlLabel">Dots</span>
-            <div className="chartControlRow">
-              <button
-                type="button"
-                className="statsMiniBtn"
-                onClick={() => setDotSize((value) => Math.max(MIN_DOT_SIZE, value - 1))}
-              >
-                -
-              </button>
-              <span className="chartControlValue">{dotSize}</span>
-              <button
-                type="button"
-                className="statsMiniBtn"
-                onClick={() => setDotSize((value) => Math.min(MAX_DOT_SIZE, value + 1))}
-              >
-                +
-              </button>
-            </div>
-          </div>
-
-          <div className="chartControlGroup chartControlGroup--inline chartControlGroup--scale">
-            <span className="chartControlLabel">Scale</span>
-            <div className="chartControlRow chartControlRow--scale">
-              <button
-                type="button"
-                className={`statsMiniBtn chartScaleAutoBtn ${useTightAutoScale ? "is-active" : ""}`}
-                onClick={() => {
-                  setUseTightAutoScale((value) => {
-                    const nextValue = !value;
-                    if (nextValue) {
-                      setYMinInput("");
-                      setYMaxInput("");
-                    }
-                    return nextValue;
-                  });
-                }}
-              >
-                Auto
-              </button>
-              <input
-                className="chartScaleInput"
-                type="number"
-                step="0.1"
-                inputMode="decimal"
-                placeholder={String(activeScale.min)}
-                value={yMinInput}
-                onChange={(e) => {
-                  setUseTightAutoScale(false);
-                  setYMinInput(e.target.value);
-                }}
-                aria-label="Minimum seconds"
-              />
-              <span className="chartControlDivider">to</span>
-              <input
-                className="chartScaleInput"
-                type="number"
-                step="0.1"
-                inputMode="decimal"
-                placeholder={String(activeScale.max)}
-                value={yMaxInput}
-                onChange={(e) => {
-                  setUseTightAutoScale(false);
-                  setYMaxInput(e.target.value);
-                }}
-                aria-label="Maximum seconds"
-              />
-            </div>
-          </div>
-
-          {hasComparison && legendItems.length > 0 && (
-            <div className="lineChartLegend">
-              {legendItems.map((item) => (
-                <div key={item.id || item.label} className="lineChartLegendItem">
-                  <span
-                    className="lineChartLegendSwatch"
-                    style={{ backgroundColor: item.color || "#2EC4B6" }}
-                  />
-                  <span className="lineChartLegendLabel">{item.label}</span>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="lineChartTopButtons">
+          <button
+            type="button"
+            className={`lineChartControlsToggle ${showTitle ? "is-active" : ""}`}
+            aria-pressed={showTitle}
+            aria-label={showTitle ? "Hide chart title" : "Show chart title"}
+            title={showTitle ? "Hide chart title" : "Show chart title"}
+            onClick={() => setShowTitle((value) => !value)}
+          >
+            T
+          </button>
+          <button
+            type="button"
+            className="lineChartControlsToggle"
+            aria-expanded={showControls}
+            aria-label={showControls ? "Hide chart controls" : "Show chart controls"}
+            title={showControls ? "Hide chart controls" : "Show chart controls"}
+            onClick={() => setShowControls((value) => !value)}
+          >
+            {showControls ? "˄" : "˅"}
+          </button>
         </div>
       )}
 
-      <div className="lineChartBody">
+      {!showControls && showTitle && title ? (
+        <div className="lineChartCollapsedTitle">{title}</div>
+      ) : null}
+
+      {allowViewPicker && showControls && (
+        <div className="lineChartControlsShell">
+          <div className="lineChartControls">
+            <div className="chartControlGroup chartControlGroup--mode">
+              <div className="chartModeGrid">
+                {!isTimeView && !hasBucketItems && (
+                  <button
+                    type="button"
+                    className={`statsToggleBtn ${groupMode === "solve" ? "is-active" : ""}`}
+                    onClick={() => {
+                      selection.clearSelection();
+                      setGroupMode("solve");
+                    }}
+                  >
+                    Idx
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={`statsToggleBtn ${groupMode === "day" ? "is-active" : ""}`}
+                  onClick={() => {
+                    selection.clearSelection();
+                    setGroupMode("day");
+                  }}
+                >
+                  D
+                </button>
+                <button
+                  type="button"
+                  className={`statsToggleBtn ${groupMode === "week" ? "is-active" : ""}`}
+                  onClick={() => {
+                    selection.clearSelection();
+                    setGroupMode("week");
+                  }}
+                >
+                  W
+                </button>
+                <button
+                  type="button"
+                  className={`statsToggleBtn ${groupMode === "month" ? "is-active" : ""}`}
+                  onClick={() => {
+                    selection.clearSelection();
+                    setGroupMode("month");
+                  }}
+                >
+                  M
+                </button>
+                <button
+                  type="button"
+                  className={`statsToggleBtn ${groupMode === "year" ? "is-active" : ""}`}
+                  onClick={() => {
+                    selection.clearSelection();
+                    setGroupMode("year");
+                  }}
+                >
+                  Y
+                </button>
+              </div>
+            </div>
+
+            <div className="chartControlGroup chartControlGroup--toggleSet">
+              <button
+                type="button"
+                className={`statsToggleBtn ${showAo5 ? "is-active" : ""}`}
+                disabled={!solveLevel || isTimeView || hasComparison}
+                onClick={() => setShowAo5((value) => !value)}
+              >
+                Ao5
+              </button>
+
+              <button
+                type="button"
+                className={`statsToggleBtn ${showAo12 ? "is-active" : ""}`}
+                disabled={!solveLevel || isTimeView || hasComparison}
+                onClick={() => setShowAo12((value) => !value)}
+              >
+                Ao12
+              </button>
+
+              <button
+                type="button"
+                className={`statsToggleBtn ${xScaleMode === "datetime" ? "is-active" : ""}`}
+                onClick={() =>
+                  setXScaleMode((value) => (value === "datetime" ? "ordinal" : "datetime"))
+                }
+              >
+                Date Gaps
+              </button>
+
+              <button
+                type="button"
+                className={`statsToggleBtn ${showMean ? "is-active" : ""}`}
+                onClick={() => setShowMean((value) => !value)}
+              >
+                Mean
+              </button>
+
+              <button
+                type="button"
+                className={`statsToggleBtn ${showGrid ? "is-active" : ""}`}
+                onClick={() => setShowGrid((value) => !value)}
+              >
+                Grid
+              </button>
+            </div>
+
+            <div className="chartControlGroup chartControlGroup--inline">
+              <span className="chartControlLabel">Dots</span>
+              <div className="chartControlRow">
+                <button
+                  type="button"
+                  className="statsMiniBtn"
+                  onClick={() => setDotSize((value) => Math.max(MIN_DOT_SIZE, value - 1))}
+                >
+                  -
+                </button>
+                <span className="chartControlValue">{dotSize}</span>
+                <button
+                  type="button"
+                  className="statsMiniBtn"
+                  onClick={() => setDotSize((value) => Math.min(MAX_DOT_SIZE, value + 1))}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            <div className="chartControlGroup chartControlGroup--inline chartControlGroup--scale">
+              <span className="chartControlLabel">Scale</span>
+              <div className="chartControlRow chartControlRow--scale">
+                <button
+                  type="button"
+                  className={`statsMiniBtn chartScaleAutoBtn ${useTightAutoScale ? "is-active" : ""}`}
+                  onClick={() => {
+                    setUseTightAutoScale((value) => {
+                      const nextValue = !value;
+                      if (nextValue) {
+                        setYMinInput("");
+                        setYMaxInput("");
+                      }
+                      return nextValue;
+                    });
+                  }}
+                >
+                  Auto
+                </button>
+                <input
+                  className="chartScaleInput"
+                  type="number"
+                  step="0.1"
+                  inputMode="decimal"
+                  placeholder={String(activeScale.min)}
+                  value={yMinInput}
+                  onChange={(e) => beginManualScaleEdit("min", e.target.value)}
+                  aria-label="Minimum seconds"
+                />
+                <span className="chartControlDivider">to</span>
+                <input
+                  className="chartScaleInput"
+                  type="number"
+                  step="0.1"
+                  inputMode="decimal"
+                  placeholder={String(activeScale.max)}
+                  value={yMaxInput}
+                  onChange={(e) => beginManualScaleEdit("max", e.target.value)}
+                  aria-label="Maximum seconds"
+                />
+              </div>
+            </div>
+
+            {hasComparison && legendItems.length > 0 && (
+              <div className="lineChartLegend">
+                {legendItems.map((item) => (
+                  <div key={item.id || item.label} className="lineChartLegendItem">
+                    <span
+                      className="lineChartLegendSwatch"
+                      style={{ backgroundColor: item.color || "#2EC4B6" }}
+                    />
+                    <span className="lineChartLegendLabel">{item.label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className={`lineChartBody ${!showControls && showTitle && title ? "lineChartBody--withTitle" : ""}`}>
         <div className="lineChartCanvas">
           <LineChartBuilder
             width={560}
@@ -1133,6 +1192,8 @@ function LineChart({
             selectedDotRadius={dotSize + 3}
             yMin={resolvedYMin}
             yMax={resolvedYMax}
+            hideTopYAxisLabel={isTitleOnlyMode}
+            trimTopYAxis={isTitleOnlyMode}
             onDotClick={(event, solve, fullIndex, point) => {
               handleDotClick(event, solve, fullIndex, point);
             }}

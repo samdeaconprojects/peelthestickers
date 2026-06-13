@@ -1420,14 +1420,16 @@ async function recomputeDayBucketsForSolveMutation({ userID, oldSolve = null, ne
 
 function markDayBucketsDirtyForSolveMutation({ userID, oldSolve = null, newSolve = null }) {
   if (!userID) return false;
-  const pendingTimeZone = getDayBucketTimeZone();
-  const scopes = buildDirtyDayBucketScopesFromSolveMutation({
-    oldSolve,
-    newSolve,
-    timeZone: pendingTimeZone,
+  runInBackground(`dayBuckets:dirty:${userID}`, async () => {
+    const timeZone = await getUserDayBucketTimeZone(userID);
+    const scopes = buildDirtyDayBucketScopesFromSolveMutation({
+      oldSolve,
+      newSolve,
+      timeZone,
+    });
+    if (!scopes.size) return [];
+    return markDayBucketScopesDirty(userID, scopes);
   });
-  if (!scopes.size) return false;
-  runInBackground(`dayBuckets:dirty:${userID}`, () => markDayBucketScopesDirty(userID, scopes));
   return true;
 }
 
@@ -2460,6 +2462,29 @@ function mergeWindowCandidates({
 
 function maybePreserveBestForAddOnly(next, prev, { removeSolve = null, addSolve = null } = {}) {
   if (removeSolve || !addSolve) return;
+
+  const prevBestSingleMs = Number(prev?.BestSingleMs);
+  const nextBestSingleMs = Number(next?.BestSingleMs);
+  if (
+    Number.isFinite(prevBestSingleMs) &&
+    (!Number.isFinite(nextBestSingleMs) || nextBestSingleMs > prevBestSingleMs)
+  ) {
+    next.BestSingleMs = prevBestSingleMs;
+    next.BestSingleSolveSK =
+      prev?.BestSingleSolveSK || next?.BestSingleSolveSK || null;
+    next.BestSingleAt = prev?.BestSingleAt || next?.BestSingleAt || null;
+  }
+
+  const prevWorstSingleMs = Number(prev?.WorstSingleMs);
+  const nextWorstSingleMs = Number(next?.WorstSingleMs);
+  if (
+    Number.isFinite(prevWorstSingleMs) &&
+    (!Number.isFinite(nextWorstSingleMs) || nextWorstSingleMs < prevWorstSingleMs)
+  ) {
+    next.WorstSingleMs = prevWorstSingleMs;
+    next.WorstSingleSolveSK =
+      prev?.WorstSingleSolveSK || next?.WorstSingleSolveSK || null;
+  }
 
   for (const config of CACHED_WINDOW_CONFIGS) {
     const prevValue = Number(prev?.[config.valueField]);
@@ -5381,7 +5406,9 @@ app.get("/api/solveWindow/:userID", async (req, res) => {
 
   const userID = String(req.params.userID || "").trim();
   const event = normalizeEvent(req.query?.event);
-  const sessionID = normalizeSessionID(req.query?.sessionID || "main");
+  const rawSessionID = String(req.query?.sessionID || "").trim();
+  const hasSessionScope = rawSessionID !== "";
+  const sessionID = hasSessionScope ? normalizeSessionID(rawSessionID) : "";
   const startSolveRef = String(req.query?.startSolveRef || "").trim();
   const n = Math.max(1, Math.min(1000, Number(req.query?.n || 5)));
 
@@ -5398,13 +5425,18 @@ app.get("/api/solveWindow/:userID", async (req, res) => {
   }
 
   try {
+    const indexName = hasSessionScope ? "GSI1" : "GSI2";
+    const keyConditionExpression = `${indexName}PK = :pk AND ${indexName}SK >= :start`;
+    const scopePk = hasSessionScope
+      ? `SESSION#${userID}#${event}#${sessionID}`
+      : `EVENT#${userID}#${event}`;
     const out = await ddb.send(
       new QueryCommand({
         TableName: TABLE,
-        IndexName: "GSI1",
-        KeyConditionExpression: "GSI1PK = :pk AND GSI1SK >= :start",
+        IndexName: indexName,
+        KeyConditionExpression: keyConditionExpression,
         ExpressionAttributeValues: {
-          ":pk": `SESSION#${userID}#${event}#${sessionID}`,
+          ":pk": scopePk,
           ":start": `${createdAt}#${solveID}`,
         },
         ScanIndexForward: true,
@@ -6770,7 +6802,8 @@ app.post("/api/recomputeSessionStats", async (req, res) => {
     if (!event) return res.status(400).json({ error: "Missing event" });
 
     const item = await recomputeSessionStats(ddb, TABLE, userID, event, sessionID);
-    return res.json({ ok: true, item });
+    const dayBuckets = await recomputeAllDayBucketsForEvent(userID, event);
+    return res.json({ ok: true, item, dayBuckets });
   } catch (e) {
     console.error("POST /api/recomputeSessionStats error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
@@ -6851,20 +6884,83 @@ app.get("/api/dayBuckets/:userID", async (req, res) => {
       await recomputeDirtyDayBucketScopes(userID, dirtyScopes, timeZone);
     }
 
-    const out = await ddb.send(
-      new QueryCommand({
-        TableName: TABLE,
-        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
-        ExpressionAttributeValues: {
-          ":pk": `USER#${userID}`,
-          ":start": rangeStart,
-          ":end": rangeEnd,
-        },
-        ScanIndexForward: true,
-      })
-    );
+    const loadBucketItems = async () => {
+      const out = await ddb.send(
+        new QueryCommand({
+          TableName: TABLE,
+          KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
+          ExpressionAttributeValues: {
+            ":pk": `USER#${userID}`,
+            ":start": rangeStart,
+            ":end": rangeEnd,
+          },
+          ScanIndexForward: true,
+        })
+      );
 
-    const items = (out.Items || []).filter((item) => hasCurrentDayBucketVersion(item));
+      return Array.isArray(out.Items) ? out.Items : [];
+    };
+
+    const buildScopeFromBucketItem = (item) => {
+      const dayKey = String(item?.BucketDay || "").trim();
+      if (!dayKey) return null;
+
+      if (String(item?.SK || "").startsWith("DAYBUCKET#ALL#")) {
+        return {
+          dayKey,
+          event: "",
+          mainOnly: false,
+          allEvents: true,
+        };
+      }
+
+      const eventKey = normalizeEvent(item?.Event);
+      if (!eventKey) return null;
+
+      return {
+        dayKey,
+        event: eventKey,
+        mainOnly: item?.SessionID === "main",
+        allEvents: false,
+      };
+    };
+
+    let rawItems = await loadBucketItems();
+    const staleScopes = rawItems
+      .filter((item) => item?.stale === true || !hasCurrentDayBucketVersion(item))
+      .map(buildScopeFromBucketItem)
+      .filter((scope) => scope && scope.dayKey && (scope.allEvents || scope.event));
+
+    if (staleScopes.length) {
+      await recomputeDirtyDayBucketScopes(userID, staleScopes, timeZone);
+      rawItems = await loadBucketItems();
+    }
+
+    let items = rawItems.filter((item) => hasCurrentDayBucketVersion(item) && item?.stale !== true);
+    const missingLargeAverageScopes = items
+      .filter(
+        (item) =>
+          item &&
+          [25, 50, 100, 1000].some(
+            (size) =>
+              Number(item?.SolveCountTotal || 0) >= size &&
+              !Number.isFinite(Number(item?.[`BestAo${size}Ms`]))
+          )
+      )
+      .map((item) => ({
+        dayKey: String(item?.BucketDay || "").trim(),
+        event: String(item?.Event || "").trim(),
+        mainOnly: item?.SessionID === "main",
+        allEvents: String(item?.SK || "").startsWith("DAYBUCKET#ALL#"),
+      }))
+      .filter((scope) => scope.dayKey && (scope.allEvents || scope.event));
+
+    if (missingLargeAverageScopes.length) {
+      await recomputeDirtyDayBucketScopes(userID, missingLargeAverageScopes, timeZone);
+      rawItems = await loadBucketItems();
+      items = rawItems.filter((item) => hasCurrentDayBucketVersion(item) && item?.stale !== true);
+    }
+
     const aggregateSummary = items.length ? mergeDayBucketSummaries(items) : null;
     return res.json({
       ok: true,
@@ -6932,6 +7028,7 @@ app.post("/api/admin/backfill-session-stats/:userID", async (req, res) => {
 
     for (const ev of eventSet) {
       await recomputeEventStats(ddb, TABLE, userID, ev);
+      await recomputeAllDayBucketsForEvent(userID, ev);
     }
 
     return res.json({
@@ -7313,6 +7410,11 @@ app.post("/api/message", async (req, res) => {
   const conversationID = String(req.body?.conversationID || "").trim();
   const senderID = String(req.body?.senderID || "").trim();
   const text = String(req.body?.text ?? "");
+  const note = String(req.body?.note ?? "");
+  const postType = req.body?.postType ?? null;
+  const solveList = Array.isArray(req.body?.solveList) ? req.body.solveList : [];
+  const statShare = req.body?.statShare ?? null;
+  const messageType = req.body?.messageType ?? null;
 
   if (!conversationID) return res.status(400).json({ error: "Missing conversationID" });
   if (!senderID) return res.status(400).json({ error: "Missing senderID" });
@@ -7345,6 +7447,11 @@ app.post("/api/message", async (req, res) => {
       ItemType: "MESSAGE",
       SenderID: senderID,
       Text: text,
+      Note: note,
+      MessageType: messageType,
+      PostType: postType,
+      SolveList: solveList,
+      StatShare: statShare,
       CreatedAt: timestamp,
       UpdatedAt: timestamp,
     };
@@ -7428,10 +7535,15 @@ app.get("/api/messages/:conversationID", async (req, res) => {
       .slice()
       .reverse()
       .map((it) => ({
-      sender: it.SenderID,
-      text: it.Text,
-      timestamp: it.CreatedAt,
-    }));
+        sender: it.SenderID,
+        text: it.Text,
+        note: it.Note ?? "",
+        timestamp: it.CreatedAt,
+        messageType: it.MessageType || null,
+        postType: it.PostType || null,
+        solveList: Array.isArray(it.SolveList) ? it.SolveList : [],
+        statShare: it.StatShare ?? null,
+      }));
 
     const nextCursor = out.LastEvaluatedKey
       ? Buffer.from(JSON.stringify(out.LastEvaluatedKey), "utf8").toString("base64url")

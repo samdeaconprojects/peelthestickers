@@ -132,6 +132,12 @@ function maxIso(a, b) {
   return String(a) > String(b) ? a : b;
 }
 
+function minIso(a, b) {
+  if (!a) return b || null;
+  if (!b) return a || null;
+  return String(a) < String(b) ? a : b;
+}
+
 function formatShareTime(value) {
   const ms = Number(value);
   if (!Number.isFinite(ms) || ms < 0) return "—";
@@ -331,6 +337,21 @@ function resolveSeriesColor(style, ratio = 0.5, fallback = "#2EC4B6") {
     return interpolateHexColor(meta.stops[0], meta.stops[1], safeRatio / 0.5);
   }
   return interpolateHexColor(meta.stops[1], meta.stops[2], (safeRatio - 0.5) / 0.5);
+}
+
+function buildTagSelectionSeriesStyle(color) {
+  if (!color) return null;
+  const style = getProfileChartStyle({ Color: color });
+  if (!(style?.mode === "gradient") || !Array.isArray(style?.stops) || style.stops.length < 3) {
+    return style;
+  }
+
+  // Selected-tag heatmaps rank faster solves toward lower ratios, so flip the
+  // tag palette to keep the lighter end aligned with faster times.
+  return {
+    ...style,
+    stops: [...style.stops].reverse(),
+  };
 }
 
 function buildStatCardKey(item) {
@@ -1021,6 +1042,7 @@ function aggregateStatsList(statsList) {
   let worstAo12StartSolveSK = null;
 
   let bestSingleAt = null;
+  let firstSolveAt = null;
   let lastSolveAt = null;
 
   const toFiniteMetricOrNull = (value) => {
@@ -1128,6 +1150,7 @@ function aggregateStatsList(statsList) {
     ));
 
     bestSingleAt = maxIso(bestSingleAt, s.BestSingleAt);
+    firstSolveAt = minIso(firstSolveAt, s.FirstSolveAt);
     lastSolveAt = maxIso(lastSolveAt, s.LastSolveAt);
   }
 
@@ -1165,6 +1188,7 @@ function aggregateStatsList(statsList) {
     BestAo1000Ms: bestAo1000Ms,
     BestAo1000StartSolveSK: bestAo1000StartSolveSK,
     BestSingleAt: bestSingleAt,
+    FirstSolveAt: firstSolveAt,
     LastSolveAt: lastSolveAt,
   };
 }
@@ -1464,6 +1488,7 @@ function Stats({
   onImportModalOpenHandled = null,
   onExportModalOpenHandled = null,
   onSessionsListRefresh = null,
+  onOverallStatsRecomputed = null,
 }) {
   const { runDb } = useDbStatus();
   const viewerDisplayName = viewerUser?.Name || viewerUser?.UserID || "you";
@@ -1511,12 +1536,13 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const [overallStatsForEvent, setOverallStatsForEvent] = useState(null);
   const [cachedEventMatrixStats, setCachedEventMatrixStats] = useState({});
   const [loadingOverallStats, setLoadingOverallStats] = useState(false);
+  const [overallStatsLoadSettledKey, setOverallStatsLoadSettledKey] = useState("");
   const [loadingEventMatrixStats, setLoadingEventMatrixStats] = useState(false);
   const [recomputeStatusText, setRecomputeStatusText] = useState("");
 
   const [loadingInitial, setLoadingInitial] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [loadingAllSolves, setLoadingAllSolves] = useState(false);
+  const [loadingAllSolves] = useState(false);
   const [loadingTimeScope, setLoadingTimeScope] = useState(false);
   const [loadingDayBuckets, setLoadingDayBuckets] = useState(false);
   const [loadingCompareDayBuckets, setLoadingCompareDayBuckets] = useState(false);
@@ -1549,6 +1575,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
   const requestTokenRef = useRef(0);
   const previousHasActiveTagFilterRef = useRef(false);
+  const summaryFallbackDecisionRef = useRef(new Map());
 
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const sessionMenuWrapRef = useRef(null);
@@ -1837,10 +1864,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     const rawTimeMs = Number.isFinite(rawCandidate) ? rawCandidate : 0;
     const finalCandidate = Number(item?.FinalTimeMs ?? item?.finalTimeMs);
     const finalTimeMs = Number.isFinite(finalCandidate) ? finalCandidate : rawTimeMs;
+    const normalizedFullIndex = Number(item?.fullIndex ?? item?.FullIndex);
 
     return {
       solveRef: item.SK || item.SolveID || created,
-      fullIndex: undefined,
+      fullIndex: Number.isFinite(normalizedFullIndex) ? normalizedFullIndex : undefined,
       time: finalTimeMs,
       rawTime: rawTimeMs,
       originalTime: rawTimeMs,
@@ -1951,10 +1979,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     if (statsViewMode !== "standard") return [];
     const ev = String(statsEvent || "").toUpperCase();
     const allForEvent = Array.isArray(sessions?.[ev]) ? sessions[ev] : [];
-
-    return withSolveFullIndices(allForEvent
-      .filter((s) => String(s?.sessionID || s?.SessionID || "main") === String(sessionId || "main"))
+    const sessionReference = allForEvent.filter(
+      (s) => String(s?.sessionID || s?.SessionID || "main") === String(sessionId || "main")
     );
+
+    return withSolveFullIndices(sessionReference, sessionReference);
   }, [sessions, statsEvent, sessionId, statsViewMode]);
 
   const hasDateScopedSessionCache = useMemo(() => {
@@ -2199,14 +2228,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const compareStyle = useMemo(
     () =>
       compareTagAccentColor
-        ? getProfileChartStyle({ Color: compareTagAccentColor })
+        ? buildTagSelectionSeriesStyle(compareTagAccentColor)
         : baseCompareStyle,
     [baseCompareStyle, compareTagAccentColor]
   );
   const primaryCompareStyle = useMemo(
     () =>
       primaryTagAccentColor
-        ? getProfileChartStyle({ Color: primaryTagAccentColor })
+        ? buildTagSelectionSeriesStyle(primaryTagAccentColor)
         : basePrimaryCompareStyle,
     [basePrimaryCompareStyle, primaryTagAccentColor]
   );
@@ -2346,19 +2375,25 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     const userID = user?.UserID;
     if (!userID) {
       setLoadingOverallStats(false);
+      setOverallStatsLoadSettledKey("");
       return;
     }
 
     if (isAllEventsMode || hasActiveTagFilter) {
       setLoadingOverallStats(false);
+      setOverallStatsLoadSettledKey("");
       return;
     }
 
+    const loadScopeKey = `${userID}::${String(statsEvent || "").toUpperCase()}::${String(
+      isAllSessionsMode ? ALL_SESSIONS : sessionId || "main"
+    )}`;
     let cancelled = false;
 
     (async () => {
       try {
         setLoadingOverallStats(true);
+        setOverallStatsLoadSettledKey("");
 
         if (isAllSessionsMode) {
           const item = await getEventStats(userID, statsEvent);
@@ -2374,7 +2409,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           if (!isAllSessionsMode) setOverallStatsForEvent(null);
         }
       } finally {
-        if (!cancelled) setLoadingOverallStats(false);
+        if (!cancelled) {
+          setLoadingOverallStats(false);
+          setOverallStatsLoadSettledKey(loadScopeKey);
+        }
       }
     })();
 
@@ -2559,7 +2597,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       let accumulated = [];
       let pageCount = 0;
       const seenCursors = new Set();
-
       setDateScopedSessionSolves([]);
       setDateScopedSessionCacheKey(dateScopedSessionKey);
 
@@ -2581,7 +2618,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           .reverse();
 
         accumulated = [...pageOldestToNewest, ...accumulated];
-        setDateScopedSessionSolves(accumulated);
+        setDateScopedSessionSolves(
+          withSolveFullIndices(
+            accumulated,
+            Array.isArray(selectedSessionSolves) && selectedSessionSolves.length
+              ? selectedSessionSolves
+              : accumulated
+          )
+        );
 
         pageCount += 1;
         if (pageCount > 100) {
@@ -2625,6 +2669,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     dateScopedSessionKey,
     isSolveLevelMode,
     normalizeSolve,
+    selectedSessionSolves,
     sessionId,
     statsEvent,
     user?.UserID,
@@ -2822,11 +2867,13 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     if (!userID || !solveScopeSessionKey || hasActiveTagFilter) {
       setOverallScopeSolves([]);
       setOverallScopeCacheKey("");
-      return false;
+      return null;
     }
 
     const cacheKey = `${userID}::${overallScopeCacheIdentity}`;
-    if (overallScopeCacheKey === cacheKey && overallScopeSolves.length > 0) return true;
+    if (overallScopeCacheKey === cacheKey && overallScopeSolves.length > 0) {
+      return overallScopeSolves;
+    }
 
     try {
       const results = await Promise.all(
@@ -2854,12 +2901,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
       setOverallScopeSolves(merged);
       setOverallScopeCacheKey(cacheKey);
-      return true;
+      return merged;
     } catch (error) {
       console.error("Failed to load overall scope solves:", error);
       setOverallScopeSolves([]);
       setOverallScopeCacheKey("");
-      return false;
+      return null;
     }
   }, [
     effectiveTimeZone,
@@ -3235,11 +3282,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       effectiveCompareDateFilterEnd
     );
     if (!hasActiveTagSelection(compareTagSelection)) {
-      return withSolveFullIndices(dateScoped, dateScoped);
+      return withSolveFullIndices(dateScoped, compareBaseSolves);
     }
     return withSolveFullIndices(
       dateScoped.filter((solve) => solveMatchesTagSelection(solve, compareTagSelection)),
-      dateScoped
+      compareBaseSolves
     );
   }, [
     compareEnabled,
@@ -3470,64 +3517,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     return appendOlderSessionPages({ maxPages: 1 });
   }, [appendOlderSessionPages]);
 
-  const loadAllSessionSolves = useCallback(async () => {
-    const userID = user?.UserID;
-    if (!userID) return false;
-    if (!isSolveLevelMode) return false;
-
-    setLoadingAllSolves(true);
-    const myToken = ++requestTokenRef.current;
-
-    try {
-      const fullItems = await getSolvesBySession(
-        userID,
-        String(statsEvent || "").toUpperCase(),
-        String(sessionId || "main")
-      );
-      if (requestTokenRef.current !== myToken) return false;
-
-      const normalized = (fullItems || []).map(normalizeSolve);
-
-      setSessions((prev) => {
-        const ev = String(statsEvent || "").toUpperCase();
-        const existingForEvent = Array.isArray(prev?.[ev]) ? prev[ev] : [];
-        const otherSessions = existingForEvent.filter(
-          (s) => String(s?.sessionID || s?.SessionID || "main") !== String(sessionId || "main")
-        );
-
-        return {
-          ...prev,
-          [ev]: [...otherSessions, ...normalized].sort((a, b) => {
-            const ta = new Date(a?.datetime || "").getTime();
-            const tb = new Date(b?.datetime || "").getTime();
-            return ta - tb;
-          }),
-        };
-      });
-
-      setSolvesPerPage(Math.max(DEFAULT_IN_VIEW, normalized.length));
-      setCurrentPage(0);
-      setIsAllLoaded(true);
-      setHasMoreOlder(false);
-      setPageCursor(null);
-      setShowAllActive(true);
-      return true;
-    } catch (err) {
-      console.error("Failed to load all solves for Stats:", err);
-      return false;
-    } finally {
-      if (requestTokenRef.current === myToken) setLoadingAllSolves(false);
-    }
-  }, [
-    DEFAULT_IN_VIEW,
-    isSolveLevelMode,
-    normalizeSolve,
-    sessionId,
-    setSessions,
-    statsEvent,
-    user?.UserID,
-  ]);
-
   const allEventsBreakdown = useMemo(() => {
     return getAllEventsBreakdownFromSessionsList(sessionsList);
   }, [sessionsList]);
@@ -3701,17 +3690,42 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   );
   const isSingleDayDateFilter = !!dateFilterStart && !!dateFilterEnd && dateFilterStart === dateFilterEnd;
   const useBucketBackedRange = !!activeBucketSummary && !preferRawDateRangeView;
+  const isAllTimeBucketOverview = useBucketBackedRange &&
+    statsViewMode === "standard" &&
+    dateFilterStart === ALL_TIME_START_DAY &&
+    !!dateFilterEnd;
   const bucketSourceLabel = useMemo(() => {
     if (!useBucketBackedRange) return "";
     if (statsViewMode === "time") return "Aggregated days";
     return "Bucketed range";
   }, [statsViewMode, useBucketBackedRange]);
-  const renderedOverallStats = useBucketBackedRange ? activeBucketSummary : effectiveOverallStats;
+  const canonicalOverallStats = useMemo(() => {
+    if (hasActiveTagFilter) return null;
+    if (isAllEventsMode) {
+      return useCachedOverallStats || isAllTimeBucketOverview ? allEventsOverall : null;
+    }
+    return overallStatsForEvent || null;
+  }, [
+    allEventsOverall,
+    hasActiveTagFilter,
+    isAllTimeBucketOverview,
+    isAllEventsMode,
+    overallStatsForEvent,
+    useCachedOverallStats,
+  ]);
+  const renderedOverallStats =
+    useBucketBackedRange
+      ? isAllTimeBucketOverview
+        ? canonicalOverallStats || activeBucketSummary
+        : activeBucketSummary
+      : effectiveOverallStats;
   const allowOverallDerivedMetrics =
     (statsViewMode === "time" && !useBucketBackedRange) || !effectiveOverallStats || showAllActive || isAllLoaded;
   const stableOverallStats = useMemo(() => {
     if (hasActiveTagFilter) return null;
-    if (useBucketBackedRange) return activeBucketSummary;
+    if (useBucketBackedRange) {
+      return isAllTimeBucketOverview ? canonicalOverallStats || activeBucketSummary : activeBucketSummary;
+    }
     if (useCachedOverallStats) {
       if (isAllEventsMode) return allEventsOverall;
       return overallStatsForEvent;
@@ -3720,7 +3734,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   }, [
     activeBucketSummary,
     allEventsOverall,
+    canonicalOverallStats,
     hasActiveTagFilter,
+    isAllTimeBucketOverview,
     isAllEventsMode,
     overallStatsForEvent,
     useBucketBackedRange,
@@ -3773,77 +3789,19 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     if (plus2Count <= 0) return false;
     return !Number.isFinite(Number(overallStatsForEvent?.Plus2BestMs));
   }, [overallStatsForEvent]);
-
-  useEffect(() => {
-    const userID = user?.UserID;
-    const shouldLoadFullSessionFallback =
-      !!userID &&
-      statsViewMode === "standard" &&
-      !hasActiveTagFilter &&
-      !hasActiveDateFilter &&
-      !isAllEventsMode &&
-      !isAllSessionsMode &&
-      overallStatsMissingPlus2Best;
-
-    if (!shouldLoadFullSessionFallback) {
-      setSessionOverallFallbackSolves([]);
-      setSessionOverallFallbackCacheKey("");
-      return;
-    }
-
-    const cacheKey = `${userID}::${String(statsEvent || "").toUpperCase()}::${String(sessionId || "main")}`;
-    if (sessionOverallFallbackCacheKey === cacheKey && sessionOverallFallbackSolves.length > 0) return;
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const items = await getSolvesBySession(
-          userID,
-          String(statsEvent || "").toUpperCase(),
-          String(sessionId || "main"),
-          effectiveTimeZone ? { timeZone: effectiveTimeZone } : {}
-        );
-        if (cancelled) return;
-        const normalized = (items || [])
-          .map(normalizeSolve)
-          .filter(Boolean)
-          .sort((a, b) => new Date(a?.datetime || "").getTime() - new Date(b?.datetime || "").getTime());
-        setSessionOverallFallbackSolves(normalized);
-        setSessionOverallFallbackCacheKey(cacheKey);
-      } catch (error) {
-        if (cancelled) return;
-        console.error("Failed to load full session solves for +2 fallback:", error);
-        setSessionOverallFallbackSolves([]);
-        setSessionOverallFallbackCacheKey("");
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    effectiveTimeZone,
-    hasActiveDateFilter,
-    hasActiveTagFilter,
-    isAllEventsMode,
-    isAllSessionsMode,
-    normalizeSolve,
-    overallStatsMissingPlus2Best,
-    sessionId,
-    sessionOverallFallbackCacheKey,
-    sessionOverallFallbackSolves.length,
-    statsEvent,
-    statsViewMode,
-    user?.UserID,
-  ]);
+  const overallStatsMissingFirstSolveAt = useMemo(() => {
+    return !String(overallStatsForEvent?.FirstSolveAt || "").trim();
+  }, [overallStatsForEvent]);
+  const overallStatsNeedsTopSinglesRepair = useMemo(() => {
+    return overallStatsForEvent?.NeedsTopSinglesRepair === true;
+  }, [overallStatsForEvent]);
 
   const overallCount = useMemo(() => {
-    if (stableOverallStats?.SolveCountTotal != null) return stableOverallStats.SolveCountTotal;
+    if (canonicalOverallStats?.SolveCountTotal != null) return canonicalOverallStats.SolveCountTotal;
     if (statsViewMode === "time") return stableOverallSolves.length;
     if (isAllEventsMode) return allEventsOverall?.SolveCountTotal ?? null;
     return stableOverallSolves.length ?? null;
-  }, [allEventsOverall, isAllEventsMode, stableOverallSolves.length, stableOverallStats, statsViewMode]);
+  }, [allEventsOverall, canonicalOverallStats, isAllEventsMode, stableOverallSolves.length, statsViewMode]);
   const showingCount = useMemo(() => {
     if (useBucketBackedRange) return activeBucketSummary?.SolveCountTotal ?? 0;
     if (statsViewMode === "time") return visiblePageFilteredRawSolves?.length || 0;
@@ -4593,34 +4551,23 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
     if (!isSolveLevelMode) return;
 
-    if (!hasMoreOlder) {
-      setSolvesPerPage(Math.max(DEFAULT_IN_VIEW, activeStandardSolves.length));
+    const appliedAllTimeRange = await applyPrimaryDateRange(
+      ALL_TIME_START_DAY,
+      getTodayLocalDayKey()
+    );
+    if (appliedAllTimeRange) {
+      setPreferRawDateRangeView(false);
       setCurrentPage(0);
-      setShowAllActive(true);
-      return;
     }
+    return;
 
-    const approved = await warnBeforeSolveScan({
-      title: "Load all solves in session?",
-      intro: "Show All fetches the entire session solve history instead of just the paged subset.",
-      event: statsEvent,
-      sessionID: sessionId,
-      confirmLabel: "Load All Solves",
-    });
-    if (!approved) return;
-
-    await loadAllSessionSolves();
   }, [
-    DEFAULT_IN_VIEW,
-    activeStandardSolves.length,
+    applyPrimaryDateRange,
     dateFilterEnd,
     dateFilterLabel,
     dateFilterStart,
-    hasMoreOlder,
     isSolveLevelMode,
     loadTimeScopeSolves,
-    loadAllSessionSolves,
-    sessionId,
     statsEvent,
     statsSession,
     statsViewMode,
@@ -4640,6 +4587,17 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const canDateWindowDecrease = canUseDateWindowControls && dateWindowDayCount > 1;
   const canDateWindowIncrease = canUseDateWindowControls && !!dateFilterEnd;
   const canDateWindowShowAll = canUseDateWindowControls;
+
+  const handleDateWindowShowAll = useCallback(async () => {
+    if (!canUseDateWindowControls) return;
+    const appliedAllTimeRange = await applyPrimaryDateRange(
+      ALL_TIME_START_DAY,
+      getTodayLocalDayKey()
+    );
+    if (!appliedAllTimeRange) return;
+    setPreferRawDateRangeView(false);
+    setCurrentPage(0);
+  }, [applyPrimaryDateRange, canUseDateWindowControls]);
 
   const handleDateWindowPrevious = useCallback(() => {
     if (!canUseDateWindowControls || dateWindowDayCount <= 0) return;
@@ -4678,14 +4636,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     if (!canUseDateWindowControls || !dateFilterEnd) return;
     resizeDateWindow(dateWindowDayCount + 1);
   }, [canUseDateWindowControls, dateFilterEnd, dateWindowDayCount, resizeDateWindow]);
-
-  const handleDateWindowShowAll = useCallback(() => {
-    if (!canUseDateWindowControls) return;
-    setPreferRawDateRangeView(false);
-    setDateFilterStart("");
-    setDateFilterEnd("");
-    setCurrentPage(0);
-  }, [canUseDateWindowControls]);
 
   const compareTotalPages = useMemo(() => {
     const per = Math.max(1, compareSolvesPerPage);
@@ -4818,6 +4768,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
       if (updated) {
         setOverallStatsForEvent(updated);
+        onOverallStatsRecomputed?.({
+          scope: isAllSessionsMode ? "event" : "session",
+          event: statsEvent,
+          sessionID: isAllSessionsMode ? null : sessionId,
+          item: updated,
+        });
       } else if (isAllSessionsMode) {
         const item = await getEventStats(user.UserID, statsEvent);
         setOverallStatsForEvent(item || null);
@@ -4849,7 +4805,97 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     sessionId,
     isAllEventsMode,
     isAllSessionsMode,
+    onOverallStatsRecomputed,
     runDb,
+  ]);
+
+  useEffect(() => {
+    const userID = user?.UserID;
+    const repairScopeKey =
+      !!userID
+        ? `${userID}::${String(statsEvent || "").toUpperCase()}::${String(sessionId || "main")}`
+        : "";
+    const shouldRepairCachedOverviewStats =
+      !!userID &&
+      statsViewMode === "standard" &&
+      !hasActiveTagFilter &&
+      !hasActiveDateFilter &&
+      !isAllEventsMode &&
+      !isAllSessionsMode &&
+      (
+        overallStatsMissingPlus2Best ||
+        overallStatsMissingFirstSolveAt ||
+        overallStatsNeedsTopSinglesRepair
+      );
+
+    if (!shouldRepairCachedOverviewStats) {
+      setSessionOverallFallbackSolves([]);
+      setSessionOverallFallbackCacheKey("");
+      return;
+    }
+
+    if (overallStatsLoadSettledKey !== repairScopeKey) return;
+
+    const cacheKey = repairScopeKey;
+    if (sessionOverallFallbackCacheKey === cacheKey && sessionOverallFallbackSolves.length > 0) return;
+    const priorDecision = summaryFallbackDecisionRef.current.get(cacheKey);
+    if (priorDecision === false) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        if (priorDecision !== true) {
+          const approved = await warnBeforeSolveScan({
+            title: "Repair cached overview stats?",
+            intro: "Overview is missing cached fields like top singles, the first solve date, or +2 best.",
+            event: statsEvent,
+            sessionID: sessionId,
+            confirmLabel: "Recompute Stats",
+            estimateLabel: "Estimated solves to rescan",
+            extraLines: [
+              "This will recompute the stored session stats record so the fix persists on future visits.",
+              "If you decline, overview will keep using cached values and may omit those fields.",
+            ],
+          });
+          if (cancelled) return;
+          summaryFallbackDecisionRef.current.set(cacheKey, approved);
+          if (!approved) return;
+        }
+
+        await runOverallRecompute();
+        if (cancelled) return;
+        setSessionOverallFallbackSolves([]);
+        setSessionOverallFallbackCacheKey("");
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Failed to repair cached overview stats:", error);
+        setSessionOverallFallbackSolves([]);
+        setSessionOverallFallbackCacheKey("");
+        summaryFallbackDecisionRef.current.delete(cacheKey);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    hasActiveDateFilter,
+    hasActiveTagFilter,
+    isAllEventsMode,
+    isAllSessionsMode,
+    overallStatsLoadSettledKey,
+    overallStatsMissingFirstSolveAt,
+    overallStatsMissingPlus2Best,
+    overallStatsNeedsTopSinglesRepair,
+    runOverallRecompute,
+    sessionId,
+    sessionOverallFallbackCacheKey,
+    sessionOverallFallbackSolves.length,
+    statsEvent,
+    statsViewMode,
+    user?.UserID,
+    warnBeforeSolveScan,
   ]);
 
   const handleRecomputeOverall = useCallback(async () => {
@@ -5648,7 +5694,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
   const overallSummaryStatShare = useMemo(() => {
     const bestOverallSingle =
-      stableOverallStats?.BestSingleMs ??
+      canonicalOverallStats?.BestSingleMs ??
       stableOverallSolves
         ?.map((solve) => Number(solve?.time))
         .filter((value) => Number.isFinite(value) && value >= 0)
@@ -5672,8 +5718,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     headerStatusText,
     isAllSessionsMode,
     overallCount,
+    canonicalOverallStats,
     stableOverallSolves,
-    stableOverallStats,
     selectedSessionDisplay,
   ]);
 
@@ -5682,7 +5728,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     const baseSummaryRender = {
       solves: serializeSharedSolves(visiblePageFilteredRawSolves, 500),
       overallSolves: serializeSharedSolves(stableOverallSolves, 1000),
-      overallStats: stableOverallStats || null,
+      overallStats: canonicalOverallStats || null,
       bucketSummary: useBucketBackedRange ? activeBucketSummary : null,
       bucketItems: useBucketBackedRange ? activeBucketItems : [],
       allEventsBreakdown: statsViewMode === "time" ? null : isAllEventsMode ? allEventsBreakdown : null,
@@ -6075,6 +6121,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     showEventBreakdownCard,
     showingCount,
     loadedSolveCountForSummary,
+    canonicalOverallStats,
     stableOverallSolves,
     stableOverallStats,
     summaryMode,
@@ -6248,6 +6295,52 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         !isCompareSource &&
         useCachedOverallStats &&
         !!overallStatsForEvent;
+      const cachedOverallSolveCount = Number(overallStatsForEvent?.SolveCountTotal);
+      const hasFullLoadedOverallScope =
+        selection.scope === "overall" &&
+        !isCompareSource &&
+        Number.isFinite(cachedOverallSolveCount) &&
+        cachedOverallSolveCount >= 0 &&
+        stableOverallSolves.length >= cachedOverallSolveCount;
+      const needsFullOverallScopeForCachedRefs =
+        selection.scope === "overall" &&
+        !isCompareSource &&
+        isAllSessionsMode &&
+        !overallScopeSolves.length;
+      const missingExactOverallSingleRef =
+        selection.scope === "overall" &&
+        selection.kind === "single" &&
+        !isCompareSource &&
+        canUseCachedOverallRefs &&
+        !(
+          selection.variant === "worst"
+            ? overallStatsForEvent?.WorstSingleSolveSK
+            : overallStatsForEvent?.BestSingleSolveSK
+        ) &&
+        !hasFullLoadedOverallScope &&
+        !overallScopeSolves.length;
+      const missingExactOverallWindowRef =
+        selection.scope === "overall" &&
+        selection.kind === "window" &&
+        !isCompareSource &&
+        canUseCachedOverallRefs &&
+        !(
+          selection.variant === "strict-best"
+            ? overallStatsForEvent?.[
+                `${(WINDOW_SPECS[selection.metricKey]?.startField || "").replace(
+                  "StartSolveSK",
+                  "StrictStartSolveSK"
+                )}`
+              ]
+            : selection.variant === "worst"
+              ? overallStatsForEvent?.[
+                  (WINDOW_SPECS[selection.metricKey]?.startField || "").replace("Best", "Worst")
+                ]
+              : overallStatsForEvent?.[WINDOW_SPECS[selection.metricKey]?.startField]
+        ) &&
+        !hasFullLoadedOverallScope &&
+        !overallScopeSolves.length;
+      let loadedOverallSolves = null;
 
       if (
         selection.scope === "overall" &&
@@ -6256,7 +6349,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         !hasActiveDateFilter &&
         !hasActiveTagFilter &&
         !overallScopeSolves.length &&
-        !canUseCachedOverallRefs
+        (!canUseCachedOverallRefs || needsFullOverallScopeForCachedRefs)
       ) {
         const approved = await warnBeforeSolveScan({
           title: "Load full overall solve scope?",
@@ -6267,20 +6360,33 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         });
         if (!approved) return;
 
-        const loaded = await loadOverallScopeSolves();
-        if (!loaded) return;
+        loadedOverallSolves = await loadOverallScopeSolves();
+        if (!loadedOverallSolves?.length) return;
       }
 
+      const overallSourceSolves =
+        !isCompareSource && loadedOverallSolves?.length
+          ? loadedOverallSolves
+          : stableOverallSolves;
+
       if (selection.kind === "single") {
-        const sourceSolves =
-          selection.scope === "overall"
-            ? isCompareSource
-              ? compareFilteredRawSolves
-              : stableOverallSolves
-            : isCompareSource
-              ? compareVisiblePageFilteredRawSolves
-              : summaryCurrentSolves;
-        let solve = null;
+      const sourceSolves =
+        selection.scope === "overall"
+          ? isCompareSource
+            ? compareFilteredRawSolves
+            : overallSourceSolves
+          : isCompareSource
+            ? compareVisiblePageFilteredRawSolves
+            : summaryCurrentSolves;
+      const solveWindowSessionScope =
+        selection.scope === "overall"
+          ? ""
+          : String(isCompareSource ? compareSessionId : sessionId || "main");
+      let solve = null;
+
+        if (missingExactOverallSingleRef) {
+          return;
+        }
 
         if ((selection.variant === "best" || selection.variant === "worst") && canUseCachedOverallRefs) {
           const bestSolveRef =
@@ -6297,7 +6403,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               const items = await getSolveWindowFromStart(
                 user.UserID,
                 String(statsEvent || "").toUpperCase(),
-                String(sessionId || "main"),
+                solveWindowSessionScope,
                 bestSolveRef,
                 1
               );
@@ -6329,10 +6435,18 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         selection.scope === "overall"
           ? isCompareSource
             ? compareFilteredRawSolves
-            : stableOverallSolves
+            : overallSourceSolves
           : isCompareSource
             ? compareVisiblePageFilteredRawSolves
             : summaryCurrentSolves;
+      const solveWindowSessionScope =
+        selection.scope === "overall"
+          ? ""
+          : String(isCompareSource ? compareSessionId : sessionId || "main");
+
+      if (missingExactOverallWindowRef) {
+        return;
+      }
 
       let solvesForWindow = null;
       const startSolveRef =
@@ -6362,7 +6476,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           const items = await getSolveWindowFromStart(
             user.UserID,
             String(isCompareSource ? compareEvent : statsEvent || "").toUpperCase(),
-            String(isCompareSource ? compareSessionId : sessionId || "main"),
+            solveWindowSessionScope,
             startSolveRef,
             spec.size
           );
@@ -6465,10 +6579,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         postType: "stat-share",
         statShare: nextStatShare,
       });
-      setFocusActionMessage(shared ? "Shared to social." : "");
+      setFocusActionMessage(shared ? "Shared." : "");
     } catch (error) {
       console.error("Failed to share stat card:", error);
-      setFocusActionMessage("Failed to share to social.");
+      setFocusActionMessage("Failed to share.");
     } finally {
       setFocusActionBusy("");
     }
@@ -6555,7 +6669,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           <StatsSummaryOverall
             solves={visiblePageFilteredRawSolves}
             overallSolves={stableOverallSolves}
-            overallStats={stableOverallStats}
+            overallStats={canonicalOverallStats}
             allowOverallDerived={allowOverallDerivedMetrics}
             mode={summaryMode}
             selectedEvent={eventSelectLabel}
@@ -6631,7 +6745,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             }
             seriesStyle={primaryCompareStyle}
             legendItems={compareLegendItems}
-            title={`Line: ${statsEvent}`}
+            title={buildStatCardTitle(eventSelectLabel, selectedSessionDisplay)}
             deleteTime={handleDeleteSolve}
             addPost={addPost}
             setSessions={setSessions}
@@ -6654,12 +6768,19 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
       if (card.key === "percent") {
         return showEventBreakdownCard
-          ? <PieChart data={timeViewEventBreakdownData} title="Event Breakdown" />
+          ? <PieChart
+              data={timeViewEventBreakdownData}
+              title="Event Breakdown"
+              profileColor={primaryAccentColor}
+              centerFillColor={settings?.primaryColor}
+            />
           : (
             useBucketBackedRange ? (
               <PieChart
                 data={buildPenaltyPieData(activeBucketSummary)}
                 title="Penalty Breakdown"
+                profileColor={primaryAccentColor}
+                centerFillColor={settings?.primaryColor}
               />
             ) : (
               <PercentBar
@@ -6799,6 +6920,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       sessionsList,
       setSessions,
       loadedSolveCountForSummary,
+      canonicalOverallStats,
       stableOverallSolves,
       stableOverallStats,
       statsEvent,
@@ -7915,7 +8037,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   <StatsSummary
                     solves={summaryCurrentSolves}
                     overallSolves={stableOverallSolves}
-                    overallStats={stableOverallStats}
+                    overallStats={canonicalOverallStats}
+                    overviewOnly={isAllTimeBucketOverview}
                     bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
                     bucketItems={useBucketBackedRange ? activeBucketItems : []}
                     allEventsBreakdown={statsViewMode === "time" ? null : isAllEventsMode ? allEventsBreakdown : null}
@@ -7946,7 +8069,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     <StatsSummary
                       solves={summaryCurrentSolves}
                       overallSolves={stableOverallSolves}
-                      overallStats={stableOverallStats}
+                      overallStats={canonicalOverallStats}
+                      overviewOnly={isAllTimeBucketOverview}
                       bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
                       bucketItems={useBucketBackedRange ? activeBucketItems : []}
                       allEventsBreakdown={null}
@@ -8002,7 +8126,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           <StatsSummaryOverall
             solves={summaryCurrentSolves}
             overallSolves={stableOverallSolves}
-            overallStats={stableOverallStats}
+            overallStats={canonicalOverallStats}
                       allowOverallDerived={allowOverallDerivedMetrics}
                       mode={summaryMode}
                       selectedEvent={eventSelectLabel}
@@ -8041,7 +8165,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         <StatsSummary
                         solves={summaryCurrentSolves}
                         overallSolves={stableOverallSolves}
-                        overallStats={useBucketBackedRange ? activeBucketSummary : stableOverallStats}
+                        overallStats={canonicalOverallStats}
+                        overviewOnly={isAllTimeBucketOverview}
                         bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
                         bucketItems={useBucketBackedRange ? activeBucketItems : []}
                         allEventsBreakdown={null}
@@ -8096,7 +8221,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                       <StatsSummaryOverall
                         solves={summaryCurrentSolves}
                         overallSolves={stableOverallSolves}
-                        overallStats={useBucketBackedRange ? activeBucketSummary : stableOverallStats}
+                        overallStats={canonicalOverallStats}
                         allowOverallDerived={allowOverallDerivedMetrics}
                         mode={summaryMode}
                         selectedEvent={eventSelectLabel}
@@ -8270,7 +8395,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   }
                   seriesStyle={primaryCompareStyle}
                   legendItems={compareLegendItems}
-                  title={`Line: ${statsEvent}`}
+                  title={buildStatCardTitle(eventSelectLabel, selectedSessionDisplay)}
                   deleteTime={handleDeleteSolve}
                   addPost={addPost}
                   setSessions={setSessions}
@@ -8294,7 +8419,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   {...bindCardFocus(cardDefinitions.find((item) => item.key === "percent")?.id)}
                 >
                   {useBucketBackedRange ? (
-                    <PieChart data={buildPenaltyPieData(activeBucketSummary)} title="Penalty Breakdown" />
+                    <PieChart
+                      data={buildPenaltyPieData(activeBucketSummary)}
+                      title="Penalty Breakdown"
+                      profileColor={primaryAccentColor}
+                      centerFillColor={settings?.primaryColor}
+                    />
                   ) : (
                     <PercentBar
                       solves={compareEnabled ? comparisonPrimarySolves : chartVisibleSolves}
@@ -8491,6 +8621,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       </StatFocusModal>
 
       <StatFocusModal
+        key={focusedCard?.id || "no-focused-card"}
         isOpen={!!focusedCard}
         title={focusedCard?.title}
         subtitle={focusedCard?.subtitle}
@@ -8514,7 +8645,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         actionButtons={[
           {
             key: "share-social",
-            label: focusActionBusy === "share" ? "Sharing..." : "Share to Social",
+            label: focusActionBusy === "share" ? "Sharing..." : "Share",
             onClick: handleShareFocusedCard,
             disabled: !focusedCard || focusActionBusy !== "" || typeof addPost !== "function",
           },
@@ -8537,8 +8668,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             tone: isFocusedCardFavorited ? "active" : "",
           },
         ]}
-      >
+        >
         <div
+          key={focusedCard?.id || focusedCard?.key || "stat-focus-canvas"}
           className={`statFocusCanvas ${focusedCard?.key === "summary" ? "is-summary" : ""} ${
             focusedCard?.key === "line" ? "is-line" : ""
           } ${
@@ -8549,7 +8681,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               : ""
           }`}
         >
-          <div className={focusedCardFrameClassName}>
+          <div
+            key={focusedCard?.id || focusedCard?.key || "stat-focus-frame"}
+            className={focusedCardFrameClassName}
+          >
             {focusedCardBody}
           </div>
         </div>

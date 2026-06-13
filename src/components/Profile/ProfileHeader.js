@@ -105,7 +105,7 @@ export default function ProfileHeader({
   const cubeTransforms = {
     "222": "translate(15px, 18px) scale(0.7)",
     "333": "scale(0.6)",
-    "444": "translate(-1px, -5px) scale(0.55)",
+    "444": "translate(-4px, -5px) scale(0.55)",
     "555": "translate(-8px, -10px) scale(0.55)",
     "666": "translate(-4px, -7px) scale(0.54)",
     "777": "translate(-4px, -6px) scale(0.54)",

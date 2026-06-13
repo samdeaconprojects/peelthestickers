@@ -8,6 +8,8 @@
   margin: 0;
   bottom: 0;
   right: 0;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* === When inside PlayerBar: keep neutral, no offsets === */
@@ -52,6 +54,8 @@
     border-color 0.2s ease,
     transform 0.2s ease,
     box-shadow 0.2s ease;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .event-selector-box:hover {
   background: rgba(255, 255, 255, 0.04);
@@ -63,7 +67,7 @@
 }
 
 .dropdown-arrow {
-  font-size: 14px;
+  font-size: 16px;
   opacity: 0.72;
 }
 
@@ -444,13 +448,13 @@
 }
 
 .event-selector-event {
-  font-size: 16pt;
+  font-size: 20pt;
   font-weight: 700;
   text-align: left;
 }
 
 .event-selector-session {
-  font-size: 10pt;
+  font-size: 13pt;
   opacity: 0.7;
   margin-top: 2px;
   white-space: nowrap;

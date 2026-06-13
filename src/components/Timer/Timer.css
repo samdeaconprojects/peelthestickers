@@ -75,6 +75,21 @@
   cursor: default;
 }
 
+.Timer__content {
+  position: relative;
+  display: inline-block;
+}
+
+.Timer__penalty {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translate(0.08em, -50%);
+  font-size: 0.68em;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
 /* GAN controls shown subtly above timer */
 .gan-controls {
   display: flex;

@@ -180,6 +180,12 @@ const CUBE_MODEL_GROUPS = [
   { key: "OTHER", label: "Other / Shared", aliases: [], color: "#9ca3af" },
 ];
 
+function normalizeCrossColorLabel(label) {
+  const value = String(label || "").trim();
+  if (!value || value === "Cross Color") return "Start Color";
+  return value;
+}
+
 function cleanArrayInput(value) {
   return String(value || "")
     .split(",")
@@ -295,7 +301,7 @@ function normalizeTagConfig(input) {
             : Object.fromEntries(CUBE_MODEL_GROUPS.map((group) => [group.key, []])),
       },
       CrossColor: {
-        label: fixed?.CrossColor?.label || "Start Color",
+        label: normalizeCrossColorLabel(fixed?.CrossColor?.label),
         options: Array.isArray(fixed?.CrossColor?.options)
           ? fixed.CrossColor.options
           : ["White", "Yellow", "Red", "Orange", "Blue", "Green"],
@@ -1143,6 +1149,17 @@ function Settings({
           </div>
 
           <div className="setting-item">
+            <label>Hide Timer Input + Solve Source On Home</label>
+            <input
+              type="checkbox"
+              checked={!!settings.hideAutomaticHomeTags}
+              onChange={(e) =>
+                updateSettings({ hideAutomaticHomeTags: e.target.checked })
+              }
+            />
+          </div>
+
+          <div className="setting-item">
             <label>Time Color Mode</label>
             <select
               value={settings.timeColorMode || "binary"}
@@ -1550,7 +1567,8 @@ function Settings({
               <label>Shortcut Rule</label>
               <div>
                 Navigation uses <strong>{primaryModifierLabel}</strong>. Solve edits use
-                <strong> Ctrl+Shift</strong>.
+                <strong> Ctrl+Shift</strong>. Scramble navigation defaults to
+                <strong> Option+Left/Right</strong>.
               </div>
             </div>
 

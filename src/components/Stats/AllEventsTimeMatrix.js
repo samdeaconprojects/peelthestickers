@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { formatTime } from "../TimeList/TimeUtils";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 
@@ -51,46 +51,98 @@ function MatrixValueButton({ value = null, average = false, className = "", onCl
   return (
     <button
       type="button"
-      className={`statsEventMatrixValueBtn ${disabled ? "is-disabled" : ""}`}
+      className={`statsEventMatrixValueBtn ${disabled ? "is-disabled" : ""} ${className}`}
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
     >
-      <div className={className}>{formatMetric(value, average)}</div>
+      <div className="statsEventMatrixValue">{formatMetric(value, average)}</div>
     </button>
   );
 }
 
-function MatrixCell({ item, metricKey, best = null, worst = null, average = false, onStatSelect = null }) {
+function MatrixCornerControls({
+  mainOnly = false,
+  showWorst = false,
+  showSessionToggle = true,
+  isVertical = false,
+  onToggleMainOnly = null,
+  onToggleWorst = null,
+}) {
   return (
-    <div className="statsEventMatrixCell">
-      <MatrixValueButton
-        value={best}
-        average={average}
-        className="statsEventMatrixValue statsEventMatrixValue--best"
-        onClick={() =>
-          onStatSelect?.({
-            event: item?.event,
-            metricKey,
-            variant: "best",
-            value: best,
-            mainOnly: item?.mainOnly !== false,
-          })
-        }
-      />
-      <MatrixValueButton
-        value={worst}
-        average={average}
-        className="statsEventMatrixValue statsEventMatrixValue--worst"
-        onClick={() =>
-          onStatSelect?.({
-            event: item?.event,
-            metricKey,
-            variant: "worst",
-            value: worst,
-            mainOnly: item?.mainOnly !== false,
-          })
-        }
-      />
+    <div
+      className={`statsEventMatrixCorner statsEventMatrixMetricHead statsEventMatrixFirstCol${
+        showSessionToggle && !mainOnly ? " is-active" : ""
+      }${isVertical ? " statsEventMatrixCorner--vertical" : ""}`}
+    >
+      {showSessionToggle ? (
+        <label className="statsEventMatrixToggle">
+          <input
+            type="checkbox"
+            checked={!mainOnly}
+            onChange={(event) => onToggleMainOnly?.(!event.target.checked)}
+          />
+          <span className="statsEventMatrixToggleLabel">
+            {mainOnly ? "Main Sessions" : "All Sessions"}
+          </span>
+        </label>
+      ) : (
+        <span className="statsEventMatrixFirstColContent">Event</span>
+      )}
+      <button
+        type="button"
+        aria-pressed={showWorst}
+        className={`statsToggleBtn barChartToggleBtn statsEventMatrixWorstToggle ${showWorst ? "is-active" : ""}`}
+        onClick={() => onToggleWorst?.()}
+      >
+        {showWorst ? "Hide worst" : "Show worst"}
+      </button>
+    </div>
+  );
+}
+
+function MatrixCell({
+  item,
+  metricKey,
+  best = null,
+  worst = null,
+  average = false,
+  onStatSelect = null,
+  showWorst = false,
+}) {
+  return (
+    <div className={`statsEventMatrixCell statsEventMatrixCell--${metricKey}`}>
+      <div className="statsEventMatrixValueStack">
+        <MatrixValueButton
+          value={best}
+          average={average}
+          className="statsEventMatrixValueBtn--best"
+          onClick={() =>
+            onStatSelect?.({
+              event: item?.event,
+              metricKey,
+              variant: "best",
+              value: best,
+              mainOnly: item?.mainOnly !== false,
+            })
+          }
+        />
+        {showWorst ? (
+          <MatrixValueButton
+            value={worst}
+            average={average}
+            className="statsEventMatrixValueBtn--worst"
+            onClick={() =>
+              onStatSelect?.({
+                event: item?.event,
+                metricKey,
+                variant: "worst",
+                value: worst,
+                mainOnly: item?.mainOnly !== false,
+              })
+            }
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -104,31 +156,36 @@ export default function AllEventsTimeMatrix({
   orientation = "horizontal",
   showSessionToggle = true,
 }) {
+  const [showWorst, setShowWorst] = useState(false);
   const isVertical = orientation === "vertical";
+  const matrixRowHeight = showWorst ? 62 : 52;
   const gridStyle = isVertical
     ? {
-        gridTemplateColumns: "minmax(82px, 0.95fr) repeat(3, minmax(0, 1fr))",
-        gridTemplateRows: `auto repeat(${Math.max(1, items.length)}, 48px)`,
+        gridTemplateColumns: "minmax(96px, 1.05fr) repeat(3, minmax(0, 1fr))",
+        gridTemplateRows: `auto repeat(${Math.max(1, items.length)}, ${matrixRowHeight}px)`,
       }
     : {
-        gridTemplateColumns: `56px repeat(${Math.max(1, items.length)}, minmax(88px, 1fr))`,
-        gridTemplateRows: "auto repeat(3, 48px)",
+        gridTemplateColumns: `96px repeat(${Math.max(1, items.length)}, minmax(92px, 1fr))`,
+        gridTemplateRows: `auto repeat(3, ${matrixRowHeight}px)`,
       };
 
   return (
     <div
-      className={`statsEventMatrix ${isVertical ? "statsEventMatrix--vertical" : ""} ${loading ? "is-loading" : ""}`}
+      className={`statsEventMatrix ${isVertical ? "statsEventMatrix--vertical" : ""} ${showWorst ? "statsEventMatrix--showWorst" : ""} ${loading ? "is-loading" : ""}`}
       aria-busy={loading}
     >
       <div className="statsEventMatrixScroller">
         <div className="statsEventMatrixGrid" style={gridStyle}>
           {isVertical ? (
             <>
-              <div className="statsEventMatrixMetricHead statsEventMatrixFirstCol">
-                <span className="statsEventMatrixFirstColContent">
-                  {showSessionToggle ? (mainOnly ? "Main Sessions" : "All Sessions") : "Event"}
-                </span>
-              </div>
+              <MatrixCornerControls
+                mainOnly={mainOnly}
+                showWorst={showWorst}
+                showSessionToggle={showSessionToggle}
+                isVertical
+                onToggleMainOnly={onToggleMainOnly}
+                onToggleWorst={() => setShowWorst((current) => !current)}
+              />
               {["Single", "AO5", "AO12"].map((label) => (
                 <div key={label} className="statsEventMatrixMetricHead statsEventMatrixMetricHead--centered">
                   <span>{label}</span>
@@ -158,6 +215,7 @@ export default function AllEventsTimeMatrix({
                     worst={item.singleWorst}
                     average={false}
                     onStatSelect={onStatSelect}
+                    showWorst={showWorst}
                   />
                   <MatrixCell
                     item={item}
@@ -166,6 +224,7 @@ export default function AllEventsTimeMatrix({
                     worst={item.ao5Worst}
                     average
                     onStatSelect={onStatSelect}
+                    showWorst={showWorst}
                   />
                   <MatrixCell
                     item={item}
@@ -174,28 +233,20 @@ export default function AllEventsTimeMatrix({
                     worst={item.ao12Worst}
                     average
                     onStatSelect={onStatSelect}
+                    showWorst={showWorst}
                   />
                 </React.Fragment>
               ))}
             </>
           ) : (
             <>
-              {showSessionToggle ? (
-                <label className={`statsEventMatrixToggle statsEventMatrixMetricHead statsEventMatrixFirstCol ${mainOnly ? "" : "is-active"}`}>
-                  <input
-                    type="checkbox"
-                    checked={!mainOnly}
-                    onChange={(event) => onToggleMainOnly?.(!event.target.checked)}
-                  />
-                  <span className="statsEventMatrixToggleLabel">
-                    {mainOnly ? "Main Sessions" : "All Sessions"}
-                  </span>
-                </label>
-              ) : (
-                <div className="statsEventMatrixMetricHead statsEventMatrixFirstCol">
-                  <span className="statsEventMatrixFirstColContent">Event</span>
-                </div>
-              )}
+              <MatrixCornerControls
+                mainOnly={mainOnly}
+                showWorst={showWorst}
+                showSessionToggle={showSessionToggle}
+                onToggleMainOnly={onToggleMainOnly}
+                onToggleWorst={() => setShowWorst((current) => !current)}
+              />
               {items.map((item) => (
                 <div key={`head-${item.event}`} className="statsEventMatrixEventHead">
                   <div className="statsEventMatrixEventTitle">
@@ -204,10 +255,10 @@ export default function AllEventsTimeMatrix({
                         isNxNStyleEvent(item.event) ? "is-nxn" : "is-other"
                       }`}
                       aria-hidden="true"
-                    >
-                      <PuzzleSVG event={getPuzzleIconEvent(item.event)} scramble="" isStatsHeaderIcon />
-                    </span>
-                    <span>{formatEventLabel(item.event)}</span>
+                      >
+                        <PuzzleSVG event={getPuzzleIconEvent(item.event)} scramble="" isStatsHeaderIcon />
+                      </span>
+                    <span className="statsEventMatrixEventLabel">{formatEventLabel(item.event)}</span>
                   </div>
                   <small>{Number(item.solveCount || 0).toLocaleString()}</small>
                 </div>
@@ -225,6 +276,7 @@ export default function AllEventsTimeMatrix({
                   worst={item.singleWorst}
                   average={false}
                   onStatSelect={onStatSelect}
+                  showWorst={showWorst}
                 />
               ))}
 
@@ -240,6 +292,7 @@ export default function AllEventsTimeMatrix({
                   worst={item.ao5Worst}
                   average
                   onStatSelect={onStatSelect}
+                  showWorst={showWorst}
                 />
               ))}
 
@@ -255,6 +308,7 @@ export default function AllEventsTimeMatrix({
                   worst={item.ao12Worst}
                   average
                   onStatSelect={onStatSelect}
+                  showWorst={showWorst}
                 />
               ))}
             </>

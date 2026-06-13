@@ -194,6 +194,7 @@ function Post({
   note = "",
   postType = "solve",
   statShare = null,
+  showMeta = true,
 }) {
   const resolvedPostType = statShare ? "stat-share" : postType;
   const primary = solveList[0] || {};
@@ -247,150 +248,160 @@ function Post({
 
   return (
     <div
-      className="post"
-      style={{ border: `2px solid ${withAlpha(postColor, 0.5)}` }}
+      className={`postShell ${trimmedNote ? "postShell--withCaption" : ""}`}
       onClick={onClick}
     >
       {resolvedPostType === "stat-share" ? (
-        <>
+        <div
+          className="post"
+          style={{ border: `2px solid ${withAlpha(postColor, 0.5)}` }}
+        >
           <div className="titleAndContent">
             <StatSharePost note={trimmedNote} statShare={statShare} shareColor={postColor} />
           </div>
 
-          {postMeta}
-        </>
+          {showMeta ? postMeta : null}
+        </div>
       ) : (
         <>
-          <div className="titleAndContent">
-            {trimmedNote ? <div className="postCaption">{trimmedNote}</div> : null}
-            <div className="postTitle">
-              <div
-                className={`postTitleCube ${
-                  nxn
-                    ? "postTitleCube--nxn"
-                    : `postTitleCube--other postTitleCube--${String(event || "333").toLowerCase()}`
-                }`}
-              >
-                {nxn ? (
-                  <RubiksCubeSVG
-                    className="postCube"
-                    n={event || "333"}
-                    faces={getScrambledFaces(scramble || "", event || "333")}
-                    isMusicPlayer={false}
-                    isTimerCube={false}
-                  />
-                ) : (
-                  <PuzzleSVG
-                    event={event || "333"}
-                    scramble={scramble || ""}
-                    isMusicPlayer={false}
-                    isTimerCube={false}
-                  />
-                )}
-              </div>
+          {trimmedNote ? (
+            <div className="postCaption postCaption--attached">{trimmedNote}</div>
+          ) : null}
 
-              <div className="titleText">
-                <span className="titleTextLabel">
-                  {eventStr} {singleOrAvg}
-                </span>
-                <span className="titleTextSeparator"> - </span>
-                <span className="titleTextValue">
-                  {headlineTime != null ? formatTime(headlineTime, solveList.length > 1) : '--'}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {showAverageSolveList ? (
-            <div className="postAverageSnapshot" aria-label="Average solves">
-              {solveList.length <= 12 ? (
+          <div
+            className="post"
+            style={{ border: `2px solid ${withAlpha(postColor, 0.5)}` }}
+          >
+            <div className="titleAndContent">
+              <div className="postTitle">
                 <div
-                  className={`postAverageSnapshotGrid ${
-                    solveList.length <= 5 ? "postAverageSnapshotGrid--5" : "postAverageSnapshotGrid--12"
+                  className={`postTitleCube ${
+                    nxn
+                      ? "postTitleCube--nxn"
+                      : `postTitleCube--other postTitleCube--${String(event || "333").toLowerCase()}`
                   }`}
                 >
-                  {solveList.map((solve, index) => {
-                    const solveMs = getComparableSolveTime(solve);
-                    const isBest = averageBestWorst.best.has(index);
-                    const isWorst = averageBestWorst.worst.has(index);
-                    const perfClass = getPerfClassByRank01(averageRankMap[index]);
+                  {nxn ? (
+                    <RubiksCubeSVG
+                      className="postCube"
+                      n={event || "333"}
+                      faces={getScrambledFaces(scramble || "", event || "333")}
+                      isMusicPlayer={false}
+                      isTimerCube={false}
+                    />
+                  ) : (
+                    <PuzzleSVG
+                      event={event || "333"}
+                      scramble={scramble || ""}
+                      isMusicPlayer={false}
+                      isTimerCube={false}
+                    />
+                  )}
+                </div>
 
-                    return (
-                      <div
-                        key={`${solve?.datetime || solve?.createdAt || index}-${index}`}
-                        className="postAverageSnapshotCell"
-                      >
+                <div className="titleText">
+                  <span className="titleTextLabel">
+                    {eventStr} {singleOrAvg}
+                  </span>
+                  <span className="titleTextSeparator"> - </span>
+                  <span className="titleTextValue">
+                    {headlineTime != null ? formatTime(headlineTime, solveList.length > 1) : '--'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {showAverageSolveList ? (
+              <div className="postAverageSnapshot" aria-label="Average solves">
+                {solveList.length <= 12 ? (
+                  <div
+                    className={`postAverageSnapshotGrid ${
+                      solveList.length <= 5 ? "postAverageSnapshotGrid--5" : "postAverageSnapshotGrid--12"
+                    }`}
+                  >
+                    {solveList.map((solve, index) => {
+                      const solveMs = getComparableSolveTime(solve);
+                      const isBest = averageBestWorst.best.has(index);
+                      const isWorst = averageBestWorst.worst.has(index);
+                      const perfClass = getPerfClassByRank01(averageRankMap[index]);
+
+                      return (
+                        <div
+                          key={`${solve?.datetime || solve?.createdAt || index}-${index}`}
+                          className="postAverageSnapshotCell"
+                        >
+                          <TimeItem
+                            ms={Number.isFinite(solveMs) ? solveMs : undefined}
+                            time={
+                              Number.isFinite(solveMs)
+                                ? undefined
+                                : solve?.time != null
+                                  ? formatTime(solve.time, false, solve?.penalty)
+                                  : "--"
+                            }
+                            penalty={solve?.penalty}
+                            rangeMin={averageRangeMin ?? undefined}
+                            rangeMax={averageRangeMax ?? undefined}
+                            className={`postAverageSnapshotTime ${isBest ? "row-border-min" : ""} ${
+                              isWorst ? "row-border-max" : ""
+                            }`}
+                            style={buildPerfBorderStyle(perfClass, "solid")}
+                            disablePerformanceClass={true}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="postAverageSnapshotSummary">
+                    {bestAverageSolve ? (
+                      <div className="postAverageSnapshotSummaryItem">
                         <TimeItem
-                          ms={Number.isFinite(solveMs) ? solveMs : undefined}
+                          ms={Number.isFinite(getComparableSolveTime(bestAverageSolve))
+                            ? getComparableSolveTime(bestAverageSolve)
+                            : undefined}
                           time={
-                            Number.isFinite(solveMs)
+                            Number.isFinite(getComparableSolveTime(bestAverageSolve))
                               ? undefined
-                              : solve?.time != null
-                                ? formatTime(solve.time, false, solve?.penalty)
+                              : bestAverageSolve?.time != null
+                                ? formatTime(bestAverageSolve.time, false, bestAverageSolve?.penalty)
                                 : "--"
                           }
-                          penalty={solve?.penalty}
-                          rangeMin={averageRangeMin ?? undefined}
-                          rangeMax={averageRangeMax ?? undefined}
-                          className={`postAverageSnapshotTime ${isBest ? "row-border-min" : ""} ${
-                            isWorst ? "row-border-max" : ""
-                          }`}
-                          style={buildPerfBorderStyle(perfClass, "solid")}
+                          penalty={bestAverageSolve?.penalty}
+                          className="postAverageSnapshotTime row-border-min"
+                          style={buildPerfBorderStyle("fastest", "dotted")}
                           disablePerformanceClass={true}
                         />
                       </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="postAverageSnapshotSummary">
-                  {bestAverageSolve ? (
-                    <div className="postAverageSnapshotSummaryItem">
-                      <TimeItem
-                        ms={Number.isFinite(getComparableSolveTime(bestAverageSolve))
-                          ? getComparableSolveTime(bestAverageSolve)
-                          : undefined}
-                        time={
-                          Number.isFinite(getComparableSolveTime(bestAverageSolve))
-                            ? undefined
-                            : bestAverageSolve?.time != null
-                              ? formatTime(bestAverageSolve.time, false, bestAverageSolve?.penalty)
-                              : "--"
-                        }
-                        penalty={bestAverageSolve?.penalty}
-                        className="postAverageSnapshotTime row-border-min"
-                        style={buildPerfBorderStyle("fastest", "dotted")}
-                        disablePerformanceClass={true}
-                      />
-                    </div>
-                  ) : null}
+                    ) : null}
 
-                  {worstAverageSolve ? (
-                    <div className="postAverageSnapshotSummaryItem">
-                      <TimeItem
-                        ms={Number.isFinite(getComparableSolveTime(worstAverageSolve))
-                          ? getComparableSolveTime(worstAverageSolve)
-                          : undefined}
-                        time={
-                          Number.isFinite(getComparableSolveTime(worstAverageSolve))
-                            ? undefined
-                            : worstAverageSolve?.time != null
-                              ? formatTime(worstAverageSolve.time, false, worstAverageSolve?.penalty)
-                              : "--"
-                        }
-                        penalty={worstAverageSolve?.penalty}
-                        className="postAverageSnapshotTime row-border-max"
-                        style={buildPerfBorderStyle("slowest", "dotted")}
-                        disablePerformanceClass={true}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
-          ) : null}
+                    {worstAverageSolve ? (
+                      <div className="postAverageSnapshotSummaryItem">
+                        <TimeItem
+                          ms={Number.isFinite(getComparableSolveTime(worstAverageSolve))
+                            ? getComparableSolveTime(worstAverageSolve)
+                            : undefined}
+                          time={
+                            Number.isFinite(getComparableSolveTime(worstAverageSolve))
+                              ? undefined
+                              : worstAverageSolve?.time != null
+                                ? formatTime(worstAverageSolve.time, false, worstAverageSolve?.penalty)
+                                : "--"
+                          }
+                          penalty={worstAverageSolve?.penalty}
+                          className="postAverageSnapshotTime row-border-max"
+                          style={buildPerfBorderStyle("slowest", "dotted")}
+                          disablePerformanceClass={true}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            ) : null}
 
-          {postMeta}
+            {showMeta ? postMeta : null}
+          </div>
         </>
       )}
     </div>

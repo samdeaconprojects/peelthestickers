@@ -49,6 +49,66 @@
   font-weight: 800;
 }
 
+.sharePostTargetSection {
+  margin-top: 16px;
+}
+
+.sharePostTargetOptions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sharePostTargetOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 10px 14px;
+  color: rgba(255, 255, 255, 0.84);
+  font-weight: 800;
+}
+
+.sharePostTargetOption.is-active {
+  border-color: rgba(46, 196, 182, 0.72);
+  background: rgba(46, 196, 182, 0.12);
+  color: white;
+}
+
+.sharePostTargetOption.is-disabled {
+  opacity: 0.6;
+}
+
+.sharePostTargetOption input {
+  margin: 0;
+}
+
+.sharePostSelect {
+  width: 100%;
+  margin-top: 10px;
+  border-radius: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: white;
+  padding: 12px 14px;
+  box-sizing: border-box;
+  font: inherit;
+  outline: none;
+}
+
+.sharePostSelect:focus {
+  border-color: rgba(46, 196, 182, 0.7);
+}
+
+.sharePostHint {
+  margin-top: 10px;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
 .sharePostInput {
   width: 100%;
   border-radius: 14px;

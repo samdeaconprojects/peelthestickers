@@ -61,18 +61,22 @@
 
 .dashed-border-max {
   border: 2px dashed #FF0000 !important;
+  background-color: rgba(255, 0, 0, 0.1);
 }
 
 .dashed-border-min {
   border: 2px dashed #00FF00 !important;
+  background-color: rgba(0, 255, 0, 0.1);
 }
 
 .overall-border-max {
   border: 2px solid #FF0000 !important;
+  background-color: rgba(255, 0, 0, 0.1);
 }
 
 .overall-border-min {
   border: 2px solid #00FF00 !important;
+  background-color: rgba(0, 255, 0, 0.1);
 }
 
 .row-border-min {

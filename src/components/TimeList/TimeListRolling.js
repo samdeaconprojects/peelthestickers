@@ -3,6 +3,33 @@ import "./TimeList.css";
 import "./TimeItem.css";
 import { formatTime, calculateAverageOfFive, calculateAverage } from "./TimeUtils";
 
+function getPenalty(solve) {
+  return String(solve?.penalty ?? solve?.Penalty ?? "").trim().toUpperCase();
+}
+
+function getComparableSolveTime(solve) {
+  if (!solve) return null;
+
+  const penalty = getPenalty(solve);
+  if (penalty === "DNF") return Number.MAX_SAFE_INTEGER;
+
+  const explicitFinal = Number(solve?.finalTimeMs ?? solve?.FinalTimeMs);
+  if (Number.isFinite(explicitFinal) && explicitFinal >= 0) {
+    return explicitFinal;
+  }
+
+  const base = Number(
+    solve?.rawTimeMs ??
+      solve?.RawTimeMs ??
+      solve?.rawTime ??
+      solve?.originalTime ??
+      solve?.time
+  );
+  if (!Number.isFinite(base) || base < 0) return null;
+
+  return penalty === "+2" ? base + 2000 : base;
+}
+
 function TimeListRolling({ solves = [], deleteTime }) {
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const [solvesPerRow, setSolvesPerRow] = useState(window.innerWidth > 1100 ? 12 : 5);
@@ -22,11 +49,24 @@ function TimeListRolling({ solves = [], deleteTime }) {
 
   // Correctly generate Ao5 and Ao12 for each column
   const ao5Results = latestSolves.map((_, i) => 
-    i >= 4 ? formatTime(calculateAverageOfFive(latestSolves.slice(i - 4, i + 1).map((s) => s.time))) : ""
+    i >= 4
+      ? formatTime(
+          calculateAverageOfFive(
+            latestSolves.slice(i - 4, i + 1).map(getComparableSolveTime)
+          )
+        )
+      : ""
   );
 
   const ao12Results = latestSolves.map((_, i) =>
-    i >= 11 ? formatTime(calculateAverage(latestSolves.slice(i - 11, i + 1).map((s) => s.time), true).average) : ""
+    i >= 11
+      ? formatTime(
+          calculateAverage(
+            latestSolves.slice(i - 11, i + 1).map(getComparableSolveTime),
+            true
+          ).average
+        )
+      : ""
   );
 
   return (
@@ -58,7 +98,7 @@ function TimeListRolling({ solves = [], deleteTime }) {
             <tr>
               {latestSolves.map((solve, index) => (
                 <td key={`solve-${index}`} className="TimeItem">
-                  {formatTime(solve.time)}
+                  {formatTime(getComparableSolveTime(solve), false, solve?.penalty)}
                   <span className="delete-icon" onClick={() => deleteTime(index)}>x</span>
                 </td>
               ))}

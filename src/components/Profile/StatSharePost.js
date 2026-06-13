@@ -69,6 +69,7 @@ function StatShareCanvas({ statShare, shareColor = "" }) {
           eventKey={render.eventKey || render.currentEvent || "333"}
           practiceMode={false}
           allowViewPicker={render.showControls === true}
+          initialShowControls={false}
           viewMode={render.viewMode || "standard"}
           selectedDay={render.selectedDay || ""}
           onSelectedDayChange={noop}

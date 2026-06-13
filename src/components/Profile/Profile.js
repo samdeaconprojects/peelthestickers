@@ -14,12 +14,15 @@ import TimeTable from "../Stats/TimeTable";
 import PercentBar from "../Stats/PercentBar";
 import StatsSummary from "../Stats/StatsSummary";
 import AllEventsTimeMatrix from "../Stats/AllEventsTimeMatrix";
+import { calculateAverage } from "../TimeList/TimeUtils";
+import { EVENT_KEYBINDING_LABELS } from "../../utils/keybindings";
+import { getProfileChartStyle } from "../../utils/profileChartStyle";
 import { getPosts } from "../../services/getPosts";
 import { getUser } from "../../services/getUser";
 import { updateUser } from "../../services/updateUser";
 import { updatePostComments } from "../../services/updatePostComments";
 import { getSessions } from "../../services/getSessions";
-import { getLastNSolvesByEvent, getLastNSolvesBySession } from "../../services/getSolvesBySession";
+import { getLastNSolvesByEvent, getLastNSolvesBySession, getSolvesBySession } from "../../services/getSolvesBySession";
 
 const PROFILE_SOLVE_QUERY_LIMIT = 200;
 
@@ -38,6 +41,25 @@ const isInteractiveFeedTarget = (target) =>
   !!target?.closest?.(
     "button, input, select, textarea, a, .statsToggleBtn, .statsMiniBtn, .chartScaleInput, .lineChartDot, [data-interactive='solve-point'], svg .timeLineSegment, .timeLineSegment"
   );
+
+function formatLineChartEventLabel(eventValue) {
+  const eventKey = String(eventValue || "").toUpperCase();
+  return EVENT_KEYBINDING_LABELS[eventKey] || String(eventValue || "Stats");
+}
+
+function formatLineChartSessionLabel(sessionValue) {
+  const normalized = String(sessionValue || "").trim();
+  if (!normalized) return "";
+  if (normalized.toLowerCase() === "all") return "All Sessions";
+  return normalized;
+}
+
+function buildLineChartTitle(title, eventValue, sessionValue) {
+  if (String(title || "").trim()) return title;
+  const eventText = formatLineChartEventLabel(eventValue);
+  const sessionText = formatLineChartSessionLabel(sessionValue);
+  return sessionText ? `${eventText} · ${sessionText}` : eventText;
+}
 
 function normalizeSolve(item, fallbackIndex = null) {
   if (!item) return null;
@@ -215,6 +237,14 @@ function aggregateProfileMatrixStats(sessionMap = {}, { mainOnly = false } = {})
   let ao5Worst = null;
   let ao12Best = null;
   let ao12Worst = null;
+  const refs = {
+    singleBest: null,
+    singleWorst: null,
+    ao5Best: null,
+    ao5Worst: null,
+    ao12Best: null,
+    ao12Worst: null,
+  };
   const entries = mainOnly
     ? Object.entries(sessionMap || {}).filter(([sessionID]) => String(sessionID || "main") === "main")
     : Object.entries(sessionMap || {});
@@ -230,12 +260,30 @@ function aggregateProfileMatrixStats(sessionMap = {}, { mainOnly = false } = {})
     const nextAo12Best = finiteMetric(stats.BestAo12Ms);
     const nextAo12Worst = finiteMetric(stats.WorstAo12Ms);
 
-    if (nextSingleBest != null) singleBest = singleBest == null ? nextSingleBest : Math.min(singleBest, nextSingleBest);
-    if (nextSingleWorst != null) singleWorst = singleWorst == null ? nextSingleWorst : Math.max(singleWorst, nextSingleWorst);
-    if (nextAo5Best != null) ao5Best = ao5Best == null ? nextAo5Best : Math.min(ao5Best, nextAo5Best);
-    if (nextAo5Worst != null) ao5Worst = ao5Worst == null ? nextAo5Worst : Math.max(ao5Worst, nextAo5Worst);
-    if (nextAo12Best != null) ao12Best = ao12Best == null ? nextAo12Best : Math.min(ao12Best, nextAo12Best);
-    if (nextAo12Worst != null) ao12Worst = ao12Worst == null ? nextAo12Worst : Math.max(ao12Worst, nextAo12Worst);
+    if (nextSingleBest != null && (singleBest == null || nextSingleBest < singleBest)) {
+      singleBest = nextSingleBest;
+      refs.singleBest = stats.BestSingleSolveSK || null;
+    }
+    if (nextSingleWorst != null && (singleWorst == null || nextSingleWorst > singleWorst)) {
+      singleWorst = nextSingleWorst;
+      refs.singleWorst = stats.WorstSingleSolveSK || null;
+    }
+    if (nextAo5Best != null && (ao5Best == null || nextAo5Best < ao5Best)) {
+      ao5Best = nextAo5Best;
+      refs.ao5Best = stats.BestAo5StartSolveSK || null;
+    }
+    if (nextAo5Worst != null && (ao5Worst == null || nextAo5Worst > ao5Worst)) {
+      ao5Worst = nextAo5Worst;
+      refs.ao5Worst = stats.WorstAo5StartSolveSK || null;
+    }
+    if (nextAo12Best != null && (ao12Best == null || nextAo12Best < ao12Best)) {
+      ao12Best = nextAo12Best;
+      refs.ao12Best = stats.BestAo12StartSolveSK || null;
+    }
+    if (nextAo12Worst != null && (ao12Worst == null || nextAo12Worst > ao12Worst)) {
+      ao12Worst = nextAo12Worst;
+      refs.ao12Worst = stats.WorstAo12StartSolveSK || null;
+    }
   }
 
   return {
@@ -246,7 +294,93 @@ function aggregateProfileMatrixStats(sessionMap = {}, { mainOnly = false } = {})
     ao5Worst,
     ao12Best,
     ao12Worst,
+    refs,
   };
+}
+
+function getSolveDisplayMs(solve) {
+  if (!solve) return null;
+  const penalty = String(solve?.penalty ?? solve?.Penalty ?? "").toUpperCase();
+  if (penalty === "DNF") return null;
+  const base =
+    Number.isFinite(Number(solve?.time)) ? Number(solve.time)
+      : Number.isFinite(Number(solve?.finalTimeMs)) ? Number(solve.finalTimeMs)
+      : Number.isFinite(Number(solve?.rawTimeMs)) ? Number(solve.rawTimeMs)
+      : null;
+  if (!Number.isFinite(base)) return null;
+  return penalty === "+2" ? base + 2000 : base;
+}
+
+function getSolveValueForAverage(solve) {
+  const penalty = String(solve?.penalty ?? solve?.Penalty ?? "").toUpperCase();
+  if (penalty === "DNF") return "DNF";
+  const value = getSolveDisplayMs(solve);
+  return Number.isFinite(value) ? value : "DNF";
+}
+
+function computeWindowAverage(solves, size) {
+  const items = Array.isArray(solves) ? solves : [];
+  if (items.length !== size) return null;
+  return calculateAverage(items.map(getSolveValueForAverage), true)?.average ?? null;
+}
+
+function findWindowByStartRef(solves, startSolveRef, size) {
+  if (!startSolveRef) return null;
+  const items = Array.isArray(solves) ? solves : [];
+  const startIndex = items.findIndex(
+    (solve) => String(solve?.solveRef ?? solve?.SK ?? "") === String(startSolveRef)
+  );
+  if (startIndex < 0) return null;
+  const slice = items.slice(startIndex, startIndex + size);
+  return slice.length === size ? slice : null;
+}
+
+function findWindowForMetric(solves, size, variant) {
+  const items = Array.isArray(solves) ? solves : [];
+  if (items.length < size) return null;
+
+  let selected = null;
+  let selectedValue = null;
+
+  for (let i = 0; i <= items.length - size; i += 1) {
+    const slice = items.slice(i, i + size);
+    const value = computeWindowAverage(slice, size);
+    if (!Number.isFinite(value)) continue;
+
+    if (
+      selected == null ||
+      (variant === "best" && value < selectedValue) ||
+      (variant === "worst" && value > selectedValue)
+    ) {
+      selected = slice;
+      selectedValue = value;
+    }
+  }
+
+  return selected;
+}
+
+function findSingleSolve(solves, variant) {
+  const items = Array.isArray(solves) ? solves : [];
+  if (!items.length) return null;
+
+  let selected = null;
+  let selectedValue = null;
+
+  items.forEach((solve) => {
+    const value = getSolveDisplayMs(solve);
+    if (!Number.isFinite(value)) return;
+    if (
+      selected == null ||
+      (variant === "best" && value < selectedValue) ||
+      (variant === "worst" && value > selectedValue)
+    ) {
+      selected = solve;
+      selectedValue = value;
+    }
+  });
+
+  return selected;
 }
 
 function compareProfileMatrixItems(a, b) {
@@ -333,6 +467,22 @@ function getProfileStatItemClass(chart) {
     default:
       return "profileStatsItem";
   }
+}
+
+function getProfileStatsChromeStyle(profile) {
+  const style = getProfileChartStyle(profile);
+  const primary = style?.primary || profile?.Color || profile?.color || "#2EC4B6";
+  const accent = style?.accent || primary;
+  const stops = Array.isArray(style?.stops) ? style.stops : [primary, accent, primary];
+
+  return {
+    "--profile-stats-card-border": withAlpha(primary, 0.82),
+    "--profile-stats-card-border-soft": withAlpha(primary, 0.32),
+    "--profile-stats-card-shadow": withAlpha(primary, 0.18),
+    "--profile-stats-card-glow": withAlpha(accent, 0.18),
+    "--profile-stats-card-bg-top": withAlpha(stops[1] || primary, 0.1),
+    "--profile-stats-card-bg-bottom": withAlpha(stops[0] || primary, 0.18),
+  };
 }
 
 function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = true }) {
@@ -626,6 +776,7 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
             ao5Worst: aggregate.ao5Worst,
             ao12Best: aggregate.ao12Best,
             ao12Worst: aggregate.ao12Worst,
+            refs: aggregate.refs,
           };
         })
         .filter((item) => Number(item.solveCount || 0) > 0)
@@ -672,10 +823,72 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
     setSelectedProfileCard(item);
   };
 
+  const handleProfileMatrixStatSelect = async (selection) => {
+    if (!selection || !viewID) return;
+
+    const event = String(selection?.event || "").trim().toUpperCase();
+    const variant = String(selection?.variant || "").trim().toLowerCase();
+    const metricKey = String(selection?.metricKey || "").trim().toLowerCase();
+    if (!event || !["best", "worst"].includes(variant)) return;
+
+    const sourceItem =
+      profileTimeMatrixItems.find((item) => String(item?.event || "").trim().toUpperCase() === event) || null;
+    const refKey = `${metricKey}${variant === "best" ? "Best" : "Worst"}`;
+    const startSolveRef = sourceItem?.refs?.[refKey] || null;
+    const scopeSessions = ["main"];
+
+    const results = await Promise.all(
+      scopeSessions.map(async (scopeSessionID) => {
+        const items = await getSolvesBySession(viewID, event, scopeSessionID);
+        return (items || []).map((solve, index) => normalizeSolve(solve, index)).filter(Boolean);
+      })
+    );
+
+    const mergedSolves = results
+      .flat()
+      .sort((a, b) => new Date(a?.datetime || "").getTime() - new Date(b?.datetime || "").getTime());
+
+    if (!mergedSolves.length) return;
+
+    if (metricKey === "single") {
+      const solve =
+        (startSolveRef
+          ? mergedSolves.find((item) => String(item?.solveRef || "") === String(startSolveRef))
+          : null) || findSingleSolve(mergedSolves, variant);
+
+      if (!solve) return;
+
+      setSelectedProfileCard({
+        chart: "solveCard",
+        solve: { ...solve, __readOnly: true },
+        createdAt: solve.datetime || new Date().toISOString(),
+        note: "",
+      });
+      return;
+    }
+
+    const windowSize = metricKey === "ao12" ? 12 : metricKey === "ao5" ? 5 : 0;
+    if (!windowSize) return;
+
+    const solvesForWindow =
+      (startSolveRef ? findWindowByStartRef(mergedSolves, startSolveRef, windowSize) : null) ||
+      findWindowForMetric(mergedSolves, windowSize, variant);
+
+    if (!solvesForWindow?.length) return;
+
+    setSelectedProfileCard({
+      chart: "averageCard",
+      solves: solvesForWindow.map((solve) => ({ ...solve, __readOnly: true })),
+      createdAt: solvesForWindow[solvesForWindow.length - 1]?.datetime || new Date().toISOString(),
+      note: "",
+    });
+  };
+
   if (!viewedProfile) return null;
   if (!viewedProfile.UserID) return <div>Loading profile…</div>;
+  const profileStatsChromeStyle = getProfileStatsChromeStyle(viewedProfile);
   return (
-    <div className="Page profilePage">
+    <div className="Page profilePage" style={profileStatsChromeStyle}>
       <ProfileHeader
         user={viewedProfile}
         currentUser={user}
@@ -918,6 +1131,7 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
                               solveList={[solve]}
                               postColor={viewedProfile.Color || viewedProfile.color}
                               note={item.note || ""}
+                              showMeta={false}
                               onClick={() => openSavedProfileCard(item)}
                             />
                           </div>
@@ -939,6 +1153,7 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
                               solveList={solves}
                               postColor={viewedProfile.Color || viewedProfile.color}
                               note={item.note || ""}
+                              showMeta={false}
                               onClick={() => openSavedProfileCard(item)}
                             />
                           </div>
@@ -995,9 +1210,10 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
                           <div key={idx} className={cardClassName}>
                             <LineChart
                               solves={solves}
-                              title={item.title || `${item.event} (${item.session || "all"})`}
+                              title={buildLineChartTitle(item.title, item.event, item.session || "all")}
                               defaultViewMode="last100"
                               allowViewPicker={true}
+                              initialShowControls={false}
                               seriesStyle={item.seriesStyle || null}
                               legendItems={item.legendItems || []}
                               viewMode={item.viewMode || "standard"}
@@ -1011,6 +1227,7 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
                           <div key={idx} className={cardClassName}>
                             <EventCountPieChart
                               sessionStats={viewedSessionStats}
+                              profileColor={user?.Color || user?.color || "#2EC4B6"}
                             />
                           </div>
                         );
@@ -1054,6 +1271,7 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
                         mainOnly
                         orientation="vertical"
                         showSessionToggle={false}
+                        onStatSelect={handleProfileMatrixStatSelect}
                       />
                     ) : (
                       <div className="profileStatsMatrixEmpty">No event stats yet.</div>

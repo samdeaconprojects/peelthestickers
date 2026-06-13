@@ -38,6 +38,14 @@ function getSolveValue(solve) {
   return Number.isFinite(time) ? time : "DNF";
 }
 
+function calculateSelectionMetric(values) {
+  const input = Array.isArray(values) ? values : [];
+  if (!input.length) return null;
+  const isMo3 = input.length === 3;
+  const result = calculateAverage(input, !isMo3);
+  return result?.average ?? null;
+}
+
 function getSolveDateTime(solve) {
   return solve?.datetime || solve?.createdAt || solve?.CreatedAt || solve?.DateTime || null;
 }
@@ -177,7 +185,7 @@ function AverageDetailModal({
     }
 
     const values = items.map(getSolveValue);
-    const result = calculateAverage(values, true);
+    const result = calculateSelectionMetric(values);
     const sharedTagGroups = tagFields
       .map((fieldMeta) => {
         if (isAlgorithmField(fieldMeta.field)) return null;
@@ -195,7 +203,7 @@ function AverageDetailModal({
       .filter(Boolean);
 
     return {
-      average: result?.average ?? null,
+        average: result,
       rows: items.map((solve, index) => ({
         solve,
         index,
@@ -237,8 +245,7 @@ function AverageDetailModal({
   const filteredAverage = useMemo(() => {
     if (!filteredRows.length) return null;
     const values = filteredRows.map((row) => getSolveValue(row.solve));
-    const result = calculateAverage(values, true);
-    return result?.average ?? null;
+    return calculateSelectionMetric(values);
   }, [filteredRows]);
 
   const itemRowSize = filteredRows.length <= 5 ? 5 : 12;
@@ -363,7 +370,7 @@ function AverageDetailModal({
               <div className="averageDetailTitleRow">
                 <div className="averageDetailTitleCopy">
                   <div className="averageDetailHeroLabel">
-                    {currentEventToString(detail.event)} Average of {filteredRows.length}
+                    {currentEventToString(detail.event)} {filteredRows.length === 3 ? "Mean of 3" : `Average of ${filteredRows.length}`}
                   </div>
                   {detail.solveRangeLabel ? (
                     <div className="averageDetailHeroDate">{detail.solveRangeLabel}</div>
@@ -475,7 +482,7 @@ function AverageDetailModal({
             initialItemRowSize={itemRowSize}
             initialTableLimit="all"
             preserveInputOrder={true}
-            showSolveAverages={false}
+            showSolveAverages={displayMode === "table"}
             containerClassName="averageDetailEmbeddedTable"
             renderSolveFooter={renderSolveAlgorithmTags}
           />

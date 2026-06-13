@@ -28,7 +28,9 @@ function normalizeEvent(event) {
 
 function normalizeSessionID(sessionID) {
   const sid = String(sessionID || "main").trim();
-  return sid || "main";
+  if (!sid) return "main";
+  if (sid.toLowerCase() === "main") return "main";
+  return sid;
 }
 
 function normalizeTimeZone(value) {
@@ -653,8 +655,38 @@ function buildDayBucketSK({ dayKey, event = "", mainOnly = false } = {}) {
     : `DAYBUCKET#EVENT#${ev}#${day}`;
 }
 
+function compareTopSingleEntry(a, b) {
+  return (
+    Number(a?.FinalTimeMs || Infinity) - Number(b?.FinalTimeMs || Infinity) ||
+    String(a?.CreatedAt || "").localeCompare(String(b?.CreatedAt || "")) ||
+    String(a?.SolveSK || "").localeCompare(String(b?.SolveSK || ""))
+  );
+}
+
+function insertTopSingleEntry(entries, solve, finalMs, limit = 10) {
+  if (!Number.isFinite(finalMs)) return Array.isArray(entries) ? entries : [];
+
+  const next = Array.isArray(entries) ? [...entries] : [];
+  next.push({
+    SolveSK: solve?.SK || null,
+    FinalTimeMs: Number(finalMs),
+    CreatedAt: solve?.CreatedAt || null,
+    SessionID: solve?.SessionID || null,
+  });
+
+  const deduped = Array.from(
+    new Map(next.filter((entry) => entry?.SolveSK).map((entry) => [entry.SolveSK, entry])).values()
+  );
+  deduped.sort(compareTopSingleEntry);
+  return deduped.slice(0, Math.max(1, Number(limit || 10)));
+}
+
 function buildDayBucketSummaryFromSolves(solves = []) {
   const input = Array.isArray(solves) ? solves : [];
+  const ao25 = bestAoForWindow(input, 25);
+  const ao50 = bestAoForWindow(input, 50);
+  const ao100 = bestAoForWindow(input, 100);
+  const ao1000 = bestAoForWindow(input, 1000);
 
   let SolveCountTotal = 0;
   let SolveCountIncluded = 0;
@@ -735,6 +767,14 @@ function buildDayBucketSummaryFromSolves(solves = []) {
       (acc, config) => ({ ...acc, ...buildWindowSummaryFromSolves(input, config) }),
       {}
     ),
+    BestAo25Ms: ao25.value,
+    BestAo25StartSolveSK: ao25.startSolveSK,
+    BestAo50Ms: ao50.value,
+    BestAo50StartSolveSK: ao50.startSolveSK,
+    BestAo100Ms: ao100.value,
+    BestAo100StartSolveSK: ao100.startSolveSK,
+    BestAo1000Ms: ao1000.value,
+    BestAo1000StartSolveSK: ao1000.startSolveSK,
     FirstSolveAt,
     LastSolveAt,
     UpdatedAt: nowIso(),
@@ -782,6 +822,14 @@ function mergeDayBucketSummaries(summaries = []) {
         BestAo5StartSolveSK: item?.BestAo5StartSolveSK || null,
         BestAo12Ms: asFiniteOrNull(item?.BestAo12Ms),
         BestAo12StartSolveSK: item?.BestAo12StartSolveSK || null,
+        BestAo25Ms: asFiniteOrNull(item?.BestAo25Ms),
+        BestAo25StartSolveSK: item?.BestAo25StartSolveSK || null,
+        BestAo50Ms: asFiniteOrNull(item?.BestAo50Ms),
+        BestAo50StartSolveSK: item?.BestAo50StartSolveSK || null,
+        BestAo100Ms: asFiniteOrNull(item?.BestAo100Ms),
+        BestAo100StartSolveSK: item?.BestAo100StartSolveSK || null,
+        BestAo1000Ms: asFiniteOrNull(item?.BestAo1000Ms),
+        BestAo1000StartSolveSK: item?.BestAo1000StartSolveSK || null,
         FirstSolveAt: item?.FirstSolveAt || null,
         LastSolveAt: item?.LastSolveAt || null,
       };
@@ -812,6 +860,14 @@ function mergeDayBucketSummaries(summaries = []) {
       BestAo5StartSolveSK: merged.BestAo5StartSolveSK,
       BestAo12Ms: merged.BestAo12Ms,
       BestAo12StartSolveSK: merged.BestAo12StartSolveSK,
+      BestAo25Ms: merged.BestAo25Ms,
+      BestAo25StartSolveSK: merged.BestAo25StartSolveSK,
+      BestAo50Ms: merged.BestAo50Ms,
+      BestAo50StartSolveSK: merged.BestAo50StartSolveSK,
+      BestAo100Ms: merged.BestAo100Ms,
+      BestAo100StartSolveSK: merged.BestAo100StartSolveSK,
+      BestAo1000Ms: merged.BestAo1000Ms,
+      BestAo1000StartSolveSK: merged.BestAo1000StartSolveSK,
       FirstSolveAt: merged.FirstSolveAt,
       LastSolveAt: merged.LastSolveAt,
     };
@@ -858,6 +914,20 @@ function mergeDayBucketSummaries(summaries = []) {
       ) {
         next[bestField] = cross.value;
         next[bestStartField] = cross.startSolveSK;
+      }
+    }
+
+    for (const [bestField, bestStartField] of [
+      ["BestAo25Ms", "BestAo25StartSolveSK"],
+      ["BestAo50Ms", "BestAo50StartSolveSK"],
+      ["BestAo100Ms", "BestAo100StartSolveSK"],
+      ["BestAo1000Ms", "BestAo1000StartSolveSK"],
+    ]) {
+      const currentBestValue = asFiniteOrNull(next[bestField]);
+      const itemBestValue = asFiniteOrNull(item?.[bestField]);
+      if (itemBestValue != null && (currentBestValue == null || itemBestValue < currentBestValue)) {
+        next[bestField] = itemBestValue;
+        next[bestStartField] = item?.[bestStartField] || null;
       }
     }
 
@@ -915,6 +985,7 @@ function buildStatsFromSolves(solves = []) {
       SumFinalTimeMs: 0,
       SumFinalTimeSqMs: 0,
       MeanMs: null,
+      MedianMs: null,
       Plus2BestMs: null,
 
       BestSingleMs: null,
@@ -956,9 +1027,11 @@ function buildStatsFromSolves(solves = []) {
       BestAo1000Ms: null,
       BestAo1000StartSolveSK: null,
 
+      TopSingles10: [],
       TopMo3Candidates: [],
       TopAo5Candidates: [],
 
+      FirstSolveAt: null,
       LastSolveAt: null,
       LastRecomputedAt: nowIso(),
     };
@@ -971,15 +1044,22 @@ function buildStatsFromSolves(solves = []) {
   let SumFinalTimeMs = 0;
   let SumFinalTimeSqMs = 0;
   let Plus2BestMs = null;
+  const includedFinalTimes = [];
 
   let BestSingleMs = null;
   let BestSingleSolveSK = null;
   let BestSingleAt = null;
+  let FirstSolveAt = null;
   let WorstSingleMs = null;
   let WorstSingleSolveSK = null;
+  let TopSingles10 = [];
 
   for (const solve of solves) {
     SolveCountTotal += 1;
+    const createdAt = String(solve?.CreatedAt || "");
+    if (createdAt && (!FirstSolveAt || createdAt < FirstSolveAt)) {
+      FirstSolveAt = createdAt;
+    }
 
     const penalty = normalizePenalty(solve?.Penalty);
     const isDNF = isDnfSolve(solve);
@@ -991,6 +1071,7 @@ function buildStatsFromSolves(solves = []) {
       SolveCountIncluded += 1;
       SumFinalTimeMs += finalMs;
       SumFinalTimeSqMs += finalMs * finalMs;
+      includedFinalTimes.push(finalMs);
 
       if (penalty === "+2" && (Plus2BestMs === null || finalMs < Plus2BestMs)) {
         Plus2BestMs = finalMs;
@@ -1006,11 +1087,23 @@ function buildStatsFromSolves(solves = []) {
         WorstSingleMs = finalMs;
         WorstSingleSolveSK = solve?.SK || null;
       }
+
+      TopSingles10 = insertTopSingleEntry(TopSingles10, solve, finalMs, 10);
     }
   }
 
   const MeanMs =
     SolveCountIncluded > 0 ? Math.round(SumFinalTimeMs / SolveCountIncluded) : null;
+  const MedianMs =
+    includedFinalTimes.length > 0
+      ? (() => {
+          const sorted = [...includedFinalTimes].sort((a, b) => a - b);
+          const mid = Math.floor(sorted.length / 2);
+          return sorted.length % 2 === 0
+            ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+            : sorted[mid];
+        })()
+      : null;
 
   const mo3 = buildWindowSummaryFromSolves(solves, {
     kind: "mo3",
@@ -1055,6 +1148,7 @@ function buildStatsFromSolves(solves = []) {
     SumFinalTimeMs,
     SumFinalTimeSqMs,
     MeanMs,
+    MedianMs,
     Plus2BestMs,
 
     BestSingleMs,
@@ -1096,8 +1190,10 @@ function buildStatsFromSolves(solves = []) {
     BestAo1000Ms: ao1000.value,
     BestAo1000StartSolveSK: ao1000.startSolveSK,
 
+    TopSingles10,
     ...cachedWindowStats,
 
+    FirstSolveAt,
     LastSolveAt: lastSolve?.CreatedAt || null,
     LastRecomputedAt: nowIso(),
   };
@@ -1339,9 +1435,14 @@ async function buildStatsFromSolveIterator(iterable) {
       stats[config.startField] = chunk[0]?.SK || null;
     }
   };
+  const includedFinalTimes = [];
 
   for await (const solve of iterable) {
     stats.SolveCountTotal += 1;
+    const createdAt = String(solve?.CreatedAt || "");
+    if (createdAt && (!stats.FirstSolveAt || createdAt < String(stats.FirstSolveAt || ""))) {
+      stats.FirstSolveAt = createdAt;
+    }
 
     const penalty = normalizePenalty(solve?.Penalty);
     const isDNF = isDnfSolve(solve);
@@ -1353,6 +1454,7 @@ async function buildStatsFromSolveIterator(iterable) {
       stats.SolveCountIncluded += 1;
       stats.SumFinalTimeMs += finalMs;
       stats.SumFinalTimeSqMs += finalMs * finalMs;
+      includedFinalTimes.push(finalMs);
 
       if (penalty === "+2" && (stats.Plus2BestMs === null || finalMs < stats.Plus2BestMs)) {
         stats.Plus2BestMs = finalMs;
@@ -1368,6 +1470,8 @@ async function buildStatsFromSolveIterator(iterable) {
         stats.WorstSingleMs = finalMs;
         stats.WorstSingleSolveSK = solve?.SK || null;
       }
+
+      stats.TopSingles10 = insertTopSingleEntry(stats.TopSingles10, solve, finalMs, 10);
     }
 
     stats.LastSolveAt = solve?.CreatedAt || stats.LastSolveAt || null;
@@ -1438,6 +1542,16 @@ async function buildStatsFromSolveIterator(iterable) {
   stats.MeanMs =
     stats.SolveCountIncluded > 0
       ? Math.round(stats.SumFinalTimeMs / stats.SolveCountIncluded)
+      : null;
+  stats.MedianMs =
+    includedFinalTimes.length > 0
+      ? (() => {
+          const sorted = includedFinalTimes.sort((a, b) => a - b);
+          const mid = Math.floor(sorted.length / 2);
+          return sorted.length % 2 === 0
+            ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+            : sorted[mid];
+        })()
       : null;
   stats.LastRecomputedAt = nowIso();
 
@@ -2405,6 +2519,10 @@ function mergeIncrementalStats(
       DNFCount: Number(prev.DNFCount || 0) + (penalty === "DNF" ? 1 : 0),
       Plus2Count: Number(prev.Plus2Count || 0) + (penalty === "+2" ? 1 : 0),
       SumFinalTimeMs: Number(prev.SumFinalTimeMs || 0) + (isIncluded ? finalMs : 0),
+      FirstSolveAt:
+        prev.FirstSolveAt && String(prev.FirstSolveAt)
+          ? String(prev.FirstSolveAt)
+          : solveItem?.CreatedAt || null,
       LastSolveAt: solveItem?.CreatedAt || prev.LastSolveAt || null,
       LastRecomputedAt: nowIso(),
     };

@@ -90,6 +90,12 @@ export const SHARED_TAG_FIELDS = [
   "Custom5",
 ];
 
+function normalizeCrossColorLabel(label) {
+  const value = String(label || "").trim();
+  if (!value || value === "Cross Color") return "Start Color";
+  return value;
+}
+
 const METHOD_SCOPED_TAG_RULES = {
   Alg_PLL: { methods: ["CFOP"], eventScopes: ["333"] },
   Alg_OLL: { methods: ["CFOP"], eventScopes: ["333"] },
@@ -410,7 +416,7 @@ export function normalizeTagConfig(input) {
             : {},
       },
       CrossColor: {
-        label: fixed?.CrossColor?.label || "Start Color",
+        label: normalizeCrossColorLabel(fixed?.CrossColor?.label),
         options: Array.isArray(fixed?.CrossColor?.options)
           ? fixed.CrossColor.options
           : DEFAULT_TAG_CONFIG.Fixed.CrossColor.options,

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 
 const BASE_VIEWBOX_SIZE = 220;
@@ -17,6 +17,14 @@ const CALLOUT_COMPACT_SIDE_STEP = 10;
 const CALLOUT_COMPACT_TEXT_STEP = 18;
 const CALLOUT_TOP_COMPACT_VERTICAL_DRIFT = 48;
 const CALLOUT_TOP_ZONE_Y = 86;
+const DEFAULT_BOLD_PIE_PALETTE = [
+  "#50B6FF",
+  "#FB596D",
+  "#FFB044",
+  "#2EC4B6",
+  "#FFE863",
+  "#8B7DFF",
+];
 
 function normalizeCalloutLines(entry, percent) {
   if (Array.isArray(entry?.calloutLines) && entry.calloutLines.length) {
@@ -100,6 +108,10 @@ function resolveCalloutSideLayout(callouts, direction, chartCenter, chartRadius)
   });
 }
 
+function resolveSliceColorIndex(entry, fallbackIndex) {
+  return Number.isFinite(entry?.colorIndex) ? entry.colorIndex : fallbackIndex;
+}
+
 const PieChartBuilder = ({
   data,
   width,
@@ -118,6 +130,7 @@ const PieChartBuilder = ({
   maxCallouts,
   onSliceHover,
   onSliceLeave,
+  centerFillColor,
 }) => {
   const total = data.reduce((sum, entry) => sum + entry.value, 0);
   const [hoveredSlice, setHoveredSlice] = useState(null);
@@ -128,7 +141,7 @@ const PieChartBuilder = ({
   const resolvedPalette =
     Array.isArray(colorPalette) && colorPalette.length > 0
       ? colorPalette
-      : ["#2EC4B6", "#FFB044", "#50B6FF", "#FB596D", "#FFE863", "#FDFFFC"];
+      : DEFAULT_BOLD_PIE_PALETTE;
 
   const sortedData = useMemo(
     () => {
@@ -138,6 +151,16 @@ const PieChartBuilder = ({
     },
     [data, sortMode]
   );
+  const safeHoveredSlice =
+    hoveredSlice != null && hoveredSlice >= 0 && hoveredSlice < sortedData.length
+      ? hoveredSlice
+      : null;
+
+  useEffect(() => {
+    if (hoveredSlice != null && safeHoveredSlice == null) {
+      setHoveredSlice(null);
+    }
+  }, [hoveredSlice, safeHoveredSlice]);
 
   const legendData = useMemo(() => {
     const withIndex = sortedData.map((entry, index) => ({ entry, index }));
@@ -150,15 +173,15 @@ const PieChartBuilder = ({
 
     if (
       promoteHoveredOverflowItem &&
-      hoveredSlice != null &&
-      hoveredSlice >= limit &&
-      withIndex[hoveredSlice]
+      safeHoveredSlice != null &&
+      safeHoveredSlice >= limit &&
+      withIndex[safeHoveredSlice]
     ) {
-      return [...visible.slice(0, Math.max(0, limit - 1)), withIndex[hoveredSlice]];
+      return [...visible.slice(0, Math.max(0, limit - 1)), withIndex[safeHoveredSlice]];
     }
 
     return visible;
-  }, [hoveredSlice, maxLegendItems, promoteHoveredOverflowItem, sortedData]);
+  }, [maxLegendItems, promoteHoveredOverflowItem, safeHoveredSlice, sortedData]);
 
   let cumulativeValue = 0;
 
@@ -172,8 +195,8 @@ const PieChartBuilder = ({
     const startY = chartCenter + chartRadius * Math.sin(startAngle);
     const endX = chartCenter + chartRadius * Math.cos(endAngle);
     const endY = chartCenter + chartRadius * Math.sin(endAngle);
-    const fill = resolvedPalette[index % resolvedPalette.length];
-    const isHovered = hoveredSlice === index;
+    const fill = resolvedPalette[resolveSliceColorIndex(entry, index) % resolvedPalette.length];
+    const isHovered = safeHoveredSlice === index;
 
     const pathData = [
       `M ${chartCenter} ${chartCenter}`,
@@ -201,7 +224,7 @@ const PieChartBuilder = ({
       <path
         key={entry.label}
         d={pathData}
-        fill={fill}
+        fill={isHovered ? fill : "transparent"}
         onClick={handleSelect}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -209,15 +232,15 @@ const PieChartBuilder = ({
           cursor: interactive ? "pointer" : "default",
           transform: isHovered ? "scale(1.04)" : "scale(1)",
           transformOrigin: `${chartCenter}px ${chartCenter}px`,
-          transition: "transform 0.2s ease-in-out, stroke-width 0.2s ease-in-out",
-          stroke: isHovered ? "rgba(255,255,255,0.9)" : "rgba(5,10,12,0.35)",
-          strokeWidth: isHovered ? "3px" : "1.25px",
+          transition: "transform 0.2s ease-in-out, stroke-width 0.2s ease-in-out, fill 0.2s ease-in-out",
+          stroke: fill,
+          strokeWidth: "5px",
         }}
       />
     );
   });
 
-  const activeSlice = hoveredSlice != null ? sortedData[hoveredSlice] : sortedData[0] || null;
+  const activeSlice = safeHoveredSlice != null ? sortedData[safeHoveredSlice] : sortedData[0] || null;
   const activePercent = activeSlice && total > 0 ? Math.round((activeSlice.value / total) * 100) : 0;
   const showCalloutSet = showCallouts && sortedData.length > 0;
   const promotedCallouts = useMemo(() => {
@@ -240,10 +263,10 @@ const PieChartBuilder = ({
 
     if (
       promoteHoveredOverflowItem &&
-      hoveredSlice != null &&
-      withIndex[hoveredSlice]
+      safeHoveredSlice != null &&
+      withIndex[safeHoveredSlice]
     ) {
-      const hoveredEntry = withIndex[hoveredSlice];
+      const hoveredEntry = withIndex[safeHoveredSlice];
       if (combined.some((item) => item.index === hoveredEntry.index)) {
         return combined;
       }
@@ -251,7 +274,7 @@ const PieChartBuilder = ({
     }
 
     return combined;
-  }, [hoveredSlice, maxCallouts, promoteHoveredOverflowItem, showCalloutSet, sortedData]);
+  }, [maxCallouts, promoteHoveredOverflowItem, safeHoveredSlice, showCalloutSet, sortedData]);
 
   const callouts = useMemo(() => {
     if (!showCalloutSet) return [];
@@ -270,7 +293,7 @@ const PieChartBuilder = ({
       const outerY = chartCenter + (chartRadius + 4) * Math.sin(midAngle);
       const percent = Math.round((entry.value / total) * 100);
       const lines = normalizeCalloutLines(entry, percent);
-      const isActive = hoveredSlice == null ? index === 0 : hoveredSlice === index;
+      const isActive = safeHoveredSlice == null ? index === 0 : safeHoveredSlice === index;
       const textSpread =
         Math.abs(sinAngle) > 0.9 ? CALLOUT_TEXT_VERTICAL_SPREAD * 0.52 : CALLOUT_TEXT_VERTICAL_SPREAD;
 
@@ -306,7 +329,7 @@ const PieChartBuilder = ({
     );
 
     return [...leftCallouts, ...rightCallouts].sort((a, b) => a.index - b.index);
-  }, [chartCenter, chartRadius, hoveredSlice, promotedCallouts, showCalloutSet, sortedData, total]);
+  }, [chartCenter, chartRadius, promotedCallouts, safeHoveredSlice, showCalloutSet, sortedData, total]);
 
   if (total === 0 || sortedData.length === 0) {
     return <p className="pieChartEmpty">No solves available</p>;
@@ -325,7 +348,10 @@ const PieChartBuilder = ({
         >
           {slices}
           {callouts.map((callout) => {
-            const fill = resolvedPalette[callout.index % resolvedPalette.length];
+            const fill =
+              resolvedPalette[
+                resolveSliceColorIndex(callout.entry, callout.index) % resolvedPalette.length
+              ];
             const textAnchor = callout.direction > 0 ? "start" : "end";
             const nameX =
               callout.direction > 0
@@ -406,7 +432,7 @@ const PieChartBuilder = ({
                 cx={chartCenter}
                 cy={chartCenter}
                 r="42"
-                fill="rgba(7, 12, 15, 0.88)"
+                fill={centerFillColor || "var(--primary-color, rgba(7, 12, 15, 0.88))"}
                 stroke="rgba(255,255,255,0.08)"
                 strokeWidth="1.5"
               />
@@ -414,7 +440,7 @@ const PieChartBuilder = ({
                 {activePercent}%
               </text>
               <text x={chartCenter} y={chartCenter + 16} textAnchor="middle" className="pieChartCenterLabel">
-                {activeSlice.label}
+                {activeSlice?.label || ""}
               </text>
             </>
           )}
@@ -434,9 +460,10 @@ const PieChartBuilder = ({
         >
         {legendData.map(({ entry, index }) => {
           const percent = Math.round((entry.value / total) * 100);
-          const isActive = hoveredSlice === index;
+          const isActive = safeHoveredSlice === index;
           const legendMeta = legendValueMode === "count" ? `${entry.value}` : `${entry.value} · ${percent}%`;
-          const legendColor = resolvedPalette[index % resolvedPalette.length];
+          const legendColor =
+            resolvedPalette[resolveSliceColorIndex(entry, index) % resolvedPalette.length];
           return (
             <button
               key={entry.label}
@@ -482,6 +509,7 @@ PieChartBuilder.propTypes = {
     PropTypes.shape({
       label: PropTypes.string.isRequired,
       value: PropTypes.number.isRequired,
+      colorIndex: PropTypes.number,
       solves: PropTypes.arrayOf(
         PropTypes.shape({
           time: PropTypes.number.isRequired,
@@ -507,6 +535,7 @@ PieChartBuilder.propTypes = {
   maxCallouts: PropTypes.number,
   onSliceHover: PropTypes.func,
   onSliceLeave: PropTypes.func,
+  centerFillColor: PropTypes.string,
 };
 
 PieChartBuilder.defaultProps = {
@@ -526,6 +555,7 @@ PieChartBuilder.defaultProps = {
   maxCallouts: null,
   onSliceHover: null,
   onSliceLeave: null,
+  centerFillColor: null,
 };
 
 export default PieChartBuilder;

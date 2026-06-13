@@ -86,6 +86,30 @@ const mergeMessagesByKey = (...lists) => {
   );
 };
 
+const loadProfilesById = async (ids = []) => {
+  const uniqueIds = Array.from(
+    new Set(
+      (Array.isArray(ids) ? ids : [])
+        .map((id) => String(id || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  const entries = await Promise.all(
+    uniqueIds.map(async (id) => {
+      try {
+        const prof = await getUser(id);
+        return [id, prof];
+      } catch (e) {
+        console.warn("getUser failed for", id, e);
+        return [id, null];
+      }
+    })
+  );
+
+  return Object.fromEntries(entries);
+};
+
 const normalizeConversationRecord = (item, profile = null) => {
   const conversationID = String(
     item?.ConversationID || item?.conversationID || ""
@@ -203,6 +227,17 @@ const parseSharedAoNPayload = (text) => {
   }
 };
 
+const parseSharedPostPayload = (text) => {
+  if (!String(text || "").startsWith("[sharedPost]")) return null;
+  try {
+    const raw = String(text).slice("[sharedPost]".length);
+    return JSON.parse(decodeURIComponent(raw));
+  } catch (err) {
+    console.warn("Failed to parse sharedPost payload:", err);
+    return null;
+  }
+};
+
 const parseSharedExtendPayload = (text) => {
   if (!String(text || "").startsWith("[sharedExtend]")) return null;
   try {
@@ -230,6 +265,32 @@ const parseSharedUpdatePayload = (text) => {
     time: Number.isFinite(time) ? time : null,
     senderID,
   };
+};
+
+const isSharedPostMessage = (msg = {}) =>
+  String(msg?.messageType || "").toUpperCase() === "SHARED_POST" ||
+  !!parseSharedPostPayload(msg?.text) ||
+  !!msg?.statShare ||
+  String(msg?.postType || "").toLowerCase() === "stat-share" ||
+  (Array.isArray(msg?.solveList) && msg.solveList.length > 0);
+
+const getSharedMessagePreviewText = (msg = {}) => {
+  const parsed = parseSharedPostPayload(msg?.text) || {};
+  const note = String(msg?.note || parsed?.note || "").trim();
+  if (note) return note;
+  if (
+    msg?.statShare ||
+    parsed?.statShare ||
+    String(msg?.postType || parsed?.postType || "").toLowerCase() === "stat-share"
+  ) {
+    return "[Shared stat card]";
+  }
+  const solveCount = Array.isArray(msg?.solveList)
+    ? msg.solveList.length
+    : Array.isArray(parsed?.solveList)
+      ? parsed.solveList.length
+      : 0;
+  return solveCount > 1 ? `[Shared average of ${solveCount}]` : "[Shared solve]";
 };
 
 const buildRoundResultsFromMessages = (messages, sharedID) => {
@@ -426,14 +487,15 @@ function Social({
   }, []);
 
   const scrollToSharedRun = (sharedID, behavior = "smooth") => {
-    if (!sharedID) return;
+    if (!sharedID) return false;
     const el = sharedMessageRefs.current[sharedID];
-    if (!el) return;
+    if (!el) return false;
 
     el.scrollIntoView({
       behavior,
       block: "center",
     });
+    return true;
   };
 
   const mergeConversationLists = useCallback((incoming, existing) => {
@@ -769,27 +831,6 @@ function Social({
       socialLoadInFlightRef.current = true;
       try {
         const friendIds = user.Friends || [];
-        const profilesById = Object.fromEntries(
-          await Promise.all(
-            friendIds.map(async (id) => {
-              try {
-                const prof = await getUser(id);
-                return [id, prof];
-              } catch (e) {
-                console.warn("getUser failed for", id, e);
-                return [id, null];
-              }
-            })
-          )
-        );
-
-        setFriendDirectory(
-          friendIds.map((id) => ({
-            id,
-            name: profilesById[id]?.Name || profilesById[id]?.name || id,
-          }))
-        );
-
         let groups = [];
         try {
           groups = await getGroups(user.UserID);
@@ -797,6 +838,32 @@ function Social({
           console.warn("getGroups failed; continuing without group data", err);
           groups = [];
         }
+
+        let storedConversations = [];
+        try {
+          storedConversations = await getConversations(user.UserID, CONVERSATION_LIMIT);
+        } catch (err) {
+          console.warn("getConversations failed; continuing with placeholder DMs", err);
+          storedConversations = [];
+        }
+
+        const conversationProfileIds = storedConversations.flatMap((item) => {
+          const memberIds = Array.isArray(item?.MemberIDs) ? item.MemberIDs : [];
+          const otherUserID = String(item?.OtherUserID || "").trim();
+          return [...memberIds, otherUserID];
+        });
+
+        const profilesById = await loadProfilesById([
+          ...friendIds,
+          ...conversationProfileIds,
+        ]);
+
+        setFriendDirectory(
+          friendIds.map((id) => ({
+            id,
+            name: profilesById[id]?.Name || profilesById[id]?.name || id,
+          }))
+        );
 
         const groupsByConversationID = Object.fromEntries(
           groups
@@ -812,6 +879,7 @@ function Social({
             authorID: user.UserID,
             isOwn: true,
             postColor: user.Color || user.color || "#2EC4B6",
+            authorTagColorCatalog: user.TagColorCatalog || null,
             profileEvent: user.ProfileEvent || "333",
             profileScramble: user.ProfileScramble || "",
           }));
@@ -827,6 +895,7 @@ function Social({
                 authorID: id,
                 isOwn: false,
                 postColor: prof?.Color || prof?.color || "#cccccc",
+                authorTagColorCatalog: prof?.TagColorCatalog || null,
                 profileEvent: prof?.ProfileEvent || prof?.profileEvent || "333",
                 profileScramble: prof?.ProfileScramble || prof?.profileScramble || "",
               }));
@@ -854,6 +923,9 @@ function Social({
                 groupID,
                 groupName: group.Name || groupID,
                 postColor: group.Color || "#7f8c8d",
+                authorTagColorCatalog:
+                  profilesById[p.AuthorID || ""]?.TagColorCatalog ||
+                  (p.AuthorID === user.UserID ? user.TagColorCatalog || null : null),
                 profileEvent: user.ProfileEvent || "333",
                 profileScramble: "",
               }));
@@ -863,14 +935,6 @@ function Social({
           const merged = [...ownAnnotated, ...friendsArrays.flat(), ...groupPostArrays.flat()];
           merged.sort((a, b) => new Date(a.DateTime || a.date) - new Date(b.DateTime || b.date));
           setFeed(merged.slice(-FEED_POST_LIMIT));
-        }
-
-        let storedConversations = [];
-        try {
-          storedConversations = await getConversations(user.UserID, CONVERSATION_LIMIT);
-        } catch (err) {
-          console.warn("getConversations failed; continuing with placeholder DMs", err);
-          storedConversations = [];
         }
 
         const normalizedStored = storedConversations.map((item) => {
@@ -957,16 +1021,7 @@ function Social({
         socialLoadInFlightRef.current = false;
       }
     },
-    [
-      user?.UserID,
-      user?.Friends,
-      user?.Name,
-      user?.Color,
-      user?.ProfileEvent,
-      user?.ProfileScramble,
-      mergeConversationLists,
-      location.state?.conversationID,
-    ]
+    [user, mergeConversationLists, location.state?.conversationID]
   );
 
   const refreshConversationDirectory = useCallback(async () => {
@@ -1076,16 +1131,28 @@ function Social({
     }
 
     const id = setTimeout(() => {
-      scrollToSharedRun(targetSharedID, "smooth");
+      const didScroll = scrollToSharedRun(targetSharedID, "smooth");
+      if (!didScroll) return;
+
+      const nextState = { ...(location.state || {}) };
+      delete nextState.sharedID;
+
+      navigate(location.pathname, {
+        replace: true,
+        state: Object.keys(nextState).length ? nextState : null,
+      });
     }, 80);
 
     return () => clearTimeout(id);
   }, [
     activeTab,
+    location.pathname,
     selectedConversation?.conversationID,
     selectedConversation?.messages,
     location.state?.conversationID,
     location.state?.sharedID,
+    navigate,
+    location.state,
   ]);
 
   const handleDelete = async (post) => {
@@ -1913,10 +1980,109 @@ function Social({
                       <div className="messagesHistoryStatus">Scroll up to load older messages</div>
                     ) : null}
                     {(selectedConversation.messages || []).map((msg, idx) => {
+                      if (isSharedPostMessage(msg)) {
+                        const parsedSharedPost = parseSharedPostPayload(msg?.text) || {};
+                        const isOwn = msg.sender === user.UserID;
+                        const senderMember = (selectedConversation?.memberProfiles || []).find(
+                          (member) => member.id === msg.sender
+                        );
+                        const senderColor = isOwn
+                          ? user?.Color || user?.color || "#2EC4B6"
+                          : senderMember?.color ||
+                            selectedConversation?.color ||
+                            "#888888";
+                        const sharedPostRecord = {
+                          author: isOwn
+                            ? user?.Name || user?.name || "You"
+                            : senderMember?.name ||
+                              selectedConversation?.name ||
+                              selectedConversation?.username ||
+                              msg.sender ||
+                              "Shared post",
+                          authorID: msg.sender || "",
+                          postColor: senderColor,
+                          authorTagColorCatalog: isOwn ? user?.TagColorCatalog || null : null,
+                          profileEvent: isOwn
+                            ? user?.ProfileEvent || "333"
+                            : senderMember?.profileEvent ||
+                              selectedConversation?.profileEvent ||
+                              "333",
+                          profileScramble: isOwn
+                            ? user?.ProfileScramble || ""
+                            : senderMember?.profileScramble ||
+                              selectedConversation?.profileScramble ||
+                              "",
+                          DateTime: msg.timestamp,
+                          Note: String(msg.note || parsedSharedPost.note || "").trim(),
+                          PostType:
+                            msg.postType ||
+                            parsedSharedPost.postType ||
+                            (msg.statShare || parsedSharedPost.statShare ? "stat-share" : "solve"),
+                          StatShare: msg.statShare || parsedSharedPost.statShare || null,
+                          SolveList: Array.isArray(msg.solveList) && msg.solveList.length
+                            ? msg.solveList
+                            : Array.isArray(parsedSharedPost.solveList)
+                              ? parsedSharedPost.solveList
+                              : [],
+                          Comments: [],
+                          fromMessage: true,
+                        };
+
+                        return (
+                          <div
+                            key={`shared-post-${idx}-${msg.timestamp || ""}-${msg.sender || ""}`}
+                            className={`chatMessage chatMessage--sharedPost ${
+                              isOwn ? "sent" : "received"
+                            }`}
+                            onClick={() => setSelectedPost(sharedPostRecord)}
+                          >
+                            <div className="chatSharedPostSender">
+                              {isOwn ? "You" : sharedPostRecord.author}
+                            </div>
+                            {sharedPostRecord.StatShare ? (
+                              <div className="statFeedPost">
+                                <div
+                                  style={{
+                                    border: `2px solid ${withAlpha(senderColor, 0.5)}`,
+                                    borderRadius: 12,
+                                  }}
+                                >
+                                  <StatSharePost
+                                    note={sharedPostRecord.Note}
+                                    statShare={sharedPostRecord.StatShare}
+                                    shareColor={senderColor}
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <Post
+                                name={sharedPostRecord.author}
+                                user={{
+                                  UserID: sharedPostRecord.authorID,
+                                  Name: sharedPostRecord.author,
+                                  Color: senderColor,
+                                  ProfileEvent: sharedPostRecord.profileEvent,
+                                  ProfileScramble: sharedPostRecord.profileScramble,
+                                }}
+                                date={formatPostDate(sharedPostRecord.DateTime)}
+                                solveList={sharedPostRecord.SolveList}
+                                note={sharedPostRecord.Note}
+                                postColor={senderColor}
+                                postType={sharedPostRecord.PostType}
+                                showMeta={false}
+                              />
+                            )}
+                          </div>
+                        );
+                      }
+
                       if (msg.text?.startsWith("[sharedAoN]")) {
                         const payload = parseSharedAoNPayload(msg.text);
                         const sharedID = payload?.sharedID || "";
+                        const isGroupConversation =
+                          String(selectedConversation?.type || "DM").toUpperCase() !== "DM";
                         const isTargeted =
+                          isGroupConversation &&
                           String(location.state?.sharedID || "") === String(sharedID || "");
 
                         return (
@@ -1976,7 +2142,7 @@ function Social({
                             border: `2px solid ${senderColor}`,
                           }}
                         >
-                          {msg.text || "[no text]"}
+                          {msg.text || getSharedMessagePreviewText(msg) || "[no text]"}
                         </div>
                       );
                     })}
@@ -2043,6 +2209,7 @@ function Social({
             UserID: selectedPost.authorID,
             Name: selectedPost.author,
             Color: selectedPost.postColor,
+            TagColorCatalog: selectedPost.authorTagColorCatalog || null,
             ProfileEvent: selectedPost.profileEvent,
             ProfileScramble: selectedPost.profileScramble,
           }}
@@ -2068,8 +2235,8 @@ function Social({
           statShare={selectedPost.StatShare || selectedPost.statShare || null}
           postColor={selectedPost.postColor || ""}
           onClose={() => setSelectedPost(null)}
-          onDelete={() => handleDelete(selectedPost)}
-          onAddComment={handleAddComment}
+          onDelete={selectedPost.fromMessage ? undefined : () => handleDelete(selectedPost)}
+          onAddComment={selectedPost.fromMessage ? undefined : handleAddComment}
         />
       )}
     </div>

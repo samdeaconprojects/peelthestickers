@@ -1205,13 +1205,13 @@ function Timer({
     if (isInspecting) return formatInspection();
     if (!effectiveTimerOn && effectiveLastPenalty === 'DNF') return 'DNF';
     const timeToDisplay = effectiveTimerOn ? effectiveElapsedTime : effectiveLastTime;
-    const formatted = formatMs(timeToDisplay);
-    return !effectiveTimerOn && effectiveLastPenalty === '+2' ? `${formatted}+` : formatted;
+    return formatMs(timeToDisplay);
   };
 
   const displayTime = formatTime();
   const displayHasMinutes = displayTime.includes(':');
-  const useHomeLongTimeLayout = displayHasMinutes && !compact && !inPlayerBar;
+  const displayHasPenaltySuffix = !effectiveTimerOn && effectiveLastPenalty === '+2';
+  const useCondensedTimerLayout = displayHasMinutes && !compact && !inPlayerBar;
 
   const getInspectionColor = () => {
     const ms = inspectionElapsed;
@@ -1369,7 +1369,7 @@ function Timer({
           ) : (
             <>
               <p
-                className={`Timer ${displayHasMinutes ? "Timer--with-minutes" : ""} ${useHomeLongTimeLayout ? "Timer--home-long" : ""} ${(isGanMode || isCubeMode || settings.timerInput === "Keyboard") ? "Timer--static" : ""} ${compact ? "Timer--compact" : ""} ${inPlayerBar ? "Timer--playerbar" : ""}`}
+                className={`Timer ${displayHasMinutes ? "Timer--with-minutes" : ""} ${useCondensedTimerLayout ? "Timer--home-long" : ""} ${(isGanMode || isCubeMode || settings.timerInput === "Keyboard") ? "Timer--static" : ""} ${compact ? "Timer--compact" : ""} ${inPlayerBar ? "Timer--playerbar" : ""}`}
                 style={
                   isGanMode
                     ? ganGreenStyle
@@ -1381,9 +1381,19 @@ function Timer({
                 }
               >
                 {(isGanMode || isCubeMode)
-                  ? displayTime
+                  ? (
+                    <span className="Timer__content">
+                      <span>{displayTime}</span>
+                      {displayHasPenaltySuffix ? <span className="Timer__penalty">+</span> : null}
+                    </span>
+                  )
                   : settings.timerInput === "Keyboard"
-                  ? displayTime
+                  ? (
+                    <span className="Timer__content">
+                      <span>{displayTime}</span>
+                      {displayHasPenaltySuffix ? <span className="Timer__penalty">+</span> : null}
+                    </span>
+                  )
                   : (manualTime || "Type")}
               </p>
             </>

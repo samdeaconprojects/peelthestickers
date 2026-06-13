@@ -49,10 +49,14 @@ export const defaultPageBindings = {
 
 export const UI_KEYBINDING_LABELS = {
   playerBar: "Toggle Player Bar",
+  previousScramble: "Previous Scramble",
+  nextScramble: "Next Scramble",
 };
 
 export const defaultUiBindings = {
   playerBar: "Primary+J",
+  previousScramble: "Option+Left",
+  nextScramble: "Option+Right",
 };
 
 export const SOLVE_KEYBINDING_LABELS = {

@@ -6,6 +6,7 @@ import { currentEventToString } from "../../components/scrambleUtils";
 import StatSharePost from "./StatSharePost";
 import NameTag from "./NameTag";
 import { getUser } from "../../services/getUser";
+import { getTagColorMapForEvent } from "../TagBar/tagUtils";
 
 const getDetailComponent = () => {
   const mod = require("../Detail/Detail");
@@ -34,6 +35,7 @@ function PostDetail({
   const [newComment, setNewComment] = useState("");
   const [selectedAverageSolve, setSelectedAverageSolve] = useState(null);
   const [commentProfilesById, setCommentProfilesById] = useState({});
+  const [resolvedAuthorUser, setResolvedAuthorUser] = useState(authorUser);
   const trimmedNote = String(note || "").trim();
   const resolvedPostType = statShare ? "stat-share" : postType;
   const isAveragePost = solveList.length > 1;
@@ -58,6 +60,40 @@ function PostDetail({
       })),
     [solveList]
   );
+
+  useEffect(() => {
+    setResolvedAuthorUser(authorUser);
+  }, [authorUser]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    const authorID = String(authorUser?.UserID || "").trim();
+    const hasAuthorTagCatalog =
+      !!authorUser?.TagColorCatalog &&
+      typeof authorUser.TagColorCatalog === "object";
+
+    if (!authorID || hasAuthorTagCatalog) {
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    const loadAuthorProfile = async () => {
+      try {
+        const profile = await getUser(authorID);
+        if (isCancelled || !profile) return;
+        setResolvedAuthorUser((prev) => ({ ...(prev || {}), ...profile }));
+      } catch (error) {
+        console.warn("Failed to load author profile for post detail", authorID, error);
+      }
+    };
+
+    loadAuthorProfile();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [authorUser]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -160,6 +196,23 @@ function PostDetail({
     }
   };
 
+  const getSolveEvent = (solve) => solve?.event || solve?.Event || "333";
+  const primaryDetailEvent = getSolveEvent(detailSolveList[0]);
+  const authorProfileColor =
+    resolvedAuthorUser?.Color || resolvedAuthorUser?.color || postColor || "#2EC4B6";
+  const detailTagColors = useMemo(
+    () => getTagColorMapForEvent(resolvedAuthorUser?.TagColorCatalog, primaryDetailEvent),
+    [resolvedAuthorUser?.TagColorCatalog, primaryDetailEvent]
+  );
+  const selectedAverageSolveTagColors = useMemo(
+    () =>
+      getTagColorMapForEvent(
+        resolvedAuthorUser?.TagColorCatalog,
+        getSolveEvent(selectedAverageSolve)
+      ),
+    [resolvedAuthorUser?.TagColorCatalog, selectedAverageSolve]
+  );
+
   const renderFallbackSolveBlock = (solve, index = null) => {
     const eventLabel = currentEventToString(solve?.event || "333");
 
@@ -255,7 +308,7 @@ function PostDetail({
           <div className="postDetailHeader">
             {author ? (
               <NameTag
-                user={authorUser || { Name: author }}
+                user={resolvedAuthorUser || authorUser || { Name: author }}
                 name={author}
                 size="sm"
                 variant="profile-corner"
@@ -277,6 +330,8 @@ function PostDetail({
                 <AverageDetailComponent
                   isOpen={true}
                   solves={detailSolveList}
+                  profileColor={authorProfileColor}
+                  tagColors={detailTagColors}
                   onClose={() => {}}
                   onSolveOpen={(solve) =>
                     setSelectedAverageSolve(solve ? { ...solve, __readOnly: true } : null)
@@ -292,6 +347,8 @@ function PostDetail({
               typeof DetailComponent === "function" ? (
                 <DetailComponent
                   solve={detailSolveList[0]}
+                  profileColor={authorProfileColor}
+                  tagColors={detailTagColors}
                   onClose={() => {}}
                   embedded={true}
                   showActions={false}
@@ -359,6 +416,8 @@ function PostDetail({
         typeof DetailComponent === "function" ? (
           <DetailComponent
             solve={selectedAverageSolve}
+            profileColor={authorProfileColor}
+            tagColors={selectedAverageSolveTagColors}
             onClose={() => setSelectedAverageSolve(null)}
             showActions={false}
           />

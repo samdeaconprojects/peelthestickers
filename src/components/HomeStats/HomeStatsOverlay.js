@@ -200,6 +200,11 @@ function stdDevMs(values) {
   return Math.sqrt(variance);
 }
 
+function finiteMetricOrNull(value) {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : null;
+}
+
 function buildCompactSummaryFromCache(overallStats) {
   if (!overallStats || typeof overallStats !== "object") return [];
   const source = {
@@ -214,14 +219,15 @@ function buildCompactSummaryFromCache(overallStats) {
   };
 
   return HOME_SUMMARY_METRICS.map((metric) => {
-    const rawBest = Number(source[metric.key]?.best);
-    const rawWorst = Number(source[metric.key]?.worst);
+    const cachedBest = finiteMetricOrNull(source[metric.key]?.best);
+    const cachedWorst = finiteMetricOrNull(source[metric.key]?.worst);
+
     return {
       ...metric,
       currentValue: null,
-      value: Number.isFinite(rawBest) ? rawBest : null,
-      bestValue: Number.isFinite(rawBest) ? rawBest : null,
-      worstValue: Number.isFinite(rawWorst) ? rawWorst : null,
+      value: cachedBest,
+      bestValue: cachedBest,
+      worstValue: cachedWorst,
     };
   });
 }

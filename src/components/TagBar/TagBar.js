@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./TagBar.css";
 import tagBadge from "../../assets/Tag.svg";
 import {
@@ -167,6 +167,9 @@ export default function TagBar({
   showFooterAction = false,
   footerActionLabel = "",
   onFooterAction = null,
+  collapsible = false,
+  hideAutomaticFields = false,
+  collapseToggleTop = null,
 }) {
   const wrapRef = useRef(null);
   const safeTags = useMemo(
@@ -203,27 +206,38 @@ export default function TagBar({
 
   const [uncontrolledActiveField, setUncontrolledActiveField] = useState("CubeModel");
   const [homeEditorOpen, setHomeEditorOpen] = useState(false);
+  const [homeTagsCollapsed, setHomeTagsCollapsed] = useState(false);
+  function isAutomaticHomeField(field) {
+    return field === "SolveSource" || field === "TimerInput";
+  }
+  const displayFieldMeta = useMemo(() => {
+    if (variant !== "home" || !hideAutomaticFields) return fieldMeta;
+    return fieldMeta.filter((item) => !isAutomaticHomeField(item.field));
+  }, [fieldMeta, hideAutomaticFields, variant]);
   const rootFieldMeta = useMemo(
-    () => fieldMeta.filter((item) => !ALG_TAG_FIELDS.has(item.field)),
-    [fieldMeta]
+    () => displayFieldMeta.filter((item) => !ALG_TAG_FIELDS.has(item.field)),
+    [displayFieldMeta]
   );
   const methodScopedFieldMeta = useMemo(
     () =>
-      [...fieldMeta.filter((item) => ALG_TAG_FIELDS.has(item.field))].sort(
+      [...displayFieldMeta.filter((item) => ALG_TAG_FIELDS.has(item.field))].sort(
         (a, b) => ALG_TAG_FIELD_ORDER.indexOf(a.field) - ALG_TAG_FIELD_ORDER.indexOf(b.field)
       ),
-    [fieldMeta]
+    [displayFieldMeta]
   );
 
   const activeField = controlledActiveField || uncontrolledActiveField;
 
-  const setActiveField = (field) => {
-    if (typeof onActiveFieldChange === "function") {
-      onActiveFieldChange(field);
-      return;
-    }
-    setUncontrolledActiveField(field);
-  };
+  const setActiveField = useCallback(
+    (field) => {
+      if (typeof onActiveFieldChange === "function") {
+        onActiveFieldChange(field);
+        return;
+      }
+      setUncontrolledActiveField(field);
+    },
+    [onActiveFieldChange]
+  );
 
   useEffect(() => {
     const onDown = (e) => {
@@ -235,10 +249,15 @@ export default function TagBar({
   }, []);
 
   useEffect(() => {
-    if (!fieldMeta.some((item) => item.field === activeField)) {
-      setActiveField(fieldMeta[0]?.field || "CubeModel");
+    if (!displayFieldMeta.some((item) => item.field === activeField)) {
+      setActiveField(displayFieldMeta[0]?.field || "CubeModel");
     }
-  }, [activeField, fieldMeta]);
+  }, [activeField, displayFieldMeta, setActiveField]);
+
+  useEffect(() => {
+    if (!homeTagsCollapsed) return;
+    setHomeEditorOpen(false);
+  }, [homeTagsCollapsed]);
 
   const optionsByField = useMemo(() => {
     return fieldMeta.reduce((acc, item) => {
@@ -291,7 +310,7 @@ export default function TagBar({
     });
   };
 
-  const visibleHomeFields = fieldMeta.filter((item) => {
+  const visibleHomeFields = displayFieldMeta.filter((item) => {
     if (
       item.field === "CubeModel" ||
       item.field === "CrossColor" ||
@@ -334,8 +353,6 @@ export default function TagBar({
     next.splice(methodIndex >= 0 ? methodIndex + 1 : next.length, 0, activeAlgorithmSummary);
     return next;
   }, [activeAlgorithmSummary, visibleHomeFields]);
-
-  const isAutomaticHomeField = (field) => field === "SolveSource" || field === "TimerInput";
 
   const getHomeChipStyle = (field, value) => {
     if (isAutomaticHomeField(field)) return null;
@@ -418,92 +435,118 @@ export default function TagBar({
 
   if (variant === "home") {
     return (
-      <div className="tagHomeWrap" ref={wrapRef}>
-        <div className="tagHomeSummary">
-          {homeSummaryItems.map((item) => {
-            const isAlgorithmSummary = item.field === "__Algorithms";
-            const value = isAlgorithmSummary ? item.value : safeTags[item.field] || "";
-            const displayValue =
-              isAlgorithmSummary
-                ? value
-                : ALG_TAG_FIELDS.has(String(item.field || "").trim()) && value
-                ? getAlgorithmTagDisplayValue(item.field, value)
-                : value;
-            return (
-              <div
-                key={item.field}
-                className={`tagHomeItem ${isAutomaticHomeField(item.field) ? "is-automatic" : ""}`}
-              >
-                <span className="tagHomeItemLabel">{item.label}</span>
+      <div
+        className={`tagHomeWrap ${collapsible ? "tagHomeWrap--collapsible" : ""} ${
+          homeTagsCollapsed ? "is-collapsed" : ""
+        }`}
+        ref={wrapRef}
+        style={
+          collapseToggleTop
+            ? { "--tag-home-toggle-top": String(collapseToggleTop).trim() }
+            : undefined
+        }
+      >
+        {collapsible && (
+          <button
+            type="button"
+            className="tagHomeCollapseToggle"
+            aria-label={homeTagsCollapsed ? "Show tags" : "Hide tags"}
+            aria-pressed={!homeTagsCollapsed}
+            onClick={() => setHomeTagsCollapsed((prev) => !prev)}
+          >
+            <span className="tagHomeCollapseToggleIcon" aria-hidden="true">
+              {homeTagsCollapsed ? "\u2039" : "\u203a"}
+            </span>
+          </button>
+        )}
+
+        <div className="tagHomeContent" aria-hidden={homeTagsCollapsed}>
+          <div className="tagHomeSummary">
+            {homeSummaryItems.map((item) => {
+              const isAlgorithmSummary = item.field === "__Algorithms";
+              const value = isAlgorithmSummary ? item.value : safeTags[item.field] || "";
+              const displayValue =
+                isAlgorithmSummary
+                  ? value
+                  : ALG_TAG_FIELDS.has(String(item.field || "").trim()) && value
+                  ? getAlgorithmTagDisplayValue(item.field, value)
+                  : value;
+              return (
+                <div
+                  key={item.field}
+                  className={`tagHomeItem ${isAutomaticHomeField(item.field) ? "is-automatic" : ""}`}
+                >
+                  <span className="tagHomeItemLabel">{item.label}</span>
+                  <button
+                    type="button"
+                    className={`tagHomeChip ${value ? "is-set" : ""}`}
+                    style={getHomeChipStyle(item.field, value)}
+                    onClick={() => {
+                      setActiveField(isAlgorithmSummary ? methodScopedFieldMeta[0]?.field || "Method" : item.field);
+                      setHomeEditorOpen(true);
+                    }}
+                  >
+                    <span className="tagHomeChipIconWrap" aria-hidden="true">
+                      <img src={tagBadge} alt="" className="tagHomeChipIcon" />
+                    </span>
+                    <span className="tagHomeChipText">
+                      <span className="tagHomeChipValue">{displayValue || `+ ${item.label}`}</span>
+                    </span>
+                  </button>
+                </div>
+              );
+            })}
+
+            {homeSummaryItems.length < displayFieldMeta.length && (
+              <div className="tagHomeItem tagHomeItem--add is-automatic">
                 <button
                   type="button"
-                  className={`tagHomeChip ${value ? "is-set" : ""}`}
-                  style={getHomeChipStyle(item.field, value)}
+                  className="tagHomeAddButton"
                   onClick={() => {
-                    setActiveField(isAlgorithmSummary ? methodScopedFieldMeta[0]?.field || "Method" : item.field);
+                    const nextField = displayFieldMeta.find(
+                      (item) => !String(safeTags[item.field] || "").trim()
+                    );
+                    setActiveField(nextField?.field || "CubeModel");
                     setHomeEditorOpen(true);
                   }}
+                  aria-label="Add tag"
                 >
-                  <span className="tagHomeChipIconWrap" aria-hidden="true">
-                    <img src={tagBadge} alt="" className="tagHomeChipIcon" />
-                  </span>
-                  <span className="tagHomeChipText">
-                    <span className="tagHomeChipValue">{displayValue || `+ ${item.label}`}</span>
+                  <span className="tagHomeAddButtonPlus" aria-hidden="true">
+                    +
                   </span>
                 </button>
               </div>
-            );
-          })}
+            )}
 
-          {homeSummaryItems.length < fieldMeta.length && (
-            <div className="tagHomeItem tagHomeItem--add is-automatic">
-              <button
-                type="button"
-                className="tagHomeAddButton"
-                onClick={() => {
-                  const nextField = fieldMeta.find(
-                    (item) => !String(safeTags[item.field] || "").trim()
-                  );
-                  setActiveField(nextField?.field || "CubeModel");
-                  setHomeEditorOpen(true);
-                }}
-                aria-label="Add tag"
-              >
-                <span className="tagHomeAddButtonPlus" aria-hidden="true">
-                  +
-                </span>
-              </button>
-            </div>
-          )}
+            {showFooterAction && typeof onFooterAction === "function" && (
+              <div className="tagHomeFooterAction">
+                <button
+                  type="button"
+                  className="tagHomeFooterButton"
+                  onClick={onFooterAction}
+                >
+                  {footerActionLabel || "Load tags"}
+                </button>
+              </div>
+            )}
+          </div>
 
-          {showFooterAction && typeof onFooterAction === "function" && (
-            <div className="tagHomeFooterAction">
-              <button
-                type="button"
-                className="tagHomeFooterButton"
-                onClick={onFooterAction}
-              >
-                {footerActionLabel || "Load tags"}
-              </button>
+          {homeEditorOpen && !homeTagsCollapsed && (
+            <div className="tagHomePopover">
+              <div className="tagHomePopoverHeader">
+                <span>Tags</span>
+                <button
+                  type="button"
+                  className="tagHomeClose"
+                  onClick={() => setHomeEditorOpen(false)}
+                >
+                  x
+                </button>
+              </div>
+              {renderEditor()}
             </div>
           )}
         </div>
-
-        {homeEditorOpen && (
-          <div className="tagHomePopover">
-            <div className="tagHomePopoverHeader">
-              <span>Tags</span>
-              <button
-                type="button"
-                className="tagHomeClose"
-                onClick={() => setHomeEditorOpen(false)}
-              >
-                x
-              </button>
-            </div>
-            {renderEditor()}
-          </div>
-        )}
       </div>
     );
   }

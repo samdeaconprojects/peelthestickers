@@ -3,7 +3,7 @@ import "./TimeList.css";
 import "./TimeItem.css";
 import Detail from "../Detail/Detail";
 import { useSettings } from "../../contexts/SettingsContext";
-import { formatTime, calculateAverage, getOveralls } from "./TimeUtils";
+import { formatTime, calculateAverage, getOveralls, getExtremeIndexes } from "./TimeUtils";
 
 import useSolveSelection from "../../hooks/useSolveSelection";
 import useBulkSolveActions from "../../hooks/useBulkSolveActions";
@@ -115,6 +115,33 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function getPenalty(solve) {
+  return String(solve?.penalty ?? solve?.Penalty ?? "").trim().toUpperCase();
+}
+
+function getComparableSolveTime(solve) {
+  if (!solve) return null;
+
+  const penalty = getPenalty(solve);
+  if (penalty === "DNF") return Number.MAX_SAFE_INTEGER;
+
+  const explicitFinal = Number(solve?.finalTimeMs ?? solve?.FinalTimeMs);
+  if (Number.isFinite(explicitFinal) && explicitFinal >= 0) {
+    return explicitFinal;
+  }
+
+  const base = Number(
+    solve?.rawTimeMs ??
+      solve?.RawTimeMs ??
+      solve?.rawTime ??
+      solve?.originalTime ??
+      solve?.time
+  );
+  if (!Number.isFinite(base) || base < 0) return null;
+
+  return penalty === "+2" ? base + 2000 : base;
+}
+
 function getSharedRowStatus(row = {}, currentIndex) {
   const idx = Number(row?.index);
   if (!Number.isFinite(idx)) return "pending";
@@ -174,7 +201,12 @@ function TimeList({
   const { settings } = useSettings();
 
   const solvesSafe = useMemo(() => {
-    return Array.isArray(solves) ? solves : [];
+    return Array.isArray(solves)
+      ? solves.map((solve) => {
+          const comparableTime = getComparableSolveTime(solve);
+          return comparableTime == null ? solve : { ...solve, time: comparableTime };
+        })
+      : [];
   }, [solves]);
 
   const isHorizontal = inPlayerBar ? false : settings.horizontalTimeList;
@@ -696,33 +728,49 @@ function TimeList({
   const horizontalBestWorst = useMemo(() => {
     if (!isHorizontal) {
       return {
-        bestTime: null,
-        worstTime: null,
-        bestAo5: null,
-        worstAo5: null,
-        bestAo12: null,
-        worstAo12: null,
+        bestTimeIndex: -1,
+        worstTimeIndex: -1,
+        bestAo5Index: -1,
+        worstAo5Index: -1,
+        bestAo12Index: -1,
+        worstAo12Index: -1,
       };
     }
 
-    const timeVals = horizontalSolves
-      .map((s) => s?.time)
-      .filter((v) => typeof v === "number" && isFinite(v));
+    const timeValues = horizontalSolves.map((s) => s?.time);
+    const { minIndex: bestTimeIndex, maxIndex: worstTimeIndex } =
+      getExtremeIndexes(timeValues);
 
-    const bestTime = timeVals.length ? Math.min(...timeVals) : null;
-    const worstTime = timeVals.length ? Math.max(...timeVals) : null;
+    const keyedAo5 = horizontalSolves.map((_, index) => {
+      const key = horizontalScrollEnabled ? index : pagedWindow.start + index;
+      return ao5ByKey[key];
+    });
+    const keyedAo12 = horizontalSolves.map((_, index) => {
+      const key = horizontalScrollEnabled ? index : pagedWindow.start + index;
+      return ao12ByKey[key];
+    });
 
-    const ao5Vals = Object.values(ao5ByKey).filter((v) => typeof v === "number" && isFinite(v));
-    const ao12Vals = Object.values(ao12ByKey).filter((v) => typeof v === "number" && isFinite(v));
+    const { minIndex: bestAo5Index, maxIndex: worstAo5Index } =
+      getExtremeIndexes(keyedAo5);
+    const { minIndex: bestAo12Index, maxIndex: worstAo12Index } =
+      getExtremeIndexes(keyedAo12);
 
-    const bestAo5 = ao5Vals.length ? Math.min(...ao5Vals) : null;
-    const worstAo5 = ao5Vals.length ? Math.max(...ao5Vals) : null;
-
-    const bestAo12 = ao12Vals.length ? Math.min(...ao12Vals) : null;
-    const worstAo12 = ao12Vals.length ? Math.max(...ao12Vals) : null;
-
-    return { bestTime, worstTime, bestAo5, worstAo5, bestAo12, worstAo12 };
-  }, [isHorizontal, horizontalSolves, ao5ByKey, ao12ByKey]);
+    return {
+      bestTimeIndex,
+      worstTimeIndex,
+      bestAo5Index,
+      worstAo5Index,
+      bestAo12Index,
+      worstAo12Index,
+    };
+  }, [
+    isHorizontal,
+    horizontalSolves,
+    horizontalScrollEnabled,
+    pagedWindow.start,
+    ao5ByKey,
+    ao12ByKey,
+  ]);
 
   if (solvesSafe.length === 0 && !sharedAverageMeta?.active) {
     return (
@@ -858,7 +906,14 @@ function TimeList({
     setHorizontalPage((p) => Math.max(0, p - 1));
   };
 
-  const { bestTime, worstTime, bestAo5, worstAo5, bestAo12, worstAo12 } = horizontalBestWorst;
+  const {
+    bestTimeIndex,
+    worstTimeIndex,
+    bestAo5Index,
+    worstAo5Index,
+    bestAo12Index,
+    worstAo12Index,
+  } = horizontalBestWorst;
 
   const getKeyForIndex = (localIndex) => {
     if (horizontalScrollEnabled) return localIndex;
@@ -979,9 +1034,9 @@ function TimeList({
                 if (avg == null) return <div key={index} className="ao12 empty TimeItem"></div>;
 
                 const textClass =
-                  bestAo12 != null && avg === bestAo12
+                  index === bestAo12Index
                     ? "best-time"
-                    : worstAo12 != null && avg === worstAo12
+                    : index === worstAo12Index
                     ? "worst-time"
                     : "";
 
@@ -1008,9 +1063,9 @@ function TimeList({
                 if (avg == null) return <div key={index} className="ao5 empty TimeItem"></div>;
 
                 const textClass =
-                  bestAo5 != null && avg === bestAo5
+                  index === bestAo5Index
                     ? "best-time"
-                    : worstAo5 != null && avg === worstAo5
+                    : index === worstAo5Index
                     ? "worst-time"
                     : "";
 
@@ -1036,15 +1091,15 @@ function TimeList({
                 const globalIdx = key;
 
                 const tval = solve?.time;
-                const isBest = bestTime != null && tval === bestTime;
-                const isWorst = worstTime != null && tval === worstTime;
+                const isBest = index === bestTimeIndex;
+                const isWorst = index === worstTimeIndex;
                 const beatSessionSingle = !!sessionSingleBeatByIndex[globalIdx];
 
                 const rank01 = timeColorMode === "index" ? horizontalRank01ByKey[key] ?? 0 : 0;
 
                 const { perfClass, perfStyle } =
                   !isBest && !isWorst
-                    ? getPerfClassAndStyle(tval, bestTime, worstTime, rank01)
+                    ? getPerfClassAndStyle(tval, overallMinValue, overallMaxValue, rank01)
                     : { perfClass: "", perfStyle: null };
 
                 const selected = selection.isIndexSelected(globalIdx);

@@ -3,6 +3,8 @@
   gap: 8px;
   align-items: center;
   text-align: center;
+  -webkit-user-select: none;
+  user-select: none;
   color: #FDFFFC;
   font-family: 'Jost', sans-serif;
   font-weight: bold;
@@ -79,8 +81,9 @@
 
 .cell.best {
   font-size: calc(18pt * var(--home-averages-scale, 1));
-  opacity: 0.8;
-  color: #00FF00;
+  opacity: 1;
+  color: #5CFF72;
+  text-shadow: 0 0 10px rgba(92, 255, 114, 0.28);
 }
 
 .cell.strict {

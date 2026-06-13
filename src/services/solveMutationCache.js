@@ -8,7 +8,10 @@ function normalizeEvent(event = "") {
 }
 
 function normalizeSessionID(sessionID = "") {
-  return String(sessionID || "").trim();
+  const sid = String(sessionID || "main").trim();
+  if (!sid) return "main";
+  if (sid.toLowerCase() === "main") return "main";
+  return sid;
 }
 
 function getSolveScopeFromItem(item = null) {

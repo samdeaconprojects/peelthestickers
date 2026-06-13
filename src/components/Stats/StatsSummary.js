@@ -202,6 +202,31 @@ function formatDateRange(solves) {
   return start && end ? `${start} - ${end}` : "—";
 }
 
+function formatDateRangeToPresent({ firstAt = null, fallbackSolves = [] } = {}) {
+  const input = Array.isArray(fallbackSolves) ? fallbackSolves : [];
+  const fallbackFirst = input[0]?.datetime || input[0]?.createdAt || null;
+  const first =
+    firstAt && fallbackFirst
+      ? String(firstAt) < String(fallbackFirst)
+        ? firstAt
+        : fallbackFirst
+      : firstAt || fallbackFirst;
+  if (!first) return "—";
+
+  const fmt = (value) => {
+    const date = value instanceof Date ? value : new Date(value);
+    if (!Number.isFinite(date.getTime())) return "";
+    return date.toLocaleDateString(undefined, {
+      month: "numeric",
+      day: "numeric",
+      year: "2-digit",
+    });
+  };
+
+  const start = fmt(first);
+  return start ? `${start} - Now` : "—";
+}
+
 function getSolveDate(solve) {
   const raw = solve?.datetime || solve?.createdAt || solve?.DateTime || solve?.dateTime;
   if (!raw) return null;
@@ -346,7 +371,7 @@ function buildViewSummary(solves, totalSolveCount = null, loadedSolveCount = nul
   };
 }
 
-function buildBucketViewSummary(bucketSummary, bucketItems = []) {
+function buildBucketViewSummary(bucketSummary, bucketItems = [], overallStats = null) {
   if (!bucketSummary) return null;
 
   const items = Array.isArray(bucketItems) ? bucketItems : [];
@@ -366,34 +391,92 @@ function buildBucketViewSummary(bucketSummary, bucketItems = []) {
     indexRange: items.length ? `${items.length.toLocaleString()} buckets` : "Bucketed range",
     single: {
       current: null,
-      best: Number.isFinite(Number(bucketSummary?.BestSingleMs))
-        ? Number(bucketSummary.BestSingleMs)
-        : null,
+      best:
+        Number.isFinite(Number(bucketSummary?.BestSingleMs))
+          ? Number(bucketSummary.BestSingleMs)
+          : Number.isFinite(Number(overallStats?.BestSingleMs))
+            ? Number(overallStats.BestSingleMs)
+            : null,
       worst: null,
     },
     metrics: {
       mo3: {
         current: null,
-        best: Number.isFinite(Number(bucketSummary?.BestMo3Ms)) ? Number(bucketSummary.BestMo3Ms) : null,
+        best:
+          Number.isFinite(Number(bucketSummary?.BestMo3Ms))
+            ? Number(bucketSummary.BestMo3Ms)
+            : Number.isFinite(Number(overallStats?.BestMo3Ms))
+              ? Number(overallStats.BestMo3Ms)
+              : null,
         worst: null,
         strictBest: null,
       },
       ao5: {
         current: null,
-        best: Number.isFinite(Number(bucketSummary?.BestAo5Ms)) ? Number(bucketSummary.BestAo5Ms) : null,
+        best:
+          Number.isFinite(Number(bucketSummary?.BestAo5Ms))
+            ? Number(bucketSummary.BestAo5Ms)
+            : Number.isFinite(Number(overallStats?.BestAo5Ms))
+              ? Number(overallStats.BestAo5Ms)
+              : null,
         worst: null,
         strictBest: null,
       },
       ao12: {
         current: null,
-        best: Number.isFinite(Number(bucketSummary?.BestAo12Ms)) ? Number(bucketSummary.BestAo12Ms) : null,
+        best:
+          Number.isFinite(Number(bucketSummary?.BestAo12Ms))
+            ? Number(bucketSummary.BestAo12Ms)
+            : Number.isFinite(Number(overallStats?.BestAo12Ms))
+              ? Number(overallStats.BestAo12Ms)
+              : null,
         worst: null,
         strictBest: null,
       },
-      ao25: { current: null, best: null, worst: null, strictBest: null },
-      ao50: { current: null, best: null, worst: null, strictBest: null },
-      ao100: { current: null, best: null, worst: null, strictBest: null },
-      ao1000: { current: null, best: null, worst: null, strictBest: null },
+      ao25: {
+        current: null,
+        best:
+          Number.isFinite(Number(bucketSummary?.BestAo25Ms))
+            ? Number(bucketSummary.BestAo25Ms)
+            : Number.isFinite(Number(overallStats?.BestAo25Ms))
+              ? Number(overallStats.BestAo25Ms)
+              : null,
+        worst: null,
+        strictBest: null,
+      },
+      ao50: {
+        current: null,
+        best:
+          Number.isFinite(Number(bucketSummary?.BestAo50Ms))
+            ? Number(bucketSummary.BestAo50Ms)
+            : Number.isFinite(Number(overallStats?.BestAo50Ms))
+              ? Number(overallStats.BestAo50Ms)
+              : null,
+        worst: null,
+        strictBest: null,
+      },
+      ao100: {
+        current: null,
+        best:
+          Number.isFinite(Number(bucketSummary?.BestAo100Ms))
+            ? Number(bucketSummary.BestAo100Ms)
+            : Number.isFinite(Number(overallStats?.BestAo100Ms))
+              ? Number(overallStats.BestAo100Ms)
+              : null,
+        worst: null,
+        strictBest: null,
+      },
+      ao1000: {
+        current: null,
+        best:
+          Number.isFinite(Number(bucketSummary?.BestAo1000Ms))
+            ? Number(bucketSummary.BestAo1000Ms)
+            : Number.isFinite(Number(overallStats?.BestAo1000Ms))
+              ? Number(overallStats.BestAo1000Ms)
+              : null,
+        worst: null,
+        strictBest: null,
+      },
     },
     mean: Number.isFinite(Number(bucketSummary?.MeanMs)) ? Number(bucketSummary.MeanMs) : null,
     median: null,
@@ -709,9 +792,42 @@ function buildOverallDerived(solves) {
   };
 }
 
+function getFirstSolveAtFromSolves(solves) {
+  const input = Array.isArray(solves) ? solves : [];
+  if (!input.length) return null;
+  return input[0]?.datetime || input[0]?.createdAt || null;
+}
+
+function getPlus2BestFromSolves(solves) {
+  let best = null;
+  for (const solve of Array.isArray(solves) ? solves : []) {
+    if (String(solve?.penalty ?? solve?.Penalty ?? "").toUpperCase() !== "+2") continue;
+    const adjusted = solveMsAdjusted(solve);
+    if (!(typeof adjusted === "number" && isFinite(adjusted))) continue;
+    if (best == null || adjusted < best) best = adjusted;
+  }
+  return best;
+}
+
 function finiteStatOrNull(value) {
   const next = Number(value);
   return Number.isFinite(next) ? next : null;
+}
+
+function minFiniteStat(a, b) {
+  const left = finiteStatOrNull(a);
+  const right = finiteStatOrNull(b);
+  if (left == null) return right;
+  if (right == null) return left;
+  return Math.min(left, right);
+}
+
+function maxFiniteStat(a, b) {
+  const left = finiteStatOrNull(a);
+  const right = finiteStatOrNull(b);
+  if (left == null) return right;
+  if (right == null) return left;
+  return Math.max(left, right);
 }
 
 function buildTimeViewSummary(solves) {
@@ -1138,21 +1254,35 @@ function useStatsSummaryData({
     () => buildViewSummary(solves, overallStats?.SolveCountTotal ?? null, loadedSolveCount),
     [solves, overallStats?.SolveCountTotal, loadedSolveCount]
   );
-  const overallFallback = useMemo(
-    () => buildViewSummary(overallSolves, overallStats?.SolveCountTotal ?? null, overallSolves?.length ?? null),
+  const overallLoadedSummary = useMemo(
+    () =>
+      buildViewSummary(
+        overallSolves,
+        overallStats?.SolveCountTotal ?? null,
+        overallSolves?.length ?? null
+      ),
     [overallSolves, overallStats?.SolveCountTotal]
   );
-  const overallDerived = useMemo(() => buildOverallDerived(overallSolves), [overallSolves]);
+  const shouldBuildOverallFallback = !overallStats;
+  const overallFallback = shouldBuildOverallFallback ? overallLoadedSummary : null;
+  const shouldBuildOverallDerived = allowOverallDerived && !overallStats;
+  const overallDerived = useMemo(
+    () => (shouldBuildOverallDerived ? buildOverallDerived(overallSolves) : null),
+    [allowOverallDerived, overallSolves, overallStats, shouldBuildOverallDerived]
+  );
+  const overallFirstSolveFallback = useMemo(() => getFirstSolveAtFromSolves(overallSolves), [overallSolves]);
+  const overallPlus2BestFallback = useMemo(() => getPlus2BestFromSolves(overallSolves), [overallSolves]);
   const hasFullOverallSolveCoverage = useMemo(() => {
     const total = Number(overallStats?.SolveCountTotal);
-    const loaded = Number(overallFallback?.solveCount);
-    return Number.isFinite(total) && total >= 0 && Number.isFinite(loaded) && loaded === total;
-  }, [overallFallback?.solveCount, overallStats?.SolveCountTotal]);
+    const loaded = Number(overallLoadedSummary?.solveCount);
+    if (Number.isFinite(total) && total >= 0 && Number.isFinite(loaded) && loaded === total) return true;
+    return Number.isFinite(total) && total >= 0 && overallSolves.length === total;
+  }, [overallLoadedSummary?.solveCount, overallSolves.length, overallStats?.SolveCountTotal]);
 
   const overall = useMemo(
     () => ({
       solveCountTotal: overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
-      single: overallStats?.BestSingleMs ?? overallFallback?.single?.best ?? null,
+      single: minFiniteStat(overallStats?.BestSingleMs, overallLoadedSummary?.single?.best),
       mo3: overallStats?.BestMo3Ms ?? overallFallback?.metrics?.mo3?.best ?? null,
       ao5: overallStats?.BestAo5Ms ?? overallFallback?.metrics?.ao5?.best ?? null,
       ao12: overallStats?.BestAo12Ms ?? overallFallback?.metrics?.ao12?.best ?? null,
@@ -1181,12 +1311,15 @@ function useStatsSummaryData({
       plus2Count: overallStats?.Plus2Count ?? null,
       plus2Best:
         overallStats?.Plus2BestMs ??
-        (hasFullOverallSolveCoverage ? overallFallback?.plus2Best ?? null : null) ??
+        (hasFullOverallSolveCoverage ? overallPlus2BestFallback : null) ??
         (allowOverallDerived ? overallDerived?.plus2Best ?? null : null),
       dnfCount: overallStats?.DNFCount ?? null,
-      singleWorst:
-        finiteStatOrNull(overallStats?.WorstSingleMs) ??
-        (allowOverallDerived ? overallDerived?.singleWorst ?? null : null),
+      firstSolveAt: overallStats?.FirstSolveAt ?? overallFirstSolveFallback ?? null,
+      singleWorst: maxFiniteStat(
+        overallStats?.WorstSingleMs,
+        overallLoadedSummary?.single?.worst ??
+          (allowOverallDerived ? overallDerived?.singleWorst ?? null : null)
+      ),
       mo3Worst:
         finiteStatOrNull(overallStats?.WorstMo3Ms) ??
         (allowOverallDerived ? overallDerived?.mo3Worst ?? null : null),
@@ -1200,8 +1333,11 @@ function useStatsSummaryData({
     [
       overallStats,
       overallFallback,
+      overallLoadedSummary,
       overallDerived,
       overallSolves,
+      overallFirstSolveFallback,
+      overallPlus2BestFallback,
       allowOverallDerived,
       hasFullOverallSolveCoverage,
     ]
@@ -1213,6 +1349,7 @@ function useStatsSummaryData({
 export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
   solves,
   overallStats,
+  overallSolves = [],
   bucketSummary = null,
   bucketItems = [],
   allEventsBreakdown,
@@ -1228,14 +1365,49 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
   compareSummary = null,
   eventBreakdownData = [],
   loading = false,
+  overviewTone = false,
+  profileColor = "#50B6FF",
+  allowOverallDerived = true,
 }) {
   const [timeTrendMode, setTimeTrendMode] = useState("average");
+  const overallLoadedSummary = useMemo(
+    () =>
+      buildViewSummary(
+        overallSolves,
+        overallStats?.SolveCountTotal ?? null,
+        overallSolves?.length ?? null
+      ),
+    [overallSolves, overallStats?.SolveCountTotal]
+  );
+  const bucketOverallMetricFallback = useMemo(
+    () => ({
+      BestSingleMs: overallStats?.BestSingleMs ?? overallLoadedSummary?.single?.best ?? null,
+      BestMo3Ms: overallStats?.BestMo3Ms ?? overallLoadedSummary?.metrics?.mo3?.best ?? null,
+      BestAo5Ms: overallStats?.BestAo5Ms ?? overallLoadedSummary?.metrics?.ao5?.best ?? null,
+      BestAo12Ms: overallStats?.BestAo12Ms ?? overallLoadedSummary?.metrics?.ao12?.best ?? null,
+      BestAo25Ms:
+        overallStats?.BestAo25Ms ??
+        (allowOverallDerived ? overallLoadedSummary?.metrics?.ao25?.best ?? null : null),
+      BestAo50Ms:
+        overallStats?.BestAo50Ms ??
+        (allowOverallDerived ? overallLoadedSummary?.metrics?.ao50?.best ?? null : null),
+      BestAo100Ms:
+        overallStats?.BestAo100Ms ??
+        (allowOverallDerived ? overallLoadedSummary?.metrics?.ao100?.best ?? null : null),
+      BestAo1000Ms:
+        overallStats?.BestAo1000Ms ??
+        (allowOverallDerived ? overallLoadedSummary?.metrics?.ao1000?.best ?? null : null),
+      Plus2BestMs: overallStats?.Plus2BestMs ?? overallLoadedSummary?.plus2Best ?? null,
+      MeanMs: overallStats?.MeanMs ?? (allowOverallDerived ? overallLoadedSummary?.mean ?? null : null),
+    }),
+    [allowOverallDerived, overallLoadedSummary, overallStats]
+  );
   const view = useMemo(
     () =>
       bucketSummary
-        ? buildBucketViewSummary(bucketSummary, bucketItems)
+        ? buildBucketViewSummary(bucketSummary, bucketItems, bucketOverallMetricFallback)
         : buildViewSummary(solves, overallStats?.SolveCountTotal ?? null, loadedSolveCount),
-    [bucketItems, bucketSummary, solves, overallStats?.SolveCountTotal, loadedSolveCount]
+    [bucketItems, bucketSummary, bucketOverallMetricFallback, solves, overallStats?.SolveCountTotal, loadedSolveCount]
   );
   const compareView = useMemo(
     () => buildViewSummary(compareSummary?.solves || [], null, null),
@@ -1263,6 +1435,24 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
   const currentMedianColor = useMemo(() => {
     return getRelativeStatColor(view?.median, overallStats?.MedianMs, overallSpread);
   }, [overallSpread, overallStats?.MedianMs, view?.median]);
+  const resolvedProfileColor = useMemo(
+    () => normalizeHexColor(profileColor, "#50B6FF"),
+    [profileColor]
+  );
+  const overviewToneStyle = useMemo(
+    () =>
+      overviewTone
+        ? {
+            background: `linear-gradient(135deg, ${withAlpha(resolvedProfileColor, 0.16)}, ${withAlpha(
+              resolvedProfileColor,
+              0.16
+            )})`,
+            borderColor: withAlpha(resolvedProfileColor, 0.82),
+            boxShadow: `inset 0 1px 0 ${withAlpha(resolvedProfileColor, 0.18)}`,
+          }
+        : undefined,
+    [overviewTone, resolvedProfileColor]
+  );
 
   if (mode === "all-events") {
     if (effectiveViewMode === "time") {
@@ -1311,7 +1501,8 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
           : isTileLayout
             ? "ssCard--view ssCard--viewTile"
             : "ssCard--view ssCard--viewRow"
-      } ${loading ? "is-loading" : ""}`}
+      } ${overviewTone ? "ssCard--overviewTone" : ""} ${loading ? "is-loading" : ""}`}
+      style={overviewToneStyle}
       aria-busy={loading}
     >
       {effectiveViewMode === "time" ? (
@@ -1689,6 +1880,14 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
     () => buildOverallDerived(compareSummary?.overallSolves || compareSummary?.solves || []),
     [compareSummary?.overallSolves, compareSummary?.solves]
   );
+  const overallDateRangeToPresent = useMemo(
+    () =>
+      formatDateRangeToPresent({
+        firstAt: overall?.firstSolveAt || overallStats?.FirstSolveAt || null,
+        fallbackSolves: overallSolves,
+      }),
+    [overall?.firstSolveAt, overallSolves, overallStats?.FirstSolveAt]
+  );
   const resolvedProfileColor = normalizeHexColor(profileColor, "#50B6FF");
   const overallCardStyle = useMemo(
     () => ({
@@ -1745,6 +1944,7 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
             <div className="ssOverviewLead">
               <div className="ssOverviewLeadTitle">Overview</div>
               <div className="ssOverviewLeadCount">{formatCount(overall.solveCountTotal)} solves</div>
+              <div className="ssOverviewLeadMeta">{overallDateRangeToPresent}</div>
               {Array.isArray(selectedTagPills) && selectedTagPills.length ? (
                 <span className="ssOverallTagList ssOverviewTagList">
                   {selectedTagPills.map((tag) => (
@@ -1796,8 +1996,21 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
 
 function StatsSummary(props) {
   const isRowLayout = (props.summaryLayout || "row") === "row";
+  const showBucketOverviewOnly =
+    props.mode !== "all-events" &&
+    props.viewMode !== "time" &&
+    props.overviewOnly === true;
+
   if (props.mode === "all-events") {
     return <StatsSummaryCurrent {...props} />;
+  }
+
+  if (showBucketOverviewOnly) {
+    return (
+      <div className={`statsSummaryShell ${isRowLayout ? "statsSummaryShell--stacked" : ""}`}>
+        <StatsSummaryCurrent {...props} overviewTone profileColor={props.profileColor} />
+      </div>
+    );
   }
 
   return (
