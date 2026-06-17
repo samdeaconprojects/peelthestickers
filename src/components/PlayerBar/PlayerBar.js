@@ -20,6 +20,7 @@ function PlayerBar({
   onTagsChange,
   onTagColorsChange,
   cubeModelOptions = [],
+  visibleTagFields = ["CubeModel"],
   discoveredTagOptions = {},
   setCurrentSession,
   handleEventChange,
@@ -220,6 +221,7 @@ function PlayerBar({
         >
           <TagBar
             tags={currentTags}
+            fields={visibleTagFields}
             tagColors={currentTagColors}
             onChange={onTagsChange}
             onTagColorsChange={onTagColorsChange}
@@ -228,6 +230,7 @@ function PlayerBar({
             discoveredOptions={discoveredTagOptions}
             profileColor={user?.Color || user?.color || "#2EC4B6"}
             variant="home"
+            hideAutomaticFields
             allowAdditions
           />
         </div>

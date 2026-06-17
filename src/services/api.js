@@ -13,7 +13,7 @@ async function parseResponse(res) {
   return { text };
 }
 
-function toUrl(path) {
+export function toApiUrl(path) {
   if (!path) return API_BASE || "";
   // absolute passthrough
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
@@ -83,7 +83,7 @@ function logApiRequest(stage, meta) {
 }
 
 async function request(method, path, body) {
-  const url = toUrl(path);
+  const url = toApiUrl(path);
   const requestID = `${method}-${Date.now()}-${++apiRequestCounter}`;
   const startedAt = Date.now();
   const options = {

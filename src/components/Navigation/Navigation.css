@@ -62,6 +62,24 @@
   filter: drop-shadow(0 0 18px rgba(255, 255, 255, 0.36));
 }
 
+.nav-logo-link:hover .pts-status-logo:not(.is-loading):not(.is-success):not(.is-error) .pts-status-logo__liquid-clip,
+.nav-logo-link:focus-visible .pts-status-logo:not(.is-loading):not(.is-success):not(.is-error) .pts-status-logo__liquid-clip {
+  opacity: 1;
+  transition-delay: 250ms;
+}
+
+.nav-logo-link:hover .pts-status-logo:not(.is-loading):not(.is-success):not(.is-error) .pts-status-logo__liquid,
+.nav-logo-link:focus-visible .pts-status-logo:not(.is-loading):not(.is-success):not(.is-error) .pts-status-logo__liquid {
+  animation: none;
+  transform: translateY(-20px);
+}
+
+.nav-logo-link:hover .pts-status-logo:not(.is-loading):not(.is-success):not(.is-error) .pts-status-logo__wave,
+.nav-logo-link:focus-visible .pts-status-logo:not(.is-loading):not(.is-success):not(.is-error) .pts-status-logo__wave {
+  animation: none;
+  opacity: 0;
+}
+
 .pts-status-logo {
   width: 55px;
   height: 55px;

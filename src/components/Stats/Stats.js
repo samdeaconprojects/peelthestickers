@@ -1593,7 +1593,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const [standardSubview, setStandardSubview] = useState("solves");
   const [timeViewMainSessionsOnly, setTimeViewMainSessionsOnly] = useState(true);
   const summaryLayout =
-    String(settings?.statsSummaryLayout || "tile").trim().toLowerCase() === "row"
+    String(settings?.statsSummaryLayout || "row").trim().toLowerCase() === "row"
       ? "row"
       : "tile";
   const showSolveCharts = isSolveLevelMode || statsViewMode === "time";
@@ -6680,6 +6680,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             onStatSelect={handleSummaryStatSelect}
             profileColor={primaryAccentColor}
             loading={primaryOverallSummaryLoading}
+            showWorstOverview={showAllActive}
           />
         );
       }
@@ -6720,6 +6721,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             onStatSelect={null}
             profileColor={compareStyle?.primary || "#7c8cff"}
             loading={compareSummaryLoading}
+            showWorstOverview={effectiveCompareShowAllActive}
           />
         );
       }
@@ -8138,6 +8140,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             onStatSelect={handleSummaryStatSelect}
             profileColor={primaryAccentColor}
                       loading={primaryOverallSummaryLoading}
+            showWorstOverview={showAllActive}
                     />
                   </div>
                 </>
@@ -8186,6 +8189,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         onStatSelect={handleSummaryStatSelect}
                         profileColor={primaryAccentColor}
                         loading={primaryOverallSummaryLoading}
+                        showWorstOverview={showAllActive}
                       />
                       </div>
                     ) : (
@@ -8232,6 +8236,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         onStatSelect={handleSummaryStatSelect}
                         profileColor={primaryAccentColor}
                         loading={primaryOverallSummaryLoading}
+                        showWorstOverview={showAllActive}
                       />
                     </div>
                       </>
@@ -8280,6 +8285,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                           onStatSelect={handleSummaryStatSelect}
                           profileColor={compareStyle?.primary || "#7c8cff"}
                           loading={compareSummaryLoading}
+                          showWorstOverview={effectiveCompareShowAllActive}
                         />
                         </div>
                       ) : (
@@ -8327,6 +8333,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                             onStatSelect={handleSummaryStatSelect}
                             profileColor={compareStyle?.primary || "#7c8cff"}
                             loading={compareSummaryLoading}
+                            showWorstOverview={effectiveCompareShowAllActive}
                           />
                         </div>
                         </>

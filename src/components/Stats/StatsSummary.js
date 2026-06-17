@@ -14,6 +14,16 @@ const WINDOW_SPECS = [
   { key: "ao100", label: "AO100", size: 100, kind: "ao" },
   { key: "ao1000", label: "AO1000", size: 1000, kind: "ao" },
 ];
+const OVERALL_WINDOW_MINIMUMS = {
+  single: 1,
+  mo3: 3,
+  ao5: 5,
+  ao12: 12,
+  ao25: 25,
+  ao50: 50,
+  ao100: 100,
+  ao1000: 1000,
+};
 
 function solveMsAdjusted(s) {
   if (!s) return null;
@@ -814,6 +824,28 @@ function finiteStatOrNull(value) {
   return Number.isFinite(next) ? next : null;
 }
 
+function positiveStatOrNull(value) {
+  const next = Number(value);
+  return Number.isFinite(next) && next > 0 ? next : null;
+}
+
+function hasEnoughSolvesForMetric(metricKey, solveCountTotal) {
+  const required = OVERALL_WINDOW_MINIMUMS[metricKey] ?? 1;
+  const total = Number(solveCountTotal);
+  if (!Number.isFinite(total)) return true;
+  return total >= required;
+}
+
+function resolveOverallMetricValue(metricKey, solveCountTotal, ...candidates) {
+  if (!hasEnoughSolvesForMetric(metricKey, solveCountTotal)) return null;
+  for (const candidate of candidates) {
+    const normalized =
+      metricKey === "single" ? finiteStatOrNull(candidate) : positiveStatOrNull(candidate);
+    if (normalized != null) return normalized;
+  }
+  return null;
+}
+
 function minFiniteStat(a, b) {
   const left = finiteStatOrNull(a);
   const right = finiteStatOrNull(b);
@@ -981,7 +1013,11 @@ function SharedMetricColumn({
   };
 
   return (
-    <div className="ssSharedMetricColumn">
+    <div
+      className={`ssSharedMetricColumn${
+        isAoMetric ? " ssSharedMetricColumn--ao" : ""
+      }${isSingleMetric ? " ssSharedMetricColumn--singleMetric" : ""}`}
+    >
       {showHeader ? (!single ? (
         <div className="ssMetricTileHeader ssSharedMetricHeader">
           <span className="ssMetricTilePrefix">{prefix}</span>
@@ -1282,14 +1318,53 @@ function useStatsSummaryData({
   const overall = useMemo(
     () => ({
       solveCountTotal: overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
-      single: minFiniteStat(overallStats?.BestSingleMs, overallLoadedSummary?.single?.best),
-      mo3: overallStats?.BestMo3Ms ?? overallFallback?.metrics?.mo3?.best ?? null,
-      ao5: overallStats?.BestAo5Ms ?? overallFallback?.metrics?.ao5?.best ?? null,
-      ao12: overallStats?.BestAo12Ms ?? overallFallback?.metrics?.ao12?.best ?? null,
-      ao25: overallStats?.BestAo25Ms ?? overallFallback?.metrics?.ao25?.best ?? null,
-      ao50: overallStats?.BestAo50Ms ?? overallFallback?.metrics?.ao50?.best ?? null,
-      ao100: overallStats?.BestAo100Ms ?? overallFallback?.metrics?.ao100?.best ?? null,
-      ao1000: overallStats?.BestAo1000Ms ?? overallFallback?.metrics?.ao1000?.best ?? null,
+      single: resolveOverallMetricValue(
+        "single",
+        overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
+        minFiniteStat(overallStats?.BestSingleMs, overallLoadedSummary?.single?.best)
+      ),
+      mo3: resolveOverallMetricValue(
+        "mo3",
+        overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
+        overallStats?.BestMo3Ms,
+        overallLoadedSummary?.metrics?.mo3?.best
+      ),
+      ao5: resolveOverallMetricValue(
+        "ao5",
+        overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
+        overallStats?.BestAo5Ms,
+        overallLoadedSummary?.metrics?.ao5?.best
+      ),
+      ao12: resolveOverallMetricValue(
+        "ao12",
+        overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
+        overallStats?.BestAo12Ms,
+        overallLoadedSummary?.metrics?.ao12?.best
+      ),
+      ao25: resolveOverallMetricValue(
+        "ao25",
+        overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
+        overallStats?.BestAo25Ms,
+        overallLoadedSummary?.metrics?.ao25?.best
+      ),
+      ao50: resolveOverallMetricValue(
+        "ao50",
+        overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
+        overallStats?.BestAo50Ms,
+        overallLoadedSummary?.metrics?.ao50?.best
+      ),
+      ao100: resolveOverallMetricValue(
+        "ao100",
+        overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
+        overallStats?.BestAo100Ms,
+        overallLoadedSummary?.metrics?.ao100?.best
+      ),
+      ao1000: resolveOverallMetricValue(
+        "ao1000",
+        overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
+        overallStats?.BestAo1000Ms,
+        overallLoadedSummary?.metrics?.ao1000?.best
+      ),
       mo3Strict:
         overallStats?.BestMo3StrictMs ??
         (allowOverallDerived ? overallDerived?.mo3Strict ?? null : null),
@@ -1315,20 +1390,36 @@ function useStatsSummaryData({
         (allowOverallDerived ? overallDerived?.plus2Best ?? null : null),
       dnfCount: overallStats?.DNFCount ?? null,
       firstSolveAt: overallStats?.FirstSolveAt ?? overallFirstSolveFallback ?? null,
-      singleWorst: maxFiniteStat(
-        overallStats?.WorstSingleMs,
-        overallLoadedSummary?.single?.worst ??
-          (allowOverallDerived ? overallDerived?.singleWorst ?? null : null)
+      singleWorst: resolveOverallMetricValue(
+        "single",
+        overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
+        maxFiniteStat(
+          overallStats?.WorstSingleMs,
+          overallLoadedSummary?.single?.worst ??
+            (allowOverallDerived ? overallDerived?.singleWorst ?? null : null)
+        )
       ),
-      mo3Worst:
-        finiteStatOrNull(overallStats?.WorstMo3Ms) ??
-        (allowOverallDerived ? overallDerived?.mo3Worst ?? null : null),
-      ao5Worst:
-        finiteStatOrNull(overallStats?.WorstAo5Ms) ??
-        (allowOverallDerived ? overallDerived?.ao5Worst ?? null : null),
-      ao12Worst:
-        finiteStatOrNull(overallStats?.WorstAo12Ms) ??
-        (allowOverallDerived ? overallDerived?.ao12Worst ?? null : null),
+      mo3Worst: resolveOverallMetricValue(
+        "mo3",
+        overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
+        overallStats?.WorstMo3Ms,
+        overallLoadedSummary?.metrics?.mo3?.worst,
+        allowOverallDerived ? overallDerived?.mo3Worst ?? null : null
+      ),
+      ao5Worst: resolveOverallMetricValue(
+        "ao5",
+        overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
+        overallStats?.WorstAo5Ms,
+        overallLoadedSummary?.metrics?.ao5?.worst,
+        allowOverallDerived ? overallDerived?.ao5Worst ?? null : null
+      ),
+      ao12Worst: resolveOverallMetricValue(
+        "ao12",
+        overallStats?.SolveCountTotal ?? overallSolves?.length ?? null,
+        overallStats?.WorstAo12Ms,
+        overallLoadedSummary?.metrics?.ao12?.worst,
+        allowOverallDerived ? overallDerived?.ao12Worst ?? null : null
+      ),
     }),
     [
       overallStats,
@@ -1865,6 +1956,7 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
   compareSummary = null,
   profileColor = "#50B6FF",
   loading = false,
+  showWorstOverview = true,
 }) {
   const { view, overall } = useStatsSummaryData({
     solves,
@@ -1969,10 +2061,10 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
             </div>
           }
           metricValues={{
-            single: { best: overall.single, worst: overall.singleWorst },
-            mo3: { best: overall.mo3, worst: overall.mo3Worst },
-            ao5: { best: overall.ao5, worst: overall.ao5Worst },
-            ao12: { best: overall.ao12, worst: overall.ao12Worst },
+            single: { best: overall.single, worst: showWorstOverview ? overall.singleWorst : null },
+            mo3: { best: overall.mo3, worst: showWorstOverview ? overall.mo3Worst : null },
+            ao5: { best: overall.ao5, worst: showWorstOverview ? overall.ao5Worst : null },
+            ao12: { best: overall.ao12, worst: showWorstOverview ? overall.ao12Worst : null },
             ao25: { best: overall.ao25, worst: null },
             ao50: { best: overall.ao50, worst: null },
             ao100: { best: overall.ao100, worst: null },

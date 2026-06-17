@@ -84,6 +84,10 @@
   align-items: center;
 }
 
+.setting-item--stacked {
+  align-items: flex-start;
+}
+
 .setting-item label {
   flex: 0 0 140px;
   color: #fff;
@@ -102,6 +106,39 @@
   margin-left: 10px;
   background: #2b2b2b;
   color: #fff;
+}
+
+.settingsCheckboxGrid {
+  flex: 1;
+  margin-left: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settingsCheckboxChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  cursor: pointer;
+}
+
+.settingsCheckboxChip.is-checked {
+  border-color: rgba(46, 196, 182, 0.58);
+  background: rgba(46, 196, 182, 0.12);
+}
+
+.settingsCheckboxChip.is-locked {
+  opacity: 0.92;
+}
+
+.settingsCheckboxChip input[type="checkbox"] {
+  margin: 0;
 }
 
 .settingsStaticValue {

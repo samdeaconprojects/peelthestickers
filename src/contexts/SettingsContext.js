@@ -18,6 +18,7 @@ import {
   defaultSolveBindings,
   defaultUiBindings,
 } from "../utils/keybindings";
+import { SHARED_TAG_FIELDS } from "../components/TagBar/tagUtils";
 
 const SettingsContext = createContext(null);
 
@@ -52,6 +53,19 @@ function normalizeNonRollingMaxRows(rawValue) {
 function normalizeStatsSummaryLayout(rawValue) {
   const raw = String(rawValue || "").trim().toLowerCase();
   return raw === "row" ? "row" : "tile";
+}
+
+function normalizePlayerBarTagFields(rawValue) {
+  const incoming = Array.isArray(rawValue) ? rawValue : [];
+  const allowed = new Set(SHARED_TAG_FIELDS);
+  const normalized = Array.from(
+    new Set(
+      incoming
+        .map((field) => String(field || "").trim())
+        .filter((field) => allowed.has(field))
+    )
+  );
+  return normalized.length ? normalized : ["CubeModel"];
 }
 
 export const defaultSettings = {
@@ -100,7 +114,8 @@ export const defaultSettings = {
   navigationArrowStyle: "scramble",
   showAddSolveButton: true,
   hideAutomaticHomeTags: false,
-  statsSummaryLayout: "tile",
+  playerBarTagFields: ["CubeModel"],
+  statsSummaryLayout: "row",
 
   // random-state = cubing.js default
   // legacy = old generateScramble behavior
@@ -146,6 +161,7 @@ function mergeSettings(input) {
     safe.nonRollingTimeListMaxRows
   );
   const statsSummaryLayout = normalizeStatsSummaryLayout(safe.statsSummaryLayout);
+  const playerBarTagFields = normalizePlayerBarTagFields(safe.playerBarTagFields);
 
   return {
     ...defaultSettings,
@@ -157,6 +173,7 @@ function mergeSettings(input) {
     nonRollingTimeListCols,
     nonRollingTimeListMaxRows,
     statsSummaryLayout,
+    playerBarTagFields,
     eventKeyBindings: {
       ...defaultEventBindings,
       ...(safe.eventKeyBindings || {}),

@@ -1023,7 +1023,7 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
 
                         return (
                           <div
-                            className={`homeStatsSummaryRow homeStatsSummaryRow--list${
+                            className={`homeStatsSummaryRow homeStatsSummaryRow--list homeStatsSummaryRow--${row.key}${
                               isSummaryExpanded ? " homeStatsSummaryRow--expanded" : ""
                             }`}
                             key={`${slotKey}-${row.key}`}

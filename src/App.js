@@ -6076,6 +6076,7 @@ function App() {
             queueTagColorCatalogSave(nextCatalog);
           }}
           cubeModelOptions={cubeModelHistoryOptions}
+          visibleTagFields={settings.playerBarTagFields}
           discoveredTagOptions={mergedHomeTagOptions}
           setCurrentSession={setCurrentSession}
           sharedSession={sharedSession}

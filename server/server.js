@@ -78,6 +78,76 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }), 
   marshallOptions: { removeUndefinedValues: true },
 });
 const dbMetricsStorage = new AsyncLocalStorage();
+const notificationClientsByUser = new Map();
+const SSE_KEEPALIVE_MS = 25000;
+
+function writeSseEvent(res, eventName, payload) {
+  if (!res || res.writableEnded) return;
+  if (eventName) {
+    res.write(`event: ${eventName}\n`);
+  }
+  res.write(`data: ${JSON.stringify(payload || {})}\n\n`);
+}
+
+function addNotificationClient(userID, res) {
+  const id = crypto.randomUUID();
+  const client = {
+    id,
+    res,
+    keepAlive: setInterval(() => {
+      if (res.writableEnded) return;
+      res.write(": keepalive\n\n");
+    }, SSE_KEEPALIVE_MS),
+  };
+
+  const existing = notificationClientsByUser.get(userID) || new Map();
+  existing.set(id, client);
+  notificationClientsByUser.set(userID, existing);
+  return client;
+}
+
+function removeNotificationClient(userID, clientID) {
+  const existing = notificationClientsByUser.get(userID);
+  if (!existing) return;
+
+  const client = existing.get(clientID);
+  if (client?.keepAlive) clearInterval(client.keepAlive);
+  existing.delete(clientID);
+
+  if (existing.size === 0) {
+    notificationClientsByUser.delete(userID);
+  }
+}
+
+function publishNotification(userID, payload, eventName = "social") {
+  const id = String(userID || "").trim();
+  if (!id) return;
+
+  const existing = notificationClientsByUser.get(id);
+  if (!existing?.size) return;
+
+  const envelope = {
+    id: crypto.randomUUID(),
+    sentAt: nowIso(),
+    ...payload,
+  };
+
+  for (const [clientID, client] of existing.entries()) {
+    if (!client?.res || client.res.writableEnded) {
+      removeNotificationClient(id, clientID);
+      continue;
+    }
+    writeSseEvent(client.res, eventName, envelope);
+  }
+}
+
+function publishNotificationToUsers(userIDs, payload, eventName = "social") {
+  const uniqueUserIDs = Array.from(
+    new Set((Array.isArray(userIDs) ? userIDs : []).map((id) => String(id || "").trim()).filter(Boolean))
+  );
+
+  uniqueUserIDs.forEach((userID) => publishNotification(userID, payload, eventName));
+}
 
 function compactDbMeta(meta = {}) {
   if (!meta || typeof meta !== "object") return {};
@@ -1418,19 +1488,16 @@ async function recomputeDayBucketsForSolveMutation({ userID, oldSolve = null, ne
   return recomputeDayBucketsForScopes({ userID, scopes, timeZone });
 }
 
-function markDayBucketsDirtyForSolveMutation({ userID, oldSolve = null, newSolve = null }) {
-  if (!userID) return false;
-  runInBackground(`dayBuckets:dirty:${userID}`, async () => {
-    const timeZone = await getUserDayBucketTimeZone(userID);
-    const scopes = buildDirtyDayBucketScopesFromSolveMutation({
-      oldSolve,
-      newSolve,
-      timeZone,
-    });
-    if (!scopes.size) return [];
-    return markDayBucketScopesDirty(userID, scopes);
+async function markDayBucketsDirtyForSolveMutation({ userID, oldSolve = null, newSolve = null }) {
+  if (!userID) return [];
+  const timeZone = await getUserDayBucketTimeZone(userID);
+  const scopes = buildDirtyDayBucketScopesFromSolveMutation({
+    oldSolve,
+    newSolve,
+    timeZone,
   });
-  return true;
+  if (!scopes.size) return [];
+  return markDayBucketScopesDirty(userID, scopes);
 }
 
 async function queryDayBucketItemsByPrefix(userID, prefix) {
@@ -1470,6 +1537,32 @@ async function queryUserItemsByPrefix(userID, prefix) {
           ":pk": `USER#${userID}`,
           ":pfx": prefix,
         },
+        ExclusiveStartKey: cursor || undefined,
+      })
+    );
+
+    if (Array.isArray(out.Items) && out.Items.length) items.push(...out.Items);
+    cursor = out.LastEvaluatedKey || null;
+  } while (cursor);
+
+  return items;
+}
+
+async function queryUserItemsByRange(userID, start, end) {
+  const items = [];
+  let cursor = null;
+
+  do {
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
+        ExpressionAttributeValues: {
+          ":pk": `USER#${userID}`,
+          ":start": start,
+          ":end": end,
+        },
+        ScanIndexForward: true,
         ExclusiveStartKey: cursor || undefined,
       })
     );
@@ -3388,7 +3481,7 @@ function runInBackground(label, fn) {
   });
 }
 
-async function finalizeImportJobInBackground(userID, jobID) {
+async function finalizeImportJob(userID, jobID) {
   const current = await getImportJobItem(userID, jobID);
   if (!current) throw new Error("Import job not found");
 
@@ -4567,8 +4660,117 @@ async function isUserInGroup(groupID, userID) {
   return !!out.Item;
 }
 
+async function getUserProfile(userID) {
+  const id = String(userID || "").trim();
+  if (!id) return null;
+
+  const out = await ddb.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: { PK: `USER#${id}`, SK: "PROFILE" },
+      ConsistentRead: true,
+    })
+  );
+
+  return out.Item || null;
+}
+
+async function listUserFriendIDs(userID) {
+  const profile = await getUserProfile(userID);
+  return Array.isArray(profile?.Friends) ? profile.Friends.map((id) => String(id || "").trim()).filter(Boolean) : [];
+}
+
+function normalizeNotificationAuthor(profile, fallbackUserID = "") {
+  const userID = String(profile?.PK || "").startsWith("USER#")
+    ? String(profile.PK).slice(5)
+    : String(fallbackUserID || "").trim();
+
+  return {
+    userID,
+    name: String(profile?.Name || profile?.Username || fallbackUserID || "").trim(),
+    username: String(profile?.Username || fallbackUserID || "").trim(),
+    color: String(profile?.Color || "#cccccc").trim() || "#cccccc",
+    profileEvent: String(profile?.ProfileEvent || "333").trim() || "333",
+    profileScramble: String(profile?.ProfileScramble || "").trim(),
+    tagColorCatalog: profile?.TagColorCatalog || null,
+  };
+}
+
+function normalizeNotificationGroup(group) {
+  if (!group) return null;
+  return {
+    groupID: String(group?.GroupID || "").trim(),
+    name: String(group?.Name || group?.GroupID || "").trim(),
+    color: String(group?.Color || "#7f8c8d").trim() || "#7f8c8d",
+  };
+}
+
+function buildNotificationMessage(item = {}) {
+  return {
+    sender: item.SenderID,
+    text: item.Text,
+    note: item.Note ?? "",
+    timestamp: item.CreatedAt,
+    messageType: item.MessageType || null,
+    postType: item.PostType || null,
+    solveList: Array.isArray(item.SolveList) ? item.SolveList : [],
+    statShare: item.StatShare ?? null,
+  };
+}
+
+async function buildUserPostNotificationPayload(postItem, ownerUserID) {
+  const authorProfile = await getUserProfile(ownerUserID);
+  return {
+    type: "post.created",
+    scope: "USER",
+    ownerUserID,
+    post: postItem,
+    author: normalizeNotificationAuthor(authorProfile, ownerUserID),
+  };
+}
+
+async function buildGroupPostNotificationPayload(postItem, groupID, authorID) {
+  const [group, authorProfile] = await Promise.all([
+    getGroupMeta(groupID),
+    getUserProfile(authorID),
+  ]);
+
+  return {
+    type: "post.created",
+    scope: "GROUP",
+    groupID,
+    post: postItem,
+    group: normalizeNotificationGroup(group),
+    author: normalizeNotificationAuthor(authorProfile, authorID),
+  };
+}
+
 // -------------------- Health --------------------
 app.get("/api/health", (_, res) => res.json({ ok: true }));
+
+app.get("/api/notifications/stream/:userID", (req, res) => {
+  const userID = String(req.params.userID || "").trim();
+  if (!userID) return res.status(400).json({ error: "Missing userID" });
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  if (typeof res.flushHeaders === "function") {
+    res.flushHeaders();
+  }
+
+  const client = addNotificationClient(userID, res);
+  writeSseEvent(res, "connected", {
+    type: "stream.connected",
+    userID,
+    connectedAt: nowIso(),
+  });
+
+  req.on("close", () => {
+    removeNotificationClient(userID, client.id);
+  });
+});
 
 // -------------------- Debug: table shape --------------------
 app.get("/api/_table", async (_, res) => {
@@ -5621,10 +5823,12 @@ app.post("/api/solve", async (req, res) => {
       ),
     ]);
     queueTagStatsInvalidationInBackground(`add:${userID}:${solveItem.Event}`, userID, tagScopeMutations);
-    markDayBucketsDirtyForSolveMutation({
-      userID,
-      newSolve: solveItem,
-    });
+    await withDbPhase("solve:add:day-buckets", () =>
+      markDayBucketsDirtyForSolveMutation({
+        userID,
+        newSolve: solveItem,
+      })
+    );
 
     return res.json({
       ok: true,
@@ -5929,30 +6133,32 @@ app.post("/api/importJobs/:userID/:jobID/finalize", async (req, res) => {
 
     const status = normalizeImportJobStatus(job.Status);
     if (status === "COMPLETED") return res.json({ ok: true, job: publicImportJob(job) });
-    if (status === "FINALIZING") return res.json({ ok: true, job: publicImportJob(job) });
     if (status === "FAILED") return res.status(409).json({ error: "Import job failed" });
     if (status === "CANCELED") return res.status(409).json({ error: "Import job canceled" });
 
-    const prepared = {
-      ...job,
-      Status: "FINALIZING",
-      Error: null,
-      FinalizedAt: nowIso(),
-      UpdatedAt: nowIso(),
-      Recompute: {
-        sessionsCompleted: 0,
-        totalSessions: Array.isArray(job.AffectedSessions) ? job.AffectedSessions.length : 0,
-        eventsCompleted: 0,
-        totalEvents: Array.isArray(job.AffectedEvents) ? job.AffectedEvents.length : 0,
-      },
-    };
-    await putImportJobItem(prepared);
+    const prepared =
+      status === "FINALIZING"
+        ? job
+        : {
+            ...job,
+            Status: "FINALIZING",
+            Error: null,
+            FinalizedAt: nowIso(),
+            UpdatedAt: nowIso(),
+            Recompute: {
+              sessionsCompleted: 0,
+              totalSessions: Array.isArray(job.AffectedSessions) ? job.AffectedSessions.length : 0,
+              eventsCompleted: 0,
+              totalEvents: Array.isArray(job.AffectedEvents) ? job.AffectedEvents.length : 0,
+            },
+          };
+    if (status !== "FINALIZING") {
+      await putImportJobItem(prepared);
+    }
 
-    runInBackground(`importJob:finalize:${userID}:${jobID}`, () =>
-      finalizeImportJobInBackground(userID, jobID)
-    );
-
-    return res.json({ ok: true, job: publicImportJob(prepared) });
+    await finalizeImportJob(userID, jobID);
+    const finished = await getImportJobItem(userID, jobID);
+    return res.json({ ok: true, job: publicImportJob(finished || prepared) });
   } catch (e) {
     console.error("POST /api/importJobs/:userID/:jobID/finalize error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
@@ -6605,11 +6811,13 @@ app.put("/api/solve/:userID/:solveRef", async (req, res) => {
       buildTagScopeMutationsForSolveMutation(existing, rebuilt)
     );
 
-    markDayBucketsDirtyForSolveMutation({
-      userID,
-      oldSolve: existing,
-      newSolve: rebuilt,
-    });
+    await withDbPhase("solve:edit:day-buckets", () =>
+      markDayBucketsDirtyForSolveMutation({
+        userID,
+        oldSolve: existing,
+        newSolve: rebuilt,
+      })
+    );
 
     return res.json({ ok: true, item: rebuilt });
   } catch (e) {
@@ -6680,11 +6888,13 @@ app.put("/api/solvePenalty/:userID/:solveRef", async (req, res) => {
       buildTagScopeMutationsForSolveMutation(existing, updated)
     );
 
-    markDayBucketsDirtyForSolveMutation({
-      userID,
-      oldSolve: existing,
-      newSolve: updated,
-    });
+    await withDbPhase("solve:penalty:day-buckets", () =>
+      markDayBucketsDirtyForSolveMutation({
+        userID,
+        oldSolve: existing,
+        newSolve: updated,
+      })
+    );
 
     return res.json({ ok: true, item: updated });
   } catch (e) {
@@ -6720,11 +6930,13 @@ app.delete("/api/solve/:userID/:solveRef", async (req, res) => {
       buildTagScopeMutationsForSolveMutation(existing, null)
     );
 
-    markDayBucketsDirtyForSolveMutation({
-      userID,
-      oldSolve: existing,
-      newSolve: null,
-    });
+    await withDbPhase("solve:delete:day-buckets", () =>
+      markDayBucketsDirtyForSolveMutation({
+        userID,
+        oldSolve: existing,
+        newSolve: null,
+      })
+    );
 
     return res.json({ ok: true });
   } catch (e) {
@@ -6860,20 +7072,9 @@ app.get("/api/dayBuckets/:userID", async (req, res) => {
     const dirtyRangeStart = `${dirtyPrefix}#${startDay || "0000-00-00"}`;
     const dirtyRangeEnd = `${dirtyPrefix}#${endDay || "9999-99-99"}`;
 
-    const dirtyOut = await ddb.send(
-      new QueryCommand({
-        TableName: TABLE,
-        KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
-        ExpressionAttributeValues: {
-          ":pk": `USER#${userID}`,
-          ":start": dirtyRangeStart,
-          ":end": dirtyRangeEnd,
-        },
-        ScanIndexForward: true,
-      })
-    );
+    const dirtyItems = await queryUserItemsByRange(userID, dirtyRangeStart, dirtyRangeEnd);
 
-    const dirtyScopes = (dirtyOut.Items || []).map((item) => ({
+    const dirtyScopes = dirtyItems.map((item) => ({
       dayKey: String(item?.DayKey || "").trim(),
       event: String(item?.Event || "").trim(),
       mainOnly: item?.MainOnly === true,
@@ -6884,22 +7085,7 @@ app.get("/api/dayBuckets/:userID", async (req, res) => {
       await recomputeDirtyDayBucketScopes(userID, dirtyScopes, timeZone);
     }
 
-    const loadBucketItems = async () => {
-      const out = await ddb.send(
-        new QueryCommand({
-          TableName: TABLE,
-          KeyConditionExpression: "PK = :pk AND SK BETWEEN :start AND :end",
-          ExpressionAttributeValues: {
-            ":pk": `USER#${userID}`,
-            ":start": rangeStart,
-            ":end": rangeEnd,
-          },
-          ScanIndexForward: true,
-        })
-      );
-
-      return Array.isArray(out.Items) ? out.Items : [];
-    };
+    const loadBucketItems = async () => queryUserItemsByRange(userID, rangeStart, rangeEnd);
 
     const buildScopeFromBucketItem = (item) => {
       const dayKey = String(item?.BucketDay || "").trim();
@@ -7066,6 +7252,11 @@ app.post("/api/post", async (req, res) => {
     };
 
     await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+    const [friendIDs, payload] = await Promise.all([
+      listUserFriendIDs(userID),
+      buildUserPostNotificationPayload(item, userID),
+    ]);
+    publishNotificationToUsers([userID, ...friendIDs], payload);
     return res.json({ ok: true, item });
   } catch (e) {
     console.error("POST /api/post error:", e);
@@ -7115,6 +7306,13 @@ app.delete("/api/post/:userID/:timestamp", async (req, res) => {
         Key: { PK: `USER#${userID}`, SK: `POST#${timestamp}` },
       })
     );
+    const friendIDs = await listUserFriendIDs(userID);
+    publishNotificationToUsers([userID, ...friendIDs], {
+      type: "post.deleted",
+      scope: "USER",
+      ownerUserID: userID,
+      timestamp,
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.error("DELETE /api/post error:", e);
@@ -7145,6 +7343,16 @@ app.put("/api/postComments/:userID/:timestamp", async (req, res) => {
         },
       })
     );
+
+    const friendIDs = await listUserFriendIDs(userID);
+    publishNotificationToUsers([userID, ...friendIDs], {
+      type: "post.comments.updated",
+      scope: "USER",
+      ownerUserID: userID,
+      timestamp,
+      comments,
+      updatedAt: nowIso(),
+    });
 
     return res.json({ ok: true });
   } catch (e) {
@@ -7471,6 +7679,23 @@ app.post("/api/message", async (req, res) => {
       preview: text,
     });
 
+    publishNotificationToUsers(
+      members.map((member) => member?.UserID).filter(Boolean),
+      {
+        type: "message.created",
+        conversationID,
+        conversation: {
+          conversationID,
+          conversationType: normalizeConversationType(meta?.ConversationType),
+          name: String(meta?.Name || "").trim(),
+          memberIDs: members.map((member) => member?.UserID).filter(Boolean),
+          lastMessageAt: timestamp,
+          lastMessagePreview: String(text || "").slice(0, 280),
+        },
+        message: buildNotificationMessage(item),
+      }
+    );
+
     return res.json({ ok: true, item, conversation: { ...meta, LastMessageAt: timestamp } });
   } catch (e) {
     console.error("POST /api/message error:", e);
@@ -7599,6 +7824,12 @@ app.post("/api/groupPost", async (req, res) => {
     };
 
     await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+    const members = await listGroupMembers(groupID);
+    const payload = await buildGroupPostNotificationPayload(item, groupID, authorID);
+    publishNotificationToUsers(
+      members.map((member) => member?.UserID).filter(Boolean),
+      payload
+    );
     return res.json({ ok: true, item });
   } catch (e) {
     console.error("POST /api/groupPost error:", e);
@@ -7677,6 +7908,19 @@ app.put("/api/groupPostComments/:groupID/:timestamp", async (req, res) => {
       })
     );
 
+    const members = await listGroupMembers(groupID);
+    publishNotificationToUsers(
+      members.map((member) => member?.UserID).filter(Boolean),
+      {
+        type: "post.comments.updated",
+        scope: "GROUP",
+        groupID,
+        timestamp,
+        comments,
+        updatedAt: nowIso(),
+      }
+    );
+
     return res.json({ ok: true });
   } catch (e) {
     console.error("PUT /api/groupPostComments error:", e);
@@ -7715,6 +7959,17 @@ app.delete("/api/groupPost/:groupID/:timestamp/:userID", async (req, res) => {
         TableName: TABLE,
         Key: { PK: `GROUP#${groupID}`, SK: `POST#${timestamp}` },
       })
+    );
+
+    const members = await listGroupMembers(groupID);
+    publishNotificationToUsers(
+      members.map((member) => member?.UserID).filter(Boolean),
+      {
+        type: "post.deleted",
+        scope: "GROUP",
+        groupID,
+        timestamp,
+      }
     );
 
     return res.json({ ok: true });

@@ -69,7 +69,7 @@ td:nth-child(13) {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
-  margin-top: 12px;
+  margin-top: 10px;
   padding: 0 2px;
   box-sizing: border-box;
 }
@@ -314,9 +314,9 @@ td:nth-child(13) {
 }
 
 .statsCompareControls--standard {
-  --stats-selector-stack-height: 106px;
-  --stats-selector-stack-gap: 8px;
-  --stats-selector-single-height: 60px;
+  --stats-selector-stack-height: 98px;
+  --stats-selector-stack-gap: 6px;
+  --stats-selector-single-height: 54px;
   --stats-selector-dual-height: calc(
     (var(--stats-selector-stack-height) - var(--stats-selector-stack-gap)) / 2
   );
@@ -342,7 +342,7 @@ td:nth-child(13) {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border-radius: 12px;
   background: var(--stats-scope-chip-bg);
   border: 2px solid var(--stats-scope-chip-border);
@@ -370,16 +370,16 @@ td:nth-child(13) {
   height: var(--stats-selector-single-height);
   min-height: 0;
   box-sizing: border-box;
-  padding-top: 8px;
-  padding-bottom: 8px;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 
 .statsCompareControls--standard.statsCompareControls--dual .statsScopeRow {
   height: var(--stats-selector-dual-height);
   min-height: 0;
   box-sizing: border-box;
-  padding-top: 3px;
-  padding-bottom: 3px;
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 
 .statsCompareControls--time .statsScopeRow {
@@ -462,9 +462,9 @@ td:nth-child(13) {
   gap: 0;
   width: 100%;
   position: relative;
-  margin-top: -2px;
-  min-height: 22px;
-  padding-top: 2px;
+  margin-top: -6px;
+  min-height: 18px;
+  padding-top: 0;
 }
 
 .statsAddCompareBtn {
@@ -498,6 +498,7 @@ td:nth-child(13) {
     border-color 0.16s ease,
     box-shadow 0.16s ease,
     transform 0.16s ease;
+  transform: translateY(5px);
 }
 
 .statsAddCompareBtn:hover,
@@ -512,7 +513,7 @@ td:nth-child(13) {
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--stats-profile-accent, #2EC4B6) 26%, transparent) inset,
     0 8px 18px rgba(0,0,0,0.22);
-  transform: translateY(-1px);
+  transform: translateY(4px);
 }
 
 .statsAddComparePlus,
@@ -563,6 +564,7 @@ td:nth-child(13) {
   white-space: nowrap;
   transition: opacity 0.16s ease, transform 0.16s ease, color 0.16s ease;
   pointer-events: none;
+  display: none;
 }
 
 .statsAddCompareBtn:hover + .statsAddCompareHint,

@@ -72,7 +72,7 @@
 
 .ssCard--viewRow {
   display: block;
-  padding: 7px 10px;
+  padding: 5px 10px;
 }
 
 .ssCard--viewRow .ssViewBody {
@@ -97,7 +97,7 @@
 }
 
 .ssCard--overall {
-  margin-top: -10px;
+  margin-top: -8px;
   padding: 0 6px 0;
   display: flex;
   flex-direction: column;
@@ -193,14 +193,14 @@
   justify-content: center;
   align-items: flex-start;
   gap: 2px;
-  padding: 8px 10px;
+  padding: 6px 10px;
 }
 
 .ssSharedMetricColumn {
   display: grid;
   grid-template-rows: 1fr;
   gap: 0;
-  padding: 7px 8px;
+  padding: 6px 8px;
 }
 
 .ssSharedColumnTitle {
@@ -239,7 +239,7 @@
 .ssSharedMetricStack,
 .ssSharedMetaStack {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   height: 100%;
 }
 
@@ -261,7 +261,7 @@
 
 .ssSharedSummaryGrid--current .ssSharedMetricColumn--meta {
   position: relative;
-  top: -8px;
+  top: -6px;
 }
 
 .ssSharedMetricValueLabel,
@@ -360,8 +360,8 @@
 .ssCard--viewRow .ssSharedSummaryLead {
   align-items: left;
   text-align: center;
-  gap: 3px;
-  padding: 7px 8px;
+  gap: 2px;
+  padding: 6px 8px;
 }
 
 .ssCard--viewRow .ssViewMeta--date {
@@ -373,20 +373,41 @@
 }
 
 .ssCard--viewRow .ssSharedSummaryGrid {
-  gap: 7px;
+  gap: 6px;
 }
 
 .ssCard--viewRow .ssSharedMetricColumn {
-  padding: 7px 6px;
-  transform: translateY(6px);
+  padding: 6px 6px;
+  transform: translateY(4px);
+}
+
+.ssCard--viewRow .ssSharedMetricColumn--ao .ssSharedMetricHeader {
+  gap: 3px;
+}
+
+.ssCard--viewRow .ssSharedMetricColumn--ao .ssMetricTilePrefix {
+  color: rgba(243, 244, 246, 0.88);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.ssCard--viewRow .ssSharedMetricColumn--ao .ssSharedMetricNumber {
+  color: rgba(255, 255, 255, 0.98);
+  font-size: clamp(1.18rem, 1.44vw, 1.42rem);
+  font-weight: 700;
+  opacity: 1;
+}
+
+.ssCard--viewRow .ssSharedMetricColumn--ao .ssSharedMetricNumber--wide {
+  font-size: clamp(1.02rem, 1.2vw, 1.16rem);
 }
 
 .ssCard--viewRow .ssSharedMetricStack {
-  gap: 4px;
+  gap: 3px;
 }
 
 .ssCard--viewRow .ssSharedMetaStack {
-  gap: 5px;
+  gap: 4px;
 }
 
 .ssCard--viewRow .ssSharedMetaLabel {
@@ -755,7 +776,7 @@
 .ssOverallBody {
   display: grid;
   grid-template-columns: minmax(0, 1.8fr) minmax(220px, 0.62fr);
-  gap: 12px;
+  gap: 10px;
   align-items: start;
   width: 100%;
 }

@@ -19,6 +19,7 @@ import { updateGroupPostComments } from "../../services/updateGroupPostComments"
 import { deleteGroupPost } from "../../services/deleteGroupPost";
 import { createGroup } from "../../services/createGroup";
 import { createSession } from "../../services/createSession";
+import { createSocialEventSource } from "../../services/socialEvents";
 
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import { currentEventToString, generateScramble } from "../scrambleUtils";
@@ -39,9 +40,7 @@ const FEED_POST_LIMIT = 25;
 const GROUP_POST_LIMIT = 25;
 const CONVERSATION_LIMIT = 100;
 const MESSAGE_PAGE_SIZE = 25;
-const ACTIVITY_REFRESH_MS = 60000;
-const CONVERSATION_REFRESH_MS = 30000;
-const MESSAGE_REFRESH_MS = 10000;
+const REALTIME_BACKSTOP_REFRESH_MS = 300000;
 
 const isDocumentVisible = () =>
   typeof document === "undefined" || document.visibilityState === "visible";
@@ -85,6 +84,32 @@ const mergeMessagesByKey = (...lists) => {
     String(a?.timestamp || "").localeCompare(String(b?.timestamp || ""))
   );
 };
+
+const getPostIdentity = (post = {}) => {
+  const ownerScope =
+    String(post?.PostOwnerType || "").toUpperCase() === "GROUP" || post?.isGroupPost
+      ? `GROUP:${post?.GroupID || post?.groupID || ""}`
+      : `USER:${post?.authorID || post?.ownerUserID || post?.PK?.split?.("#")?.[1] || ""}`;
+  const timestamp =
+    post?.DateTime ||
+    post?.date ||
+    post?.CreatedAt ||
+    (typeof post?.SK === "string" && post.SK.startsWith("POST#") ? post.SK.slice(5) : "");
+  return `${ownerScope}|${timestamp}`;
+};
+
+const getPostTimestamp = (post = {}) => {
+  const raw =
+    post?.DateTime ||
+    post?.date ||
+    post?.CreatedAt ||
+    (typeof post?.SK === "string" && post.SK.startsWith("POST#") ? post.SK.slice(5) : null);
+  const value = raw ? new Date(raw).getTime() : NaN;
+  return Number.isFinite(value) ? value : 0;
+};
+
+const sortFeedItems = (items = []) =>
+  [...items].sort((a, b) => getPostTimestamp(a) - getPostTimestamp(b)).slice(-FEED_POST_LIMIT);
 
 const loadProfilesById = async (ids = []) => {
   const uniqueIds = Array.from(
@@ -206,6 +231,34 @@ const buildConversationMembers = (memberIDs, profilesById, currentUser) =>
       };
     })
     .filter(Boolean);
+
+const buildFeedEntryFromNotification = (payload, currentUser) => {
+  const post = payload?.post;
+  if (!post || !currentUser?.UserID) return null;
+
+  const author = payload?.author || {};
+  const group = payload?.group || null;
+  const authorID = String(
+    author?.userID || post?.AuthorID || payload?.ownerUserID || ""
+  ).trim();
+  const isGroupPost = String(payload?.scope || "").toUpperCase() === "GROUP";
+
+  return {
+    ...post,
+    author: author?.name || post?.AuthorName || authorID || "Unknown",
+    authorID,
+    isOwn: authorID === currentUser.UserID,
+    isGroupPost,
+    groupID: isGroupPost ? String(payload?.groupID || post?.GroupID || "").trim() : "",
+    groupName: isGroupPost ? group?.name || post?.GroupID || "" : "",
+    postColor: isGroupPost
+      ? group?.color || "#7f8c8d"
+      : author?.color || currentUser.Color || currentUser.color || "#cccccc",
+    authorTagColorCatalog: author?.tagColorCatalog || null,
+    profileEvent: author?.profileEvent || currentUser.ProfileEvent || "333",
+    profileScramble: author?.profileScramble || "",
+  };
+};
 
 const getGroupAvatarGridConfig = (memberCount) => {
   const count = Math.max(1, Math.min(Number(memberCount) || 0, 9));
@@ -569,6 +622,56 @@ function Social({
     });
   }, []);
 
+  const upsertFeedItem = useCallback((feedItem) => {
+    if (!feedItem) return;
+
+    setFeed((prev) => {
+      const next = new Map((Array.isArray(prev) ? prev : []).map((item) => [getPostIdentity(item), item]));
+      next.set(getPostIdentity(feedItem), {
+        ...(next.get(getPostIdentity(feedItem)) || {}),
+        ...feedItem,
+      });
+      return sortFeedItems(Array.from(next.values()));
+    });
+
+    setSelectedPost((prev) => {
+      if (!prev) return prev;
+      if (getPostIdentity(prev) !== getPostIdentity(feedItem)) return prev;
+      return {
+        ...prev,
+        ...feedItem,
+      };
+    });
+  }, []);
+
+  const patchFeedItem = useCallback((matcher, patch) => {
+    setFeed((prev) =>
+      sortFeedItems(
+        (Array.isArray(prev) ? prev : []).map((item) =>
+          matcher(item)
+            ? {
+                ...item,
+                ...patch,
+              }
+            : item
+        )
+      )
+    );
+
+    setSelectedPost((prev) => {
+      if (!prev || !matcher(prev)) return prev;
+      return {
+        ...prev,
+        ...patch,
+      };
+    });
+  }, []);
+
+  const removeFeedItem = useCallback((matcher) => {
+    setFeed((prev) => (Array.isArray(prev) ? prev : []).filter((item) => !matcher(item)));
+    setSelectedPost((prev) => (prev && matcher(prev) ? null : prev));
+  }, []);
+
   useEffect(() => {
     if (activeTab !== 0) return;
     if (!shouldStickActivityToBottomRef.current) return;
@@ -719,19 +822,6 @@ function Social({
 
     handleRefreshMessages();
   }, [refreshTick, activeTab, selectedConversation?.conversationID, user?.UserID, handleRefreshMessages]);
-
-  useEffect(() => {
-    if (activeTab !== 1) return;
-    if (!selectedConversation?.conversationID) return;
-    if (!user?.UserID) return;
-
-    const id = setInterval(() => {
-      if (!isDocumentVisible()) return;
-      handleRefreshMessages();
-    }, MESSAGE_REFRESH_MS);
-
-    return () => clearInterval(id);
-  }, [activeTab, selectedConversation?.conversationID, user?.UserID, handleRefreshMessages]);
 
   const handleLoadOlderMessages = useCallback(async () => {
     const activeConversation = selectedConversationRef.current;
@@ -1033,6 +1123,118 @@ function Social({
     await Promise.allSettled([refreshConversationDirectory(), handleRefreshMessages()]);
   }, [refreshConversationDirectory, handleRefreshMessages]);
 
+  const handleSocialEvent = useCallback(
+    async (payload = {}) => {
+      const eventType = String(payload?.type || "").trim();
+      if (!eventType || eventType === "stream.connected") return;
+
+      if (eventType === "message.created") {
+        const conversationID = String(payload?.conversationID || "").trim();
+        const message = payload?.message || null;
+        const conversationPatch = {
+          conversationID,
+          type: String(payload?.conversation?.conversationType || "DM").toUpperCase(),
+          memberIDs: Array.isArray(payload?.conversation?.memberIDs)
+            ? payload.conversation.memberIDs
+            : [],
+          lastMessageAt: payload?.conversation?.lastMessageAt || message?.timestamp || null,
+          lastMessagePreview:
+            payload?.conversation?.lastMessagePreview || message?.text || "",
+          isPlaceholder: false,
+        };
+
+        const hasConversation = conversationsRef.current.some(
+          (conv) => conv.conversationID === conversationID
+        );
+
+        if (!hasConversation) {
+          await refreshConversationDirectory();
+          return;
+        }
+
+        setConversations((prev) =>
+          prev.map((conv) =>
+            conv.conversationID === conversationID
+              ? {
+                  ...conv,
+                  ...conversationPatch,
+                  messages: message
+                    ? mergeMessagesByKey(conv.messages || [], [message])
+                    : conv.messages || [],
+                }
+              : conv
+          )
+        );
+
+        setSelectedConversation((prev) =>
+          prev?.conversationID === conversationID
+            ? {
+                ...prev,
+                ...conversationPatch,
+                messages: message
+                  ? mergeMessagesByKey(prev.messages || [], [message])
+                  : prev.messages || [],
+              }
+            : prev
+        );
+        return;
+      }
+
+      if (eventType === "post.created") {
+        const feedItem = buildFeedEntryFromNotification(payload, user);
+        upsertFeedItem(feedItem);
+        return;
+      }
+
+      if (eventType === "post.comments.updated") {
+        const targetTimestamp = String(payload?.timestamp || "").trim();
+        const targetScope = String(payload?.scope || "").toUpperCase();
+        patchFeedItem(
+          (item) => {
+            const itemTimestamp = String(
+              item?.DateTime || item?.date || item?.CreatedAt || ""
+            ).trim();
+            if (itemTimestamp !== targetTimestamp) return false;
+            if (targetScope === "GROUP") {
+              return (
+                String(item?.groupID || item?.GroupID || "").trim() ===
+                String(payload?.groupID || "").trim()
+              );
+            }
+            return (
+              String(item?.authorID || item?.PK?.split?.("#")?.[1] || "").trim() ===
+              String(payload?.ownerUserID || "").trim()
+            );
+          },
+          { Comments: Array.isArray(payload?.comments) ? payload.comments : [] }
+        );
+        return;
+      }
+
+      if (eventType === "post.deleted") {
+        const targetTimestamp = String(payload?.timestamp || "").trim();
+        const targetScope = String(payload?.scope || "").toUpperCase();
+        removeFeedItem((item) => {
+          const itemTimestamp = String(
+            item?.DateTime || item?.date || item?.CreatedAt || ""
+          ).trim();
+          if (itemTimestamp !== targetTimestamp) return false;
+          if (targetScope === "GROUP") {
+            return (
+              String(item?.groupID || item?.GroupID || "").trim() ===
+              String(payload?.groupID || "").trim()
+            );
+          }
+          return (
+            String(item?.authorID || item?.PK?.split?.("#")?.[1] || "").trim() ===
+            String(payload?.ownerUserID || "").trim()
+          );
+        });
+      }
+    },
+    [patchFeedItem, refreshConversationDirectory, removeFeedItem, upsertFeedItem, user]
+  );
+
   useEffect(() => {
     const preferredConversationID = String(location.state?.conversationID || "").trim();
 
@@ -1067,29 +1269,70 @@ function Social({
   ]);
 
   useEffect(() => {
-    if (activeTab !== 1) return;
-    if (!user?.UserID) return;
+    if (!user?.UserID) return undefined;
 
-    const id = setInterval(() => {
-      if (!isDocumentVisible()) return;
-      refreshConversationDirectory();
-    }, CONVERSATION_REFRESH_MS);
+    const source = createSocialEventSource(user.UserID, {
+      onEvent: (payload) => {
+        handleSocialEvent(payload);
+      },
+      onError: () => {
+        // EventSource reconnects automatically; keep a sparse backstop refresh below.
+      },
+    });
 
-    return () => clearInterval(id);
-  }, [activeTab, user?.UserID, refreshConversationDirectory]);
+    return () => {
+      source?.close();
+    };
+  }, [handleSocialEvent, user?.UserID]);
 
   useEffect(() => {
-    if (activeTab !== 0) return;
-    if (!user?.UserID) return;
+    if (!user?.UserID) return undefined;
+
+    const handleVisibilityChange = () => {
+      if (!isDocumentVisible()) return;
+      const preferredConversationID = String(location.state?.conversationID || "").trim();
+      loadSocialData(preferredConversationID, {
+        includeFeed: activeTab === 0,
+      });
+      if (activeTab === 1 && selectedConversationRef.current?.conversationID) {
+        handleRefreshMessages();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [
+    activeTab,
+    handleRefreshMessages,
+    loadSocialData,
+    location.state?.conversationID,
+    user?.UserID,
+  ]);
+
+  useEffect(() => {
+    if (!user?.UserID) return undefined;
 
     const id = setInterval(() => {
       if (!isDocumentVisible()) return;
       const preferredConversationID = String(location.state?.conversationID || "").trim();
-      loadSocialData(preferredConversationID, { includeFeed: true });
-    }, ACTIVITY_REFRESH_MS);
+      loadSocialData(preferredConversationID, {
+        includeFeed: activeTab === 0,
+      });
+      if (activeTab === 1 && selectedConversationRef.current?.conversationID) {
+        handleRefreshMessages();
+      }
+    }, REALTIME_BACKSTOP_REFRESH_MS);
 
     return () => clearInterval(id);
-  }, [activeTab, user?.UserID, loadSocialData, location.state?.conversationID]);
+  }, [
+    activeTab,
+    handleRefreshMessages,
+    loadSocialData,
+    location.state?.conversationID,
+    user?.UserID,
+  ]);
 
   useEffect(() => {
     const preferredConversationID = String(location.state?.conversationID || "").trim();
@@ -1338,8 +1581,6 @@ function Social({
         ),
         options
       );
-
-      handleRefreshMessages();
     } catch (err) {
       console.error("Failed to create shared session", err);
     }
@@ -1458,7 +1699,6 @@ function Social({
         lastMessageAt: savedMessage.timestamp,
         lastMessagePreview: savedMessage.text,
       });
-      handleRefreshMessages();
     } catch (err) {
       console.error("Failed to send message:", err);
     }
@@ -1552,7 +1792,6 @@ function Social({
         lastMessageAt: savedMessage.timestamp,
         lastMessagePreview: savedMessage.text,
       });
-      await handleRefreshMessages();
     } catch (err) {
       console.error("Failed to send shared average:", err);
     }

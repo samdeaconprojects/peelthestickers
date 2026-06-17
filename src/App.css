@@ -2,7 +2,7 @@
   --primary-color: #0E171D;
   --secondary-color: white;
   --current-page-color: #2ec4b6;
-  --player-bar-height: 176px;
+  --player-bar-height: 146px;
   --player-bar-bg: #181F23;
   --player-bar-bg-rgb: 24, 31, 35;
 }
@@ -245,6 +245,7 @@ body {
 
 .left-slot-auth .name-tag-link:hover::before,
 .left-slot-auth .name-tag-link:focus-visible::before {
+  transition-delay: 500ms;
   width: 100%;
 }
 
@@ -255,6 +256,7 @@ body {
 
 .left-slot-auth .name-tag-link:hover .nametagText,
 .left-slot-auth .name-tag-link:focus-visible .nametagText {
+  transition-delay: 600ms;
   padding-left: 4px;
 }
 

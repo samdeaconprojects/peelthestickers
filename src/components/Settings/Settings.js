@@ -22,7 +22,9 @@ import {
 } from "../HomeStats/homeStatsConfig";
 import {
   getTagColorMapForEvent,
+  getSharedTagFieldMeta,
   normalizeTagColorCatalog,
+  SHARED_TAG_FIELDS,
 } from "../TagBar/tagUtils";
 import {
   EVENT_KEYBINDING_LABELS,
@@ -436,6 +438,19 @@ function normalizeStatsSummaryLayoutForUi(rawValue) {
   return raw === "row" ? "row" : "tile";
 }
 
+function normalizePlayerBarTagFieldsForUi(rawValue) {
+  const incoming = Array.isArray(rawValue) ? rawValue : [];
+  const allowed = new Set(SHARED_TAG_FIELDS);
+  const normalized = Array.from(
+    new Set(
+      incoming
+        .map((field) => String(field || "").trim())
+        .filter((field) => allowed.has(field))
+    )
+  );
+  return normalized.length ? normalized : ["CubeModel"];
+}
+
 function Settings({
   userID,
   onClose,
@@ -475,6 +490,10 @@ function Settings({
 
   const [tagConfig, setTagConfig] = useState(DEFAULT_TAG_CONFIG);
   const [tagColorCatalog, setTagColorCatalog] = useState({ Global: {}, ByEvent: {} });
+  const playerBarTagFieldMeta = useMemo(
+    () => getSharedTagFieldMeta(tagConfig),
+    [tagConfig]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -498,6 +517,9 @@ function Settings({
             ),
             statsSummaryLayout: normalizeStatsSummaryLayoutForUi(
               user.Settings.statsSummaryLayout
+            ),
+            playerBarTagFields: normalizePlayerBarTagFieldsForUi(
+              user.Settings.playerBarTagFields
             ),
           };
           setAllSettings(normalizedSettings);
@@ -673,6 +695,22 @@ function Settings({
     });
   };
 
+  const handlePlayerBarTagFieldToggle = (field, checked) => {
+    const safeField = String(field || "").trim();
+    if (!safeField) return;
+
+    const current = Array.isArray(settings?.playerBarTagFields)
+      ? settings.playerBarTagFields
+      : ["CubeModel"];
+    const next = checked
+      ? Array.from(new Set([...current, safeField]))
+      : current.filter((item) => item !== safeField);
+
+    updateSettings({
+      playerBarTagFields: next.length ? next : ["CubeModel"],
+    });
+  };
+
   const persistCurrentSettings = async (options = {}) => {
     const normalizedTagConfig = normalizeTagConfig(tagConfig);
     const normalizedSettingsToSave = {
@@ -681,6 +719,9 @@ function Settings({
       scrambleMode: normalizeScrambleModeForUi(settings.scrambleMode),
       navigationArrowStyle: normalizeNavigationArrowStyleForUi(
         settings.navigationArrowStyle
+      ),
+      playerBarTagFields: normalizePlayerBarTagFieldsForUi(
+        settings.playerBarTagFields
       ),
     };
 
@@ -712,6 +753,9 @@ function Settings({
         scrambleMode: normalizeScrambleModeForUi(fresh.Settings.scrambleMode),
         navigationArrowStyle: normalizeNavigationArrowStyleForUi(
           fresh.Settings.navigationArrowStyle
+        ),
+        playerBarTagFields: normalizePlayerBarTagFieldsForUi(
+          fresh.Settings.playerBarTagFields
         ),
       };
       setAllSettings(normalizedFreshSettings);
@@ -1157,6 +1201,32 @@ function Settings({
                 updateSettings({ hideAutomaticHomeTags: e.target.checked })
               }
             />
+          </div>
+
+          <div className="setting-item setting-item--stacked">
+            <label>Player Bar Tags</label>
+            <div className="settingsCheckboxGrid" role="group" aria-label="Player bar tags">
+              {playerBarTagFieldMeta.map((item) => {
+                const isChecked = (settings?.playerBarTagFields || ["CubeModel"]).includes(
+                  item.field
+                );
+                return (
+                  <label
+                    key={item.field}
+                    className={`settingsCheckboxChip ${isChecked ? "is-checked" : ""}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={(e) =>
+                        handlePlayerBarTagFieldToggle(item.field, e.target.checked)
+                      }
+                    />
+                    <span>{item.label}</span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
 
           <div className="setting-item">

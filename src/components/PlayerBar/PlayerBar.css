@@ -2,7 +2,7 @@
   display: grid;
   grid-template-columns: minmax(140px, 240px) minmax(420px, 1fr) minmax(170px, 230px);
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 
   position: fixed;
   bottom: 0;
@@ -13,7 +13,7 @@
 
   background-color: var(--player-bar-bg);
   border-top: 1px solid var(--current-page-color);
-  padding: 12px 18px;
+  padding: 8px 18px;
   box-sizing: border-box;
   transition: transform 0.4s ease-in-out;
 }
@@ -62,13 +62,13 @@
 
 .player-bar .playerbar-timer .Timer--playerbar {
   display: block !important;
-  font-size: 84px !important;
+  font-size: 76px !important;
   line-height: 1 !important;
   letter-spacing: 5px;
   margin: 0 !important;
   padding: 0 !important;
   position: static;
-  transform: translateY(-4px) !important;
+  transform: translateY(-2px) !important;
 }
 
 /* MIDDLE */
@@ -79,34 +79,34 @@
   justify-content: center;
   height: 100%;
   min-height: 0;
-  gap: 10px;
+  gap: 4px;
 }
 
 /* fixed-height scramble box so TimeList never moves */
 .scramble-box {
   max-width: 700px;
   width: 100%;
-  min-height: 64px;
+  min-height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: visible;
   text-align: center;
-  margin-top: -12px;
+  margin-top: -10px;
 }
 
 .scramble-box .scramble-text {
   white-space: normal;
   max-width: 100%;
-  font-size: 0.84rem;
-  line-height: 1.02;
+  font-size: 0.8rem;
+  line-height: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin: 0 auto;
 }
 
 .scramble-box .scramble-container {
-  transform: translateY(-28px);
+  transform: translateY(-24px);
 }
 
 /* TimeList */
@@ -300,26 +300,31 @@
 
 .playerbar-right-top {
   position: relative;
-  min-height: 68px;
-  padding-right: 92px;
+  min-height: 60px;
+  padding-right: 98px;
   flex: 0 0 auto;
 }
 
 .playerbar-selector-wrap {
   display: flex;
-  justify-content: flex-start;
-  width: 100%;
+  justify-content: center;
+  width: fit-content;
+  max-width: calc(100% - 8px);
+  min-height: 60px;
+  align-items: center;
+  margin: 0 auto;
 }
 
 .playerbar-cube {
   position: absolute;
-  top: 0;
-  right: 8px;
+  top: 50%;
+  right: 18px;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 84px;
-  height: 84px;
+  width: 74px;
+  height: 74px;
 }
 
 .playerbar-cube-shell {
@@ -331,14 +336,14 @@
 }
 
 .playerbar-cube svg {
-  width: 74px;
-  height: 74px;
+  width: 68px;
+  height: 68px;
 }
 
 .playerbar-cube .puzzle-svg-wrap {
   position: relative;
-  width: 74px;
-  height: 74px;
+  width: 68px;
+  height: 68px;
   display: grid;
   place-items: center;
 }
@@ -377,27 +382,56 @@
 .playerbar-tagstrip {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   min-height: 0;
   padding-top: 0;
-  padding-right: 38px;
-  margin-top: -18px;
+  padding-right: 0;
+  margin-top: -6px;
   position: relative;
   z-index: 20;
   opacity: 1;
-  flex: 1 1 auto;
-  justify-content: flex-start;
+  flex: 0 0 auto;
+  justify-content: center;
   overflow: visible;
+  width: fit-content;
+  max-width: calc(100% - 98px);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.playerbar-tagstrip .tagHomeWrap,
+.playerbar-tagstrip .tagHomeContent,
+.playerbar-tagstrip .tagHomeSummary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+}
+
+.playerbar-tagstrip .tagHomeWrap {
+  width: fit-content;
 }
 
 .playerbar-tagstrip .tagHomeSummary {
-  gap: 4px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(88px, 104px));
+  column-gap: 10px;
+  row-gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  justify-content: center;
 }
 
 .playerbar-tagstrip .tagHomeItem {
-  min-width: 0;
-  width: auto;
+  min-width: 88px;
+  width: 100%;
   max-width: 104px;
+  justify-self: stretch;
+}
+
+.playerbar-tagstrip .tagHomeItem:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+  justify-self: center;
 }
 
 .playerbar-tagstrip .tagHomeItemLabel {
@@ -409,9 +443,9 @@
 
 .playerbar-tagstrip .tagHomeChip {
   min-width: 0;
-  width: auto;
-  min-height: 14px;
-  padding: 1px 4px;
+  width: 100%;
+  min-height: 18px;
+  padding: 2px 6px;
   border-width: 1px;
   border-color: color-mix(in srgb, var(--tag-chip-border) 58%, transparent);
   background: color-mix(in srgb, var(--tag-chip-bg) 82%, transparent);
@@ -425,6 +459,12 @@
 .playerbar-tagstrip .tagHomeChipValue {
   font-size: clamp(7px, 0.78vw, 10px);
   line-height: 1;
+  display: block;
+  width: 100%;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .playerbar-tagstrip .tagHomeChipIconWrap,
@@ -443,7 +483,9 @@
 .playerbar-tagstrip .tagHomePopover {
   top: auto;
   bottom: calc(100% + 10px);
-  right: 0;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
   width: min(360px, calc(100vw - 32px));
 }
 

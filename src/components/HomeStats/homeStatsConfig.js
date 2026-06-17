@@ -92,7 +92,7 @@ function defaultSlotConfig(slotKey) {
       height: meta.defaultHeight,
       opacity: meta.defaultOpacity,
       summaryColorCustomized: false,
-      summaryLayout: "tile",
+      summaryLayout: "compact",
       summaryShowMeta: false,
       summarySurface: "flat",
     };
@@ -111,7 +111,7 @@ function defaultSlotConfig(slotKey) {
       height: meta.defaultHeight,
       opacity: meta.defaultOpacity,
       summaryColorCustomized: false,
-      summaryLayout: "tile",
+      summaryLayout: "compact",
       summaryShowMeta: false,
       summarySurface: "flat",
     };
@@ -130,7 +130,7 @@ function defaultSlotConfig(slotKey) {
       height: meta.defaultHeight,
       opacity: meta.defaultOpacity,
       summaryColorCustomized: false,
-      summaryLayout: "tile",
+      summaryLayout: "compact",
       summaryShowMeta: false,
       summarySurface: "flat",
     };
@@ -148,7 +148,7 @@ function defaultSlotConfig(slotKey) {
     height: meta.defaultHeight,
     opacity: meta.defaultOpacity,
     summaryColorCustomized: false,
-    summaryLayout: "tile",
+    summaryLayout: "compact",
     summaryShowMeta: false,
     summarySurface: "flat",
   };
