@@ -27,6 +27,33 @@
   font-size: 24px;
 }
 
+.createGroupModeToggle {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  width: fit-content;
+}
+
+.createGroupModeToggle button {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.createGroupModeToggle button.isActive {
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+}
+
 .createGroupNameInput {
   width: 100%;
   box-sizing: border-box;
@@ -49,6 +76,20 @@
   color: #ff9d9d;
   font-size: 13px;
   line-height: 1.4;
+}
+
+.createGroupHelper,
+.createGroupRoomPreview {
+  color: #b8b8b8;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.createGroupRoomPreview {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .createGroupMembersList {

@@ -11,7 +11,7 @@
   gap: 0;
   padding: 12px 20px 20px;
   border-radius: 22px;
-  background: rgba(29, 29, 29, 0.97);
+  background: var(--detail-surface-strong);
   color: #fff;
   border: 1.5px solid rgba(255,255,255,0.24);
   box-shadow: 0 24px 80px rgba(0,0,0,0.45);

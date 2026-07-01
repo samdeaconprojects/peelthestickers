@@ -104,6 +104,7 @@ function SharedAverageModal({
   isTwoPerson = false,
   yourLabel = "You",
   theirLabel = "Them",
+  allowHostedMode = false,
 }) {
   const [mode, setMode] = useState("average");
   const [sharedEvent, setSharedEvent] = useState(defaultEvent);
@@ -179,6 +180,18 @@ function SharedAverageModal({
       return;
     }
 
+    if (mode === "hosted") {
+      onConfirm({
+        mode: "hosted",
+        count: 25,
+        batchSize: 25,
+        creatorEvent: casualEvent,
+        opponentEvent: casualEvent,
+      });
+      onClose();
+      return;
+    }
+
     onConfirm({
       mode: "average",
       count,
@@ -215,6 +228,15 @@ function SharedAverageModal({
           >
             Casual
           </button>
+          {allowHostedMode && (
+            <button
+              type="button"
+              className={mode === "hosted" ? "isActive" : ""}
+              onClick={() => setMode("hosted")}
+            >
+              Host Live
+            </button>
+          )}
         </div>
 
         {(mode === "average" || mode === "average-separate") && isTwoPerson && (
@@ -275,7 +297,7 @@ function SharedAverageModal({
               Shared scrambles, round-by-round scoring, match ends when someone reaches the target.
             </p>
           </>
-        ) : mode === "casual" ? (
+        ) : mode === "casual" || mode === "hosted" ? (
           <>
             <label>
               Event
@@ -283,8 +305,9 @@ function SharedAverageModal({
             </label>
 
             <p className="sharedAverageHelperText">
-              Shared scrambles in a long-running session. It behaves like normal solving and grows
-              automatically as you go.
+              {mode === "hosted"
+                ? "Host-led scramble stream. Everyone solves the same feed, and their solves can still save to main."
+                : "Shared scrambles in a long-running session. It behaves like normal solving and grows automatically as you go."}
             </p>
           </>
         ) : (
@@ -310,7 +333,9 @@ function SharedAverageModal({
 
         <div className="sharedAverageButtons">
           <button type="button" onClick={onClose}>Cancel</button>
-          <button type="button" onClick={handleConfirm}>Start</button>
+          <button type="button" onClick={handleConfirm}>
+            {mode === "hosted" ? "Start Hosting" : "Start"}
+          </button>
         </div>
       </div>
     </div>

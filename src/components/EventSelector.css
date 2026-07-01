@@ -221,7 +221,7 @@
 .event-card:hover {
   transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--event-accent) 48%, white 16%);
-  background: #252a31;
+  background: var(--theme-surface-hover);
   box-shadow: 0 18px 34px rgba(0, 0, 0, 0.24);
 }
 
@@ -353,7 +353,7 @@
 }
 
 .event-item {
-  background: rgba(61, 61, 61, 0.8);
+  background: var(--theme-surface-soft);
   color: white;
   padding: 8px 12px;
   border-radius: 999px;
@@ -381,7 +381,7 @@
 
 .event-group--sessions {
   margin-top: 0;
-  background: #1b1e23;
+  background: var(--theme-surface);
   border-radius: 20px;
   border-top: none;
   position: sticky;

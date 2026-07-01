@@ -38,6 +38,18 @@
   z-index: 1;
 }
 
+.puzzle-svg-inner--white svg rect,
+.puzzle-svg-inner--white svg path,
+.puzzle-svg-inner--white svg polygon,
+.puzzle-svg-inner--white svg circle,
+.puzzle-svg-inner--white svg line,
+.puzzle-svg-inner--white svg ellipse,
+.puzzle-svg-inner--white svg polyline {
+  fill: #fff !important;
+  stroke: #fff !important;
+  opacity: 0.8;
+}
+
 .puzzle-svg-oh-hand {
   position: absolute;
   left: var(--puzzle-oh-left, 50%);

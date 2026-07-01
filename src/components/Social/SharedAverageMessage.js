@@ -352,6 +352,11 @@ function SharedAverageMessage({
           mode: String(parsedPayload?.mode || parsedPayload?.type || "average"),
           targetWins: Number(parsedPayload?.targetWins || 0) || null,
           batchSize: Number(parsedPayload?.batchSize || 0) || null,
+          isHosted: parsedPayload?.isHosted === true || String(parsedPayload?.mode || "").toLowerCase() === "hosted",
+          saveSessionID: parsedPayload?.saveSessionID || null,
+          hostID: parsedPayload?.hostID || parsedPayload?.creatorID || msg?.sender || null,
+          hostName: parsedPayload?.hostName || null,
+          roomCode: parsedPayload?.roomCode || null,
           count: Number.isFinite(count) ? count : 0,
           creatorID: parsedPayload?.creatorID || msg?.sender || null,
           creatorEvent,
@@ -1018,7 +1023,11 @@ function SharedAverageMessage({
   const youStatus = getStatusLabel(computed.yourCurrentIndex, parsed.count, "you");
   const themStatus = getStatusLabel(computed.theirCurrentIndex, parsed.count, nameThem);
   const centerTitle =
-    mode === "head_to_head"
+    mode === "hosted"
+      ? samePlan
+        ? `${eventDisplayLabel(yourEvent)} live host`
+        : "Mixed live host"
+      : mode === "head_to_head"
       ? samePlan
         ? `${eventDisplayLabel(yourEvent)} head to head`
         : "Mixed head to head"
@@ -1032,7 +1041,11 @@ function SharedAverageMessage({
   const scoreLabel = mode === "head_to_head" ? "MATCH" : "WINS";
   const meanLabel = mode === "head_to_head" ? "MEAN" : mode === "casual" ? "AVG" : "MEAN";
   const currentSolveBadge =
-    mode === "head_to_head"
+    mode === "hosted"
+      ? parsed?.hostName
+        ? `Hosted by ${parsed.hostName}`
+        : "Live shared feed"
+      : mode === "head_to_head"
       ? computed.activeIndex === -1
         ? "Match complete"
         : `First to ${targetWins}`
@@ -1089,6 +1102,11 @@ function SharedAverageMessage({
             mode: parsed.mode,
             targetWins: parsed.targetWins,
             batchSize: parsed.batchSize,
+            isHosted: parsed.isHosted === true,
+            saveSessionID: parsed.saveSessionID || null,
+            hostID: parsed.hostID || parsed.creatorID || msg?.sender || null,
+            hostName: parsed.hostName || null,
+            roomCode: parsed.roomCode || null,
             event: yourEvent,
             events: yourEvents,
             scrambles: yourScrambles,
@@ -1286,7 +1304,11 @@ function SharedAverageMessage({
   };
 
   const groupCurrentSolveBadge = groupComputed
-    ? mode === "head_to_head"
+    ? mode === "hosted"
+      ? parsed?.hostName
+        ? `Hosted by ${parsed.hostName}`
+        : "Live shared feed"
+      : mode === "head_to_head"
       ? groupComputed.isComplete
         ? "Match complete"
         : `First to ${targetWins}`
@@ -1402,7 +1424,7 @@ function SharedAverageMessage({
                         openSharedSession({ mode: isActiveSession ? "resume" : "next" })
                       }
                     >
-                      {isActiveSession ? "Resume" : "Start Session"}
+                      {isActiveSession ? "Resume" : mode === "hosted" ? "Join Live" : "Start Session"}
                     </button>
                   )}
 
@@ -1590,7 +1612,7 @@ function SharedAverageMessage({
                     openSharedSession({ mode: isActiveSession ? "resume" : "next" })
                   }
                 >
-                  {isActiveSession ? "Resume" : "Start Session"}
+                  {isActiveSession ? "Resume" : mode === "hosted" ? "Join Live" : "Start Session"}
                 </button>
               )}
 

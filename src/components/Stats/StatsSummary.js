@@ -332,11 +332,12 @@ function computeWindowStat(solves, spec) {
 
   const current = windows[windows.length - 1] ?? null;
   const numericValues = windows.filter((v) => typeof v === "number" && isFinite(v));
+  const hasOnlyDnfWindows = numericValues.length === 0 && windows.some((value) => value === "DNF");
 
   return {
     current,
-    best: numericValues.length ? Math.min(...numericValues) : null,
-    worst: numericValues.length ? Math.max(...numericValues) : null,
+    best: numericValues.length ? Math.min(...numericValues) : hasOnlyDnfWindows ? "DNF" : null,
+    worst: numericValues.length ? Math.max(...numericValues) : hasOnlyDnfWindows ? "DNF" : null,
   };
 }
 
@@ -381,7 +382,12 @@ function buildViewSummary(solves, totalSolveCount = null, loadedSolveCount = nul
   };
 }
 
-function buildBucketViewSummary(bucketSummary, bucketItems = [], overallStats = null) {
+function buildBucketViewSummary(
+  bucketSummary,
+  bucketItems = [],
+  overallStats = null,
+  visibleRangeSummary = null
+) {
   if (!bucketSummary) return null;
 
   const items = Array.isArray(bucketItems) ? bucketItems : [];
@@ -404,6 +410,8 @@ function buildBucketViewSummary(bucketSummary, bucketItems = [], overallStats = 
       best:
         Number.isFinite(Number(bucketSummary?.BestSingleMs))
           ? Number(bucketSummary.BestSingleMs)
+          : Number.isFinite(Number(visibleRangeSummary?.single?.best))
+            ? Number(visibleRangeSummary.single.best)
           : Number.isFinite(Number(overallStats?.BestSingleMs))
             ? Number(overallStats.BestSingleMs)
             : null,
@@ -415,6 +423,8 @@ function buildBucketViewSummary(bucketSummary, bucketItems = [], overallStats = 
         best:
           Number.isFinite(Number(bucketSummary?.BestMo3Ms))
             ? Number(bucketSummary.BestMo3Ms)
+            : Number.isFinite(Number(visibleRangeSummary?.metrics?.mo3?.best))
+              ? Number(visibleRangeSummary.metrics.mo3.best)
             : Number.isFinite(Number(overallStats?.BestMo3Ms))
               ? Number(overallStats.BestMo3Ms)
               : null,
@@ -426,6 +436,8 @@ function buildBucketViewSummary(bucketSummary, bucketItems = [], overallStats = 
         best:
           Number.isFinite(Number(bucketSummary?.BestAo5Ms))
             ? Number(bucketSummary.BestAo5Ms)
+            : Number.isFinite(Number(visibleRangeSummary?.metrics?.ao5?.best))
+              ? Number(visibleRangeSummary.metrics.ao5.best)
             : Number.isFinite(Number(overallStats?.BestAo5Ms))
               ? Number(overallStats.BestAo5Ms)
               : null,
@@ -437,6 +449,8 @@ function buildBucketViewSummary(bucketSummary, bucketItems = [], overallStats = 
         best:
           Number.isFinite(Number(bucketSummary?.BestAo12Ms))
             ? Number(bucketSummary.BestAo12Ms)
+            : Number.isFinite(Number(visibleRangeSummary?.metrics?.ao12?.best))
+              ? Number(visibleRangeSummary.metrics.ao12.best)
             : Number.isFinite(Number(overallStats?.BestAo12Ms))
               ? Number(overallStats.BestAo12Ms)
               : null,
@@ -448,6 +462,8 @@ function buildBucketViewSummary(bucketSummary, bucketItems = [], overallStats = 
         best:
           Number.isFinite(Number(bucketSummary?.BestAo25Ms))
             ? Number(bucketSummary.BestAo25Ms)
+            : Number.isFinite(Number(visibleRangeSummary?.metrics?.ao25?.best))
+              ? Number(visibleRangeSummary.metrics.ao25.best)
             : Number.isFinite(Number(overallStats?.BestAo25Ms))
               ? Number(overallStats.BestAo25Ms)
               : null,
@@ -459,6 +475,8 @@ function buildBucketViewSummary(bucketSummary, bucketItems = [], overallStats = 
         best:
           Number.isFinite(Number(bucketSummary?.BestAo50Ms))
             ? Number(bucketSummary.BestAo50Ms)
+            : Number.isFinite(Number(visibleRangeSummary?.metrics?.ao50?.best))
+              ? Number(visibleRangeSummary.metrics.ao50.best)
             : Number.isFinite(Number(overallStats?.BestAo50Ms))
               ? Number(overallStats.BestAo50Ms)
               : null,
@@ -470,6 +488,8 @@ function buildBucketViewSummary(bucketSummary, bucketItems = [], overallStats = 
         best:
           Number.isFinite(Number(bucketSummary?.BestAo100Ms))
             ? Number(bucketSummary.BestAo100Ms)
+            : Number.isFinite(Number(visibleRangeSummary?.metrics?.ao100?.best))
+              ? Number(visibleRangeSummary.metrics.ao100.best)
             : Number.isFinite(Number(overallStats?.BestAo100Ms))
               ? Number(overallStats.BestAo100Ms)
               : null,
@@ -481,6 +501,8 @@ function buildBucketViewSummary(bucketSummary, bucketItems = [], overallStats = 
         best:
           Number.isFinite(Number(bucketSummary?.BestAo1000Ms))
             ? Number(bucketSummary.BestAo1000Ms)
+            : Number.isFinite(Number(visibleRangeSummary?.metrics?.ao1000?.best))
+              ? Number(visibleRangeSummary.metrics.ao1000.best)
             : Number.isFinite(Number(overallStats?.BestAo1000Ms))
               ? Number(overallStats.BestAo1000Ms)
               : null,
@@ -489,11 +511,15 @@ function buildBucketViewSummary(bucketSummary, bucketItems = [], overallStats = 
       },
     },
     mean: Number.isFinite(Number(bucketSummary?.MeanMs)) ? Number(bucketSummary.MeanMs) : null,
-    median: null,
+    median: Number.isFinite(Number(visibleRangeSummary?.median))
+      ? Number(visibleRangeSummary.median)
+      : null,
     stdDev: stdDevFromAggregate(bucketSummary),
     plus2Count: Number(bucketSummary?.Plus2Count || 0),
     plus2Best: Number.isFinite(Number(bucketSummary?.Plus2BestMs))
       ? Number(bucketSummary.Plus2BestMs)
+      : Number.isFinite(Number(visibleRangeSummary?.plus2Best))
+        ? Number(visibleRangeSummary.plus2Best)
       : null,
     sum: Number(bucketSummary?.SumFinalTimeMs || 0),
     dnfCount: Number(bucketSummary?.DNFCount || 0),
@@ -983,6 +1009,34 @@ const SHARED_METRIC_COLUMNS = [
   { key: "ao1000", label: "AO1000", average: true },
 ];
 
+function hasSharedMetricValue(values) {
+  if (!values || typeof values !== "object") return false;
+  return values.best != null || values.worst != null;
+}
+
+function getVisibleSharedMetricColumns(metricValues, solveCountTotal) {
+  const total = Number(solveCountTotal);
+  const hasSolveCount = Number.isFinite(total) && total > 0;
+
+  return SHARED_METRIC_COLUMNS.filter((column) => {
+    if (hasSolveCount) {
+      return hasEnoughSolvesForMetric(column.key, total);
+    }
+    return hasSharedMetricValue(metricValues?.[column.key]);
+  });
+}
+
+function getSharedSummaryGridTemplate(metricCount, variant = "current") {
+  const safeMetricCount = Math.max(1, Number(metricCount) || 0);
+  return [
+    "156px",
+    ...Array.from({ length: safeMetricCount }, () => "minmax(92px, 108px)"),
+    "minmax(0, 0.7fr)",
+    "minmax(88px, 110px)",
+    "minmax(176px, 232px)",
+  ].join(" ");
+}
+
 function SharedMetricColumn({
   label,
   metricKey,
@@ -1072,15 +1126,37 @@ function SharedSummaryGrid({
   metricValues,
   metaRows,
   extraRows,
+  solveCount = null,
   scope,
   variant = "current",
+  showMetricHeaders = null,
   summarySource = "primary",
   onStatSelect,
 }) {
+  const visibleMetricColumns = useMemo(
+    () => getVisibleSharedMetricColumns(metricValues, solveCount),
+    [metricValues, solveCount]
+  );
+  const hiddenMetricCount = Math.max(0, SHARED_METRIC_COLUMNS.length - visibleMetricColumns.length);
+  const gridTemplateColumns = useMemo(
+    () => getSharedSummaryGridTemplate(visibleMetricColumns.length, variant),
+    [variant, visibleMetricColumns.length]
+  );
+  const metaValueFontScale = hiddenMetricCount >= 3 ? 1.08 : hiddenMetricCount >= 2 ? 1.05 : hiddenMetricCount >= 1 ? 1.02 : 1;
+  const metaLabelFontScale = hiddenMetricCount >= 3 ? 1.05 : hiddenMetricCount >= 2 ? 1.03 : hiddenMetricCount >= 1 ? 1.01 : 1;
+  const resolvedShowMetricHeaders = showMetricHeaders ?? (variant !== "overall");
+
   return (
-    <div className={`ssSharedSummaryGrid ssSharedSummaryGrid--${variant}`}>
+    <div
+      className={`ssSharedSummaryGrid ssSharedSummaryGrid--${variant}`}
+      style={{
+        "--ss-shared-grid-columns": gridTemplateColumns,
+        "--ss-shared-meta-value-scale": metaValueFontScale,
+        "--ss-shared-meta-label-scale": metaLabelFontScale,
+      }}
+    >
       <div className="ssSharedSummaryLead">{left}</div>
-      {SHARED_METRIC_COLUMNS.map((column) => {
+      {visibleMetricColumns.map((column) => {
         const values = metricValues?.[column.key] || {};
         return (
           <SharedMetricColumn
@@ -1090,13 +1166,14 @@ function SharedSummaryGrid({
             best={values.best}
             worst={values.worst}
             average={column.average}
-            showHeader={variant !== "overall"}
+            showHeader={resolvedShowMetricHeaders}
             scope={scope}
             summarySource={summarySource}
             onStatSelect={onStatSelect}
           />
         );
       })}
+      <div className="ssSharedSummarySpacer" aria-hidden="true" />
       <SharedMetaColumn rows={metaRows} />
       <SharedMetaColumn rows={extraRows} />
     </div>
@@ -1494,10 +1571,22 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
     [allowOverallDerived, overallLoadedSummary, overallStats]
   );
   const view = useMemo(
-    () =>
-      bucketSummary
-        ? buildBucketViewSummary(bucketSummary, bucketItems, bucketOverallMetricFallback)
-        : buildViewSummary(solves, overallStats?.SolveCountTotal ?? null, loadedSolveCount),
+    () => {
+      const visibleRangeSummary = buildViewSummary(
+        solves,
+        overallStats?.SolveCountTotal ?? null,
+        loadedSolveCount
+      );
+
+      return bucketSummary
+        ? buildBucketViewSummary(
+            bucketSummary,
+            bucketItems,
+            bucketOverallMetricFallback,
+            visibleRangeSummary
+          )
+        : visibleRangeSummary;
+    },
     [bucketItems, bucketSummary, bucketOverallMetricFallback, solves, overallStats?.SolveCountTotal, loadedSolveCount]
   );
   const compareView = useMemo(
@@ -1910,6 +1999,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
                   ao100: { best: view?.metrics?.ao100?.best, worst: view?.metrics?.ao100?.worst },
                   ao1000: { best: view?.metrics?.ao1000?.best, worst: view?.metrics?.ao1000?.worst },
                 }}
+                solveCount={view?.solveCount}
                 metaRows={[
                   {
                     label: "Mean",
@@ -1981,6 +2071,41 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
     [overall?.firstSolveAt, overallSolves, overallStats?.FirstSolveAt]
   );
   const resolvedProfileColor = normalizeHexColor(profileColor, "#50B6FF");
+  const currentVisibleMetricCount = useMemo(
+    () =>
+      getVisibleSharedMetricColumns(
+        {
+          single: { best: view?.single?.best, worst: view?.single?.worst },
+          mo3: { best: view?.metrics?.mo3?.best, worst: view?.metrics?.mo3?.worst },
+          ao5: { best: view?.metrics?.ao5?.best, worst: view?.metrics?.ao5?.worst },
+          ao12: { best: view?.metrics?.ao12?.best, worst: view?.metrics?.ao12?.worst },
+          ao25: { best: view?.metrics?.ao25?.best, worst: view?.metrics?.ao25?.worst },
+          ao50: { best: view?.metrics?.ao50?.best, worst: view?.metrics?.ao50?.worst },
+          ao100: { best: view?.metrics?.ao100?.best, worst: view?.metrics?.ao100?.worst },
+          ao1000: { best: view?.metrics?.ao1000?.best, worst: view?.metrics?.ao1000?.worst },
+        },
+        view?.solveCount
+      ).length,
+    [view]
+  );
+  const overallMetricValues = useMemo(
+    () => ({
+      single: { best: overall.single, worst: showWorstOverview ? overall.singleWorst : null },
+      mo3: { best: overall.mo3, worst: showWorstOverview ? overall.mo3Worst : null },
+      ao5: { best: overall.ao5, worst: showWorstOverview ? overall.ao5Worst : null },
+      ao12: { best: overall.ao12, worst: showWorstOverview ? overall.ao12Worst : null },
+      ao25: { best: overall.ao25, worst: null },
+      ao50: { best: overall.ao50, worst: null },
+      ao100: { best: overall.ao100, worst: null },
+      ao1000: { best: overall.ao1000, worst: null },
+    }),
+    [overall, showWorstOverview]
+  );
+  const overallVisibleMetricCount = useMemo(
+    () => getVisibleSharedMetricColumns(overallMetricValues, overall.solveCountTotal).length,
+    [overallMetricValues, overall.solveCountTotal]
+  );
+  const showOverallMetricHeaders = overallVisibleMetricCount !== currentVisibleMetricCount;
   const overallCardStyle = useMemo(
     () => ({
       background: `linear-gradient(135deg, ${withAlpha(resolvedProfileColor, 0.16)}, ${withAlpha(
@@ -2030,6 +2155,7 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
         <SharedSummaryGrid
           scope="overall"
           variant="overall"
+          showMetricHeaders={showOverallMetricHeaders}
           summarySource={summarySource}
           onStatSelect={onStatSelect}
           left={
@@ -2060,16 +2186,8 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
               ) : null}
             </div>
           }
-          metricValues={{
-            single: { best: overall.single, worst: showWorstOverview ? overall.singleWorst : null },
-            mo3: { best: overall.mo3, worst: showWorstOverview ? overall.mo3Worst : null },
-            ao5: { best: overall.ao5, worst: showWorstOverview ? overall.ao5Worst : null },
-            ao12: { best: overall.ao12, worst: showWorstOverview ? overall.ao12Worst : null },
-            ao25: { best: overall.ao25, worst: null },
-            ao50: { best: overall.ao50, worst: null },
-            ao100: { best: overall.ao100, worst: null },
-            ao1000: { best: overall.ao1000, worst: null },
-          }}
+          metricValues={overallMetricValues}
+          solveCount={overall.solveCountTotal}
           metaRows={[
             { label: "Mean", value: formatStatTime(overall.mean), tone: "ssMetricValue--strict" },
             { label: "Med", value: formatStatTime(overall.median), tone: "ssMetricValue--strict" },

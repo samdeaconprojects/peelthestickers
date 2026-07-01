@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import "./Social.css";
 import { useDbStatus } from "../../contexts/DbStatusContext";
@@ -14,6 +14,7 @@ import { sendMessage } from "../../services/sendMessage";
 import { getConversations } from "../../services/getConversations";
 import { createConversation } from "../../services/createConversation";
 import { getGroups } from "../../services/getGroups";
+import { joinGroup } from "../../services/joinGroup";
 import { getGroupPosts } from "../../services/getGroupPosts";
 import { updateGroupPostComments } from "../../services/updateGroupPostComments";
 import { deleteGroupPost } from "../../services/deleteGroupPost";
@@ -26,6 +27,7 @@ import { currentEventToString, generateScramble } from "../scrambleUtils";
 import SharedAverageModal from "./SharedAverageModal";
 import SharedAverageMessage from "./SharedAverageMessage";
 import CreateGroupModal from "./CreateGroupModal";
+import JoinRoomModal from "./JoinRoomModal";
 
 import DotIcon from "../../assets/Dot.svg";
 import FlipIcon from "../../assets/Flip.svg";
@@ -280,6 +282,16 @@ const parseSharedAoNPayload = (text) => {
   }
 };
 
+const parseSharedRoomClosedPayload = (text) => {
+  if (!String(text || "").startsWith("[sharedRoomClosed]")) return null;
+  try {
+    return JSON.parse(String(text).slice("[sharedRoomClosed]".length));
+  } catch (err) {
+    console.warn("Failed to parse sharedRoomClosed payload:", err);
+    return null;
+  }
+};
+
 const parseSharedPostPayload = (text) => {
   if (!String(text || "").startsWith("[sharedPost]")) return null;
   try {
@@ -319,6 +331,46 @@ const parseSharedUpdatePayload = (text) => {
     senderID,
   };
 };
+
+const getSharedSessionEvent = (...candidates) =>
+  candidates
+    .flatMap((candidate) => (Array.isArray(candidate) ? candidate : [candidate]))
+    .map((value) => String(value || "").trim().toUpperCase())
+    .find(Boolean) || "333";
+
+const getLatestHostedSharedMessage = (messages = []) =>
+  [...(Array.isArray(messages) ? messages : [])]
+    .filter((msg) => msg?.text?.startsWith("[sharedAoN]"))
+    .map((msg) => ({
+      msg,
+      payload: parseSharedAoNPayload(msg?.text),
+    }))
+    .filter(
+      (entry) =>
+        entry?.payload?.sharedID &&
+        (entry?.payload?.isHosted === true ||
+          String(entry?.payload?.mode || entry?.payload?.type || "").toLowerCase() === "hosted")
+    )
+    .sort((a, b) =>
+      String(a?.msg?.timestamp || a?.msg?.createdAt || "").localeCompare(
+        String(b?.msg?.timestamp || b?.msg?.createdAt || "")
+      )
+    )
+    .at(-1) || null;
+
+const getLatestHostedRoomClosedMessage = (messages = []) =>
+  [...(Array.isArray(messages) ? messages : [])]
+    .map((msg) => ({
+      msg,
+      payload: parseSharedRoomClosedPayload(msg?.text),
+    }))
+    .filter((entry) => entry?.payload?.conversationID || entry?.payload?.roomCode)
+    .sort((a, b) =>
+      String(a?.msg?.timestamp || a?.msg?.createdAt || "").localeCompare(
+        String(b?.msg?.timestamp || b?.msg?.createdAt || "")
+      )
+    )
+    .at(-1) || null;
 
 const isSharedPostMessage = (msg = {}) =>
   String(msg?.messageType || "").toUpperCase() === "SHARED_POST" ||
@@ -436,6 +488,7 @@ function Social({
   refreshTick,
   sharedSession,
   leaveSharedRun,
+  currentEvent,
 }) {
   const { runDb } = useDbStatus();
   const [activeTab, setActiveTab] = useState(0);
@@ -452,6 +505,9 @@ function Social({
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [createGroupError, setCreateGroupError] = useState("");
+  const [showJoinRoomModal, setShowJoinRoomModal] = useState(false);
+  const [joiningRoom, setJoiningRoom] = useState(false);
+  const [joinRoomError, setJoinRoomError] = useState("");
   const [friendDirectory, setFriendDirectory] = useState([]);
 
   const [searchOpen, setSearchOpen] = useState(false);
@@ -465,6 +521,7 @@ function Social({
   const messagesPanelRef = useRef(null);
   const messagesEndRef = useRef(null);
   const sharedMessageRefs = useRef({});
+  const profileCacheRef = useRef(new Map());
   const selectedConversationRef = useRef(null);
   const sharedSessionRef = useRef(sharedSession);
   const conversationsRef = useRef(conversations);
@@ -493,6 +550,29 @@ function Social({
   useEffect(() => {
     sharedSessionRef.current = sharedSession;
   }, [sharedSession]);
+
+  const loadProfilesByIdCached = useCallback(async (ids = []) => {
+    const uniqueIds = Array.from(
+      new Set(
+        (Array.isArray(ids) ? ids : [])
+          .map((id) => String(id || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    const missingIds = uniqueIds.filter((id) => !profileCacheRef.current.has(id));
+
+    if (missingIds.length) {
+      const entries = await loadProfilesById(missingIds);
+      Object.entries(entries || {}).forEach(([id, value]) => {
+        profileCacheRef.current.set(id, value || null);
+      });
+    }
+
+    return Object.fromEntries(
+      uniqueIds.map((id) => [id, profileCacheRef.current.get(id) || null])
+    );
+  }, []);
 
   const formatPostDate = (value) => {
     const d = value instanceof Date ? value : new Date(value);
@@ -943,7 +1023,7 @@ function Social({
           return [...memberIds, otherUserID];
         });
 
-        const profilesById = await loadProfilesById([
+        const profilesById = await loadProfilesByIdCached([
           ...friendIds,
           ...conversationProfileIds,
         ]);
@@ -1044,6 +1124,10 @@ function Social({
               name: group?.Name || item?.Name || item?.DisplayName || conversationID,
               username: group?.Name || item?.Name || conversationID,
               color: group?.Color || "#7f8c8d",
+              groupID: group?.GroupID || "",
+              isJoinable: group?.IsJoinable === true,
+              roomCode: group?.JoinCode || group?.GroupID || "",
+              isStreamRoom: group?.IsStreamRoom === true,
               memberProfiles,
             };
           }
@@ -1111,7 +1195,7 @@ function Social({
         socialLoadInFlightRef.current = false;
       }
     },
-    [user, mergeConversationLists, location.state?.conversationID]
+    [user, mergeConversationLists, location.state?.conversationID, loadProfilesByIdCached]
   );
 
   const refreshConversationDirectory = useCallback(async () => {
@@ -1334,70 +1418,6 @@ function Social({
     user?.UserID,
   ]);
 
-  useEffect(() => {
-    const preferredConversationID = String(location.state?.conversationID || "").trim();
-    if (!preferredConversationID || !conversations.length) return;
-
-    const match = conversations.find(
-      (conv) => String(conv.conversationID) === preferredConversationID
-    );
-
-    if (match) {
-      setSelectedConversation((prev) => ({
-        ...prev,
-        ...match,
-        messages:
-          Array.isArray(match.messages) && match.messages.length
-            ? match.messages
-            : Array.isArray(prev?.messages)
-            ? prev.messages
-            : [],
-      }));
-      if (location.state?.openMessages) {
-        setActiveTab(1);
-      }
-    }
-  }, [conversations, location.state?.conversationID, location.state?.openMessages]);
-
-  useEffect(() => {
-    if (activeTab !== 1) return;
-
-    const targetConversationID = String(location.state?.conversationID || "").trim();
-    const targetSharedID = String(location.state?.sharedID || "").trim();
-
-    if (!targetSharedID) return;
-    if (
-      targetConversationID &&
-      selectedConversation?.conversationID !== targetConversationID
-    ) {
-      return;
-    }
-
-    const id = setTimeout(() => {
-      const didScroll = scrollToSharedRun(targetSharedID, "smooth");
-      if (!didScroll) return;
-
-      const nextState = { ...(location.state || {}) };
-      delete nextState.sharedID;
-
-      navigate(location.pathname, {
-        replace: true,
-        state: Object.keys(nextState).length ? nextState : null,
-      });
-    }, 80);
-
-    return () => clearTimeout(id);
-  }, [
-    activeTab,
-    location.pathname,
-    selectedConversation?.conversationID,
-    selectedConversation?.messages,
-    location.state?.conversationID,
-    location.state?.sharedID,
-    navigate,
-    location.state,
-  ]);
-
   const handleDelete = async (post) => {
     if (!post.isOwn) return;
     if (post.PostOwnerType === "GROUP" || post.isGroupPost) {
@@ -1480,7 +1500,13 @@ function Social({
     return nextConversation;
   };
 
-  const handleCreateGroup = async ({ name, memberIDs }) => {
+  const handleCreateGroup = async ({
+    name,
+    memberIDs,
+    isJoinable = false,
+    isStreamRoom = false,
+    roomCode = "",
+  }) => {
     if (!user?.UserID || creatingGroup) return;
 
     setCreatingGroup(true);
@@ -1491,11 +1517,44 @@ function Social({
           ownerID: user.UserID,
           name,
           memberIDs,
+          groupID: roomCode,
+          isJoinable,
+          isStreamRoom,
         })
       );
       const conversationID = String(result?.item?.ConversationID || "").trim();
+      const roomConversation = {
+        conversationID,
+        id: conversationID,
+        type: "GROUP",
+        name: result?.item?.Name || name,
+        username: result?.item?.Name || name,
+        color: result?.item?.Color || "#7f8c8d",
+        groupID: result?.item?.GroupID || roomCode,
+        isJoinable: result?.item?.IsJoinable === true,
+        roomCode: result?.item?.JoinCode || result?.item?.GroupID || roomCode,
+        isStreamRoom: result?.item?.IsStreamRoom === true,
+        memberIDs: Array.isArray(result?.members)
+          ? result.members.map((member) => String(member?.UserID || "").trim()).filter(Boolean)
+          : [user.UserID],
+        messages: [],
+        messagesCursor: null,
+        hasOlderMessages: false,
+        loadingOlderMessages: false,
+        isPlaceholder: false,
+        lastMessageAt: null,
+        lastMessagePreview: "",
+      };
+
+      upsertConversation(roomConversation);
       await loadSocialData(conversationID);
-      setActiveTab(1);
+
+      if (isStreamRoom) {
+        await startHostedRoomForConversation(roomConversation);
+      } else {
+        setActiveTab(1);
+      }
+
       setShowCreateGroupModal(false);
     } catch (err) {
       console.error("Failed to create group:", err);
@@ -1504,6 +1563,131 @@ function Social({
       setCreatingGroup(false);
     }
   };
+
+  const handleJoinRoom = async ({ roomCode }) => {
+    if (!user?.UserID || joiningRoom) return;
+
+    setJoiningRoom(true);
+    setJoinRoomError("");
+    try {
+      const result = await runDb("Joining room", () =>
+        joinGroup({
+          userID: user.UserID,
+          roomCode,
+        })
+      );
+      const conversationID = String(result?.item?.ConversationID || "").trim();
+      const initialMessagesPage = conversationID
+        ? await getMessagesPage(conversationID, user.UserID, {
+            limit: MESSAGE_PAGE_SIZE,
+          })
+        : { items: [], nextCursor: null, hasMore: false };
+      const initialMessages = Array.isArray(initialMessagesPage?.items)
+        ? initialMessagesPage.items
+        : [];
+      const roomConversation = {
+        conversationID,
+        id: conversationID,
+        type: "GROUP",
+        name: result?.item?.Name || roomCode,
+        username: result?.item?.Name || roomCode,
+        color: result?.item?.Color || "#7f8c8d",
+        groupID: result?.item?.GroupID || roomCode,
+        isJoinable: result?.item?.IsJoinable === true,
+        roomCode: result?.item?.JoinCode || result?.item?.GroupID || roomCode,
+        isStreamRoom: result?.item?.IsStreamRoom === true,
+        memberIDs: Array.isArray(result?.members)
+          ? result.members.map((member) => String(member?.UserID || "").trim()).filter(Boolean)
+          : [],
+        messages: initialMessages,
+        messagesCursor: initialMessagesPage?.nextCursor || null,
+        hasOlderMessages: !!initialMessagesPage?.hasMore,
+        loadingOlderMessages: false,
+        isPlaceholder: false,
+        lastMessageAt:
+          initialMessages[initialMessages.length - 1]?.timestamp || result?.item?.UpdatedAt || null,
+        lastMessagePreview:
+          initialMessages[initialMessages.length - 1]?.text || result?.item?.Name || "",
+      };
+
+      upsertConversation(roomConversation);
+      await loadSocialData(conversationID);
+      setShowJoinRoomModal(false);
+      await followHostedRoomConversation(roomConversation, initialMessages);
+    } catch (err) {
+      console.error("Failed to join room:", err);
+      setJoinRoomError(err?.message || "Failed to join room.");
+    } finally {
+      setJoiningRoom(false);
+    }
+  };
+
+  const handleCloseRoom = useCallback(async () => {
+    if (!sharedSession?.conversationID || !user?.UserID) return;
+
+    try {
+      await runDb("Closing room", () =>
+        sendMessage(
+          sharedSession.conversationID,
+          user.UserID,
+          `[sharedRoomClosed]${JSON.stringify({
+            conversationID: sharedSession.conversationID,
+            roomCode: sharedSession.roomCode || null,
+            closedBy: user.UserID,
+            closedByName: user?.Username || user?.Name || user.UserID,
+            closedAt: new Date().toISOString(),
+          })}`
+        )
+      );
+      leaveSharedRun?.();
+    } catch (err) {
+      console.error("Failed to close room:", err);
+    }
+  }, [sharedSession, user?.UserID, user?.Username, user?.Name, runDb, leaveSharedRun]);
+
+  useEffect(() => {
+    if (!user?.UserID) return;
+    if (String(selectedConversation?.type || "").toUpperCase() !== "GROUP") return;
+    if (selectedConversation?.isStreamRoom !== true) return;
+
+    const latestHosted = getLatestHostedSharedMessage(selectedConversation?.messages || []);
+    const latestClosed = getLatestHostedRoomClosedMessage(selectedConversation?.messages || []);
+    if (!latestHosted?.payload?.sharedID) return;
+
+    const latestHostedTs = new Date(
+      latestHosted?.msg?.timestamp || latestHosted?.msg?.createdAt || 0
+    ).getTime();
+    const latestClosedTs = new Date(
+      latestClosed?.msg?.timestamp || latestClosed?.msg?.createdAt || 0
+    ).getTime();
+
+    if (latestClosedTs >= latestHostedTs) return;
+
+    const shouldReplaceActive =
+      !sharedSession ||
+      String(sharedSession?.conversationID || "") !==
+        String(selectedConversation?.conversationID || "") ||
+      String(sharedSession?.sharedID || "") !== String(latestHosted.payload.sharedID || "");
+
+    if (!shouldReplaceActive) return;
+
+    loadSharedSession(
+      {
+        ...latestHosted.payload,
+        sourceMessage: latestHosted.payload,
+      },
+      {
+        targetIndex: undefined,
+      }
+    );
+  }, [
+    user?.UserID,
+    selectedConversation?.type,
+    selectedConversation?.isStreamRoom,
+    selectedConversation?.conversationID,
+    selectedConversation?.messages,
+    sharedSession,
+  ]);
 
   const loadSharedSession = async (
     {
@@ -1515,66 +1699,134 @@ function Social({
       opponentEvent,
       creatorEvents,
       opponentEvents,
+      creatorScrambles,
+      opponentScrambles,
       creatorID,
       mode,
       targetWins,
       batchSize,
+      saveSessionID,
+      hostID,
+      hostName,
+      roomCode,
+      isHosted,
       sourceMessage,
     },
     options = {}
   ) => {
     if (!user?.UserID) return;
+    const baseConversation = options?.conversationOverride || selectedConversationRef.current || {};
 
+    const resolvedEvent = getSharedSessionEvent(
+      event,
+      creatorEvent,
+      opponentEvent,
+      events,
+      creatorEvents,
+      opponentEvents,
+      sourceMessage?.event,
+      sourceMessage?.creatorEvent,
+      sourceMessage?.opponentEvent,
+      sourceMessage?.events,
+      sourceMessage?.creatorEvents,
+      sourceMessage?.opponentEvents
+    );
     const sessionID = sharedID.split("#").slice(0, 3).join("#");
-    const sessionName = `Shared ${currentEventToString(event)} with ${
-      selectedConversationRef.current?.name || "Friend"
+    const sessionName = `Shared ${currentEventToString(resolvedEvent)} with ${
+      baseConversation?.name || "Friend"
     }`;
-    const currentMessages = selectedConversationRef.current?.messages || [];
+    const currentMessages = baseConversation?.messages || [];
     const roundResults = buildRoundResultsFromMessages(currentMessages, sharedID);
 
     try {
       await runDb("Creating shared session", () =>
-        createSession(user.UserID, event, sessionID, sessionName)
+        createSession(user.UserID, resolvedEvent, sessionID, sessionName)
       );
 
       beginSharedSession(
         applySharedExtensions(
           {
             sessionID,
-            event,
+            event: resolvedEvent,
             sharedID,
             mode: mode || sourceMessage?.mode || sourceMessage?.type || "average",
             targetWins: targetWins || sourceMessage?.targetWins || null,
             batchSize: batchSize || sourceMessage?.batchSize || null,
-            scrambles,
-            events: Array.isArray(events) ? events : [],
-            creatorEvent: creatorEvent || null,
-            opponentEvent: opponentEvent || null,
-            creatorEvents: Array.isArray(creatorEvents) ? creatorEvents : [],
-            opponentEvents: Array.isArray(opponentEvents) ? opponentEvents : [],
+            saveSessionID:
+              saveSessionID || sourceMessage?.saveSessionID || (mode === "hosted" ? "main" : null),
+            hostID: hostID || sourceMessage?.hostID || creatorID || null,
+            hostName: hostName || sourceMessage?.hostName || null,
+            roomCode: roomCode || sourceMessage?.roomCode || baseConversation?.roomCode || null,
+            isHosted: isHosted === true || mode === "hosted" || sourceMessage?.isHosted === true,
+            scrambles:
+              Array.isArray(scrambles) && scrambles.length
+                ? scrambles
+                : Array.isArray(creatorScrambles) && creatorScrambles.length
+                ? creatorScrambles
+                : Array.isArray(sourceMessage?.scrambles)
+                ? sourceMessage.scrambles
+                : Array.isArray(sourceMessage?.creatorScrambles)
+                ? sourceMessage.creatorScrambles
+                : [],
+            events:
+              Array.isArray(events) && events.length
+                ? events
+                : Array.isArray(creatorEvents) && creatorEvents.length
+                ? creatorEvents
+                : Array.isArray(sourceMessage?.events)
+                ? sourceMessage.events
+                : Array.isArray(sourceMessage?.creatorEvents)
+                ? sourceMessage.creatorEvents
+                : [],
+            creatorEvent: creatorEvent || sourceMessage?.creatorEvent || resolvedEvent,
+            opponentEvent: opponentEvent || sourceMessage?.opponentEvent || resolvedEvent,
+            creatorEvents:
+              Array.isArray(creatorEvents) && creatorEvents.length
+                ? creatorEvents
+                : Array.isArray(sourceMessage?.creatorEvents)
+                ? sourceMessage.creatorEvents
+                : [],
+            opponentEvents:
+              Array.isArray(opponentEvents) && opponentEvents.length
+                ? opponentEvents
+                : Array.isArray(sourceMessage?.opponentEvents)
+                ? sourceMessage.opponentEvents
+                : [],
+            creatorScrambles:
+              Array.isArray(creatorScrambles) && creatorScrambles.length
+                ? creatorScrambles
+                : Array.isArray(sourceMessage?.creatorScrambles)
+                ? sourceMessage.creatorScrambles
+                : [],
+            opponentScrambles:
+              Array.isArray(opponentScrambles) && opponentScrambles.length
+                ? opponentScrambles
+                : Array.isArray(sourceMessage?.opponentScrambles)
+                ? sourceMessage.opponentScrambles
+                : [],
             creatorID: creatorID || null,
             opponentID:
-              selectedConversationRef.current?.type === "DM"
-                ? selectedConversationRef.current?.friendID ||
-                  selectedConversationRef.current?.username ||
+              baseConversation?.type === "DM"
+                ? baseConversation?.friendID ||
+                  baseConversation?.username ||
                   null
                 : null,
             opponentName:
-              selectedConversationRef.current?.name ||
-              selectedConversationRef.current?.username ||
+              baseConversation?.name ||
+              baseConversation?.username ||
               "Opponent",
             theirLabel:
-              selectedConversationRef.current?.username ||
-              selectedConversationRef.current?.name ||
+              baseConversation?.username ||
+              baseConversation?.name ||
               "Opponent",
             theirUsername:
-              selectedConversationRef.current?.username ||
-              selectedConversationRef.current?.name ||
+              baseConversation?.username ||
+              baseConversation?.name ||
               "Opponent",
-            opponentColor: selectedConversationRef.current?.color || "#888888",
-            theirColor: selectedConversationRef.current?.color || "#888888",
-            color: selectedConversationRef.current?.color || "#888888",
-            conversationID: selectedConversationRef.current?.conversationID || "",
+            opponentColor: baseConversation?.color || "#888888",
+            theirColor: baseConversation?.color || "#888888",
+            color: baseConversation?.color || "#888888",
+            conversationID: baseConversation?.conversationID || "",
             roundResults,
           },
           currentMessages
@@ -1585,6 +1837,113 @@ function Social({
       console.error("Failed to create shared session", err);
     }
   };
+
+  const followHostedRoomConversation = useCallback(
+    async (conversation, messages = []) => {
+      const latestHosted = getLatestHostedSharedMessage(messages);
+      const latestClosed = getLatestHostedRoomClosedMessage(messages);
+      const latestHostedTs = new Date(
+        latestHosted?.msg?.timestamp || latestHosted?.msg?.createdAt || 0
+      ).getTime();
+      const latestClosedTs = new Date(
+        latestClosed?.msg?.timestamp || latestClosed?.msg?.createdAt || 0
+      ).getTime();
+
+      if (!latestHosted?.payload?.sharedID || latestHostedTs <= latestClosedTs) {
+        return false;
+      }
+
+      await loadSharedSession(
+        {
+          ...latestHosted.payload,
+          sourceMessage: latestHosted.payload,
+        },
+        {
+          conversationOverride: {
+            ...(conversation || {}),
+            messages,
+          },
+          targetIndex: undefined,
+        }
+      );
+
+      return true;
+    },
+    [loadSharedSession]
+  );
+
+  const startHostedRoomForConversation = useCallback(
+    async (conversation) => {
+      const conversationID = String(conversation?.conversationID || "").trim();
+      if (!conversationID || !user?.UserID) return false;
+
+      const normalizedEvent = getSharedSessionEvent(currentEvent, user?.ProfileEvent, "333");
+      const batchSize = 25;
+      const creatorEvents = [];
+      const opponentEvents = [];
+      const creatorScrambles = [];
+      const opponentScrambles = [];
+
+      for (let i = 0; i < batchSize; i += 1) {
+        const scramble = generateScramble(normalizedEvent);
+        creatorEvents.push(normalizedEvent);
+        opponentEvents.push(normalizedEvent);
+        creatorScrambles.push(scramble);
+        opponentScrambles.push(scramble);
+      }
+
+      const payload = {
+        v: 2,
+        mode: "hosted",
+        type: "hosted",
+        sharedID: `SHARED#${conversationID}#${normalizedEvent}#${Date.now()}`,
+        count: creatorScrambles.length,
+        batchSize,
+        isHosted: true,
+        saveSessionID: "main",
+        hostID: user.UserID,
+        hostName: user?.Username || user?.Name || user.UserID,
+        roomCode: conversation?.roomCode || null,
+        creatorID: user.UserID,
+        creatorEvent: normalizedEvent,
+        opponentEvent: normalizedEvent,
+        creatorEvents,
+        opponentEvents,
+        creatorScrambles,
+        opponentScrambles,
+      };
+
+      const scrambleText = `[sharedAoN]${JSON.stringify(payload)}`;
+      const saved = await sendMessage(conversationID, user.UserID, scrambleText);
+      const savedMessage = {
+        sender: saved?.SenderID || user.UserID,
+        text: saved?.Text || scrambleText,
+        timestamp: saved?.CreatedAt || new Date().toISOString(),
+      };
+      const nextConversation = {
+        ...(conversation || {}),
+        messages: mergeMessagesByKey(conversation?.messages || [], [savedMessage]),
+        lastMessageAt: savedMessage.timestamp,
+        lastMessagePreview: savedMessage.text,
+      };
+
+      upsertConversation(nextConversation);
+
+      await loadSharedSession(
+        {
+          ...payload,
+          sourceMessage: payload,
+        },
+        {
+          conversationOverride: nextConversation,
+          targetIndex: 0,
+        }
+      );
+
+      return true;
+    },
+    [currentEvent, loadSharedSession, upsertConversation, user?.ProfileEvent, user?.UserID, user?.Username, user?.Name]
+  );
 
   useEffect(() => {
     const fetchSuggestion = async () => {
@@ -1623,13 +1982,121 @@ function Social({
     );
     return bTime - aTime;
   });
+  const activeRoomConversationID = String(sharedSession?.conversationID || "").trim();
+  const selectedConversationID = String(selectedConversation?.conversationID || "").trim();
+  const visibleConversations = sortedConversations.filter((conv) => {
+    if (conv?.isStreamRoom !== true) return true;
+
+    const conversationID = String(conv?.conversationID || "").trim();
+    return (
+      !!conversationID &&
+      (conversationID === selectedConversationID || conversationID === activeRoomConversationID)
+    );
+  });
+  const activeRoomConversation = useMemo(() => {
+    if (!activeRoomConversationID) return null;
+    return (
+      sortedConversations.find(
+        (conv) => String(conv?.conversationID || "").trim() === activeRoomConversationID
+      ) || null
+    );
+  }, [activeRoomConversationID, sortedConversations]);
+
+  useEffect(() => {
+    const preferredConversationID = String(location.state?.conversationID || "").trim();
+    if (!preferredConversationID || !conversations.length) return;
+
+    const match = conversations.find(
+      (conv) => String(conv.conversationID) === preferredConversationID
+    );
+
+    if (match) {
+      setSelectedConversation((prev) => ({
+        ...prev,
+        ...match,
+        messages:
+          Array.isArray(match.messages) && match.messages.length
+            ? match.messages
+            : Array.isArray(prev?.messages)
+            ? prev.messages
+            : [],
+      }));
+      if (location.state?.openMessages) {
+        setActiveTab(1);
+      }
+    }
+  }, [conversations, location.state?.conversationID, location.state?.openMessages]);
+
+  useEffect(() => {
+    if (!activeRoomConversationID || !conversations.length) return;
+
+    const activeMatch = conversations.find(
+      (conv) => String(conv?.conversationID || "").trim() === activeRoomConversationID
+    );
+    if (!activeMatch || activeMatch?.isStreamRoom !== true) return;
+
+    if (selectedConversationID === activeRoomConversationID) {
+      return;
+    }
+
+    setSelectedConversation((prev) => ({
+      ...(prev || {}),
+      ...activeMatch,
+      messages:
+        Array.isArray(activeMatch.messages) && activeMatch.messages.length
+          ? activeMatch.messages
+          : Array.isArray(prev?.messages)
+          ? prev.messages
+          : [],
+    }));
+    setActiveTab(1);
+  }, [activeRoomConversationID, conversations, selectedConversationID]);
+
+  useEffect(() => {
+    if (activeTab !== 1) return;
+
+    const targetConversationID = String(location.state?.conversationID || "").trim();
+    const targetSharedID = String(location.state?.sharedID || "").trim();
+
+    if (!targetSharedID) return;
+    if (
+      targetConversationID &&
+      selectedConversation?.conversationID !== targetConversationID
+    ) {
+      return;
+    }
+
+    const id = setTimeout(() => {
+      const didScroll = scrollToSharedRun(targetSharedID, "smooth");
+      if (!didScroll) return;
+
+      const nextState = { ...(location.state || {}) };
+      delete nextState.sharedID;
+
+      navigate(location.pathname, {
+        replace: true,
+        state: Object.keys(nextState).length ? nextState : null,
+      });
+    }, 80);
+
+    return () => clearTimeout(id);
+  }, [
+    activeTab,
+    location.pathname,
+    selectedConversation?.conversationID,
+    selectedConversation?.messages,
+    location.state?.conversationID,
+    location.state?.sharedID,
+    navigate,
+    location.state,
+  ]);
 
   const handleOpenMessagesTab = useCallback(() => {
     setActiveTab(1);
-    if (sortedConversations.length > 0) {
-      setSelectedConversation(sortedConversations[0]);
+    if (visibleConversations.length > 0) {
+      setSelectedConversation(visibleConversations[0]);
     }
-  }, [sortedConversations]);
+  }, [visibleConversations]);
 
   const selectedConversationMembers =
     selectedConversation?.type === "GROUP"
@@ -1769,6 +2236,11 @@ function Social({
       count: roundCount,
       targetWins: Number(targetWins) || null,
       batchSize: Number(batchSize) || null,
+      isHosted: mode === "hosted",
+      saveSessionID: mode === "hosted" ? "main" : null,
+      hostID: user.UserID,
+      hostName: user?.Username || user?.Name || user.UserID,
+      roomCode: selectedConversation?.roomCode || null,
       creatorID: user.UserID,
       creatorEvent: creatorEvents[0] || creatorEvent || "333",
       opponentEvent: opponentEvents[0] || opponentEvent || "333",
@@ -1832,7 +2304,7 @@ function Social({
 
         {activeTab === 1 && (
           <div className="headerConversationStrip">
-            {sortedConversations.map((conv) => (
+            {visibleConversations.map((conv) => (
               (() => {
                 const groupGrid = getGroupAvatarGridConfig((conv.memberProfiles || []).length);
 
@@ -1913,6 +2385,39 @@ function Social({
                 );
               })()
             ))}
+            {activeRoomConversation &&
+            !visibleConversations.some(
+              (conv) => conv.conversationID === activeRoomConversation.conversationID
+            ) ? (
+              <button
+                type="button"
+                key={activeRoomConversation.conversationID}
+                className={`conversationPreview ${
+                  selectedConversation?.conversationID === activeRoomConversation.conversationID
+                    ? "selected"
+                    : ""
+                }`}
+                onClick={() => {
+                  setSelectedConversation(activeRoomConversation);
+                  setActiveTab(1);
+                }}
+              >
+                <div className="avatarContainer">
+                  <div className="profilePicturePost profilePicturePost--group">
+                    <div className="groupAvatarCluster groupAvatarCluster--solo">
+                      <div className="groupAvatarMini" style={{ borderColor: activeRoomConversation.color || "#50B6FF" }}>
+                        <div className="groupAvatarMiniCube postNameCube">
+                          <span style={{ fontSize: "11px", fontWeight: 900, color: "#fff" }}>
+                            Room
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="avatarName">{activeRoomConversation.name || "Active room"}</div>
+                </div>
+              </button>
+            ) : null}
           </div>
         )}
 
@@ -1973,6 +2478,17 @@ function Social({
               disabled={activeTab !== 1}
             >
               <span className="searchActionPlus">+</span>
+            </button>
+
+            <button
+              type="button"
+              className="searchActionButton searchActionButton--join"
+              onClick={() => setShowJoinRoomModal(true)}
+              aria-label="Join room"
+              title="Join room"
+              disabled={activeTab !== 1}
+            >
+              <span className="searchActionJoin">Join</span>
             </button>
           </div>
 
@@ -2124,12 +2640,61 @@ function Social({
                     <>
                       {selectedConversation.type === "GROUP" && (
                         <div className="groupThreadMeta">
-                          <div className="groupThreadTitle">{selectedConversation.name}</div>
+                          <div className="groupThreadTitleRow">
+                            <div className="groupThreadTitle">{selectedConversation.name}</div>
+                            {selectedConversation?.isStreamRoom ? (
+                              <span className="groupThreadBadge">Room</span>
+                            ) : null}
+                          </div>
                           <div className="groupThreadMembers">
                             {selectedConversationMembers.length
                               ? selectedConversationMembers.map((member) => member.name).join(", ")
                               : "No other members"}
                           </div>
+                          {selectedConversation?.isJoinable && selectedConversation?.roomCode ? (
+                            <div className="groupThreadRoomCode">
+                              Room code: <span>{selectedConversation.roomCode}</span>
+                            </div>
+                          ) : null}
+                          {selectedConversation?.isStreamRoom ? (
+                            <div className="groupThreadRoomCode">
+                              {String(sharedSession?.conversationID || "") ===
+                              String(selectedConversation?.conversationID || "") ? (
+                                <>
+                                  <span>
+                                    {String(sharedSession?.hostID || sharedSession?.creatorID || "") ===
+                                    String(user?.UserID || "")
+                                      ? "You are hosting this room."
+                                      : "You are following this room."}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="sharedConversationStatsToggle"
+                                    onClick={() => {
+                                      if (
+                                        String(sharedSession?.hostID || sharedSession?.creatorID || "") ===
+                                        String(user?.UserID || "")
+                                      ) {
+                                        handleCloseRoom();
+                                      } else {
+                                        leaveSharedRun?.();
+                                      }
+                                    }}
+                                    style={{ marginLeft: "10px" }}
+                                  >
+                                    <span>
+                                      {String(sharedSession?.hostID || sharedSession?.creatorID || "") ===
+                                      String(user?.UserID || "")
+                                        ? "Stop room"
+                                        : "Leave room"}
+                                    </span>
+                                  </button>
+                                </>
+                              ) : (
+                                <span>Open this room to follow the host scramble feed.</span>
+                              )}
+                            </div>
+                          ) : null}
                         </div>
                       )}
 
@@ -2404,7 +2969,13 @@ function Social({
                     />
 
                     <button onClick={() => setShowSharedModal(true)}>
-                      {sharedSession ? "New Shared Avg" : "Shared Average"}
+                      {selectedConversation?.isStreamRoom
+                        ? sharedSession
+                          ? "Host Another"
+                          : "Start Hosting"
+                        : sharedSession
+                        ? "New Shared Avg"
+                        : "Shared Average"}
                     </button>
                     <button onClick={handleSendMessage}>Send</button>
                   </div>
@@ -2424,6 +2995,7 @@ function Social({
         yourDefaultEvent={user?.ProfileEvent || "333"}
         theirDefaultEvent={selectedConversation?.profileEvent || "333"}
         isTwoPerson={selectedConversation?.type !== "GROUP"}
+        allowHostedMode={selectedConversation?.isStreamRoom === true}
         yourLabel={user?.Username || user?.Name || "You"}
         theirLabel={selectedConversation?.username || selectedConversation?.name || "Them"}
         onConfirm={handleConfirmSharedAverage}
@@ -2439,6 +3011,17 @@ function Social({
         onCreate={handleCreateGroup}
         isSubmitting={creatingGroup}
         errorMessage={createGroupError}
+      />
+
+      <JoinRoomModal
+        isOpen={showJoinRoomModal}
+        onClose={() => {
+          setShowJoinRoomModal(false);
+          setJoinRoomError("");
+        }}
+        onJoin={handleJoinRoom}
+        isSubmitting={joiningRoom}
+        errorMessage={joinRoomError}
       />
 
       {selectedPost && (

@@ -30,6 +30,7 @@ function PlayerBar({
   onScrambleClick,
   goForwardScramble,
   goBackwardScramble,
+  hostedRoomMeta,
   addPost,
   user,
   applyPenalty,
@@ -40,6 +41,7 @@ function PlayerBar({
   sharedAverageMeta,
   onRefreshSharedAverage,
   onLeaveSharedSession,
+  onCloseHostedRoom,
   onSessionChange,
   onSelectSessionObj,
 }) {
@@ -108,6 +110,27 @@ function PlayerBar({
         </div>
 
         <div className="playerbar-timelist">
+          {hostedRoomMeta?.active ? (
+            <div className="playerbar-room-pill">
+              <span className="playerbar-room-pill__label">
+                {hostedRoomMeta.isHost ? "Hosting room" : "Following room"}
+              </span>
+              <span className="playerbar-room-pill__meta">{hostedRoomMeta.eventLabel}</span>
+              {hostedRoomMeta.roomCode ? (
+                <span className="playerbar-room-pill__meta">{hostedRoomMeta.roomCode}</span>
+              ) : null}
+              <button
+                type="button"
+                className="playerbar-room-pill__button"
+                onClick={() => {
+                  if (hostedRoomMeta.isHost) onCloseHostedRoom?.();
+                  else onLeaveSharedSession?.();
+                }}
+              >
+                {hostedRoomMeta.isHost ? "Stop" : "Leave"}
+              </button>
+            </div>
+          ) : null}
           {sharedAverageMeta?.active ? (
             <div className="playerbar-shared-strip">
               <div className="playerbar-shared-header">

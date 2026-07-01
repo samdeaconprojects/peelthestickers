@@ -73,6 +73,14 @@ const ENABLE_VERBOSE_DB_LOGS =
   String(process.env.PTS_LOG_DB_VERBOSE || "false").toLowerCase() === "true";
 const DB_READ_COST_PER_MILLION = Number(process.env.PTS_DB_READ_COST_PER_MILLION || 0.25);
 const DB_WRITE_COST_PER_MILLION = Number(process.env.PTS_DB_WRITE_COST_PER_MILLION || 1.25);
+const FREE_IMPORT_SOLVE_LIMIT = Math.max(
+  0,
+  Number(process.env.PTS_FREE_IMPORT_SOLVE_LIMIT || 100000)
+);
+const PAID_IMPORT_SOLVE_LIMIT = Math.max(
+  FREE_IMPORT_SOLVE_LIMIT,
+  Number(process.env.PTS_PAID_IMPORT_SOLVE_LIMIT || 2000000)
+);
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }), {
   marshallOptions: { removeUndefinedValues: true },
@@ -780,6 +788,209 @@ function normalizeImportSourceKey(value) {
   return String(value || "")
     .trim()
     .slice(0, 240);
+}
+
+function normalizeImportSolveCount(value) {
+  const count = Number(value || 0);
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  return Math.floor(count);
+}
+
+function coerceBoolean(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (["true", "1", "yes", "y", "paid", "active", "trialing", "pro", "premium"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "n", "free", "inactive", "canceled", "cancelled"].includes(normalized)) {
+    return false;
+  }
+  return null;
+}
+
+function normalizeImportSolveTier(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (["free", "none", "basic"].includes(normalized)) return "free";
+  if (["paid", "pro", "plus", "premium", "unlimited", "starter_paid"].includes(normalized)) {
+    return "paid";
+  }
+  return "";
+}
+
+function resolveExplicitImportSolveLimit(profile = null, settings = {}) {
+  const candidates = [
+    profile?.ImportSolveLimit,
+    profile?.importSolveLimit,
+    settings?.importSolveLimit,
+    settings?.ImportSolveLimit,
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Math.floor(parsed);
+    }
+  }
+
+  return null;
+}
+
+function getImportSolveAllowance(profile = null) {
+  const settings =
+    profile?.Settings && typeof profile.Settings === "object" ? profile.Settings : {};
+  const explicitLimit = resolveExplicitImportSolveLimit(profile, settings);
+  const used = normalizeImportSolveCount(profile?.ImportSolveCount ?? profile?.importSolveCount);
+
+  if (explicitLimit != null) {
+    return {
+      isPaid: explicitLimit > FREE_IMPORT_SOLVE_LIMIT,
+      limit: explicitLimit,
+      used,
+    };
+  }
+
+  const tierCandidates = [
+    profile?.ImportSolveTier,
+    profile?.importSolveTier,
+    settings?.importSolveTier,
+    settings?.ImportSolveTier,
+  ];
+
+  for (const candidate of tierCandidates) {
+    const normalizedTier = normalizeImportSolveTier(candidate);
+    if (!normalizedTier) continue;
+    return {
+      isPaid: normalizedTier === "paid",
+      limit: normalizedTier === "paid" ? PAID_IMPORT_SOLVE_LIMIT : FREE_IMPORT_SOLVE_LIMIT,
+      used,
+    };
+  }
+
+  const booleanCandidates = [
+    profile?.IsPaid,
+    profile?.isPaid,
+    settings?.isPaid,
+  ];
+
+  for (const candidate of booleanCandidates) {
+    const coerced = coerceBoolean(candidate);
+    if (coerced != null) {
+      return {
+        isPaid: coerced,
+        limit: coerced ? PAID_IMPORT_SOLVE_LIMIT : FREE_IMPORT_SOLVE_LIMIT,
+        used,
+      };
+    }
+  }
+
+  return {
+    isPaid: false,
+    limit: FREE_IMPORT_SOLVE_LIMIT,
+    used,
+  };
+}
+
+function buildImportSolveLimitError({ requested = 0, used = 0, limit = FREE_IMPORT_SOLVE_LIMIT, isPaid = false } = {}) {
+  const remaining = Math.max(0, limit - used);
+  const tierLabel = isPaid ? "paid" : "free";
+  const error = new Error(
+    `Import solve limit exceeded for ${tierLabel} users. Requested ${requested.toLocaleString()} solves, ${used.toLocaleString()} already imported, ${remaining.toLocaleString()} remaining out of ${limit.toLocaleString()}.`
+  );
+  error.code = "IMPORT_SOLVE_LIMIT_EXCEEDED";
+  error.statusCode = 403;
+  error.meta = {
+    requested,
+    used,
+    remaining,
+    limit,
+    tier: tierLabel,
+  };
+  return error;
+}
+
+async function reserveImportSolveAllowance(userID, requestedCount, profile = null) {
+  const requested = normalizeImportSolveCount(requestedCount);
+  const currentProfile = profile || (await getUserProfile(userID));
+  if (!currentProfile) throw new Error("User not found");
+
+  const allowance = getImportSolveAllowance(currentProfile);
+  if (requested <= 0) return allowance;
+  if (allowance.used + requested > allowance.limit) {
+    throw buildImportSolveLimitError({
+      requested,
+      used: allowance.used,
+      limit: allowance.limit,
+      isPaid: allowance.isPaid,
+    });
+  }
+
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${userID}`, SK: "PROFILE" },
+        ConditionExpression:
+          "attribute_exists(PK) AND (attribute_not_exists(#count) OR #count <= :maxBefore)",
+        UpdateExpression: "SET #count = if_not_exists(#count, :zero) + :delta, #UpdatedAt = :updatedAt",
+        ExpressionAttributeNames: {
+          "#count": "ImportSolveCount",
+          "#UpdatedAt": "UpdatedAt",
+        },
+        ExpressionAttributeValues: {
+          ":zero": 0,
+          ":delta": requested,
+          ":maxBefore": allowance.limit - requested,
+          ":updatedAt": nowIso(),
+        },
+      })
+    );
+  } catch (err) {
+    if (String(err?.name || "") === "ConditionalCheckFailedException") {
+      const refreshedProfile = await getUserProfile(userID);
+      const refreshedAllowance = getImportSolveAllowance(refreshedProfile);
+      throw buildImportSolveLimitError({
+        requested,
+        used: refreshedAllowance.used,
+        limit: refreshedAllowance.limit,
+        isPaid: refreshedAllowance.isPaid,
+      });
+    }
+    throw err;
+  }
+
+  return {
+    ...allowance,
+    used: allowance.used + requested,
+  };
+}
+
+async function releaseImportSolveAllowance(userID, releasedCount) {
+  const released = normalizeImportSolveCount(releasedCount);
+  if (!userID || released <= 0) return;
+
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${userID}`, SK: "PROFILE" },
+        ConditionExpression: "attribute_exists(PK) AND attribute_exists(#count) AND #count >= :released",
+        UpdateExpression: "SET #count = #count - :released, #UpdatedAt = :updatedAt",
+        ExpressionAttributeNames: {
+          "#count": "ImportSolveCount",
+          "#UpdatedAt": "UpdatedAt",
+        },
+        ExpressionAttributeValues: {
+          ":released": released,
+          ":updatedAt": nowIso(),
+        },
+      })
+    );
+  } catch (err) {
+    console.error("releaseImportSolveAllowance failed:", err);
+  }
 }
 
 function stableJsonValue(value) {
@@ -4561,6 +4772,9 @@ function buildGroupMetaItem({
   conversationID,
   color = "",
   photo = "",
+  isJoinable = false,
+  joinCode = "",
+  isStreamRoom = false,
   createdAt,
 }) {
   const ts = String(createdAt || nowIso());
@@ -4576,6 +4790,9 @@ function buildGroupMetaItem({
     MemberCount: members.length,
     Color: String(color || "").trim(),
     Photo: String(photo || "").trim(),
+    IsJoinable: isJoinable === true,
+    JoinCode: String(joinCode || groupID || "").trim() || groupID,
+    IsStreamRoom: isStreamRoom === true,
     CreatedAt: ts,
     UpdatedAt: ts,
   };
@@ -4604,6 +4821,9 @@ function buildUserGroupItems({
   conversationID,
   color = "",
   photo = "",
+  isJoinable = false,
+  joinCode = "",
+  isStreamRoom = false,
   createdAt,
 }) {
   const ts = String(createdAt || nowIso());
@@ -4617,9 +4837,80 @@ function buildUserGroupItems({
     Role: userID === ownerID ? "OWNER" : "MEMBER",
     Color: String(color || "").trim(),
     Photo: String(photo || "").trim(),
+    IsJoinable: isJoinable === true,
+    JoinCode: String(joinCode || groupID || "").trim() || groupID,
+    IsStreamRoom: isStreamRoom === true,
     CreatedAt: ts,
     UpdatedAt: ts,
   }));
+}
+
+async function syncConversationMembership({
+  conversationID,
+  conversationType,
+  memberIDs,
+  name = "",
+  lastMessageAt = null,
+  lastMessagePreview = "",
+  timestamp,
+}) {
+  const ts = String(timestamp || nowIso());
+  const members = normalizeMemberIDs(memberIDs);
+  const type = normalizeConversationType(conversationType);
+  const lastAt = lastMessageAt || null;
+  const lastPreview = String(lastMessagePreview || "");
+
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { PK: `CONVO#${conversationID}`, SK: "META" },
+      UpdateExpression:
+        "SET ConversationType = :type, #name = :name, MemberCount = :count, UpdatedAt = :updated",
+      ExpressionAttributeNames: {
+        "#name": "Name",
+      },
+      ExpressionAttributeValues: {
+        ":type": type,
+        ":name": String(name || "").trim(),
+        ":count": members.length,
+        ":updated": ts,
+      },
+    })
+  );
+
+  await Promise.all(
+    members.map((userID) => {
+      const otherMemberIDs = members.filter((id) => id !== userID);
+      const displayName =
+        type === "DM" ? otherMemberIDs[0] || userID : String(name || "").trim() || conversationID;
+
+      return ddb.send(
+        new UpdateCommand({
+          TableName: TABLE,
+          Key: { PK: `USER#${userID}`, SK: `CONVO#${conversationID}` },
+          UpdateExpression:
+            "SET ConversationID = :cid, ConversationType = :type, #name = :name, DisplayName = :displayName, OtherUserID = :other, MemberIDs = :members, LastMessageAt = :last, LastMessagePreview = :preview, UpdatedAt = :updated, ItemType = :itemType, CreatedAt = if_not_exists(CreatedAt, :created), SharedStats = if_not_exists(SharedStats, :stats)",
+          ExpressionAttributeNames: {
+            "#name": "Name",
+          },
+          ExpressionAttributeValues: {
+            ":cid": conversationID,
+            ":type": type,
+            ":name": String(name || "").trim(),
+            ":displayName": displayName,
+            ":other": type === "DM" ? otherMemberIDs[0] || null : null,
+            ":members": members,
+            ":last": lastAt,
+            ":preview": lastPreview,
+            ":updated": ts,
+            ":itemType": "USERCONVO",
+            ":created": ts,
+            ":stats": createEmptySharedStats(),
+          },
+        })
+      );
+    })
+  );
 }
 
 async function getGroupMeta(groupID) {
@@ -5857,6 +6148,18 @@ app.post("/api/importJobs", async (req, res) => {
       req.body?.metadata && typeof req.body.metadata === "object" ? req.body.metadata : {};
 
     if (!userID) return res.status(400).json({ error: "Missing userID" });
+    const profile = await getUserProfile(userID);
+    if (!profile) return res.status(404).json({ error: "User not found" });
+
+    const allowance = getImportSolveAllowance(profile);
+    if (allowance.used >= allowance.limit) {
+      throw buildImportSolveLimitError({
+        requested: totalSolves,
+        used: allowance.used,
+        limit: allowance.limit,
+        isPaid: allowance.isPaid,
+      });
+    }
 
     const jobID = createImportJobID();
     const ts = nowIso();
@@ -5896,7 +6199,7 @@ app.post("/api/importJobs", async (req, res) => {
     return res.json({ ok: true, job: publicImportJob(item) });
   } catch (e) {
     console.error("POST /api/importJobs error:", e);
-    return res.status(500).json({ error: e?.message || "Server error" });
+    return res.status(Number(e?.statusCode) || 500).json({ error: e?.message || "Server error" });
   }
 });
 
@@ -6090,7 +6393,16 @@ app.post("/api/importJobs/:userID/:jobID/chunk", async (req, res) => {
       0
     );
 
-    const wrote = await batchWriteRequestsWithRetry(requests);
+    await reserveImportSolveAllowance(userID, accepted);
+
+    let wrote = 0;
+    try {
+      wrote = await batchWriteRequestsWithRetry(requests);
+    } catch (err) {
+      await releaseImportSolveAllowance(userID, accepted);
+      throw err;
+    }
+
     const ts = nowIso();
     const next = {
       ...job,
@@ -6114,7 +6426,7 @@ app.post("/api/importJobs/:userID/:jobID/chunk", async (req, res) => {
     });
   } catch (e) {
     console.error("POST /api/importJobs/:userID/:jobID/chunk error:", e);
-    return res.status(500).json({ error: e?.message || "Server error" });
+    return res.status(Number(e?.statusCode) || 500).json({ error: e?.message || "Server error" });
   }
 });
 
@@ -6249,7 +6561,16 @@ app.post("/api/importSolvesBatch", async (req, res) => {
       });
     }
 
-    const wrote = await batchWriteRequestsWithRetry(requests);
+    await reserveImportSolveAllowance(userID, addedSolves.length);
+
+    let wrote = 0;
+    try {
+      wrote = await batchWriteRequestsWithRetry(requests);
+    } catch (err) {
+      await releaseImportSolveAllowance(userID, addedSolves.length);
+      throw err;
+    }
+
     let sessionStats = null;
     let eventStats = null;
     let dayBuckets = { event, daysAffected: [] };
@@ -6265,7 +6586,7 @@ app.post("/api/importSolvesBatch", async (req, res) => {
     return res.json({ ok: true, addedSolves, wrote, sessionStats, eventStats, dayBuckets });
   } catch (e) {
     console.error("POST /api/importSolvesBatch error:", e);
-    return res.status(500).json({ error: e?.message || "Server error" });
+    return res.status(Number(e?.statusCode) || 500).json({ error: e?.message || "Server error" });
   }
 });
 
@@ -6362,7 +6683,14 @@ app.post("/api/wca/import", async (req, res) => {
     }
 
     if (requests.length) {
-      await batchWriteRequestsWithRetry(requests);
+      await reserveImportSolveAllowance(userID, importedSolveCount, userItem);
+
+      try {
+        await batchWriteRequestsWithRetry(requests);
+      } catch (err) {
+        await releaseImportSolveAllowance(userID, importedSolveCount);
+        throw err;
+      }
 
       const affectedEvents = new Set();
       for (const group of groups) {
@@ -6418,7 +6746,7 @@ app.post("/api/wca/import", async (req, res) => {
     });
   } catch (e) {
     console.error("POST /api/wca/import error:", e);
-    return res.status(500).json({ error: e?.message || "Server error" });
+    return res.status(Number(e?.statusCode) || 500).json({ error: e?.message || "Server error" });
   }
 });
 
@@ -7441,18 +7769,25 @@ app.post("/api/group", async (req, res) => {
     const providedGroupID = normalizeGroupID(req.body?.groupID || "");
     const color = String(req.body?.color || "").trim();
     const photo = String(req.body?.photo || "").trim();
+    const isJoinable = req.body?.isJoinable === true;
+    const isStreamRoom = req.body?.isStreamRoom === true || isJoinable;
     const memberIDs = normalizeMemberIDs([ownerID, ...(req.body?.memberIDs || [])]);
 
     if (!ownerID) return res.status(400).json({ error: "Missing ownerID" });
     if (!name) return res.status(400).json({ error: "Missing name" });
-    if (memberIDs.length < 2) {
-      return res.status(400).json({ error: "Groups require at least 2 members" });
+    if (memberIDs.length < (isJoinable ? 1 : 2)) {
+      return res.status(400).json({
+        error: isJoinable
+          ? "Joinable rooms require at least 1 member"
+          : "Groups require at least 2 members",
+      });
     }
 
     const groupID =
       providedGroupID ||
       `grp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const conversationID = `GROUP#${groupID}`;
+    const joinCode = groupID;
 
     const existing = await getGroupMeta(groupID);
     if (existing) {
@@ -7469,6 +7804,9 @@ app.post("/api/group", async (req, res) => {
       conversationID,
       color,
       photo,
+      isJoinable,
+      joinCode,
+      isStreamRoom,
       createdAt: ts,
     });
     const groupMembers = buildGroupMemberItems({ groupID, memberIDs, ownerID, createdAt: ts });
@@ -7480,6 +7818,9 @@ app.post("/api/group", async (req, res) => {
       conversationID,
       color,
       photo,
+      isJoinable,
+      joinCode,
+      isStreamRoom,
       createdAt: ts,
     });
 
@@ -7497,6 +7838,125 @@ app.post("/api/group", async (req, res) => {
     return res.json({ ok: true, item: groupMeta, members: groupMembers, existed: false });
   } catch (e) {
     console.error("POST /api/group error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.post("/api/group/join", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const userID = String(req.body?.userID || "").trim();
+    const requestedCode = normalizeGroupID(req.body?.groupID || req.body?.roomCode || "");
+
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+    if (!requestedCode) return res.status(400).json({ error: "Missing room code" });
+
+    const group = await getGroupMeta(requestedCode);
+    if (!group) {
+      return res.status(404).json({ error: "Room not found" });
+    }
+
+    if (group.IsJoinable !== true && group.IsStreamRoom !== true) {
+      return res.status(403).json({ error: "This room is not open for joining" });
+    }
+
+    const existingMembers = await listGroupMembers(requestedCode);
+    const existingMemberIDs = normalizeMemberIDs(existingMembers.map((member) => member?.UserID));
+
+    if (existingMemberIDs.includes(userID)) {
+      return res.json({
+        ok: true,
+        item: group,
+        members: existingMembers,
+        existed: true,
+      });
+    }
+
+    const ts = nowIso();
+    const nextMemberIDs = normalizeMemberIDs([...existingMemberIDs, userID]);
+    const conversationID = String(group?.ConversationID || `GROUP#${requestedCode}`).trim();
+
+    const groupMember = buildGroupMemberItems({
+      groupID: requestedCode,
+      memberIDs: [userID],
+      ownerID: String(group?.OwnerID || "").trim(),
+      createdAt: ts,
+    });
+    const userGroup = buildUserGroupItems({
+      groupID: requestedCode,
+      memberIDs: [userID],
+      ownerID: String(group?.OwnerID || "").trim(),
+      name: String(group?.Name || requestedCode).trim(),
+      conversationID,
+      color: String(group?.Color || "").trim(),
+      photo: String(group?.Photo || "").trim(),
+      isJoinable: group.IsJoinable === true,
+      joinCode: String(group?.JoinCode || requestedCode).trim(),
+      isStreamRoom: group.IsStreamRoom === true,
+      createdAt: ts,
+    });
+
+    await batchWriteRequestsWithRetry(
+      [...groupMember, ...userGroup].map((Item) => ({ PutRequest: { Item } }))
+    );
+
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `GROUP#${requestedCode}`, SK: "META" },
+        UpdateExpression: "SET MemberCount = :count, UpdatedAt = :updated",
+        ExpressionAttributeValues: {
+          ":count": nextMemberIDs.length,
+          ":updated": ts,
+        },
+      })
+    );
+
+    const conversationMeta = await getConversationMeta(conversationID);
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: {
+          PK: `CONVO#${conversationID}`,
+          SK: `MEMBER#${userID}`,
+          ItemType: "CONVOMEMBER",
+          ConversationID: conversationID,
+          ConversationType: "GROUP",
+          UserID: userID,
+          Role: "MEMBER",
+          JoinedAt: ts,
+          CreatedAt: ts,
+          UpdatedAt: ts,
+        },
+      })
+    );
+
+    await syncConversationMembership({
+      conversationID,
+      conversationType: "GROUP",
+      memberIDs: nextMemberIDs,
+      name: String(group?.Name || requestedCode).trim(),
+      lastMessageAt: conversationMeta?.LastMessageAt || null,
+      lastMessagePreview: conversationMeta?.LastMessagePreview || "",
+      timestamp: ts,
+    });
+
+    const refreshedGroup = await getGroupMeta(requestedCode);
+    const refreshedMembers = await listGroupMembers(requestedCode);
+
+    return res.json({
+      ok: true,
+      item: refreshedGroup || {
+        ...group,
+        MemberCount: nextMemberIDs.length,
+        UpdatedAt: ts,
+      },
+      members: refreshedMembers,
+      existed: false,
+    });
+  } catch (e) {
+    console.error("POST /api/group/join error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
   }
 });

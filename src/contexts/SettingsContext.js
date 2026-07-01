@@ -50,9 +50,13 @@ function normalizeNonRollingMaxRows(rawValue) {
   return 3;
 }
 
-function normalizeStatsSummaryLayout(rawValue) {
+function normalizeStatsSummaryLayout() {
+  return "row";
+}
+
+function normalizeDetailViewSurfaceMode(rawValue) {
   const raw = String(rawValue || "").trim().toLowerCase();
-  return raw === "row" ? "row" : "tile";
+  return raw === "legacy" ? "legacy" : "themed";
 }
 
 function normalizePlayerBarTagFields(rawValue) {
@@ -83,6 +87,7 @@ export const defaultSettings = {
   timeColorMode: "index",
   sharedTimeColorMode: "profile",
   showStrictAverages: false,
+  whitePuzzleSVGs: false,
 
   eventKeyBindings: defaultEventBindings,
   pageKeyBindings: defaultPageBindings,
@@ -116,6 +121,7 @@ export const defaultSettings = {
   hideAutomaticHomeTags: false,
   playerBarTagFields: ["CubeModel"],
   statsSummaryLayout: "row",
+  detailViewSurfaceMode: "themed",
 
   // random-state = cubing.js default
   // legacy = old generateScramble behavior
@@ -161,6 +167,9 @@ function mergeSettings(input) {
     safe.nonRollingTimeListMaxRows
   );
   const statsSummaryLayout = normalizeStatsSummaryLayout(safe.statsSummaryLayout);
+  const detailViewSurfaceMode = normalizeDetailViewSurfaceMode(
+    safe.detailViewSurfaceMode
+  );
   const playerBarTagFields = normalizePlayerBarTagFields(safe.playerBarTagFields);
 
   return {
@@ -173,6 +182,7 @@ function mergeSettings(input) {
     nonRollingTimeListCols,
     nonRollingTimeListMaxRows,
     statsSummaryLayout,
+    detailViewSurfaceMode,
     playerBarTagFields,
     eventKeyBindings: {
       ...defaultEventBindings,
@@ -222,6 +232,18 @@ export const SettingsProvider = ({ children }) => {
   useEffect(() => {
     const primaryColor = settings.primaryColor || defaultSettings.primaryColor;
     const playerBarColor = darkenHex(primaryColor, 0.19, "#181F23");
+    const themedDetailColor = darkenHex(playerBarColor, 0.12, "#14191d");
+    const detailViewSurfaceMode = normalizeDetailViewSurfaceMode(
+      settings.detailViewSurfaceMode
+    );
+    const detailSurfaceStrong =
+      detailViewSurfaceMode === "legacy"
+        ? "rgba(29, 29, 29, 0.97)"
+        : `rgba(${hexToRgbString(themedDetailColor, "20, 25, 29")}, 0.97)`;
+    const detailSurfaceSoft =
+      detailViewSurfaceMode === "legacy"
+        ? "rgba(61, 61, 61, 0.8)"
+        : `rgba(${hexToRgbString(themedDetailColor, "20, 25, 29")}, 0.88)`;
 
     document.documentElement.style.setProperty(
       "--primary-color",
@@ -236,7 +258,15 @@ export const SettingsProvider = ({ children }) => {
       "--player-bar-bg-rgb",
       hexToRgbString(playerBarColor, "24, 31, 35")
     );
-  }, [settings.primaryColor, settings.secondaryColor]);
+    document.documentElement.style.setProperty(
+      "--detail-surface-strong",
+      detailSurfaceStrong
+    );
+    document.documentElement.style.setProperty(
+      "--detail-surface-soft",
+      detailSurfaceSoft
+    );
+  }, [settings.primaryColor, settings.secondaryColor, settings.detailViewSurfaceMode]);
 
   const updateSettings = useCallback((newSettings) => {
     setSettings((prev) => mergeSettings({ ...prev, ...(newSettings || {}) }));

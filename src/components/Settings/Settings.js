@@ -433,9 +433,8 @@ function normalizeNavigationArrowStyleForUi(rawValue) {
   return raw === "classic" ? "classic" : "scramble";
 }
 
-function normalizeStatsSummaryLayoutForUi(rawValue) {
-  const raw = String(rawValue || "").trim().toLowerCase();
-  return raw === "row" ? "row" : "tile";
+function normalizeStatsSummaryLayoutForUi() {
+  return "row";
 }
 
 function normalizePlayerBarTagFieldsForUi(rawValue) {
@@ -461,6 +460,7 @@ function Settings({
   onStatsImport,
   onStatsExport,
   onSessionsRefresh,
+  onOpenTutorial,
 }) {
   const { settings, updateSettings, setAllSettings } = useSettings();
   const { runDb } = useDbStatus();
@@ -1274,7 +1274,19 @@ function Settings({
               onChange={(e) => updateSettings({ statsSummaryLayout: e.target.value })}
             >
               <option value="row">Row view</option>
-              <option value="tile">Tile view</option>
+            </select>
+          </div>
+
+          <div className="setting-item">
+            <label>Detail View Surface</label>
+            <select
+              value={settings.detailViewSurfaceMode || "themed"}
+              onChange={(e) =>
+                updateSettings({ detailViewSurfaceMode: e.target.value })
+              }
+            >
+              <option value="themed">Themed (player bar tint)</option>
+              <option value="legacy">Legacy dark gray</option>
             </select>
           </div>
 
@@ -1284,6 +1296,15 @@ function Settings({
               type="checkbox"
               checked={settings.showStrictAverages !== false}
               onChange={(e) => updateSettings({ showStrictAverages: e.target.checked })}
+            />
+          </div>
+
+          <div className="setting-item">
+            <label>White Puzzle SVGs</label>
+            <input
+              type="checkbox"
+              checked={settings.whitePuzzleSVGs === true}
+              onChange={(e) => updateSettings({ whitePuzzleSVGs: e.target.checked })}
             />
           </div>
 
@@ -1781,6 +1802,19 @@ function Settings({
               value={profileData.WCAID}
               onChange={(e) => handleProfileChange("WCAID", e.target.value)}
             />
+          </div>
+
+          <div className="setting-item settingsActionsRow">
+            <label>Tutorial:</label>
+            <div className="settingsActionGroup">
+              <button
+                type="button"
+                className="settingsActionButton settingsActionButtonSecondary"
+                onClick={onOpenTutorial}
+              >
+                Open Tutorial
+              </button>
+            </div>
           </div>
         </div>
 

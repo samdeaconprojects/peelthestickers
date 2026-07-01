@@ -20,6 +20,7 @@ const PuzzleSVG = ({
   isProfileCube,
   isAvatarCube,    // ✅ NEW: for Social message avatars / name tiles
   isStatsHeaderIcon,
+  forceWhite = false,
 }) => {
   const faceBasedEvents = ["222", "333", "444", "555", "666", "777", "333OH", "333BLD"];
   const isRubikEvent = faceBasedEvents.includes(event);
@@ -157,7 +158,7 @@ const PuzzleSVG = ({
 
         {/* ✅ wrapper nudge does NOT change RubiksCubeSVG scaling */}
         <div
-          className="puzzle-svg-inner"
+          className={`puzzle-svg-inner${forceWhite ? " puzzle-svg-inner--white" : ""}`}
           style={{
             transform: `translate(${nudgeX}px, ${nudgeY}px) scale(${headerScale * oneHandScale})`,
             transformOrigin: "center",
@@ -208,7 +209,10 @@ const PuzzleSVG = ({
         </button>
       )}
 
-      <div className="puzzle-svg-inner" style={{ transform: `translate(${nudgeX}px, ${nudgeY}px)` }}>
+      <div
+        className={`puzzle-svg-inner${forceWhite ? " puzzle-svg-inner--white" : ""}`}
+        style={{ transform: `translate(${nudgeX}px, ${nudgeY}px)` }}
+      >
         <SpecificPuzzle
           scramble={scramble}
           size={size}

@@ -121,6 +121,45 @@
   position: relative;
 }
 
+.playerbar-room-pill {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translate(-50%, -100%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(80, 182, 255, 0.34);
+  background: rgba(80, 182, 255, 0.12);
+  color: white;
+  white-space: nowrap;
+}
+
+.playerbar-room-pill__label {
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.playerbar-room-pill__meta {
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.72;
+}
+
+.playerbar-room-pill__button {
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255,255,255,0.14);
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .playerbar-shared-strip {
   width: 100%;
   max-width: 700px;

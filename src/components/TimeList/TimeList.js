@@ -166,6 +166,10 @@ function buildSharedMirrorRows(rows = [], colsPerRow = 12) {
   return out;
 }
 
+const DEFAULT_HORIZONTAL_AUTO_COLS_BREAKPOINT_PX = 1250;
+const DEFAULT_NON_ROLLING_AUTO_COLS_BREAKPOINT_PX = 1100;
+const DEFAULT_COMPACT_HORIZONTAL_LARGE_MIN_WIDTH_PX = 0;
+
 function TimeList({
   user,
   applyPenalty,
@@ -192,6 +196,9 @@ function TimeList({
   canLoadMore = true,
   isLoadingMore = false,
   totalSolveCount,
+  horizontalAutoColsBreakpointPx = DEFAULT_HORIZONTAL_AUTO_COLS_BREAKPOINT_PX,
+  nonRollingAutoColsBreakpointPx = DEFAULT_NON_ROLLING_AUTO_COLS_BREAKPOINT_PX,
+  compactHorizontalLargeMinWidthPx = DEFAULT_COMPACT_HORIZONTAL_LARGE_MIN_WIDTH_PX,
 
   sharedAverageMeta = null,
   onRefreshSharedAverage,
@@ -258,7 +265,7 @@ function TimeList({
       ? 12
       : horizontalColsSetting === "5"
       ? 5
-      : windowWidth > 1250
+      : windowWidth > horizontalAutoColsBreakpointPx
       ? 12
       : 5;
 
@@ -270,7 +277,7 @@ function TimeList({
       ? 12
       : nonRollingColsSetting === "5"
       ? 5
-      : windowWidth > 1100
+      : windowWidth > nonRollingAutoColsBreakpointPx
       ? 12
       : 5;
 
@@ -296,7 +303,7 @@ function TimeList({
         ? 12
         : nonRollingColsSetting === "5"
         ? 5
-        : window.innerWidth > 1100
+        : window.innerWidth > nonRollingAutoColsBreakpointPx
         ? 12
         : 5;
     const resolvedRowsToDisplay = inPlayerBar ? 1 : nonRollingRowsToDisplay;
@@ -304,7 +311,13 @@ function TimeList({
     setCurrentPage(Math.max(0, totalRows - resolvedRowsToDisplay));
 
     return () => window.removeEventListener("resize", handleResize);
-  }, [inPlayerBar, nonRollingColsSetting, nonRollingRowsToDisplay, solvesSafe.length]);
+  }, [
+    inPlayerBar,
+    nonRollingColsSetting,
+    nonRollingRowsToDisplay,
+    nonRollingAutoColsBreakpointPx,
+    solvesSafe.length,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -400,8 +413,24 @@ function TimeList({
     return { [overallMin]: true };
   }, [canonicalSessionBestSingleMs, overallMin, practiceMode, solvesSafe]);
 
-  const colsPerRow = isHorizontal ? (windowWidth > 1100 ? 12 : 5) : nonRollingColsPerRow;
+  const colsPerRow = isHorizontal
+    ? windowWidth > horizontalAutoColsBreakpointPx
+      ? 12
+      : 5
+    : nonRollingColsPerRow;
   const rowsToDisplay = inPlayerBar ? 1 : isHorizontal ? rowsToShow : nonRollingRowsToDisplay;
+  const homeCompactHorizontalStyle =
+    !inPlayerBar &&
+    isHorizontal &&
+    colsPerRow === 5 &&
+    windowWidth > compactHorizontalLargeMinWidthPx
+      ? {
+          "--home-timelist-scale": 1.16,
+          "--home-timelist-padding-scale": 1.18,
+          "--home-horizontal-cell-width": "82px",
+          "--home-horizontal-cell-height": "36px",
+        }
+      : null;
 
   const maxPage = useMemo(() => {
     const denom = colsPerRow * rowsToDisplay;
@@ -932,7 +961,7 @@ function TimeList({
     Array.isArray(selectedSolveList) && selectedSolveList.every((s) => hasRealSolveRef(s));
 
   return (
-    <div className="time-list-container">
+    <div className="time-list-container" style={homeCompactHorizontalStyle || undefined}>
       <BulkSolveControls
         selectionCount={selection.selectionCount}
         clearSelection={selection.clearSelection}

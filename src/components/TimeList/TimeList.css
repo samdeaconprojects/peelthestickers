@@ -306,7 +306,8 @@
 
 .ao5.best-time,
 .ao12.best-time {
-  color: green;
+  color: #5CFF72;
+  text-shadow: 0 0 10px rgba(92, 255, 114, 0.28);
 }
 
 .ao5.worst-time,

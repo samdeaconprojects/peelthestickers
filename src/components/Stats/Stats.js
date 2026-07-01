@@ -1592,10 +1592,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const [statsViewMode, setStatsViewMode] = useState("standard");
   const [standardSubview, setStandardSubview] = useState("solves");
   const [timeViewMainSessionsOnly, setTimeViewMainSessionsOnly] = useState(true);
-  const summaryLayout =
-    String(settings?.statsSummaryLayout || "row").trim().toLowerCase() === "row"
-      ? "row"
-      : "tile";
+  const summaryLayout = "row";
   const showSolveCharts = isSolveLevelMode || statsViewMode === "time";
   const [selectedTimeDay, setSelectedTimeDay] = useState("");
   const [dateFilterStart, setDateFilterStart] = useState("");
@@ -3783,18 +3780,24 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       : statsViewMode === "time"
         ? summaryCurrentSolves.length
         : activeStandardSolves.length;
+  const overallStatsSolveCount = Number(overallStatsForEvent?.SolveCountTotal || 0);
   const overallStatsMissingPlus2Best = useMemo(() => {
     if (!overallStatsForEvent) return false;
+    if (overallStatsSolveCount <= 0) return false;
     const plus2Count = Number(overallStatsForEvent?.Plus2Count || 0);
     if (plus2Count <= 0) return false;
     return !Number.isFinite(Number(overallStatsForEvent?.Plus2BestMs));
-  }, [overallStatsForEvent]);
+  }, [overallStatsForEvent, overallStatsSolveCount]);
   const overallStatsMissingFirstSolveAt = useMemo(() => {
+    if (!overallStatsForEvent) return false;
+    if (overallStatsSolveCount <= 0) return false;
     return !String(overallStatsForEvent?.FirstSolveAt || "").trim();
-  }, [overallStatsForEvent]);
+  }, [overallStatsForEvent, overallStatsSolveCount]);
   const overallStatsNeedsTopSinglesRepair = useMemo(() => {
+    if (!overallStatsForEvent) return false;
+    if (overallStatsSolveCount <= 0) return false;
     return overallStatsForEvent?.NeedsTopSinglesRepair === true;
-  }, [overallStatsForEvent]);
+  }, [overallStatsForEvent, overallStatsSolveCount]);
 
   const overallCount = useMemo(() => {
     if (canonicalOverallStats?.SolveCountTotal != null) return canonicalOverallStats.SolveCountTotal;
@@ -5210,7 +5213,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         });
       } catch (e) {
         console.error("Import failed:", e);
-        alert("Import failed. Check console for details.");
+        alert(String(e?.message || "Import failed."));
       } finally {
         setImportBusy(false);
         setImportProgress(null);

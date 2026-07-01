@@ -984,7 +984,7 @@ td:nth-child(13) {
 }
 
 .statsScopeChip {
-  background: #3D3D3D;
+  background: var(--theme-surface-soft);
   color: white;
   padding: 7px 12px;
   border-radius: 8px;
@@ -2754,17 +2754,16 @@ td:nth-child(13) {
   border-radius: inherit;
   background: var(--pie-legend-accent, #2EC4B6);
   border-left: 1px solid var(--pie-legend-accent, #2EC4B6);
-  opacity: 0;
-  transform: scaleX(0);
+  opacity: 0.32;
+  transform: scaleX(1);
   transform-origin: right center;
-  transition: transform 0.22s ease, opacity 0.18s ease;
+  transition: opacity 0.18s ease;
 }
 
 .pieChartLegendItem.is-active .pieChartLegendBarFill,
 .pieChartLegendItem:hover .pieChartLegendBarFill,
 .pieChartLegendItem:focus-visible .pieChartLegendBarFill {
-  opacity: 0.38;
-  transform: scaleX(1);
+  opacity: 0.46;
 }
 
 .pieChartLegendSwatch {
@@ -2780,6 +2779,7 @@ td:nth-child(13) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: rgba(255,255,255,0.94);
   font-size: 11px;
   font-weight: 800;
   position: relative;
@@ -2787,7 +2787,7 @@ td:nth-child(13) {
 }
 
 .pieChartLegendMeta {
-  color: rgba(255,255,255,0.66);
+  color: rgba(255,255,255,0.76);
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
@@ -3342,7 +3342,7 @@ td:nth-child(13) {
   gap: 12px;
   padding: 18px;
   border-radius: 22px;
-  background: rgba(29, 29, 29, 0.97);
+  background: var(--detail-surface-strong);
   border: 1.5px solid rgba(255,255,255,0.24);
   box-shadow: 0 24px 80px rgba(0,0,0,0.45);
   overflow: hidden;
@@ -3759,7 +3759,7 @@ td:nth-child(13) {
   padding: 14px;
   border-radius: 22px;
   border: 1px solid rgba(255,255,255,0.1);
-  background: rgba(11, 14, 19, 0.96);
+  background: var(--detail-surface-strong);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
 }
 

@@ -2,7 +2,13 @@ import React, { useCallback, useEffect, useState } from "react";
 import "./SignInPopup.css";
 import PTSLongStatusLogo from "./PTSLongStatusLogo";
 
-function SignInPopup({ onSignIn, onSignUp, onClose }) {
+function SignInPopup({
+  onSignIn,
+  onSignUp,
+  onClose,
+  inline = false,
+  title = "",
+}) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
@@ -32,7 +38,7 @@ function SignInPopup({ onSignIn, onSignUp, onClose }) {
     const handleKeyDown = (e) => {
       if (isSubmitting) return;
 
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && onClose) {
         onClose();
         return;
       }
@@ -48,9 +54,18 @@ function SignInPopup({ onSignIn, onSignUp, onClose }) {
     };
   }, [handleSignIn, handleSignUp, isSubmitting, isSignUp, onClose]);
 
+  const wrapperClassName = inline ? "signInPopup signInPopup--inline" : "signInPopup";
+  const contentClassName = inline
+    ? "signInPopupContent signInPopupContent--inline"
+    : "signInPopupContent";
+
   return (
-    <div className="signInPopup" onClick={isSubmitting ? undefined : onClose}>
-      <div className="signInPopupContent" onClick={(e) => e.stopPropagation()}>
+    <div
+      className={wrapperClassName}
+      onClick={!inline && !isSubmitting ? onClose : undefined}
+    >
+      <div className={contentClassName} onClick={(e) => e.stopPropagation()}>
+        {title ? <p className="signInPopupTitle">{title}</p> : null}
         <div className="signInLogoWrap">
           <PTSLongStatusLogo
             status={{ phase: isSubmitting ? "loading" : "idle" }}

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { formatTime } from "../TimeList/TimeUtils";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
+import { useSettings } from "../../contexts/SettingsContext";
 
 function formatMetric(value, average = false) {
   const numeric = Number(value);
@@ -156,6 +157,8 @@ export default function AllEventsTimeMatrix({
   orientation = "horizontal",
   showSessionToggle = true,
 }) {
+  const { settings } = useSettings();
+  const useWhitePuzzleSVGs = settings?.whitePuzzleSVGs === true;
   const [showWorst, setShowWorst] = useState(false);
   const isVertical = orientation === "vertical";
   const matrixRowHeight = showWorst ? 62 : 52;
@@ -202,7 +205,12 @@ export default function AllEventsTimeMatrix({
                         }`}
                         aria-hidden="true"
                       >
-                        <PuzzleSVG event={getPuzzleIconEvent(item.event)} scramble="" isStatsHeaderIcon />
+                        <PuzzleSVG
+                          event={getPuzzleIconEvent(item.event)}
+                          scramble=""
+                          isStatsHeaderIcon
+                          forceWhite={useWhitePuzzleSVGs}
+                        />
                       </span>
                       <span className="statsEventMatrixEventLabel">{formatEventLabel(item.event)}</span>
                     </div>
@@ -255,8 +263,13 @@ export default function AllEventsTimeMatrix({
                         isNxNStyleEvent(item.event) ? "is-nxn" : "is-other"
                       }`}
                       aria-hidden="true"
-                      >
-                        <PuzzleSVG event={getPuzzleIconEvent(item.event)} scramble="" isStatsHeaderIcon />
+                    >
+                      <PuzzleSVG
+                        event={getPuzzleIconEvent(item.event)}
+                        scramble=""
+                        isStatsHeaderIcon
+                        forceWhite={useWhitePuzzleSVGs}
+                      />
                       </span>
                     <span className="statsEventMatrixEventLabel">{formatEventLabel(item.event)}</span>
                   </div>

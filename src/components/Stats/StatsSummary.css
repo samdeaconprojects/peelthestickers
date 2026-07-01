@@ -31,7 +31,8 @@
 .ssCard {
   --ss-line: rgba(255, 255, 255, 0.18);
   --ss-current: #5ab2ff;
-  --ss-best: #38d6c9;
+  --ss-best: #00e676;
+  --ss-overall-best: #38d6c9;
   --ss-strict: #f2ef62;
   --ss-worst: #ff6078;
   --ss-accent: #f2ef62;
@@ -90,7 +91,7 @@
 
 .ssCard--timeAllEvents {
   display: grid;
-  grid-template-columns: 156px minmax(180px, 0.58fr) minmax(0, 1.28fr);
+  grid-template-columns: 156px minmax(160px, 0.52fr) minmax(0, 1.08fr);
   gap: 12px;
   padding: 14px 14px 13px;
   align-items: center;
@@ -172,11 +173,13 @@
 
 .ssSharedSummaryGrid {
   display: grid;
-  grid-template-columns:
+  grid-template-columns: var(
+    --ss-shared-grid-columns,
     minmax(132px, 0.95fr)
-    repeat(8, minmax(86px, 1fr))
-    minmax(76px, 0.64fr)
-    minmax(148px, 1.26fr);
+      repeat(8, minmax(86px, 1fr))
+      minmax(76px, 0.64fr)
+      minmax(148px, 1.26fr)
+  );
   gap: 10px;
   align-items: stretch;
   width: 100%;
@@ -184,6 +187,10 @@
 
 .ssSharedSummaryLead,
 .ssSharedMetricColumn {
+  min-width: 0;
+}
+
+.ssSharedSummarySpacer {
   min-width: 0;
 }
 
@@ -198,42 +205,65 @@
 
 .ssSharedMetricColumn {
   display: grid;
-  grid-template-rows: 1fr;
+  grid-template-rows: minmax(28px, auto) 1fr;
   gap: 0;
   padding: 6px 8px;
+  align-content: start;
+}
+
+.ssSharedMetricColumn--meta {
+  grid-template-rows: 1fr;
+  align-content: stretch;
 }
 
 .ssSharedColumnTitle {
-  font-size: 0.68rem;
+  font-size: 0.76rem;
   line-height: 1;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: rgba(243, 244, 246, 0.66);
 }
 
 .ssSharedColumnTitle--single {
-  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  font-size: 0.78rem;
   color: rgba(243, 244, 246, 0.8);
   text-align: center;
 }
 
 .ssSharedMetricHeader {
+  display: flex;
+  align-items: center;
   justify-content: center;
-  gap: 2px;
+  min-height: 28px;
+  gap: 5px;
   text-align: center;
 }
 
+.ssSharedMetricHeader .ssMetricTilePrefix {
+  font-size: 0.78rem;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: rgba(243, 244, 246, 0.82);
+}
+
 .ssSharedMetricHeader .ssSharedMetricNumber {
-  font-size: clamp(1.08rem, 1.26vw, 1.28rem);
-  line-height: 0.96;
-  opacity: 0.82;
+  font-size: clamp(1.28rem, 1.5vw, 1.56rem);
+  line-height: 0.92;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: rgba(255, 255, 255, 0.98);
+  opacity: 1;
 }
 
 .ssSharedMetricHeader .ssSharedMetricNumber--wide {
-  font-size: clamp(0.92rem, 1.06vw, 1.08rem);
-  line-height: 0.96;
-  opacity: 0.82;
+  font-size: clamp(1.08rem, 1.24vw, 1.24rem);
+  line-height: 0.92;
 }
 
 .ssSharedMetricStack,
@@ -261,16 +291,18 @@
 
 .ssSharedSummaryGrid--current .ssSharedMetricColumn--meta {
   position: relative;
-  top: -6px;
+  top: -12px;
+  height: 100%;
 }
 
 .ssSharedMetricValueLabel,
 .ssSharedMetaLabel {
-  font-size: 0.66rem;
+  font-size: calc(0.66rem * var(--ss-shared-meta-label-scale, 1));
   line-height: 1;
   font-weight: 700;
   text-transform: uppercase;
   color: rgba(243, 244, 246, 0.52);
+  white-space: nowrap;
 }
 
 .ssSharedMetricValue {
@@ -288,30 +320,33 @@
 }
 
 .ssSharedMetricColumn .ssTileMetricValue {
-  font-size: clamp(1.08rem, 1.28vw, 1.22rem);
+  font-size: clamp(1.16rem, 1.36vw, 1.32rem);
   line-height: 0.96;
-  opacity: 0.9;
+  font-weight: 800;
+  opacity: 0.92;
 }
 
 .ssSharedMetricColumn .ssTileMetricValue--emphasized,
 .ssSharedMetricColumn .ssTileMetricValue.ssMetricValue--best {
-  font-size: clamp(1.44rem, 1.86vw, 1.82rem);
+  font-size: clamp(1.68rem, 2.16vw, 2.08rem);
   line-height: 0.92;
+  font-weight: 900;
   opacity: 1;
 }
 
 .ssSharedMetricColumn .ssTileMetricValueBlock--worst .ssTileMetricValue {
-  font-size: clamp(1.12rem, 1.34vw, 1.28rem);
+  font-size: clamp(1.04rem, 1.2vw, 1.18rem);
   line-height: 0.96;
   opacity: 0.92;
 }
 
 .ssSharedMetaValue {
-  font-size: clamp(0.94rem, 1.02vw, 1.06rem);
+  font-size: calc(0.98rem * var(--ss-shared-meta-value-scale, 1));
   line-height: 1.05;
   font-weight: 800;
   white-space: nowrap;
   justify-self: end;
+  min-width: 0;
 }
 
 .ssOverviewLead {
@@ -377,33 +412,36 @@
 }
 
 .ssCard--viewRow .ssSharedMetricColumn {
-  padding: 6px 6px;
-  transform: translateY(4px);
+  padding: 8px 6px 6px;
+  transform: none;
 }
 
 .ssCard--viewRow .ssSharedMetricColumn--ao .ssSharedMetricHeader {
-  gap: 3px;
+  gap: 5px;
+  position: static;
 }
 
 .ssCard--viewRow .ssSharedMetricColumn--ao .ssMetricTilePrefix {
-  color: rgba(243, 244, 246, 0.88);
-  font-size: 0.76rem;
-  font-weight: 700;
+  color: rgba(243, 244, 246, 0.9);
+  font-size: clamp(0.82rem, 0.92vw, 0.88rem);
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: 0.12em;
 }
 
 .ssCard--viewRow .ssSharedMetricColumn--ao .ssSharedMetricNumber {
   color: rgba(255, 255, 255, 0.98);
-  font-size: clamp(1.18rem, 1.44vw, 1.42rem);
-  font-weight: 700;
+  font-size: clamp(1.32rem, 1.62vw, 1.6rem);
+  font-weight: 900;
   opacity: 1;
 }
 
 .ssCard--viewRow .ssSharedMetricColumn--ao .ssSharedMetricNumber--wide {
-  font-size: clamp(1.02rem, 1.2vw, 1.16rem);
+  font-size: clamp(1.12rem, 1.3vw, 1.3rem);
 }
 
 .ssCard--viewRow .ssSharedMetricStack {
-  gap: 3px;
+  gap: 5px;
 }
 
 .ssCard--viewRow .ssSharedMetaStack {
@@ -415,7 +453,7 @@
 }
 
 .ssCard--viewRow .ssSharedMetaValue {
-  font-size: clamp(0.86rem, 0.96vw, 0.98rem);
+  font-size: calc(0.92rem * var(--ss-shared-meta-value-scale, 1));
 }
 
 .ssTimeAllEventsLead {
@@ -485,7 +523,7 @@
 
 .ssCard--timeAllEvents .pieChartRoot {
   gap: 4px;
-  grid-template-columns: minmax(160px, 1fr) minmax(0, 0.88fr);
+  grid-template-columns: minmax(154px, 0.9fr) minmax(0, 1fr);
 }
 
 .ssCard--timeAllEvents .pieChartCanvas {
@@ -501,11 +539,15 @@
 }
 
 .ssCard--timeAllEvents .pieChartLegend {
-  gap: 3px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(118px, 1fr));
+  gap: 6px;
   padding-left: 0;
+  align-content: center;
 }
 
 .ssCard--timeAllEvents .pieChartLegendItem {
+  min-height: 34px;
   padding: 4px 6px;
   border-radius: 8px;
 }
@@ -524,6 +566,16 @@
 
 .ssCard--timeAllEvents .pieChartCenterLabel {
   font-size: 8px;
+}
+
+@media (max-width: 1180px) {
+  .ssCard--timeAllEvents {
+    grid-template-columns: 156px minmax(140px, 0.5fr) minmax(0, 1fr);
+  }
+
+  .ssCard--timeAllEvents .pieChartLegend {
+    grid-template-columns: 1fr;
+  }
 }
 
 .ssCurrentSummaryGrid {
@@ -1486,9 +1538,33 @@
 }
 
 .ssSharedSummaryGrid--overall .ssSharedMetricColumn {
+  position: relative;
   align-content: center;
-  padding: 0 4px;
+  padding: 12px 4px 0;
   transform: translateY(3px);
+}
+
+.ssSharedSummaryGrid--overall .ssSharedMetricHeader,
+.ssSharedSummaryGrid--overall .ssSharedColumnTitle--single {
+  position: absolute;
+  top: 0;
+  left: 4px;
+  right: 4px;
+  min-height: 14px;
+  margin-bottom: 0;
+  justify-content: center;
+}
+
+.ssSharedSummaryGrid--overall .ssSharedMetricHeader .ssMetricTilePrefix {
+  font-size: 0.54rem;
+  letter-spacing: 0.1em;
+  color: rgba(243, 244, 246, 0.46);
+}
+
+.ssSharedSummaryGrid--overall .ssSharedMetricHeader .ssSharedMetricNumber,
+.ssSharedSummaryGrid--overall .ssSharedColumnTitle--single {
+  font-size: clamp(0.84rem, 0.92vw, 0.92rem);
+  color: rgba(243, 244, 246, 0.58);
 }
 
 .ssSharedSummaryGrid--overall .ssSharedMetricColumn--meta {
@@ -1514,7 +1590,7 @@
 .ssSharedSummaryGrid--overall .ssTileMetricValue--emphasized,
 .ssSharedSummaryGrid--overall .ssTileMetricValue.ssMetricValue--best {
   font-size: clamp(1.26rem, 1.4vw, 1.46rem);
-  color: var(--stats-accent-best-bold);
+  color: var(--ss-overall-best);
   transform: translateY(5px);
 }
 
@@ -1545,7 +1621,7 @@
 }
 
 .ssSharedSummaryGrid--overall .ssSharedMetaValue.ssMetricValue--best {
-  color: var(--stats-accent-best-bold);
+  color: var(--ss-overall-best);
 }
 
 .ssSharedSummaryGrid--overall .ssSharedMetaValue.ssMetricValue--worst {

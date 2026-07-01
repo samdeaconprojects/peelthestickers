@@ -18,7 +18,7 @@ function NameTag({
 }) {
   if (isSignedIn === false) {
     return (
-      <div className={`name-tag name-tag--${size}`}>
+      <div className={`name-tag name-tag--${size} name-tag--signedOut`}>
         <button className="auth-button" onClick={handleSignIn}>
           Sign in
         </button>
@@ -58,7 +58,7 @@ function NameTag({
 
   return (
     <div
-      className={`name-tag name-tag--${size} ${nameLengthClass} ${
+      className={`name-tag name-tag--${size} name-tag--signedIn ${nameLengthClass} ${
         hideName ? "name-tag--iconOnly" : ""
       }`.trim()}
     >

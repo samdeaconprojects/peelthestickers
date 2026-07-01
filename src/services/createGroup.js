@@ -8,6 +8,8 @@ export const createGroup = async ({
   color = "",
   photo = "",
   groupID = "",
+  isJoinable = false,
+  isStreamRoom = false,
 } = {}) => {
   const owner = String(ownerID || "").trim();
   if (!owner) throw new Error("createGroup: ownerID required");
@@ -26,7 +28,15 @@ export const createGroup = async ({
     color: String(color || "").trim(),
     photo: String(photo || "").trim(),
     groupID: String(groupID || "").trim(),
+    isJoinable: isJoinable === true,
+    isStreamRoom: isStreamRoom === true || isJoinable === true,
   }).catch(async (error) => {
+    if (isJoinable === true || isStreamRoom === true) {
+      throw new Error(
+        `Room creation failed before the joinable room could be saved: ${error?.message || error}`
+      );
+    }
+
     const fallbackGroupID =
       String(groupID || "").trim() ||
       `grp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -46,6 +56,9 @@ export const createGroup = async ({
           GroupID: fallbackGroupID,
           Name: groupName,
           ConversationID: fallbackConversation?.item?.ConversationID || conversationID,
+          IsJoinable: isJoinable === true,
+          JoinCode: fallbackGroupID,
+          IsStreamRoom: isStreamRoom === true || isJoinable === true,
           FallbackOnly: true,
         },
         members: fallbackConversation?.members || [],

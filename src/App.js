@@ -22,6 +22,10 @@ import EventSelector from "./components/EventSelector";
 import Scramble from "./components/Scramble/Scramble";
 import PuzzleSVG from "./components/PuzzleSVGs/PuzzleSVG";
 import SignInPopup from "./components/SignInPopup/SignInPopup";
+import {
+  ProfileSetupModal,
+  TutorialModal,
+} from "./components/Onboarding/OnboardingModal";
 import NameTag from "./components/Profile/NameTag";
 import Detail from "./components/Detail/Detail";
 import SharePostModal from "./components/Social/SharePostModal";
@@ -537,6 +541,24 @@ function findSharedNextIndex(sharedSession, userID) {
   return total - 1;
 }
 
+function findHostedSharedIndex(sharedSession) {
+  const total = getSharedSolveCount(sharedSession);
+  if (!total) return 0;
+
+  const hostID = String(
+    sharedSession?.hostID || sharedSession?.creatorID || ""
+  ).trim();
+  if (!hostID) return 0;
+
+  for (let i = 0; i < total; i++) {
+    const row = sharedSession?.roundResults?.[i] || {};
+    const hostResult = row?.[hostID];
+    if (!Number.isFinite(Number(hostResult?.time))) return i;
+  }
+
+  return Math.max(total - 1, 0);
+}
+
 function getSharedRoundParticipants(sharedSession, solveIndex, currentUserID) {
   const row = sharedSession?.roundResults?.[solveIndex] || {};
   return Object.entries(row)
@@ -608,6 +630,62 @@ function parseSharedExtendPayload(text) {
   } catch {
     return null;
   }
+}
+
+function parseSharedAoNPayload(text) {
+  if (!String(text || "").startsWith("[sharedAoN]")) return null;
+  try {
+    const parsed = JSON.parse(String(text).slice("[sharedAoN]".length));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseSharedRoomClosedPayload(text) {
+  if (!String(text || "").startsWith("[sharedRoomClosed]")) return null;
+  try {
+    const parsed = JSON.parse(String(text).slice("[sharedRoomClosed]".length));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function getLatestHostedSharedMessage(messages = []) {
+  return [...(Array.isArray(messages) ? messages : [])]
+    .map((msg) => ({
+      msg,
+      payload: parseSharedAoNPayload(msg?.text),
+    }))
+    .filter(
+      (entry) =>
+        entry?.payload?.sharedID &&
+        (entry?.payload?.isHosted === true ||
+          String(entry?.payload?.mode || entry?.payload?.type || "").toLowerCase() ===
+            "hosted")
+    )
+    .sort((a, b) =>
+      String(a?.msg?.timestamp || a?.msg?.createdAt || "").localeCompare(
+        String(b?.msg?.timestamp || b?.msg?.createdAt || "")
+      )
+    )
+    .at(-1) || null;
+}
+
+function getLatestHostedRoomClosedMessage(messages = []) {
+  return [...(Array.isArray(messages) ? messages : [])]
+    .map((msg) => ({
+      msg,
+      payload: parseSharedRoomClosedPayload(msg?.text),
+    }))
+    .filter((entry) => entry?.payload?.conversationID || entry?.payload?.roomCode)
+    .sort((a, b) =>
+      String(a?.msg?.timestamp || a?.msg?.createdAt || "").localeCompare(
+        String(b?.msg?.timestamp || b?.msg?.createdAt || "")
+      )
+    )
+    .at(-1) || null;
 }
 
 function buildRoundResultsFromMessages(messages, sharedID) {
@@ -695,6 +773,31 @@ function getSharedMode(session) {
   return String(session?.mode || session?.type || "average").trim().toLowerCase();
 }
 
+function isHostedSharedSession(session) {
+  return getSharedMode(session) === "hosted" || session?.isHosted === true;
+}
+
+function getSharedSaveSessionID(session) {
+  return String(
+    session?.saveSessionID || session?.targetSessionID || (isHostedSharedSession(session) ? "main" : session?.sessionID) || "main"
+  ).trim() || "main";
+}
+
+function getSharedSolveSourceLabel(session) {
+  if (!session?.sharedID) return "Standard";
+  if (!isHostedSharedSession(session)) return "Shared";
+
+  const hostLabel = String(
+    session?.hostName ||
+      session?.creatorName ||
+      session?.creatorUsername ||
+      session?.creatorID ||
+      ""
+  ).trim();
+
+  return hostLabel ? `Room - ${hostLabel}` : "Room";
+}
+
 function getSharedTargetWins(session) {
   const n = Number(session?.targetWins || 0);
   return Number.isFinite(n) && n > 0 ? n : 3;
@@ -733,6 +836,82 @@ function getSharedPerspective(session, userID, fallbackEvent = "333") {
   };
 }
 
+function buildHostedSharedSession(payload, currentSession, messages = []) {
+  const creatorEvents =
+    Array.isArray(payload?.creatorEvents) && payload.creatorEvents.length
+      ? payload.creatorEvents
+      : Array.isArray(payload?.events) && payload.events.length
+      ? payload.events
+      : Array.from({ length: Number(payload?.count) || 0 }, () =>
+          payload?.creatorEvent || payload?.event || currentSession?.event || "333"
+        );
+  const opponentEvents =
+    Array.isArray(payload?.opponentEvents) && payload.opponentEvents.length
+      ? payload.opponentEvents
+      : creatorEvents;
+  const creatorScrambles =
+    Array.isArray(payload?.creatorScrambles) && payload.creatorScrambles.length
+      ? payload.creatorScrambles
+      : Array.isArray(payload?.scrambles)
+      ? payload.scrambles
+      : [];
+  const opponentScrambles =
+    Array.isArray(payload?.opponentScrambles) && payload.opponentScrambles.length
+      ? payload.opponentScrambles
+      : creatorScrambles;
+  const roundResults = buildRoundResultsFromMessages(messages, payload?.sharedID);
+
+  return applySharedExtensionsToSession(
+    {
+      ...(currentSession || {}),
+      sessionID:
+        String(payload?.sharedID || "")
+          .split("#")
+          .slice(0, 3)
+          .join("#") || currentSession?.sessionID || "main",
+      sharedID: payload?.sharedID || currentSession?.sharedID || "",
+      mode: payload?.mode || payload?.type || "hosted",
+      type: payload?.type || payload?.mode || "hosted",
+      targetWins: payload?.targetWins || null,
+      batchSize: payload?.batchSize || currentSession?.batchSize || null,
+      saveSessionID:
+        payload?.saveSessionID || currentSession?.saveSessionID || currentSession?.sessionID || "main",
+      hostID:
+        payload?.hostID || payload?.creatorID || currentSession?.hostID || currentSession?.creatorID || null,
+      hostName:
+        payload?.hostName || currentSession?.hostName || currentSession?.creatorName || null,
+      roomCode: payload?.roomCode || currentSession?.roomCode || null,
+      isHosted: true,
+      event: creatorEvents[0] || payload?.creatorEvent || payload?.event || currentSession?.event || "333",
+      events: creatorEvents,
+      scrambles: creatorScrambles,
+      creatorID: payload?.creatorID || currentSession?.creatorID || null,
+      creatorEvent:
+        payload?.creatorEvent || creatorEvents[0] || currentSession?.creatorEvent || currentSession?.event || "333",
+      opponentEvent:
+        payload?.opponentEvent ||
+        opponentEvents[0] ||
+        currentSession?.opponentEvent ||
+        currentSession?.event ||
+        "333",
+      creatorEvents,
+      opponentEvents,
+      creatorScrambles,
+      opponentScrambles,
+      conversationID: currentSession?.conversationID || "",
+      opponentID: currentSession?.opponentID || null,
+      opponentName: currentSession?.opponentName || "Room",
+      theirLabel: currentSession?.theirLabel || currentSession?.opponentName || "Room",
+      theirUsername: currentSession?.theirUsername || currentSession?.theirLabel || "Room",
+      opponentColor: currentSession?.opponentColor || "#888888",
+      theirColor: currentSession?.theirColor || currentSession?.opponentColor || "#888888",
+      color: currentSession?.color || currentSession?.opponentColor || "#888888",
+      roundResults,
+    },
+    messages
+  );
+}
+
 function computeSharedScore(session, currentUserID) {
   const roundResults = session?.roundResults || {};
   const opponentID = session?.opponentID || null;
@@ -758,7 +937,7 @@ function computeSharedScore(session, currentUserID) {
 
 function shouldCompleteSharedSessionNow(session, nextIndex, currentUserID) {
   const mode = getSharedMode(session);
-  if (mode === "casual") return false;
+  if (mode === "casual" || mode === "hosted") return false;
 
   if (mode === "head_to_head") {
     const { yourWins, theirWins } = computeSharedScore(session, currentUserID);
@@ -1142,6 +1321,8 @@ function App() {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [showSignInPopup, setShowSignInPopup] = useState(false);
   const [showSettingsPopup, setShowSettingsPopup] = useState(false);
+  const [showPostSignUpProfileSetup, setShowPostSignUpProfileSetup] = useState(false);
+  const [showTutorialModal, setShowTutorialModal] = useState(false);
   const [showManualSolveModal, setShowManualSolveModal] = useState(false);
   const [manualSolveTime, setManualSolveTime] = useState("");
   const [manualSolveScramble, setManualSolveScramble] = useState("");
@@ -1221,6 +1402,8 @@ function App() {
   const isViewingSharedStats = !!statsSharedUserID && statsSharedUserID !== String(user?.UserID || "").trim();
 
   const sharedReturnTargetRef = useRef(null);
+  const sharedSessionRef = useRef(sharedSession);
+  const hostedRoomPromptDismissRef = useRef("");
   const currentEventRef = useRef(currentEvent);
   const displayedScrambleRef = useRef("");
   const scrambleModeRef = useRef(settings?.scrambleMode || "random-state");
@@ -1245,6 +1428,10 @@ function App() {
   const latestCreatedSolveRef = useRef({ event: "", solveRef: "" });
   const lastSavedSettingsJsonRef = useRef("");
   const skipNextSettingsAutosaveRef = useRef(false);
+
+  useEffect(() => {
+    sharedSessionRef.current = sharedSession;
+  }, [sharedSession]);
 
   const setDbPhase = useCallback((phase, op = "") => {
     setDbStatus((prev) => ({
@@ -1677,7 +1864,7 @@ function App() {
     base.TimerInput = String(settings?.timerInput || "Keyboard").trim() || "Keyboard";
 
     if (practiceMode) base.SolveSource = "Practice";
-    else if (sharedSession?.sharedID) base.SolveSource = "Shared";
+    else if (sharedSession?.sharedID) base.SolveSource = getSharedSolveSourceLabel(sharedSession);
     else if (activeSessionObj?.SessionType === "RELAY") {
       base.SolveSource = "Relay";
     } else if (String(settings?.timerInput || "").trim() === "GAN Cube") {
@@ -1754,7 +1941,9 @@ function App() {
       payload.TimerInput || t.TimerInput || settings.timerInput || "Keyboard";
 
     if (!payload.SolveSource) {
-      if (payload.IsShared || payload.Shared) payload.SolveSource = "Shared";
+      if (payload.IsShared || payload.Shared) {
+        payload.SolveSource = getSharedSolveSourceLabel(sharedSession);
+      }
       else if (payload.IsRelay) payload.SolveSource = "Relay";
       else if (payload.SmartCube) payload.SolveSource = "SmartCube";
       else payload.SolveSource = "Standard";
@@ -2009,12 +2198,15 @@ function App() {
     const perspective = getSharedPerspective(sharedSession, user?.UserID, currentEvent);
     const nextSharedEvent =
       perspective.yourEvents?.[sharedIndex] || perspective.yourFallbackEvent || "333";
+    const nextSessionID = isHostedSharedSession(sharedSession)
+      ? getSharedSaveSessionID(sharedSession)
+      : sessionID || "main";
 
     setCurrentEvent(nextSharedEvent);
-    setCurrentSession(sessionID || "main");
+    setCurrentSession(nextSessionID);
     setShowPlayerBar(true);
 
-    console.log("Loaded Shared Session:", sessionID);
+    console.log("Loaded Shared Session:", sessionID, "saveTarget:", nextSessionID);
   }, [sharedIndex, sharedSession, user?.UserID, currentEvent]);
 
   useEffect(() => {
@@ -2130,7 +2322,6 @@ function App() {
       const baseEvent = normalizeSharedEventKey(
         perspective.yourFallbackEvent || session?.event || currentEvent || "333"
       );
-
       const creatorEvents = [];
       const opponentEvents = [];
       const creatorScrambles = [];
@@ -2210,6 +2401,8 @@ function App() {
           ? requestedIndex
           : resumeCurrent
           ? sharedIndex
+          : isHostedSharedSession(session)
+          ? findHostedSharedIndex(session)
           : session?.sharedID && user?.UserID
           ? findSharedNextIndex(session, user.UserID)
           : 0;
@@ -2228,6 +2421,105 @@ function App() {
     },
     [sharedSession, sharedIndex, currentEvent, currentSession, activeSessionObj, user?.UserID]
   );
+
+  const startHostedRoomSessionForEvent = useCallback(
+    async (nextEvent) => {
+      if (!sharedSession?.conversationID || !user?.UserID) return false;
+
+      const normalizedEvent = normalizeSharedEventKey(nextEvent || currentEvent);
+      if (!normalizedEvent) return false;
+
+      const batchSize = Math.max(5, Number(sharedSession?.batchSize || 25) || 25);
+      const creatorEvents = [];
+      const opponentEvents = [];
+      const creatorScrambles = [];
+      const opponentScrambles = [];
+
+      for (let i = 0; i < batchSize; i += 1) {
+        const scramble = await generateScrambleForEvent(normalizedEvent);
+        creatorEvents.push(normalizedEvent);
+        opponentEvents.push(normalizedEvent);
+        creatorScrambles.push(scramble);
+        opponentScrambles.push(scramble);
+      }
+
+      const payload = {
+        v: 2,
+        mode: "hosted",
+        type: "hosted",
+        sharedID: `SHARED#${sharedSession.conversationID}#${normalizedEvent}#${Date.now()}`,
+        count: creatorScrambles.length,
+        batchSize,
+        isHosted: true,
+        saveSessionID: getSharedSaveSessionID(sharedSession),
+        hostID: user.UserID,
+        hostName: user?.Username || user?.Name || user.UserID,
+        roomCode: sharedSession.roomCode || null,
+        creatorID: user.UserID,
+        creatorEvent: normalizedEvent,
+        opponentEvent: normalizedEvent,
+        creatorEvents,
+        opponentEvents,
+        creatorScrambles,
+        opponentScrambles,
+      };
+
+      const text = `[sharedAoN]${JSON.stringify(payload)}`;
+      const timestamp = new Date().toISOString();
+
+      try {
+        await sendMessage(sharedSession.conversationID, user.UserID, text);
+      } catch (err) {
+        console.warn("Failed to broadcast hosted room event switch:", err);
+        return false;
+      }
+
+      const nextSession = buildHostedSharedSession(
+        payload,
+        {
+          ...sharedSession,
+          conversationID: sharedSession.conversationID,
+        },
+        [{ text, timestamp }]
+      );
+
+      hostedRoomPromptDismissRef.current = "";
+      setSharedSession(nextSession);
+      setSharedIndex(findHostedSharedIndex(nextSession));
+      setShowPlayerBar(true);
+      return true;
+    },
+    [sharedSession, user?.UserID, user?.Username, user?.Name, currentEvent]
+  );
+
+  const closeHostedRoom = useCallback(async () => {
+    if (!sharedSession?.conversationID || !isHostedSharedSession(sharedSession) || !user?.UserID) {
+      return false;
+    }
+
+    const payload = {
+      conversationID: sharedSession.conversationID,
+      roomCode: sharedSession.roomCode || null,
+      closedBy: user.UserID,
+      closedByName: user?.Username || user?.Name || user.UserID,
+      closedAt: new Date().toISOString(),
+    };
+
+    try {
+      await sendMessage(
+        sharedSession.conversationID,
+        user.UserID,
+        `[sharedRoomClosed]${JSON.stringify(payload)}`
+      );
+    } catch (err) {
+      console.warn("Failed to close hosted room:", err);
+      return false;
+    }
+
+    hostedRoomPromptDismissRef.current = "";
+    restorePreviousSessionAfterShared();
+    return true;
+  }, [sharedSession, user?.UserID, user?.Username, user?.Name, restorePreviousSessionAfterShared]);
 
   const goForwardScramble = useCallback(async () => {
     const isRelay = activeSessionObj?.SessionType === "RELAY";
@@ -2274,17 +2566,107 @@ function App() {
   };
 
   const refreshActiveSharedSession = useCallback(async () => {
-    if (!sharedSession?.conversationID || !sharedSession?.sharedID || !user?.UserID) return;
+    const activeSharedSession = sharedSessionRef.current;
+    if (!activeSharedSession?.conversationID || !activeSharedSession?.sharedID || !user?.UserID) {
+      return;
+    }
 
     try {
-      const messages = await getMessages(sharedSession.conversationID, user.UserID, 100);
+      const messages = await getMessages(activeSharedSession.conversationID, user.UserID, 100);
+      const latestHostedEntry = getLatestHostedSharedMessage(messages);
+      const latestClosedEntry = getLatestHostedRoomClosedMessage(messages);
+
+      if (isHostedSharedSession(activeSharedSession) && latestClosedEntry?.payload) {
+        const closedConversationID = String(
+          latestClosedEntry.payload?.conversationID || ""
+        ).trim();
+        const currentConversationID = String(activeSharedSession.conversationID || "").trim();
+        const closedTs = new Date(
+          latestClosedEntry?.msg?.timestamp || latestClosedEntry?.msg?.createdAt || 0
+        ).getTime();
+        const hostedTs = new Date(
+          latestHostedEntry?.msg?.timestamp || latestHostedEntry?.msg?.createdAt || 0
+        ).getTime();
+
+        if (
+          closedConversationID &&
+          currentConversationID &&
+          closedConversationID === currentConversationID &&
+          closedTs >= hostedTs
+        ) {
+          const closedBy = String(
+            latestClosedEntry.payload?.closedByName ||
+              latestClosedEntry.payload?.closedBy ||
+              "The host"
+          ).trim();
+          const isHost =
+            String(activeSharedSession.hostID || activeSharedSession.creatorID || "").trim() ===
+            String(user.UserID || "").trim();
+
+          if (!isHost) {
+            window.alert(`${closedBy} closed this room.`);
+          }
+
+          hostedRoomPromptDismissRef.current = "";
+          restorePreviousSessionAfterShared();
+          return;
+        }
+      }
+
+      if (isHostedSharedSession(activeSharedSession) && latestHostedEntry?.payload?.sharedID) {
+        const nextHostedID = String(latestHostedEntry.payload.sharedID || "").trim();
+        const currentHostedID = String(activeSharedSession.sharedID || "").trim();
+        const isHost =
+          String(activeSharedSession.hostID || activeSharedSession.creatorID || "").trim() ===
+          String(user.UserID || "").trim();
+
+        if (nextHostedID && nextHostedID !== currentHostedID) {
+          if (!isHost) {
+            if (hostedRoomPromptDismissRef.current !== nextHostedID) {
+              const nextHostedEvent =
+                latestHostedEntry.payload?.creatorEvent ||
+                latestHostedEntry.payload?.event ||
+                activeSharedSession?.event ||
+                "333";
+              const shouldFollow = window.confirm(
+                `The host switched this room to ${sharedEventLabel(
+                  nextHostedEvent
+                )}. Follow the new scramble feed?`
+              );
+
+              if (!shouldFollow) {
+                hostedRoomPromptDismissRef.current = nextHostedID;
+              } else {
+                const nextHostedSession = buildHostedSharedSession(
+                  latestHostedEntry.payload,
+                  activeSharedSession,
+                  messages
+                );
+                hostedRoomPromptDismissRef.current = "";
+                setSharedSession(nextHostedSession);
+                setSharedIndex(findHostedSharedIndex(nextHostedSession));
+                setShowPlayerBar(true);
+              }
+            }
+          } else {
+            const nextHostedSession = buildHostedSharedSession(
+              latestHostedEntry.payload,
+              activeSharedSession,
+              messages
+            );
+            setSharedSession(nextHostedSession);
+            setSharedIndex(findHostedSharedIndex(nextHostedSession));
+          }
+        }
+      }
+
       const incomingRoundResults = buildRoundResultsFromMessages(
         messages,
-        sharedSession.sharedID
+        activeSharedSession.sharedID
       );
 
       setSharedSession((prev) => {
-        if (!prev || prev.sharedID !== sharedSession.sharedID) return prev;
+        if (!prev || prev.sharedID !== activeSharedSession.sharedID) return prev;
         const extended = applySharedExtensionsToSession(
           {
             ...prev,
@@ -2298,15 +2680,12 @@ function App() {
           roundResults: mergeRoundResults(prev.roundResults, incomingRoundResults),
         };
       });
-
-      setSocialRefreshTick((tick) => tick + 1);
     } catch (err) {
       console.warn("Failed to refresh active shared session:", err);
     }
-  }, [sharedSession, user?.UserID]);
+  }, [user?.UserID, restorePreviousSessionAfterShared]);
 
   useEffect(() => {
-    if (!isHomePage) return;
     if (!sharedSession?.conversationID || !sharedSession?.sharedID) return;
     if (!user?.UserID) return;
 
@@ -2318,7 +2697,6 @@ function App() {
 
     return () => clearInterval(id);
   }, [
-    isHomePage,
     sharedSession?.conversationID,
     sharedSession?.sharedID,
     user?.UserID,
@@ -2519,6 +2897,8 @@ function App() {
       });
       setIsSignedIn(true);
       setShowSignInPopup(false);
+      setShowPostSignUpProfileSetup(true);
+      setShowTutorialModal(false);
 
       const restoredNavPrefs = readNavPrefs(userID, profile?.Settings || {});
       setNavPrefs(restoredNavPrefs);
@@ -2647,6 +3027,31 @@ function App() {
     } catch (error) {
       console.error("Sign-in error:", error);
     }
+  };
+
+  const handleCompletePostSignUpProfileSetup = async (draft) => {
+    if (!user?.UserID) return;
+
+    const updates = {
+      Color: String(draft?.color || "#0E171D").trim() || "#0E171D",
+      ProfileEvent: String(draft?.profileEvent || "333").trim().toUpperCase() || "333",
+      ProfileScramble: String(draft?.profileScramble || "").trim(),
+    };
+
+    const fresh = await runDb("Saving profile setup", () => updateUser(user.UserID, updates));
+    setUser((prev) => ({ ...(prev || {}), ...fresh }));
+    setShowPostSignUpProfileSetup(false);
+    setShowTutorialModal(true);
+  };
+
+  const handleClosePostSignUpProfileSetup = () => {
+    setShowPostSignUpProfileSetup(false);
+    setShowTutorialModal(true);
+  };
+
+  const openTutorialFromSettings = () => {
+    setShowSettingsPopup(false);
+    setShowTutorialModal(true);
   };
 
   const addSolve = async (newTime, smartMeta = null, options = {}) => {
@@ -2937,6 +3342,8 @@ function App() {
     let nextSharedIndex = null;
     let nextSharedSessionState = sharedSession;
     let sharedMode = sharedSession ? getSharedMode(sharedSession) : null;
+    const sharedSaveSessionID = sharedSession ? getSharedSaveSessionID(sharedSession) : currentSession;
+    const isSharedHost = !!(sharedSession && user?.UserID && sharedSession.creatorID === user.UserID);
 
     const activeSolveEvent = sharedSession
       ? normalizeSharedEventKey(
@@ -3006,6 +3413,17 @@ function App() {
           SharedID: sharedSession.sharedID,
           SharedIndex: sharedIndex,
           SharedEvent: activeSolveEvent,
+          SharedMode: getSharedMode(sharedSession),
+          SharedHostID:
+            sharedSession.hostID || sharedSession.creatorID || null,
+          SharedHostName:
+            sharedSession.hostName ||
+            sharedSession.creatorName ||
+            sharedSession.creatorUsername ||
+            sharedSession.creatorID ||
+            null,
+          SharedRoomCode: sharedSession.roomCode || null,
+          SharedSaveSessionID: sharedSaveSessionID || "main",
           ...(manualTimerInput ? { TimerInput: manualTimerInput } : {}),
           ...smartTagPayload,
         })
@@ -3053,6 +3471,7 @@ function App() {
         time: newTime,
         scramble,
         event: activeSolveEvent,
+        sessionID: sharedSaveSessionID,
         tags: newTags,
       });
       rememberLatestCreatedSolve(activeSolveEvent, pendingSolve.solveRef);
@@ -3062,7 +3481,7 @@ function App() {
         const res = await runDb("Saving solve", () =>
           addSolveToDB(user.UserID, {
             event: activeSolveEvent,
-            sessionID: currentSession,
+            sessionID: sharedSaveSessionID,
             rawTimeMs: newTime,
             penalty: null,
             scramble,
@@ -3079,7 +3498,7 @@ function App() {
         );
         replacePendingSolve(activeSolveEvent, pendingSolve, savedSolve);
         if (res?.sessionStats) {
-          mergeCanonicalSessionStats(activeSolveEvent, currentSession, res.sessionStats);
+          mergeCanonicalSessionStats(activeSolveEvent, sharedSaveSessionID, res.sessionStats);
         }
       } catch (err) {
         removePendingSolve(activeSolveEvent, pendingSolve.solveRef);
@@ -3108,7 +3527,7 @@ function App() {
 
       if (
         activeSharedID &&
-        sharedMode === "casual" &&
+        (sharedMode === "casual" || (sharedMode === "hosted" && isSharedHost)) &&
         nextSharedSessionState &&
         nextSharedIndex >= getSharedSolveCount(nextSharedSessionState)
       ) {
@@ -3119,7 +3538,10 @@ function App() {
         console.log("Shared session completed");
         restorePreviousSessionAfterShared();
       } else if (activeSharedID && Number.isFinite(nextSharedIndex)) {
-        setSharedIndex(nextSharedIndex);
+        const nextTotal = getSharedSolveCount(nextSharedSessionState || sharedSession);
+        setSharedIndex(
+          nextTotal > 0 ? Math.min(nextSharedIndex, nextTotal - 1) : Math.max(nextSharedIndex, 0)
+        );
       }
     } else {
       const localSolve = {
@@ -3293,9 +3715,37 @@ function App() {
   );
 
   const switchToEvent = useCallback(
-    (nextEvent) => {
+    async (nextEvent) => {
       const normalizedEvent = String(nextEvent || "").trim().toUpperCase();
       if (!normalizedEvent) return;
+
+      const activeHostedRoom = isHostedSharedSession(sharedSession);
+      const isHostedRoomHost =
+        activeHostedRoom &&
+        String(sharedSession?.hostID || sharedSession?.creatorID || "").trim() ===
+          String(user?.UserID || "").trim();
+      const hostedRoomEvent = normalizeSharedEventKey(
+        sharedSession?.creatorEvent || sharedSession?.event || currentEvent
+      );
+
+      if (
+        activeHostedRoom &&
+        isHostedRoomHost &&
+        hostedRoomEvent &&
+        hostedRoomEvent !== normalizedEvent
+      ) {
+        const switched = await startHostedRoomSessionForEvent(normalizedEvent);
+        if (switched) {
+          setCurrentEvent(normalizedEvent);
+          setCurrentSession(getSharedSaveSessionID(sharedSession));
+          setActiveSessionObj(null);
+          setRelayLegIndex(0);
+          setRelayLegTimes([]);
+          setRelayScrambles([]);
+          setRelayLegs([]);
+          return;
+        }
+      }
 
       const savedSession =
         isSignedIn && user?.UserID
@@ -3307,13 +3757,21 @@ function App() {
       sharedReturnTargetRef.current = null;
       setSharedSession(null);
       setSharedIndex(0);
+      hostedRoomPromptDismissRef.current = "";
       setActiveSessionObj(null);
       setRelayLegIndex(0);
       setRelayLegTimes([]);
       setRelayScrambles([]);
       setRelayLegs([]);
     },
-    [isSignedIn, navPrefs.lastSessionByEvent, user?.UserID]
+    [
+      currentEvent,
+      isSignedIn,
+      navPrefs.lastSessionByEvent,
+      sharedSession,
+      startHostedRoomSessionForEvent,
+      user?.UserID,
+    ]
   );
 
   const deleteTime = async (eventKeyParam, solveOrIndex, options = {}) => {
@@ -3813,11 +4271,12 @@ function App() {
   };
 
   const leaveSharedRun = useCallback(() => {
+    hostedRoomPromptDismissRef.current = "";
     restorePreviousSessionAfterShared();
   }, [restorePreviousSessionAfterShared]);
 
-  const handleEventChange = (event) => {
-    switchToEvent(event.target.value);
+  const handleEventChange = async (event) => {
+    await switchToEvent(event.target.value);
   };
 
   useEffect(() => {
@@ -4229,7 +4688,7 @@ function App() {
 
   const showLoadLastSolveTagsButton =
     isHomePage &&
-    !sharedSession &&
+    !(sharedSession && !isHostedSharedSession(sharedSession)) &&
     !isRelayActive &&
     !practiceMode &&
     !hasManualCurrentTags &&
@@ -4331,7 +4790,12 @@ function App() {
 
   const applyPostSolveTagBinding = useCallback(
     async (updates = {}) => {
-      if (!isHomePage || sharedSession || isRelayActive || tagScopeEventKey !== "333") {
+      if (
+        !isHomePage ||
+        (sharedSession && !isHostedSharedSession(sharedSession)) ||
+        isRelayActive ||
+        tagScopeEventKey !== "333"
+      ) {
         return false;
       }
 
@@ -4569,7 +5033,7 @@ function App() {
   }, [deleteUndoState, sessions, user?.UserID, runDb, adjustSessionSolveCount]);
 
   const deleteLatestSolve = useCallback(() => {
-    if (!isHomePage || sharedSession || isRelayActive) return false;
+    if (!isHomePage || (sharedSession && !isHostedSharedSession(sharedSession)) || isRelayActive) return false;
 
     const latestSolve = currentSolves[currentSolves.length - 1];
     if (!latestSolve?.solveRef) return false;
@@ -4580,7 +5044,7 @@ function App() {
 
   const applyPenaltyToLatestSolve = useCallback(
     (penalty) => {
-      if (!isHomePage || sharedSession || isRelayActive) return false;
+      if (!isHomePage || (sharedSession && !isHostedSharedSession(sharedSession)) || isRelayActive) return false;
 
       const latestSolve = currentSolves[currentSolves.length - 1];
       const solveRef = latestSolve?.solveRef;
@@ -5034,6 +5498,15 @@ function App() {
         count,
         targetWins: sharedSession.targetWins || null,
         batchSize: sharedSession.batchSize || null,
+        isHosted: isHostedSharedSession(sharedSession),
+        saveSessionID: getSharedSaveSessionID(sharedSession),
+        hostID: sharedSession.hostID || sharedSession.creatorID || user?.UserID || null,
+        hostName:
+          sharedSession.hostName ||
+          sharedSession.creatorName ||
+          sharedSession.creatorUsername ||
+          null,
+        roomCode: sharedSession.roomCode || null,
         creatorID: sharedSession.creatorID || user?.UserID || null,
         creatorEvent: sharedSession.creatorEvent || creatorEvents[0] || sharedSession.event || "333",
         opponentEvent:
@@ -5425,7 +5898,34 @@ function App() {
           )
         )
       : "N/A";
-  const isSharedHomeView = isHomePage && !!(sharedSession && activeSharedMessage);
+  const isHostedRoomActive = !!(sharedSession && isHostedSharedSession(sharedSession));
+  const hostedRoomMeta = useMemo(() => {
+    if (!isHostedRoomActive || !sharedSession) return null;
+    const roomEvent =
+      sharedCurrentEvent ||
+      sharedSession?.creatorEvent ||
+      sharedSession?.event ||
+      currentEvent ||
+      "333";
+    const hostID = String(sharedSession?.hostID || sharedSession?.creatorID || "").trim();
+    const currentUserID = String(user?.UserID || "").trim();
+    const isHost = !!hostID && hostID === currentUserID;
+
+    return {
+      active: true,
+      isHost,
+      roomCode: sharedSession?.roomCode || null,
+      roomName:
+        sharedSession?.hostName ||
+        sharedSession?.creatorName ||
+        sharedSession?.creatorUsername ||
+        "Room",
+      eventLabel: sharedEventLabel(roomEvent),
+      roundLabel: `Round ${Math.min(sharedIndex + 1, Math.max(getSharedSolveCount(sharedSession), 1))}`,
+    };
+  }, [currentEvent, isHostedRoomActive, sharedCurrentEvent, sharedIndex, sharedSession, user?.UserID]);
+  const isSharedHomeView =
+    isHomePage && !!(sharedSession && activeSharedMessage && !isHostedSharedSession(sharedSession));
   const dbStatusValue = useMemo(
     () => ({
       dbStatus,
@@ -5439,6 +5939,16 @@ function App() {
   const statsRouteSessionStats = isViewingSharedStats ? sharedStatsSessionStats : sessionStats;
   const statsRouteSessionsList = isViewingSharedStats ? sharedStatsSessionsList : sessionsList;
   const statsRouteSetSessions = isViewingSharedStats ? setSharedStatsSessions : setSessions;
+  const renderSignedOutScreen = (title) => (
+    <div className="Page auth-required-screen">
+      <SignInPopup
+        onSignIn={handleSignIn}
+        onSignUp={handleSignUp}
+        inline
+        title={title}
+      />
+    </div>
+  );
 
   return (
     <DbStatusProvider value={dbStatusValue}>
@@ -5511,7 +6021,7 @@ function App() {
                                 type="button"
                                 onClick={() => setRelayLegIndex(idx)}
                                 style={{
-                                  background: active ? "#2EC4B6" : "#3D3D3D",
+                                  background: active ? "#2EC4B6" : "var(--theme-surface-soft)",
                                   color: "white",
                                   border: "none",
                                   borderRadius: "6px",
@@ -5701,6 +6211,74 @@ function App() {
                               onFooterAction={loadTagsFromLastSolve}
                             />
                           </div>
+
+                          {hostedRoomMeta?.active ? (
+                            <div
+                              style={{
+                                position: "absolute",
+                                top: "18px",
+                                left: "12px",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                                padding: "8px 12px",
+                                borderRadius: "999px",
+                                background: "rgba(80, 182, 255, 0.14)",
+                                border: "1px solid rgba(80, 182, 255, 0.45)",
+                                color: "white",
+                                zIndex: 220,
+                              }}
+                            >
+                              <span style={{ fontSize: "11px", fontWeight: 900 }}>
+                                {hostedRoomMeta.isHost ? "Hosting room" : "Following room"}
+                              </span>
+                              <span style={{ fontSize: "11px", opacity: 0.82 }}>
+                                {hostedRoomMeta.eventLabel}
+                              </span>
+                              {hostedRoomMeta.roomCode ? (
+                                <span style={{ fontSize: "11px", opacity: 0.7 }}>
+                                  {hostedRoomMeta.roomCode}
+                                </span>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={openSharedMatch}
+                                style={{
+                                  border: "none",
+                                  borderRadius: "999px",
+                                  padding: "4px 10px",
+                                  background: "rgba(255,255,255,0.12)",
+                                  color: "white",
+                                  fontSize: "10px",
+                                  fontWeight: 800,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Room
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (hostedRoomMeta.isHost) closeHostedRoom();
+                                  else leaveSharedRun();
+                                }}
+                                style={{
+                                  border: "none",
+                                  borderRadius: "999px",
+                                  padding: "4px 10px",
+                                  background: hostedRoomMeta.isHost
+                                    ? "rgba(246, 66, 88, 0.9)"
+                                    : "rgba(255,255,255,0.12)",
+                                  color: "white",
+                                  fontSize: "10px",
+                                  fontWeight: 800,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                {hostedRoomMeta.isHost ? "Stop" : "Leave"}
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -5721,7 +6299,7 @@ function App() {
                     latestSolve={currentSolves[currentSolves.length - 1] || null}
                   />
 
-                  {sharedSession && activeSharedMessage ? (
+                  {sharedSession && activeSharedMessage && !isHostedSharedSession(sharedSession) ? (
                     <SharedAverageMessage
                       msg={activeSharedMessage}
                       user={user}
@@ -5753,6 +6331,9 @@ function App() {
                         applyPenalty={applyPenalty}
                         solves={currentSolves}
                         sessionBestSingleMs={currentSessionStatsForEvent?.BestSingleMs}
+                        horizontalAutoColsBreakpointPx={1200}
+                        nonRollingAutoColsBreakpointPx={1050}
+                        compactHorizontalLargeMinWidthPx={880}
                         deleteTime={(index) =>
                           practiceMode
                             ? deletePracticeTime(index)
@@ -5885,28 +6466,36 @@ function App() {
             <Route
               path="/profile"
               element={
-                <Profile
-                  user={user}
-                  setUser={setUser}
-                  deletePost={deletePost}
-                  showPlayerBar={showPlayerBar}
-                  updateComments={handleUpdateComments}
-                  sessions={sessions}
-                />
+                isSignedIn ? (
+                  <Profile
+                    user={user}
+                    setUser={setUser}
+                    deletePost={deletePost}
+                    showPlayerBar={showPlayerBar}
+                    updateComments={handleUpdateComments}
+                    sessions={sessions}
+                  />
+                ) : (
+                  renderSignedOutScreen("Profile")
+                )
               }
             />
 
             <Route
               path="/profile/:userID"
               element={
-                <Profile
-                  user={user}
-                  setUser={setUser}
-                  deletePost={deletePost}
-                  showPlayerBar={showPlayerBar}
-                  updateComments={handleUpdateComments}
-                  sessions={sessions}
-                />
+                isSignedIn ? (
+                  <Profile
+                    user={user}
+                    setUser={setUser}
+                    deletePost={deletePost}
+                    showPlayerBar={showPlayerBar}
+                    updateComments={handleUpdateComments}
+                    sessions={sessions}
+                  />
+                ) : (
+                  renderSignedOutScreen("Profile")
+                )
               }
             />
 
@@ -5917,6 +6506,10 @@ function App() {
                   <div className="Page">
                     <div style={{ padding: "24px" }}>Loading shared stats...</div>
                   </div>
+                ) : !isSignedIn && isViewingSharedStats ? (
+                  renderSignedOutScreen("Shared Stats")
+                ) : !isSignedIn ? (
+                  renderSignedOutScreen("Stats")
                 ) : isViewingSharedStats && sharedStatsDeniedReason ? (
                   <div className="Page">
                     <div style={{ padding: "24px" }}>{sharedStatsDeniedReason}</div>
@@ -6021,18 +6614,23 @@ function App() {
             <Route
               path="/social"
               element={
-                <Social
-                  user={user}
-                  addPost={addPost}
-                  deletePost={deletePost}
-                  updateComments={handleUpdateComments}
-                  beginSharedSession={beginSharedSession}
-                  updateSharedSession={setSharedSession}
-                  mergeSharedSession={mergeSharedSession}
-                  refreshTick={socialRefreshTick}
-                  sharedSession={sharedSession}
-                  leaveSharedRun={leaveSharedRun}
-                />
+                isSignedIn ? (
+                  <Social
+                    user={user}
+                    addPost={addPost}
+                    deletePost={deletePost}
+                    updateComments={handleUpdateComments}
+                    beginSharedSession={beginSharedSession}
+                    updateSharedSession={setSharedSession}
+                    mergeSharedSession={mergeSharedSession}
+                    refreshTick={socialRefreshTick}
+                    sharedSession={sharedSession}
+                    leaveSharedRun={leaveSharedRun}
+                    currentEvent={currentEvent}
+                  />
+                ) : (
+                  renderSignedOutScreen("Social")
+                )
               }
             />
           </Routes>
@@ -6080,7 +6678,7 @@ function App() {
           discoveredTagOptions={mergedHomeTagOptions}
           setCurrentSession={setCurrentSession}
           sharedSession={sharedSession}
-          sharedAverageMeta={activeSharedMeta}
+          sharedAverageMeta={isHostedRoomActive ? null : activeSharedMeta}
           sessionsList={sessionsList}
           customEvents={customEvents}
           handleEventChange={handleEventChange}
@@ -6090,11 +6688,13 @@ function App() {
           onScrambleClick={onScrambleClick}
           goForwardScramble={goForwardScramble}
           goBackwardScramble={goBackwardScramble}
+          hostedRoomMeta={hostedRoomMeta}
           addPost={addPost}
           user={user}
           applyPenalty={applyPenalty}
           onRefreshSharedAverage={refreshActiveSharedSession}
           onLeaveSharedSession={leaveSharedRun}
+          onCloseHostedRoom={closeHostedRoom}
           onSessionChange={() => {
             sharedReturnTargetRef.current = null;
             setSharedSession(null);
@@ -6132,6 +6732,23 @@ function App() {
         />
       )}
 
+      <ProfileSetupModal
+        open={showPostSignUpProfileSetup}
+        initialValues={{
+          color: user?.Color || user?.color || "#0E171D",
+          profileEvent: user?.ProfileEvent || user?.profileEvent || "333",
+          profileScramble: user?.ProfileScramble || user?.profileScramble || "",
+        }}
+        onGenerateScramble={generateScrambleForEvent}
+        onSave={handleCompletePostSignUpProfileSetup}
+        onClose={handleClosePostSignUpProfileSetup}
+      />
+
+      <TutorialModal
+        open={showTutorialModal}
+        onClose={() => setShowTutorialModal(false)}
+      />
+
       {showSettingsPopup && (
         <Settings
           userID={user?.UserID}
@@ -6153,6 +6770,7 @@ function App() {
             setStatsExportRequest((prev) => prev + 1);
             setShowStatsExportModal(true);
           }}
+          onOpenTutorial={openTutorialFromSettings}
           onProfileUpdate={(fresh) => {
             setUser((prev) => ({ ...prev, ...fresh }));
             if (fresh?.Settings && typeof fresh.Settings === "object") {

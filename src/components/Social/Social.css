@@ -583,11 +583,43 @@
   color: white;
 }
 
+.groupThreadTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .groupThreadMembers {
   margin-top: 4px;
   font-size: 12px;
   line-height: 1.4;
   color: #c8c8c8;
+}
+
+.groupThreadBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(46, 196, 182, 0.16);
+  border: 1px solid rgba(46, 196, 182, 0.36);
+  color: #ddfffb;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.groupThreadRoomCode {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #bfe8e4;
+}
+
+.groupThreadRoomCode span {
+  color: white;
+  font-weight: 700;
+  letter-spacing: 0.06em;
 }
 
 .sharedConversationStatsWrap {
@@ -887,6 +919,12 @@
   white-space: nowrap;
 }
 
+.searchActionButton--join {
+  width: auto;
+  min-width: 52px;
+  padding: 0 10px;
+}
+
 .searchActionButton:hover,
 .searchActionButton:focus-visible {
   opacity: 1;
@@ -907,6 +945,12 @@
 .searchActionPlus {
   font-size: 18px;
   line-height: 1;
+}
+
+.searchActionJoin {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 /* icon stays at the far right */
