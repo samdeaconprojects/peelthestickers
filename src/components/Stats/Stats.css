@@ -260,10 +260,10 @@ td:nth-child(13) {
 
 .statsViewToggle--modeGrid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
-  min-width: 126px;
-  width: 132px;
+  min-width: 188px;
+  width: 196px;
   align-items: stretch;
 }
 

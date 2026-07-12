@@ -11,16 +11,18 @@ import { useLocation } from "react-router-dom";
 import { formatTime } from "../TimeList/TimeUtils";
 
 function PlayerBar({
+  isSignedIn,
   sessions,
   currentEvent,
   currentSession,
   currentTags,
   currentTagColors,
+  currentTagVisibility,
   tagConfig,
   onTagsChange,
+  onTagVisibilityChange,
   onTagColorsChange,
   cubeModelOptions = [],
-  visibleTagFields = ["CubeModel"],
   discoveredTagOptions = {},
   setCurrentSession,
   handleEventChange,
@@ -238,25 +240,28 @@ function PlayerBar({
           </div>
         </div>
 
-        <div
-          className="playerbar-tagstrip"
-          aria-label="Active solve tags"
-        >
-          <TagBar
-            tags={currentTags}
-            fields={visibleTagFields}
-            tagColors={currentTagColors}
-            onChange={onTagsChange}
-            onTagColorsChange={onTagColorsChange}
-            tagConfig={tagConfig}
-            cubeModelOptions={cubeModelOptions}
-            discoveredOptions={discoveredTagOptions}
-            profileColor={user?.Color || user?.color || "#2EC4B6"}
-            variant="home"
-            hideAutomaticFields
-            allowAdditions
-          />
-        </div>
+        {isSignedIn && (
+          <div
+            className="playerbar-tagstrip"
+            aria-label="Active solve tags"
+          >
+            <TagBar
+              tags={currentTags}
+              tagColors={currentTagColors}
+              summaryVisibility={currentTagVisibility}
+              onChange={onTagsChange}
+              onSummaryVisibilityChange={onTagVisibilityChange}
+              onTagColorsChange={onTagColorsChange}
+              tagConfig={tagConfig}
+              cubeModelOptions={cubeModelOptions}
+              discoveredOptions={discoveredTagOptions}
+              profileColor={user?.Color || user?.color || "#2EC4B6"}
+              variant="home"
+              hideAutomaticFields
+              allowAdditions
+            />
+          </div>
+        )}
 
       </div>
     </div>

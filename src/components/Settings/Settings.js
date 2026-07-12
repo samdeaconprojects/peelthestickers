@@ -22,9 +22,7 @@ import {
 } from "../HomeStats/homeStatsConfig";
 import {
   getTagColorMapForEvent,
-  getSharedTagFieldMeta,
   normalizeTagColorCatalog,
-  SHARED_TAG_FIELDS,
 } from "../TagBar/tagUtils";
 import {
   EVENT_KEYBINDING_LABELS,
@@ -70,6 +68,17 @@ const NAVIGATION_ARROW_STYLE_OPTIONS = [
   { value: "classic", label: "Classic triangles" },
 ];
 
+const TIMER_SIZE_OPTIONS = [
+  { value: "small", label: "Small" },
+  { value: "normal", label: "Normal" },
+  { value: "large", label: "Large" },
+];
+
+const TIMER_FONT_OPTIONS = [
+  { value: "default", label: "Default" },
+  { value: "digital", label: "Digital" },
+];
+
 const DEFAULT_TAG_CONFIG = {
   Fixed: {
     CubeModel: { label: "Cube Model", options: [] },
@@ -79,7 +88,15 @@ const DEFAULT_TAG_CONFIG = {
     },
     Method: {
       label: "Method",
-      options: ["CFOP", "Roux", "ZZ", "Petrus", "LBL", "Other"],
+      options: ["CFOP", "Roux", "Redux", "Yau", "Hoya", "ZZ", "Petrus", "LBL", "Other"],
+    },
+    Parity_OLL: {
+      label: "OLL Parity",
+      options: ["Yes"],
+    },
+    Parity_PLL: {
+      label: "PLL Parity",
+      options: ["Yes"],
     },
     Alg_OLL: {
       label: "OLL",
@@ -149,6 +166,8 @@ const TAG_KEY_OPTIONS = [
   { value: "CubeModel", label: "Cube Model" },
   { value: "CrossColor", label: "Start Color" },
   { value: "Method", label: "Method" },
+  { value: "Parity_OLL", label: "OLL Parity" },
+  { value: "Parity_PLL", label: "PLL Parity" },
   { value: "Alg_OLL", label: "OLL" },
   { value: "Alg_PLL", label: "PLL" },
   { value: "Alg_CMLL", label: "CMLL" },
@@ -437,19 +456,6 @@ function normalizeStatsSummaryLayoutForUi() {
   return "row";
 }
 
-function normalizePlayerBarTagFieldsForUi(rawValue) {
-  const incoming = Array.isArray(rawValue) ? rawValue : [];
-  const allowed = new Set(SHARED_TAG_FIELDS);
-  const normalized = Array.from(
-    new Set(
-      incoming
-        .map((field) => String(field || "").trim())
-        .filter((field) => allowed.has(field))
-    )
-  );
-  return normalized.length ? normalized : ["CubeModel"];
-}
-
 function Settings({
   userID,
   onClose,
@@ -490,10 +496,6 @@ function Settings({
 
   const [tagConfig, setTagConfig] = useState(DEFAULT_TAG_CONFIG);
   const [tagColorCatalog, setTagColorCatalog] = useState({ Global: {}, ByEvent: {} });
-  const playerBarTagFieldMeta = useMemo(
-    () => getSharedTagFieldMeta(tagConfig),
-    [tagConfig]
-  );
 
   useEffect(() => {
     let cancelled = false;
@@ -517,9 +519,6 @@ function Settings({
             ),
             statsSummaryLayout: normalizeStatsSummaryLayoutForUi(
               user.Settings.statsSummaryLayout
-            ),
-            playerBarTagFields: normalizePlayerBarTagFieldsForUi(
-              user.Settings.playerBarTagFields
             ),
           };
           setAllSettings(normalizedSettings);
@@ -695,22 +694,6 @@ function Settings({
     });
   };
 
-  const handlePlayerBarTagFieldToggle = (field, checked) => {
-    const safeField = String(field || "").trim();
-    if (!safeField) return;
-
-    const current = Array.isArray(settings?.playerBarTagFields)
-      ? settings.playerBarTagFields
-      : ["CubeModel"];
-    const next = checked
-      ? Array.from(new Set([...current, safeField]))
-      : current.filter((item) => item !== safeField);
-
-    updateSettings({
-      playerBarTagFields: next.length ? next : ["CubeModel"],
-    });
-  };
-
   const persistCurrentSettings = async (options = {}) => {
     const normalizedTagConfig = normalizeTagConfig(tagConfig);
     const normalizedSettingsToSave = {
@@ -719,9 +702,6 @@ function Settings({
       scrambleMode: normalizeScrambleModeForUi(settings.scrambleMode),
       navigationArrowStyle: normalizeNavigationArrowStyleForUi(
         settings.navigationArrowStyle
-      ),
-      playerBarTagFields: normalizePlayerBarTagFieldsForUi(
-        settings.playerBarTagFields
       ),
     };
 
@@ -753,9 +733,6 @@ function Settings({
         scrambleMode: normalizeScrambleModeForUi(fresh.Settings.scrambleMode),
         navigationArrowStyle: normalizeNavigationArrowStyleForUi(
           fresh.Settings.navigationArrowStyle
-        ),
-        playerBarTagFields: normalizePlayerBarTagFieldsForUi(
-          fresh.Settings.playerBarTagFields
         ),
       };
       setAllSettings(normalizedFreshSettings);
@@ -1073,6 +1050,34 @@ function Settings({
           </div>
 
           <div className="setting-item">
+            <label>Timer Size:</label>
+            <select
+              onChange={(e) => updateSettings({ timerSize: e.target.value })}
+              value={settings.timerSize || "normal"}
+            >
+              {TIMER_SIZE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="setting-item">
+            <label>Timer Font:</label>
+            <select
+              onChange={(e) => updateSettings({ timerFont: e.target.value })}
+              value={settings.timerFont || "default"}
+            >
+              {TIMER_FONT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="setting-item">
             <label>Scramble Type:</label>
             <select
               value={scrambleMode}
@@ -1201,32 +1206,6 @@ function Settings({
                 updateSettings({ hideAutomaticHomeTags: e.target.checked })
               }
             />
-          </div>
-
-          <div className="setting-item setting-item--stacked">
-            <label>Player Bar Tags</label>
-            <div className="settingsCheckboxGrid" role="group" aria-label="Player bar tags">
-              {playerBarTagFieldMeta.map((item) => {
-                const isChecked = (settings?.playerBarTagFields || ["CubeModel"]).includes(
-                  item.field
-                );
-                return (
-                  <label
-                    key={item.field}
-                    className={`settingsCheckboxChip ${isChecked ? "is-checked" : ""}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={(e) =>
-                        handlePlayerBarTagFieldToggle(item.field, e.target.checked)
-                      }
-                    />
-                    <span>{item.label}</span>
-                  </label>
-                );
-              })}
-            </div>
           </div>
 
           <div className="setting-item">

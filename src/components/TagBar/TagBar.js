@@ -30,6 +30,9 @@ function EditorField({
   getChipStyle,
   getColorValue,
   onColorChange,
+  showVisibilityToggle = false,
+  isVisibleInSummary = false,
+  onToggleVisibility,
 }) {
   const [draftValue, setDraftValue] = useState(value || "");
   const listId = useMemo(
@@ -140,6 +143,16 @@ function EditorField({
               />
             </label>
           )}
+
+          {showVisibilityToggle && typeof onToggleVisibility === "function" && (
+            <button
+              type="button"
+              className="tagEditorAddBtn"
+              onClick={() => onToggleVisibility(!isVisibleInSummary)}
+            >
+              {isVisibleInSummary ? "Hide On Home" : "Show On Home"}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -170,6 +183,8 @@ export default function TagBar({
   collapsible = false,
   hideAutomaticFields = false,
   collapseToggleTop = null,
+  summaryVisibility = {},
+  onSummaryVisibilityChange = null,
 }) {
   const wrapRef = useRef(null);
   const safeTags = useMemo(
@@ -311,15 +326,16 @@ export default function TagBar({
   };
 
   const visibleHomeFields = displayFieldMeta.filter((item) => {
-    if (
-      item.field === "CubeModel" ||
-      item.field === "CrossColor" ||
-      item.field === "Method"
-    ) {
-      return true;
-    }
+    const field = String(item.field || "").trim();
+    const hasExplicitVisibility =
+      summaryVisibility && typeof summaryVisibility === "object"
+        ? Object.prototype.hasOwnProperty.call(summaryVisibility, field)
+        : false;
+    if (hasExplicitVisibility) return summaryVisibility[field] === true;
+
+    if (field === "CubeModel" || field === "CrossColor" || field === "Method") return true;
     const value = String(safeTags[item.field] || "").trim();
-    if (String(item.field || "").startsWith("Alg_")) return !!value;
+    if (field.startsWith("Alg_")) return !!value;
     return !!value;
   });
   const activeAlgorithmSummary = useMemo(() => {
@@ -375,6 +391,13 @@ export default function TagBar({
             getChipStyle={getHomeChipStyle}
             getColorValue={(option) => safeTagColors?.[item.field]?.[String(option || "").trim()] || ""}
             onColorChange={(option, color) => setFieldColor(item.field, option, color)}
+            showVisibilityToggle={variant === "home"}
+            isVisibleInSummary={visibleHomeFields.some((visibleItem) => visibleItem.field === item.field)}
+            onToggleVisibility={
+              variant === "home" && typeof onSummaryVisibilityChange === "function"
+                ? (nextVisible) => onSummaryVisibilityChange(item.field, nextVisible)
+                : undefined
+            }
           />
 
           {item.field === "Method" &&
@@ -400,6 +423,13 @@ export default function TagBar({
                     safeTagColors?.[subItem.field]?.[String(option || "").trim()] || ""
                   }
                   onColorChange={(option, color) => setFieldColor(subItem.field, option, color)}
+                  showVisibilityToggle={variant === "home"}
+                  isVisibleInSummary={visibleHomeFields.some((visibleItem) => visibleItem.field === subItem.field)}
+                  onToggleVisibility={
+                    variant === "home" && typeof onSummaryVisibilityChange === "function"
+                      ? (nextVisible) => onSummaryVisibilityChange(subItem.field, nextVisible)
+                      : undefined
+                  }
                 />
               ))}
             </div>
@@ -426,6 +456,13 @@ export default function TagBar({
                 safeTagColors?.[subItem.field]?.[String(option || "").trim()] || ""
               }
               onColorChange={(option, color) => setFieldColor(subItem.field, option, color)}
+              showVisibilityToggle={variant === "home"}
+              isVisibleInSummary={visibleHomeFields.some((visibleItem) => visibleItem.field === subItem.field)}
+              onToggleVisibility={
+                variant === "home" && typeof onSummaryVisibilityChange === "function"
+                  ? (nextVisible) => onSummaryVisibilityChange(subItem.field, nextVisible)
+                  : undefined
+              }
             />
           ))}
         </div>
@@ -504,7 +541,8 @@ export default function TagBar({
                   className="tagHomeAddButton"
                   onClick={() => {
                     const nextField = displayFieldMeta.find(
-                      (item) => !String(safeTags[item.field] || "").trim()
+                      (item) =>
+                        !visibleHomeFields.some((visibleItem) => visibleItem.field === item.field)
                     );
                     setActiveField(nextField?.field || "CubeModel");
                     setHomeEditorOpen(true);

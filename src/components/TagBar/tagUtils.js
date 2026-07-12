@@ -37,7 +37,15 @@ export const DEFAULT_TAG_CONFIG = {
     },
     Method: {
       label: "Method",
-      options: ["CFOP", "Roux", "ZZ", "Petrus", "LBL", "Other"],
+      options: ["CFOP", "Roux", "Redux", "Yau", "Hoya", "ZZ", "Petrus", "LBL", "Other"],
+    },
+    Parity_OLL: {
+      label: "OLL Parity",
+      options: ["Yes"],
+    },
+    Parity_PLL: {
+      label: "PLL Parity",
+      options: ["Yes"],
     },
     Alg_OLL: {
       label: "OLL",
@@ -77,6 +85,8 @@ export const SHARED_TAG_FIELDS = [
   "CubeModel",
   "CrossColor",
   "Method",
+  "Parity_OLL",
+  "Parity_PLL",
   "Alg_PLL",
   "Alg_OLL",
   "Alg_CMLL",
@@ -97,6 +107,8 @@ function normalizeCrossColorLabel(label) {
 }
 
 const METHOD_SCOPED_TAG_RULES = {
+  Parity_OLL: { methods: [], eventScopes: ["444", "555", "666", "777"] },
+  Parity_PLL: { methods: [], eventScopes: ["444", "555", "666", "777"] },
   Alg_PLL: { methods: ["CFOP"], eventScopes: ["333"] },
   Alg_OLL: { methods: ["CFOP"], eventScopes: ["333"] },
   Alg_CMLL: { methods: ["Roux"], eventScopes: ["333"] },
@@ -427,6 +439,18 @@ export function normalizeTagConfig(input) {
           ? fixed.Method.options
           : DEFAULT_TAG_CONFIG.Fixed.Method.options,
       },
+      Parity_OLL: {
+        label: fixed?.Parity_OLL?.label || "OLL Parity",
+        options: Array.isArray(fixed?.Parity_OLL?.options)
+          ? fixed.Parity_OLL.options
+          : DEFAULT_TAG_CONFIG.Fixed.Parity_OLL.options,
+      },
+      Parity_PLL: {
+        label: fixed?.Parity_PLL?.label || "PLL Parity",
+        options: Array.isArray(fixed?.Parity_PLL?.options)
+          ? fixed.Parity_PLL.options
+          : DEFAULT_TAG_CONFIG.Fixed.Parity_PLL.options,
+      },
       Alg_OLL: {
         label: fixed?.Alg_OLL?.label || "OLL",
         options: Array.isArray(fixed?.Alg_OLL?.options)
@@ -480,6 +504,8 @@ export function makeEmptyTagSelection() {
     CubeModel: "",
     CrossColor: "",
     Method: "",
+    Parity_OLL: "",
+    Parity_PLL: "",
     Alg_OLL: "",
     Alg_PLL: "",
     Alg_CMLL: "",
@@ -541,6 +567,8 @@ export function getSharedTagLabels(tagConfig) {
     CubeModel: cfg.Fixed.CubeModel.label || "Cube Model",
     CrossColor: cfg.Fixed.CrossColor.label || "Start Color",
     Method: cfg.Fixed.Method.label || "Method",
+    Parity_OLL: cfg.Fixed.Parity_OLL.label || "OLL Parity",
+    Parity_PLL: cfg.Fixed.Parity_PLL.label || "PLL Parity",
     Alg_OLL: cfg.Fixed.Alg_OLL.label || "OLL",
     Alg_PLL: cfg.Fixed.Alg_PLL.label || "PLL",
     Alg_CMLL: cfg.Fixed.Alg_CMLL.label || "CMLL",
@@ -573,6 +601,16 @@ export function getSharedTagFieldMeta(tagConfig) {
       field: "Method",
       label: cfg.Fixed.Method.label || "Method",
       options: cfg.Fixed.Method.options || [],
+    },
+    {
+      field: "Parity_OLL",
+      label: cfg.Fixed.Parity_OLL.label || "OLL Parity",
+      options: cfg.Fixed.Parity_OLL.options || [],
+    },
+    {
+      field: "Parity_PLL",
+      label: cfg.Fixed.Parity_PLL.label || "PLL Parity",
+      options: cfg.Fixed.Parity_PLL.options || [],
     },
     {
       field: "Alg_PLL",

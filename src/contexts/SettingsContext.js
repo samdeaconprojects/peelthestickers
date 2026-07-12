@@ -38,6 +38,21 @@ function normalizeNavigationArrowStyle(rawValue) {
   return "scramble";
 }
 
+function normalizeTimerSize(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+
+  if (raw === "small") return "small";
+  if (raw === "large") return "large";
+  return "normal";
+}
+
+function normalizeTimerFont(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+
+  if (raw === "digital") return "digital";
+  return "default";
+}
+
 function normalizeTimeListColumns(rawValue) {
   const raw = String(rawValue || "").trim().toLowerCase();
   if (raw === "5" || raw === "12") return raw;
@@ -72,10 +87,85 @@ function normalizePlayerBarTagFields(rawValue) {
   return normalized.length ? normalized : ["CubeModel"];
 }
 
+function normalizeTagSelectionRecord(selection) {
+  const next = Object.fromEntries(SHARED_TAG_FIELDS.map((field) => [field, ""]));
+  SHARED_TAG_FIELDS.forEach((field) => {
+    next[field] = String(selection?.[field] || "").trim();
+  });
+  return next;
+}
+
+function normalizeTagDefaultsByEvent(rawValue) {
+  const input = rawValue && typeof rawValue === "object" ? rawValue : {};
+  return Object.fromEntries(
+    Object.entries(input)
+      .map(([eventKey, selection]) => [
+        String(eventKey || "").trim().toUpperCase(),
+        normalizeTagSelectionRecord(selection),
+      ])
+      .filter(([eventKey]) => !!eventKey)
+  );
+}
+
+function normalizeTagDefaultsBySession(rawValue) {
+  const input = rawValue && typeof rawValue === "object" ? rawValue : {};
+  return Object.fromEntries(
+    Object.entries(input)
+      .map(([eventKey, sessionMap]) => {
+        const normalizedEventKey = String(eventKey || "").trim().toUpperCase();
+        const safeSessionMap = sessionMap && typeof sessionMap === "object" ? sessionMap : {};
+        return [
+          normalizedEventKey,
+          Object.fromEntries(
+            Object.entries(safeSessionMap)
+              .map(([sessionID, selection]) => [
+                String(sessionID || "").trim() || "main",
+                normalizeTagSelectionRecord(selection),
+              ])
+              .filter(([sessionID]) => !!sessionID)
+          ),
+        ];
+      })
+      .filter(([eventKey]) => !!eventKey)
+  );
+}
+
+function normalizeHomeTagVisibilityBySession(rawValue) {
+  const input = rawValue && typeof rawValue === "object" ? rawValue : {};
+  return Object.fromEntries(
+    Object.entries(input)
+      .map(([eventKey, sessionMap]) => {
+        const normalizedEventKey = String(eventKey || "").trim().toUpperCase();
+        const safeSessionMap = sessionMap && typeof sessionMap === "object" ? sessionMap : {};
+        return [
+          normalizedEventKey,
+          Object.fromEntries(
+            Object.entries(safeSessionMap)
+              .map(([sessionID, fieldMap]) => {
+                const safeFieldMap = fieldMap && typeof fieldMap === "object" ? fieldMap : {};
+                return [
+                  String(sessionID || "").trim() || "main",
+                  Object.fromEntries(
+                    Object.entries(safeFieldMap)
+                      .map(([field, value]) => [String(field || "").trim(), value === true])
+                      .filter(([field]) => SHARED_TAG_FIELDS.includes(field))
+                  ),
+                ];
+              })
+              .filter(([sessionID]) => !!sessionID)
+          ),
+        ];
+      })
+      .filter(([eventKey]) => !!eventKey)
+  );
+}
+
 export const defaultSettings = {
   primaryColor: "#0E171D",
   secondaryColor: "#ffffff",
   timerInput: "Keyboard",
+  timerSize: "normal",
+  timerFont: "default",
 
   horizontalTimeList: true,
   horizontalTimeListScroll: false,
@@ -120,6 +210,9 @@ export const defaultSettings = {
   showAddSolveButton: true,
   hideAutomaticHomeTags: false,
   playerBarTagFields: ["CubeModel"],
+  tagDefaultsByEvent: {},
+  tagDefaultsBySession: {},
+  homeTagVisibilityBySession: {},
   statsSummaryLayout: "row",
   detailViewSurfaceMode: "themed",
 
@@ -161,6 +254,8 @@ function mergeSettings(input) {
   const smartCubeProvider = normalizeSmartCubeProvider(safe.smartCubeProvider);
   const scrambleMode = normalizeScrambleMode(safe.scrambleMode);
   const navigationArrowStyle = normalizeNavigationArrowStyle(safe.navigationArrowStyle);
+  const timerSize = normalizeTimerSize(safe.timerSize);
+  const timerFont = normalizeTimerFont(safe.timerFont);
   const horizontalTimeListCols = normalizeTimeListColumns(safe.horizontalTimeListCols);
   const nonRollingTimeListCols = normalizeTimeListColumns(safe.nonRollingTimeListCols);
   const nonRollingTimeListMaxRows = normalizeNonRollingMaxRows(
@@ -178,12 +273,19 @@ function mergeSettings(input) {
     smartCubeProvider,
     navigationArrowStyle,
     scrambleMode,
+    timerSize,
+    timerFont,
     horizontalTimeListCols,
     nonRollingTimeListCols,
     nonRollingTimeListMaxRows,
     statsSummaryLayout,
     detailViewSurfaceMode,
     playerBarTagFields,
+    tagDefaultsByEvent: normalizeTagDefaultsByEvent(safe.tagDefaultsByEvent),
+    tagDefaultsBySession: normalizeTagDefaultsBySession(safe.tagDefaultsBySession),
+    homeTagVisibilityBySession: normalizeHomeTagVisibilityBySession(
+      safe.homeTagVisibilityBySession
+    ),
     eventKeyBindings: {
       ...defaultEventBindings,
       ...(safe.eventKeyBindings || {}),

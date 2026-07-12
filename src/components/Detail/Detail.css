@@ -11,6 +11,7 @@
   align-items: center;
   z-index: 4000;
   padding: 28px;
+  overflow: auto;
   box-sizing: border-box;
 }
 
@@ -27,7 +28,7 @@
   max-height: 80vh;
   height: auto;
   position: relative;
-  overflow: auto;
+  overflow: visible;
 }
 
 .detailPopupContent--embedded {

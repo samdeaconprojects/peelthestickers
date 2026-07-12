@@ -25,36 +25,67 @@
 .Timer {
   color: white;
   /* Grow with screen width but stay within reasonable bounds */
-  font-size: clamp(2rem, 16vw, 20rem);
+  font-size: calc(clamp(2rem, 16vw, 20rem) * var(--timer-size-scale, 1));
   text-align: center;
   margin-right: 10%;
   margin-top: 25%;
-  letter-spacing: 12px;
+  letter-spacing: calc(12px * var(--timer-letter-spacing-scale, 1));
 }
 
 .Timer--with-minutes {
-  font-size: clamp(2rem, 13.25vw, 16.5rem);
-  letter-spacing: 8px;
+  font-size: calc(clamp(2rem, 13.25vw, 16.5rem) * var(--timer-size-scale, 1));
+  letter-spacing: calc(8px * var(--timer-letter-spacing-scale, 1));
   margin-top: 19%;
 }
 
 .Timer--home-long {
-  font-size: clamp(2rem, 12.4vw, 15.25rem);
-  letter-spacing: 4px;
+  font-size: calc(clamp(2rem, 12.4vw, 15.25rem) * var(--timer-size-scale, 1));
+  letter-spacing: calc(4px * var(--timer-letter-spacing-scale, 1));
   margin-right: 7%;
 }
 
 .Timer--compact {
-  font-size: clamp(1.9rem, 8.6vw, 8.1rem);
+  font-size: calc(clamp(1.9rem, 8.6vw, 8.1rem) * var(--timer-size-scale, 1));
   margin-top: 0;
   margin-right: 5%;
-  letter-spacing: 5px;
+  letter-spacing: calc(5px * var(--timer-letter-spacing-scale, 1));
 }
 
 .Timer--compact.Timer--with-minutes {
-  font-size: clamp(1.8rem, 7.5vw, 6.9rem);
-  letter-spacing: 4px;
+  font-size: calc(clamp(1.8rem, 7.5vw, 6.9rem) * var(--timer-size-scale, 1));
+  letter-spacing: calc(4px * var(--timer-letter-spacing-scale, 1));
   margin-top: 0;
+}
+
+.Timer--size-small,
+.manual-display--size-small {
+  --timer-size-scale: 0.82;
+  --timer-letter-spacing-scale: 0.88;
+}
+
+.Timer--size-normal,
+.manual-display--size-normal {
+  --timer-size-scale: 1;
+  --timer-letter-spacing-scale: 1;
+}
+
+.Timer--size-large,
+.manual-display--size-large {
+  --timer-size-scale: 1.18;
+  --timer-letter-spacing-scale: 1.08;
+}
+
+.Timer--font-default,
+.manual-display--font-default {
+  font-family: "Droid Sans Mono", monospace;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.Timer--font-digital,
+.manual-display--font-digital {
+  font-family: "Droid Sans Mono", monospace;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0;
 }
 
 .Timer--playerbar {
@@ -80,6 +111,10 @@
   display: inline-block;
 }
 
+.Timer__content--segmented {
+  line-height: 1;
+}
+
 .Timer__penalty {
   position: absolute;
   left: 100%;
@@ -88,6 +123,118 @@
   font-size: 0.68em;
   letter-spacing: 0;
   line-height: 1;
+}
+
+.SegmentedDisplay {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 0.085em;
+}
+
+.SegmentedChar {
+  position: relative;
+  width: 0.62em;
+  height: 1em;
+  display: inline-block;
+}
+
+.SegmentedChar--colon {
+  width: 0.2em;
+}
+
+.SegmentedChar--dot {
+  width: 0.22em;
+}
+
+.SegmentedChar--space {
+  width: 0.26em;
+}
+
+.SegmentedChar__segment {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+}
+
+.SegmentedChar__segment--active {
+  background: currentColor;
+}
+
+.SegmentedChar__segment--inactive {
+  opacity: 0.34;
+}
+
+.SegmentedChar__segment--a,
+.SegmentedChar__segment--d,
+.SegmentedChar__segment--g {
+  left: 0.105em;
+  width: 0.41em;
+  height: 0.075em;
+}
+
+.SegmentedChar__segment--a {
+  top: 0.02em;
+}
+
+.SegmentedChar__segment--g {
+  top: 0.46em;
+}
+
+.SegmentedChar__segment--d {
+  bottom: 0.02em;
+}
+
+.SegmentedChar__segment--b,
+.SegmentedChar__segment--c,
+.SegmentedChar__segment--e,
+.SegmentedChar__segment--f {
+  width: 0.075em;
+  height: 0.38em;
+}
+
+.SegmentedChar__segment--b,
+.SegmentedChar__segment--c {
+  right: 0.03em;
+}
+
+.SegmentedChar__segment--e,
+.SegmentedChar__segment--f {
+  left: 0.03em;
+}
+
+.SegmentedChar__segment--b,
+.SegmentedChar__segment--f {
+  top: 0.07em;
+}
+
+.SegmentedChar__segment--c,
+.SegmentedChar__segment--e {
+  bottom: 0.07em;
+}
+
+.SegmentedChar__dot {
+  position: absolute;
+  width: 0.09em;
+  height: 0.09em;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.SegmentedChar__dot--top {
+  top: 0.28em;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.SegmentedChar__dot--bottom {
+  bottom: 0.27em;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.SegmentedChar__dot--single {
+  right: 0.02em;
+  bottom: 0.02em;
 }
 
 /* GAN controls shown subtly above timer */
@@ -146,7 +293,7 @@
 
 .manual-display {
   /* Responsive font size like Timer */
-  font-size: clamp(3rem, 12vw, 12rem);
+  font-size: calc(clamp(3rem, 12vw, 12rem) * var(--timer-size-scale, 1));
   margin-bottom: 0.5rem;
   color: white;
   padding: 0.4rem 1rem;

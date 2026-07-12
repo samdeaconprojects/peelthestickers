@@ -92,6 +92,8 @@ import {
   normalizeTagConfig,
   normalizeTagCatalog,
   normalizeTagColorCatalog,
+  pruneHiddenMethodScopedTags,
+  sanitizeTagSelection,
   setTagColorCatalogValue,
   SHARED_TAG_FIELDS,
 } from "./components/TagBar/tagUtils";
@@ -377,6 +379,61 @@ function getCubeCollectionOptionsForEvent(cubeCollection, eventCode) {
   return Array.from(new Set([...scopedOptions, ...globalOptions])).sort((a, b) =>
     a.localeCompare(b)
   );
+}
+
+function getStoredEventTagDefaults(settings, eventKey) {
+  const eventDefaults =
+    settings?.tagDefaultsByEvent && typeof settings.tagDefaultsByEvent === "object"
+      ? settings.tagDefaultsByEvent
+      : {};
+  return sanitizeTagSelection(eventDefaults?.[String(eventKey || "").trim().toUpperCase()] || {});
+}
+
+function hasStoredSessionTagDefaults(settings, eventKey, sessionID) {
+  const eventDefaults =
+    settings?.tagDefaultsBySession && typeof settings.tagDefaultsBySession === "object"
+      ? settings.tagDefaultsBySession[String(eventKey || "").trim().toUpperCase()]
+      : null;
+  if (!eventDefaults || typeof eventDefaults !== "object") return false;
+  return Object.prototype.hasOwnProperty.call(
+    eventDefaults,
+    String(sessionID || "main").trim() || "main"
+  );
+}
+
+function getStoredSessionTagDefaults(settings, eventKey, sessionID) {
+  const eventDefaults =
+    settings?.tagDefaultsBySession && typeof settings.tagDefaultsBySession === "object"
+      ? settings.tagDefaultsBySession[String(eventKey || "").trim().toUpperCase()]
+      : {};
+  return sanitizeTagSelection(
+    eventDefaults?.[String(sessionID || "main").trim() || "main"] || {}
+  );
+}
+
+function getStoredSessionTagVisibility(settings, eventKey, sessionID) {
+  const eventVisibility =
+    settings?.homeTagVisibilityBySession &&
+    typeof settings.homeTagVisibilityBySession === "object"
+      ? settings.homeTagVisibilityBySession[String(eventKey || "").trim().toUpperCase()]
+      : {};
+  const sessionVisibility =
+    eventVisibility?.[String(sessionID || "main").trim() || "main"] &&
+    typeof eventVisibility[String(sessionID || "main").trim() || "main"] === "object"
+      ? eventVisibility[String(sessionID || "main").trim() || "main"]
+      : {};
+  return Object.fromEntries(
+    Object.entries(sessionVisibility)
+      .map(([field, value]) => [String(field || "").trim(), value === true])
+      .filter(([field]) => SHARED_TAG_FIELDS.includes(field))
+  );
+}
+
+function hasAnyStoredSessionTagValue(selection = {}) {
+  return SHARED_TAG_FIELDS.some((field) => {
+    if (field === "TimerInput" || field === "SolveSource") return false;
+    return !!String(selection?.[field] || "").trim();
+  });
 }
 
 function normalizeSharedEventKey(evt) {
@@ -1374,7 +1431,6 @@ function App() {
   const [relayScrambles, setRelayScrambles] = useState([]);
   const [relayLegs, setRelayLegs] = useState([]);
 
-  const [tagsByEvent, setTagsByEvent] = useState({});
   const [tagConfig, setTagConfig] = useState(DEFAULT_TAG_CONFIG);
   const [homeDiscoveredTagOptions, setHomeDiscoveredTagOptions] = useState({});
 
@@ -1855,11 +1911,104 @@ function App() {
     [tagScopeEventKey, user?.UserID, tagCatalog, queueTagCatalogSave]
   );
 
+  const handleCurrentTagDefaultsChange = useCallback(
+    (nextSelection) => {
+      const normalizedEventKey = String(tagScopeEventKey || "").trim().toUpperCase();
+      if (!normalizedEventKey) return;
+
+      const sanitized = pruneHiddenMethodScopedTags(
+        sanitizeTagSelection(nextSelection),
+        eventKey
+      );
+      const normalizedSessionID = String(currentSession || "main").trim() || "main";
+      const nextEventDefaultsByEvent = {
+        ...(settings?.tagDefaultsByEvent && typeof settings.tagDefaultsByEvent === "object"
+          ? settings.tagDefaultsByEvent
+          : {}),
+      };
+      const nextSessionDefaultsByEvent = {
+        ...(settings?.tagDefaultsBySession && typeof settings.tagDefaultsBySession === "object"
+          ? settings.tagDefaultsBySession
+          : {}),
+      };
+      const nextEventDefaults = getStoredEventTagDefaults(settings, normalizedEventKey);
+      const nextSessionDefaults = makeEmptyTagSelection();
+
+      SHARED_TAG_FIELDS.forEach((field) => {
+        if (field === "TimerInput" || field === "SolveSource") return;
+        nextSessionDefaults[field] = sanitized[field];
+        if (normalizedSessionID === "main") {
+          nextEventDefaults[field] = sanitized[field];
+        }
+      });
+
+      nextEventDefaultsByEvent[normalizedEventKey] = nextEventDefaults;
+
+      const nextEventSessionDefaults = {
+        ...(nextSessionDefaultsByEvent[normalizedEventKey] || {}),
+      };
+
+      if (hasAnyStoredSessionTagValue(nextSessionDefaults)) {
+        nextEventSessionDefaults[normalizedSessionID] = nextSessionDefaults;
+        nextSessionDefaultsByEvent[normalizedEventKey] = nextEventSessionDefaults;
+      } else if (Object.prototype.hasOwnProperty.call(nextEventSessionDefaults, normalizedSessionID)) {
+        delete nextEventSessionDefaults[normalizedSessionID];
+        if (Object.keys(nextEventSessionDefaults).length > 0) {
+          nextSessionDefaultsByEvent[normalizedEventKey] = nextEventSessionDefaults;
+        } else {
+          delete nextSessionDefaultsByEvent[normalizedEventKey];
+        }
+      }
+
+      updateSettings({
+        tagDefaultsByEvent: nextEventDefaultsByEvent,
+        tagDefaultsBySession: nextSessionDefaultsByEvent,
+      });
+    },
+    [currentSession, eventKey, settings, tagScopeEventKey, updateSettings]
+  );
+
+  const handleCurrentTagVisibilityChange = useCallback(
+    (field, isVisible) => {
+      const normalizedEventKey = String(tagScopeEventKey || "").trim().toUpperCase();
+      const normalizedField = String(field || "").trim();
+      const normalizedSessionID = String(currentSession || "main").trim() || "main";
+      if (!normalizedEventKey || !SHARED_TAG_FIELDS.includes(normalizedField)) return;
+
+      const nextVisibilityByEvent = {
+        ...(settings?.homeTagVisibilityBySession &&
+        typeof settings.homeTagVisibilityBySession === "object"
+          ? settings.homeTagVisibilityBySession
+          : {}),
+      };
+      const nextEventVisibility = {
+        ...(nextVisibilityByEvent[normalizedEventKey] || {}),
+      };
+      const nextSessionVisibility = {
+        ...(nextEventVisibility[normalizedSessionID] || {}),
+      };
+
+      nextSessionVisibility[normalizedField] = isVisible === true;
+      nextEventVisibility[normalizedSessionID] = nextSessionVisibility;
+      nextVisibilityByEvent[normalizedEventKey] = nextEventVisibility;
+
+      updateSettings({
+        homeTagVisibilityBySession: nextVisibilityByEvent,
+      });
+    },
+    [currentSession, settings?.homeTagVisibilityBySession, tagScopeEventKey, updateSettings]
+  );
+
   const currentTags = useMemo(() => {
-    const base = {
-      ...makeEmptyTagSelection(),
-      ...(tagsByEvent[tagScopeEventKey] || {}),
-    };
+    const base = makeEmptyTagSelection();
+    const hasSessionDefaults = hasStoredSessionTagDefaults(settings, tagScopeEventKey, currentSession);
+    const eventDefaults = getStoredEventTagDefaults(settings, tagScopeEventKey);
+    const sessionDefaults = getStoredSessionTagDefaults(settings, tagScopeEventKey, currentSession);
+
+    SHARED_TAG_FIELDS.forEach((field) => {
+      if (field === "TimerInput" || field === "SolveSource") return;
+      base[field] = hasSessionDefaults ? sessionDefaults[field] : eventDefaults[field];
+    });
 
     base.TimerInput = String(settings?.timerInput || "Keyboard").trim() || "Keyboard";
 
@@ -1873,15 +2022,21 @@ function App() {
       base.SolveSource = "Standard";
     }
 
-    return base;
+    return pruneHiddenMethodScopedTags(base, eventKey);
   }, [
-    tagsByEvent,
-    tagScopeEventKey,
-    settings?.timerInput,
+    currentSession,
+    eventKey,
+    settings,
     practiceMode,
-    sharedSession?.sharedID,
+    sharedSession,
     activeSessionObj?.SessionType,
+    tagScopeEventKey,
   ]);
+
+  const currentTagVisibility = useMemo(
+    () => getStoredSessionTagVisibility(settings, tagScopeEventKey, currentSession),
+    [currentSession, settings, tagScopeEventKey]
+  );
 
   const currentTagColors = useMemo(
     () => getTagColorMapForEvent(tagColorCatalog, eventKey),
@@ -4697,12 +4852,9 @@ function App() {
   const loadTagsFromLastSolve = useCallback(() => {
     if (!latestSolveRestorableTags) return;
 
-    setTagsByEvent((prev) => ({
-      ...(prev || {}),
-      [tagScopeEventKey]: latestSolveRestorableTags,
-    }));
+    handleCurrentTagDefaultsChange(latestSolveRestorableTags);
     rememberTagSelectionValues(latestSolveRestorableTags);
-  }, [latestSolveRestorableTags, rememberTagSelectionValues, tagScopeEventKey]);
+  }, [handleCurrentTagDefaultsChange, latestSolveRestorableTags, rememberTagSelectionValues]);
 
   useEffect(() => {
     currentSolvesRef.current = currentSolves;
@@ -5831,12 +5983,17 @@ function App() {
               .filter(Boolean)
           ),
           ...scopedKeys
-            .map((key) => String(tagsByEvent?.[key]?.CubeModel || "").trim())
+            .flatMap((key) =>
+              Object.values(settings?.tagDefaultsBySession?.[key] || {}).map((selection) =>
+                String(selection?.CubeModel || "").trim()
+              )
+            )
             .filter(Boolean),
+          String(currentTags?.CubeModel || "").trim(),
         ].filter(Boolean)
       )
     ).sort((a, b) => a.localeCompare(b));
-  }, [eventKey, sessions, tagScopeEventKey, tagsByEvent, user?.CubeCollection]);
+  }, [currentTags?.CubeModel, eventKey, sessions, settings?.tagDefaultsBySession, tagScopeEventKey, user?.CubeCollection]);
 
   const baseHomeTagOptions = useMemo(
     () => collectTagSelectionOptions([], homeTagConfig, cubeModelHistoryOptions),
@@ -6148,69 +6305,70 @@ function App() {
                             </div>
                           </div>
 
-                          <div
-                            className={`home-tag-dock ${
-                              isSharedHomeView ? "home-tag-dock--shared" : ""
-                            }`}
-                            style={{
-                              position: "absolute",
-                              top: "76px",
-                              right: "12px",
-                              left: "auto",
-                              display: "flex",
-                              pointerEvents: "auto",
-                              zIndex: 200,
-                            }}
-                          >
-                            <TagBar
-                              key={`tagbar-${eventKey}`}
-                              tags={currentTags}
-                              eventKey={eventKey}
-                              tagColors={currentTagColors}
-                              onChange={(next) => {
-                                setTagsByEvent((prev) => ({
-                                  ...(prev || {}),
-                                  [tagScopeEventKey]: next,
-                                }));
-                                rememberTagSelectionValues(next);
+                          {isSignedIn && (
+                            <div
+                              className={`home-tag-dock ${
+                                isSharedHomeView ? "home-tag-dock--shared" : ""
+                              }`}
+                              style={{
+                                position: "absolute",
+                                top: "76px",
+                                right: "12px",
+                                left: "auto",
+                                display: "flex",
+                                pointerEvents: "auto",
+                                zIndex: 200,
                               }}
-                              onTagColorsChange={(next) => {
-                                let nextCatalog = tagColorCatalog;
+                            >
+                              <TagBar
+                                key={`tagbar-${eventKey}-${currentSession}`}
+                                tags={currentTags}
+                                eventKey={eventKey}
+                                tagColors={currentTagColors}
+                                onChange={(next) => {
+                                  handleCurrentTagDefaultsChange(next);
+                                  rememberTagSelectionValues(next);
+                                }}
+                                onTagColorsChange={(next) => {
+                                  let nextCatalog = tagColorCatalog;
 
-                                Object.entries(next || {}).forEach(([field, valueMap]) => {
-                                  Object.entries(valueMap || {}).forEach(([value, color]) => {
-                                    nextCatalog = setTagColorCatalogValue(
-                                      nextCatalog,
-                                      eventKey,
-                                      field,
-                                      value,
-                                      color
-                                    );
+                                  Object.entries(next || {}).forEach(([field, valueMap]) => {
+                                    Object.entries(valueMap || {}).forEach(([value, color]) => {
+                                      nextCatalog = setTagColorCatalogValue(
+                                        nextCatalog,
+                                        eventKey,
+                                        field,
+                                        value,
+                                        color
+                                      );
+                                    });
                                   });
-                                });
 
-                                setUser((prev) => ({
-                                  ...(prev || {}),
-                                  TagColorCatalog: nextCatalog,
-                                }));
-                                queueTagColorCatalogSave(nextCatalog);
-                              }}
-                              tagConfig={homeTagConfig}
-                              cubeModelOptions={cubeModelHistoryOptions}
-                              discoveredOptions={mergedHomeTagOptions}
-                              profileColor={user?.Color || user?.color || "#2EC4B6"}
-                              variant="home"
-                              collapsible
-                              hideAutomaticFields={!!settings.hideAutomaticHomeTags}
-                              collapseToggleTop={
-                                settings.hideAutomaticHomeTags ? "36px" : "92px"
-                              }
-                              allowAdditions
-                              showFooterAction={showLoadLastSolveTagsButton}
-                              footerActionLabel="Load tags from last solve"
-                              onFooterAction={loadTagsFromLastSolve}
-                            />
-                          </div>
+                                  setUser((prev) => ({
+                                    ...(prev || {}),
+                                    TagColorCatalog: nextCatalog,
+                                  }));
+                                  queueTagColorCatalogSave(nextCatalog);
+                                }}
+                                tagConfig={homeTagConfig}
+                                cubeModelOptions={cubeModelHistoryOptions}
+                                discoveredOptions={mergedHomeTagOptions}
+                                profileColor={user?.Color || user?.color || "#2EC4B6"}
+                                variant="home"
+                                summaryVisibility={currentTagVisibility}
+                                onSummaryVisibilityChange={handleCurrentTagVisibilityChange}
+                                collapsible
+                                hideAutomaticFields={!!settings.hideAutomaticHomeTags}
+                                collapseToggleTop={
+                                  settings.hideAutomaticHomeTags ? "36px" : "92px"
+                                }
+                                allowAdditions
+                                showFooterAction={showLoadLastSolveTagsButton}
+                                footerActionLabel="Load tags from last solve"
+                                onFooterAction={loadTagsFromLastSolve}
+                              />
+                            </div>
+                          )}
 
                           {hostedRoomMeta?.active ? (
                             <div
@@ -6639,19 +6797,19 @@ function App() {
 
       {!isHomePage && showPlayerBar && (
         <PlayerBar
+          isSignedIn={isSignedIn}
           sessions={sessions}
           currentEvent={currentEvent}
           currentSession={currentSession}
           currentTags={currentTags}
           currentTagColors={currentTagColors}
+          currentTagVisibility={currentTagVisibility}
           tagConfig={homeTagConfig}
           onTagsChange={(next) => {
-            setTagsByEvent((prev) => ({
-              ...(prev || {}),
-              [tagScopeEventKey]: next,
-            }));
+            handleCurrentTagDefaultsChange(next);
             rememberTagSelectionValues(next);
           }}
+          onTagVisibilityChange={handleCurrentTagVisibilityChange}
           onTagColorsChange={(next) => {
             let nextCatalog = tagColorCatalog;
 
@@ -6674,7 +6832,6 @@ function App() {
             queueTagColorCatalogSave(nextCatalog);
           }}
           cubeModelOptions={cubeModelHistoryOptions}
-          visibleTagFields={settings.playerBarTagFields}
           discoveredTagOptions={mergedHomeTagOptions}
           setCurrentSession={setCurrentSession}
           sharedSession={sharedSession}

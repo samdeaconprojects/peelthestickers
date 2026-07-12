@@ -115,6 +115,106 @@ function tokenizeScramble(scramble) {
   return steps;
 }
 
+function normalizeTimerSize(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+
+  if (raw === "small") return "small";
+  if (raw === "large") return "large";
+  return "normal";
+}
+
+function normalizeTimerFont(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+
+  if (raw === "digital") return "digital";
+  return "default";
+}
+
+const SEGMENTED_CHAR_MAP = {
+  "0": ["a", "b", "c", "d", "e", "f"],
+  "1": ["b", "c"],
+  "2": ["a", "b", "g", "e", "d"],
+  "3": ["a", "b", "g", "c", "d"],
+  "4": ["f", "g", "b", "c"],
+  "5": ["a", "f", "g", "c", "d"],
+  "6": ["a", "f", "g", "e", "c", "d"],
+  "7": ["a", "b", "c"],
+  "8": ["a", "b", "c", "d", "e", "f", "g"],
+  "9": ["a", "b", "c", "d", "f", "g"],
+};
+
+function canRenderSegmentedValue(value) {
+  return /^[0-9:.\s]+$/.test(String(value || ""));
+}
+
+function SegmentedCharacter({ char }) {
+  if (char === ":") {
+    return (
+      <span className="SegmentedChar SegmentedChar--colon" aria-hidden="true">
+        <span className="SegmentedChar__dot SegmentedChar__dot--top" />
+        <span className="SegmentedChar__dot SegmentedChar__dot--bottom" />
+      </span>
+    );
+  }
+
+  if (char === ".") {
+    return (
+      <span className="SegmentedChar SegmentedChar--dot" aria-hidden="true">
+        <span className="SegmentedChar__dot SegmentedChar__dot--single" />
+      </span>
+    );
+  }
+
+  if (char === " ") {
+    return <span className="SegmentedChar SegmentedChar--space" aria-hidden="true" />;
+  }
+
+  const activeSegments = new Set(SEGMENTED_CHAR_MAP[char] || []);
+
+  return (
+    <span className="SegmentedChar" aria-hidden="true">
+      {["a", "b", "c", "d", "e", "f", "g"].map((segment) => (
+        <span
+          key={segment}
+          className={`SegmentedChar__segment SegmentedChar__segment--${segment} ${
+            activeSegments.has(segment)
+              ? "SegmentedChar__segment--active"
+              : "SegmentedChar__segment--inactive"
+          }`}
+        />
+      ))}
+    </span>
+  );
+}
+
+function renderTimerValue(value, timerFont, showPenaltySuffix) {
+  const text = String(value || "");
+  const canUseSegmented = timerFont === "digital" && canRenderSegmentedValue(text);
+
+  if (!canUseSegmented) {
+    return (
+      <span className="Timer__content">
+        <span>{text}</span>
+        {showPenaltySuffix ? <span className="Timer__penalty">+</span> : null}
+      </span>
+    );
+  }
+
+  return (
+    <span className="Timer__content Timer__content--segmented">
+      <span
+        className="SegmentedDisplay"
+        aria-label={`${text}${showPenaltySuffix ? "+" : ""}`}
+      >
+        {text.split("").map((char, index) => (
+          <SegmentedCharacter key={`${char}-${index}`} char={char} />
+        ))}
+      </span>
+      {showPenaltySuffix ? <span className="Timer__penalty">+</span> : null}
+    </span>
+  );
+}
+
 function Timer({
   addTime,
   inPlayerBar = false,
@@ -220,6 +320,8 @@ function Timer({
 
   const showKeypad = !inPlayerBar && !settings?.disableKeypad;
   const forceKeyboardView = !!inPlayerBar;
+  const timerSize = normalizeTimerSize(settings?.timerSize);
+  const timerFont = normalizeTimerFont(settings?.timerFont);
 
   const inspectionIntervalRef = useRef(null);
   const inspectionStartRef = useRef(null);
@@ -1343,7 +1445,7 @@ function Timer({
               }}
             >
               <div
-                className="Timer Timer--static"
+                className={`Timer Timer--static Timer--font-${timerFont}`}
                 style={{
                   color: getInspectionColor(),
                   transition: "color 120ms linear",
@@ -1351,7 +1453,7 @@ function Timer({
                   lineHeight: 1,
                 }}
               >
-                {formatTime()}
+                {renderTimerValue(displayTime, timerFont, inspectionElapsed >= 15000)}
               </div>
 
               <div
@@ -1369,7 +1471,7 @@ function Timer({
           ) : (
             <>
               <p
-                className={`Timer ${displayHasMinutes ? "Timer--with-minutes" : ""} ${useCondensedTimerLayout ? "Timer--home-long" : ""} ${(isGanMode || isCubeMode || settings.timerInput === "Keyboard") ? "Timer--static" : ""} ${compact ? "Timer--compact" : ""} ${inPlayerBar ? "Timer--playerbar" : ""}`}
+                className={`Timer ${displayHasMinutes ? "Timer--with-minutes" : ""} ${useCondensedTimerLayout ? "Timer--home-long" : ""} ${(isGanMode || isCubeMode || settings.timerInput === "Keyboard") ? "Timer--static" : ""} ${compact ? "Timer--compact" : ""} ${inPlayerBar ? "Timer--playerbar" : ""} ${!inPlayerBar ? `Timer--size-${timerSize}` : ""} Timer--font-${timerFont}`}
                 style={
                   isGanMode
                     ? ganGreenStyle
@@ -1380,20 +1482,8 @@ function Timer({
                     : typePlaceholderStyle
                 }
               >
-                {(isGanMode || isCubeMode)
-                  ? (
-                    <span className="Timer__content">
-                      <span>{displayTime}</span>
-                      {displayHasPenaltySuffix ? <span className="Timer__penalty">+</span> : null}
-                    </span>
-                  )
-                  : settings.timerInput === "Keyboard"
-                  ? (
-                    <span className="Timer__content">
-                      <span>{displayTime}</span>
-                      {displayHasPenaltySuffix ? <span className="Timer__penalty">+</span> : null}
-                    </span>
-                  )
+                {(isGanMode || isCubeMode) || settings.timerInput === "Keyboard"
+                  ? renderTimerValue(displayTime, timerFont, displayHasPenaltySuffix)
                   : (manualTime || "Type")}
               </p>
             </>
@@ -1401,7 +1491,10 @@ function Timer({
         </div>
       ) : (
         <div className="manual-entry-container">
-          <div className="manual-display" style={typePlaceholderStyle}>
+          <div
+            className={`manual-display ${!inPlayerBar ? `manual-display--size-${timerSize}` : ""} manual-display--font-${timerFont}`}
+            style={typePlaceholderStyle}
+          >
             {manualTime || "Type"}
           </div>
 

@@ -16,7 +16,6 @@ import AverageDetailModal from "../Detail/AverageDetailModal";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
 import TagBar from "../TagBar/TagBar";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
-import StatsIcon from "../../assets/Stats.svg";
 import PtsLinkStatsIcon from "../../assets/ptsLinkStats.svg";
 import tagBadge from "../../assets/Tag.svg";
 
@@ -7434,6 +7433,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const renderViewportControls = (scopeKey = "primary") => {
     const useCompareControls =
       scopeKey === "compare" && compareEnabled && statsViewMode === "standard" && !linkStatsControls;
+    const showInlineOverviewButton =
+      statsViewMode !== "standard" || useCompareControls || compareEnabled;
     const controls = !useCompareControls && canUseDateWindowControls
       ? {
           previous: handleDateWindowPrevious,
@@ -7583,14 +7584,16 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         +1
       </button>
 
-      <button
-        onClick={controls.showAll}
-        disabled={!controls.canShowAll}
-        className="statsToggleBtn statsTopOverviewBtn"
-        title="Load all solves"
-      >
-        {controls.loadingShowAll ? "Loading…" : controls.showAllActive ? "All Loaded" : "Overview"}
-      </button>
+      {showInlineOverviewButton ? (
+        <button
+          onClick={controls.showAll}
+          disabled={!controls.canShowAll}
+          className="statsToggleBtn statsTopOverviewBtn"
+          title="Load all solves"
+        >
+          {controls.loadingShowAll ? "Loading…" : controls.showAllActive ? "All Loaded" : "Overview"}
+        </button>
+      ) : null}
         </>
       )}
       </div>
@@ -7877,6 +7880,30 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               <button
                 type="button"
                 className={`statsToggleBtn ${
+                  statsViewMode === "standard" && standardSubview === "tags" ? "is-active" : ""
+                }`}
+                onClick={() => void handleSetStatsDisplayMode("tags")}
+                aria-label="Tag Breakdown"
+                title="Tag Breakdown"
+              >
+                Tag Breakdown
+              </button>
+              <button
+                type="button"
+                className={`statsToggleBtn statsTopOverviewBtn ${
+                  statsViewMode === "standard" && !compareEnabled && showAllActive ? "is-active" : ""
+                }`}
+                onClick={handleShowAll}
+                disabled={compareEnabled || !canShowAll}
+                title="Load all solves"
+              >
+                {loadingAllSolves ? "Loading…" : showAllActive ? "All Loaded" : "Overview"}
+              </button>
+            </div>
+            <div className="statsViewToggleStack">
+              <button
+                type="button"
+                className={`statsToggleBtn ${
                   statsViewMode === "standard" && standardSubview === "solves" ? "is-active" : ""
                 }`}
                 onClick={() => void handleSetStatsDisplayMode("solves")}
@@ -7891,24 +7918,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                 Time
               </button>
             </div>
-            <button
-              type="button"
-              className={`statsToggleBtn statsToggleBtn--iconOnly ${
-                statsViewMode === "standard" && standardSubview === "tags" ? "is-active" : ""
-              }`}
-              onClick={() => void handleSetStatsDisplayMode("tags")}
-              aria-label="Tags"
-              title="Tags"
-            >
-              <span className="statsToggleBtnIconStack" aria-hidden="true">
-                <img
-                  src={StatsIcon}
-                  alt=""
-                  className="statsToggleBtnIcon statsToggleBtnIcon--background"
-                />
-                <img src={tagBadge} alt="" className="statsToggleBtnIcon statsToggleBtnIcon--foreground" />
-              </span>
-            </button>
           </div>
         </div>
 

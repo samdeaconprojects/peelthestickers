@@ -691,22 +691,34 @@ export function parseAlgorithm(alg, faces, n) {
       .filter(Boolean);
   
     moves.forEach(move => {
-  
       let wide = move.includes('w'); // Check if it's a wide move
       let layerCount = 1; // Default layer count
       let mod = ''; // Modifier (' or 2)
       let face; // The face to move (R, U, etc.)
-  
+
       if (wide) {
-        let indexW = move.indexOf('w');
-        face = move.charAt(indexW - 1); // Get the face character before 'w'
-        layerCount = indexW > 1 ? parseInt(move.substring(0, indexW - 1)) : 1; // Layer count (number before face character and 'w')
-        mod = move.length > indexW + 1 ? move.substring(indexW + 1) : ''; // Modifier after 'w'
+        const indexW = move.indexOf('w');
+        face = move.charAt(indexW - 1);
+        layerCount = indexW > 1 ? parseInt(move.substring(0, indexW - 1), 10) : 1;
+        mod = move.length > indexW + 1 ? move.substring(indexW + 1) : '';
       } else {
-        face = isNaN(parseInt(move.charAt(0))) ? move.charAt(0) : move.charAt(1); // Get the face character, checking if the first character is not a number
-        mod = move.length > 1 ? move.substring(1) : '';
+        const match = move.match(/^(\d+)?([A-Za-z])(.*)$/);
+        if (!match) return;
+
+        const [, layerPrefix, rawFace, rawMod] = match;
+        const isLowercaseWide = rawFace >= 'a' && rawFace <= 'z';
+
+        face = rawFace.toUpperCase();
+        mod = rawMod || '';
+
+        if (isLowercaseWide) {
+          wide = true;
+          layerCount = layerPrefix ? parseInt(layerPrefix, 10) : 2;
+        } else {
+          layerCount = layerPrefix ? parseInt(layerPrefix, 10) : 1;
+        }
       }
-  
+
       if (wide && layerCount === 1) {
         layerCount = 2;
       }
