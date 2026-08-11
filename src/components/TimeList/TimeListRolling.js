@@ -53,7 +53,8 @@ function TimeListRolling({ solves = [], deleteTime }) {
       ? formatTime(
           calculateAverageOfFive(
             latestSolves.slice(i - 4, i + 1).map(getComparableSolveTime)
-          )
+          ),
+          true
         )
       : ""
   );
@@ -64,7 +65,8 @@ function TimeListRolling({ solves = [], deleteTime }) {
           calculateAverage(
             latestSolves.slice(i - 11, i + 1).map(getComparableSolveTime),
             true
-          ).average
+          ).average,
+          true
         )
       : ""
   );

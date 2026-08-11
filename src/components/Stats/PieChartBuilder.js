@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
+import "./Stats.css";
 
 const BASE_VIEWBOX_SIZE = 220;
 const CALLOUT_VIEWBOX_SIZE = 320;

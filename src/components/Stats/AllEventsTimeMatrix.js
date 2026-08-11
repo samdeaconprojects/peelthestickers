@@ -207,7 +207,7 @@ export default function AllEventsTimeMatrix({
                       >
                         <PuzzleSVG
                           event={getPuzzleIconEvent(item.event)}
-                          scramble=""
+                          scramble={item.scramble || ""}
                           isStatsHeaderIcon
                           forceWhite={useWhitePuzzleSVGs}
                         />
@@ -266,7 +266,7 @@ export default function AllEventsTimeMatrix({
                     >
                       <PuzzleSVG
                         event={getPuzzleIconEvent(item.event)}
-                        scramble=""
+                        scramble={item.scramble || ""}
                         isStatsHeaderIcon
                         forceWhite={useWhitePuzzleSVGs}
                       />

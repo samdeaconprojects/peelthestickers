@@ -183,6 +183,12 @@ const getPostHeadlineTime = (solves = []) => {
   return result?.average ?? null;
 };
 
+const getAverageShortLabel = (solveCount) => {
+  const count = Number(solveCount);
+  if (!Number.isFinite(count) || count <= 1) return "";
+  return count === 3 ? `MO${count}` : `AO${count}`;
+};
+
 function Post({
   name,
   picture,
@@ -200,6 +206,7 @@ function Post({
   const primary = solveList[0] || {};
   const { event, scramble } = primary;
   const singleOrAvg = solveList.length > 1 ? `Average of ${solveList.length}` : 'Single';
+  const averageShortLabel = solveList.length > 1 ? getAverageShortLabel(solveList.length) : "";
   const headlineTime = getPostHeadlineTime(solveList);
   const eventStr = currentEventToString(event || '333');
   const showAverageSolveList =
@@ -300,9 +307,17 @@ function Post({
                 </div>
 
                 <div className="titleText">
-                  <span className="titleTextLabel">
+                  <span
+                    className={`titleTextLabel ${solveList.length > 1 ? "titleTextLabel--average" : ""}`}
+                  >
                     {eventStr} {singleOrAvg}
                   </span>
+                  {solveList.length > 1 ? (
+                    <span className="titleTextLabelCompact" aria-hidden="true">
+                      <span className="titleTextLabelCompactEvent">{eventStr}</span>
+                      <span className="titleTextLabelCompactAverage">{averageShortLabel}</span>
+                    </span>
+                  ) : null}
                   <span className="titleTextSeparator"> - </span>
                   <span className="titleTextValue">
                     {headlineTime != null ? formatTime(headlineTime, solveList.length > 1) : '--'}

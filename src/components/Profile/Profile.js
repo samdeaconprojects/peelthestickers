@@ -17,6 +17,7 @@ import AllEventsTimeMatrix from "../Stats/AllEventsTimeMatrix";
 import { calculateAverage } from "../TimeList/TimeUtils";
 import { EVENT_KEYBINDING_LABELS } from "../../utils/keybindings";
 import { getProfileChartStyle } from "../../utils/profileChartStyle";
+import { getProfileEventScramble } from "../../utils/profileEventSolves";
 import { getPosts } from "../../services/getPosts";
 import { getUser } from "../../services/getUser";
 import { updateUser } from "../../services/updateUser";
@@ -769,6 +770,7 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
           return {
             event,
             mainOnly: true,
+            scramble: getProfileEventScramble(viewedProfile, event, ""),
             solveCount: aggregate.solveCount,
             singleBest: aggregate.singleBest,
             singleWorst: aggregate.singleWorst,
@@ -781,7 +783,7 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
         })
         .filter((item) => Number(item.solveCount || 0) > 0)
         .sort(compareProfileMatrixItems),
-    [viewedSessionStats]
+    [viewedProfile, viewedSessionStats]
   );
   const availableEvents = useMemo(
     () => Object.keys(viewedSessionCatalog).sort((a, b) => String(a).localeCompare(String(b))),

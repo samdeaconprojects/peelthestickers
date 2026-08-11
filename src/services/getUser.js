@@ -1,5 +1,6 @@
 // src/services/getUser.js
 import { apiGet } from "./api.js";
+import { normalizeProfileEventSolvesMap } from "../utils/profileEventSolves";
 
 function firstNonEmpty(...values) {
   for (const value of values) {
@@ -57,6 +58,9 @@ function normalizeUserRecord(user) {
     user.Scramble,
     user.scramble
   );
+  const profileSolvesByEvent = normalizeProfileEventSolvesMap(
+    user.ProfileSolvesByEvent ?? user.profileSolvesByEvent
+  );
 
   return {
     ...user,
@@ -72,6 +76,8 @@ function normalizeUserRecord(user) {
     profileEvent: user.profileEvent ?? profileEvent,
     ProfileScramble: profileScramble,
     profileScramble: user.profileScramble ?? profileScramble,
+    ProfileSolvesByEvent: profileSolvesByEvent,
+    profileSolvesByEvent: user.profileSolvesByEvent ?? profileSolvesByEvent,
     WCAID: firstNonEmpty(user.WCAID, user.wcaid),
     wcaid: firstNonEmpty(user.wcaid, user.WCAID),
     Friends: Array.isArray(user.Friends) ? user.Friends.map((id) => String(id || "").trim()).filter(Boolean) : [],

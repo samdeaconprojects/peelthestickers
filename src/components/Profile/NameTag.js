@@ -3,6 +3,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import "./NameTag.css";
+import { getProfileEventScramble } from "../../utils/profileEventSolves";
 
 function NameTag({
   isSignedIn,
@@ -35,6 +36,11 @@ function NameTag({
   const linkTo = to || (derivedId ? `/profile/${derivedId}` : "/profile");
 
   const ev = (u?.ProfileEvent || u?.profileEvent || "333");
+  const profileScramble = getProfileEventScramble(
+    u,
+    ev,
+    u?.ProfileScramble || u?.profileScramble || ""
+  );
   const evClass = String(ev).toLowerCase();
   const linkClassName = [
     "name-tag-link",
@@ -76,7 +82,7 @@ function NameTag({
           <div className={`nametagCube nametagCube--${evClass}`}>
             <PuzzleSVG
               event={ev}
-              scramble={u?.ProfileScramble || u?.profileScramble || ""}
+              scramble={profileScramble}
               isTimerCube={false}
               isNameTagCube={true}
             />

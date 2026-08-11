@@ -906,7 +906,7 @@ function TimeList({
           className="TimeItem current-five averageCell nonRollingAverageCell"
           onClick={() => openAverageWindow(timesRow)}
         >
-          {formatTime(averageData.average)}
+          {formatTime(averageData.average, true)}
         </td>
       </tr>
     );
@@ -1078,7 +1078,7 @@ function TimeList({
                     className={`ao12 TimeItem ${textClass}`}
                     onClick={() => openAverageWindow(slice)}
                   >
-                    {formatTime(avg)}
+                    {formatTime(avg, true)}
                   </div>
                 );
               })}
@@ -1107,7 +1107,7 @@ function TimeList({
                     className={`ao5 TimeItem ${textClass}`}
                     onClick={() => openAverageWindow(slice)}
                   >
-                    {formatTime(avg)}
+                    {formatTime(avg, true)}
                   </div>
                 );
               })}

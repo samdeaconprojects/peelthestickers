@@ -848,7 +848,7 @@ const TimeTable = ({
                   >
                     <span className="timelist-row-average-label">AVG</span>
                     <span className="timelist-row-average-value">
-                      {row.average != null ? formatTime(row.average) : "DNF"}
+                      {row.average != null ? formatTime(row.average, true) : "DNF"}
                     </span>
                   </div>
                 )}

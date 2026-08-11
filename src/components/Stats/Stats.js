@@ -44,6 +44,7 @@ import { getSessions as fetchSessionsList } from "../../services/getSessions";
 import { useDbStatus } from "../../contexts/DbStatusContext";
 import { findBestStrictWindow } from "../../utils/strictAverageUtils";
 import { getProfileChartStyle } from "../../utils/profileChartStyle";
+import { getProfileEventScramble } from "../../utils/profileEventSolves";
 import {
   collectTagSelectionOptions,
   DEFAULT_TAG_CONFIG,
@@ -3540,6 +3541,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           return {
             event,
             mainOnly: timeViewMainSessionsOnly,
+            scramble: getProfileEventScramble(user, event, ""),
             solveCount: Number(aggregate?.SolveCountTotal || 0),
             singleBest: toFiniteMatrixMetric(aggregate?.BestSingleMs),
             singleWorst: toFiniteMatrixMetric(aggregate?.WorstSingleMs),
@@ -3585,6 +3587,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         return {
           event,
           mainOnly: timeViewMainSessionsOnly,
+          scramble: getProfileEventScramble(user, event, ""),
           solveCount: Number(aggregate?.SolveCountTotal || 0),
           singleBest: toFiniteMatrixMetric(aggregate?.BestSingleMs),
           singleWorst: toFiniteMatrixMetric(aggregate?.WorstSingleMs),
@@ -3604,7 +3607,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       })
       .filter((item) => item.solveCount > 0)
       .sort(compareTimeViewEventMatrixItems);
-  }, [allLoadedFilteredRawSolves, cachedEventMatrixStats, hasActiveDateFilter, sessionsList, timeViewMainSessionsOnly]);
+  }, [
+    allLoadedFilteredRawSolves,
+    cachedEventMatrixStats,
+    hasActiveDateFilter,
+    sessionsList,
+    timeViewMainSessionsOnly,
+    user,
+  ]);
   const useCachedOverallStats = statsViewMode === "standard" && !hasActiveDateFilter && !hasActiveTagFilter;
   const effectiveOverallStats = useCachedOverallStats ? overallStatsForEvent : null;
   const activeBucketItems = useMemo(

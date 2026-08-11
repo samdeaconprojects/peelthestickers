@@ -5,6 +5,7 @@ import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import NameTag from "./NameTag";
 import { getUser } from "../../services/getUser";
 import { updateUser } from "../../services/updateUser";
+import { getProfileEventScramble } from "../../utils/profileEventSolves";
 
 function getFavoriteEvent(sessionStats) {
   if (!sessionStats || typeof sessionStats !== "object") return null;
@@ -133,6 +134,10 @@ export default function ProfileHeader({
   }, [sessionStats]);
 
   const favoriteEvent = useMemo(() => getFavoriteEvent(sessionStats), [sessionStats]);
+  const resolvedProfileScramble = useMemo(
+    () => getProfileEventScramble(user, ProfileEvent, ProfileScramble),
+    [ProfileEvent, ProfileScramble, user]
+  );
 
   const setFriendBusy = (friendID, key, value) => {
     setFriendActionBusy((prev) => ({
@@ -332,7 +337,7 @@ export default function ProfileHeader({
             <PuzzleSVG
               className="profileCube"
               event={ProfileEvent}
-              scramble={ProfileScramble}
+              scramble={resolvedProfileScramble}
               isMusicPlayer={false}
               isProfileCube={true}
               isTimerCube={false}

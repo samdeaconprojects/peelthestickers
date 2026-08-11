@@ -781,6 +781,19 @@
     color: rgba(255, 255, 255, 0.78);
 }
 
+.titleTextLabelCompact {
+    display: none;
+    color: rgba(255, 255, 255, 0.78);
+    flex-direction: column;
+    align-items: flex-start;
+    line-height: 1.05;
+}
+
+.titleTextLabelCompactEvent,
+.titleTextLabelCompactAverage {
+    display: block;
+}
+
 .titleTextSeparator {
     color: rgba(255, 255, 255, 0.48);
 }
@@ -1375,5 +1388,24 @@
 
   .postAverageSnapshot {
     width: min(294px, 100%);
+  }
+}
+
+@media (max-width: 900px) {
+  .titleText {
+    align-items: center;
+  }
+
+  .titleTextLabel--average {
+    display: none;
+  }
+
+  .titleTextLabelCompact {
+    display: inline-flex;
+    flex: 0 1 auto;
+  }
+
+  .titleTextSeparator {
+    display: none;
   }
 }

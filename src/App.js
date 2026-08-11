@@ -102,6 +102,10 @@ import {
   calculateAverage,
   formatTime,
 } from "./components/TimeList/TimeUtils";
+import {
+  normalizeProfileEventKey,
+  normalizeProfileEventSolvesMap,
+} from "./utils/profileEventSolves";
 
 const INITIAL_SESSIONS = {
   "222": [],
@@ -4336,6 +4340,22 @@ function App() {
             createdAt,
             solves: solveList,
           };
+    const eventKey = normalizeProfileEventKey(nextItem.event || solveList[0]?.event || "333");
+    const currentProfileSolvesByEvent = normalizeProfileEventSolvesMap(
+      user?.ProfileSolvesByEvent || user?.profileSolvesByEvent
+    );
+    const nextProfileSolvesByEvent = {
+      ...currentProfileSolvesByEvent,
+      [eventKey]: {
+        chart: nextItem.chart,
+        event: eventKey,
+        scramble: String(solveList[0]?.scramble || "").trim(),
+        createdAt,
+        note: nextItem.note || "",
+        solve: nextItem.chart === "solveCard" ? nextItem.solve : null,
+        solves: nextItem.chart === "averageCard" ? nextItem.solves : [],
+      },
+    };
 
     const fallbackVisibleStats = [
       { chart: "statsSummary", scope: "all-events", viewMode: "standard" },
@@ -4349,15 +4369,32 @@ function App() {
 
     const nextKey = buildProfileItemKey(nextItem);
     const exists = current.some((item) => buildProfileItemKey(item) === nextKey);
-    if (exists) return { status: "exists" };
+    if (exists) {
+      await runDb("Saving profile stats", () =>
+        updateUser(user.UserID, {
+          ProfileSolvesByEvent: nextProfileSolvesByEvent,
+        })
+      );
+      setUser((prev) => ({
+        ...(prev || {}),
+        ProfileSolvesByEvent: nextProfileSolvesByEvent,
+        profileSolvesByEvent: nextProfileSolvesByEvent,
+      }));
+      return { status: "exists" };
+    }
 
     const nextVisibleStats = [...current, nextItem];
     await runDb("Saving profile stats", () =>
-      updateUser(user.UserID, { VisibleStats: nextVisibleStats })
+      updateUser(user.UserID, {
+        VisibleStats: nextVisibleStats,
+        ProfileSolvesByEvent: nextProfileSolvesByEvent,
+      })
     );
     setUser((prev) => ({
       ...(prev || {}),
       VisibleStats: nextVisibleStats,
+      ProfileSolvesByEvent: nextProfileSolvesByEvent,
+      profileSolvesByEvent: nextProfileSolvesByEvent,
     }));
     return { status: "added" };
   };
