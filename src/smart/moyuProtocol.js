@@ -1,290 +1,271 @@
+// src/smart/moyuProtocol.js
+//
+// MoYu AI / WCU MY32-family smart-cube protocol (BLE service 0783b03e-…).
+//
+// Wire format: every packet is 20 bytes, encrypted with AES-128 in a two-block
+// "ECB + IV whitening" scheme (NOT CBC): the first 16 bytes and, when the packet
+// is longer than 16 bytes, the last 16 bytes are each AES-decrypted and then
+// XORed with the IV. Key/IV are the fixed base values with the device MAC
+// (reversed) added, mod 255, into the first 6 bytes.
+//
+// Decoded byte 0 is the opcode:
+//   161 (0xA1) hardware info      163 (0xA3) facelet state
+//   164 (0xA4) battery            165 (0xA5) move batch (up to 5 moves)
+//   171 (0xAB) gyro quaternion    172 (0xAC) enable-gyro command
+//
+// Protocol constants reverse-engineered by the community; see
+// poliva/smartcube-web-bluetooth src/smartcube/protocols/moyu32.ts.
+
 import aesjs from "aes-js";
-import { BitstreamReader, BitstreamWriter } from "@astronautlabs/bitstream";
 
 export const MOYU_SERVICE_UUID = "0783b03e-7735-b5a0-1760-a305d2795cb0";
 export const MOYU_READ_CHAR_UUID = "0783b03e-7735-b5a0-1760-a305d2795cb1";
 export const MOYU_WRITE_CHAR_UUID = "0783b03e-7735-b5a0-1760-a305d2795cb2";
 
-const KEY = new Uint8Array([
-21,119,58,92,103,14,45,31,
-23,103,42,19,155,103,82,87
-]);
+// MoYu / WCU Bluetooth SIG company identifier (little-endian on the wire).
+export const MOYU_COMPANY_ID = 0x0504;
 
-const IV = new Uint8Array([
-17,35,38,37,134,42,44,59,
-85,6,127,49,126,103,33,87
-]);
-
-function createUint8ArrayStream(targetBuffer){
-let offset=0;
-return{
-write(chunk){
-if(chunk instanceof ArrayBuffer){
-chunk=new Uint8Array(chunk);
-}else if(ArrayBuffer.isView(chunk)){
-chunk=new Uint8Array(chunk.buffer,chunk.byteOffset,chunk.byteLength);
-}else{
-throw new TypeError("Chunk must be ArrayBuffer or TypedArray");
-}
-if(offset+chunk.byteLength>targetBuffer.byteLength){
-throw new Error("Buffer overflow");
-}
-targetBuffer.set(chunk,offset);
-offset+=chunk.byteLength;
-}
-};
-}
-
-function readComplexSignedSync(streamRdr,bitLength){
-const sign=streamRdr.readSync(1)===1?-1:1;
-const value=streamRdr.readSync(bitLength-1);
-if(bitLength%8!==0)return 0;
-let tValue=0;
-for(let l=0;l<bitLength/8;l++){
-const mesh=255<<(l*8);
-const t=(value&mesh)>>(l*8);
-tValue=(tValue<<8)+t;
-}
-return sign*tValue;
-}
-
-function padTo20Bytes(packet){
-if(packet.length>=20)return packet;
-const padded=new Uint8Array(20);
-padded.set(packet);
-for(let i=packet.length;i<20;i++)padded[i]=0;
-return padded;
-}
-
-function createCrypter(){
-
-let rawKey=null;
-let rawIvKey=null;
-let key=new Uint8Array(16);
-let ivKey=new Uint8Array(16);
-let salt=null;
-
-function updateKey(){
-if(rawKey===null||rawIvKey===null)return;
-key=new Uint8Array(rawKey);
-ivKey=new Uint8Array(rawIvKey);
-if(salt!==null){
-for(let i=0;i<6;i++){
-const saltValue=salt[5-i];
-key[i]=(key[i]+saltValue)%255;
-ivKey[i]=(ivKey[i]+saltValue)%255;
-}
-}
-}
-
-function processBlock(data,offset,encryptMode){
-const block=data.slice(offset,offset+16);
-const cipher=new aesjs.ModeOfOperation.cbc(key,ivKey);
-const processed=encryptMode?cipher.encrypt(block):cipher.decrypt(block);
-data.set(processed,offset);
-}
-
-function encrypt(data){
-processBlock(data,0,true);
-if(data.length>16){
-const offset=data.length-16;
-processBlock(data,offset,true);
-}
-return data;
-}
-
-function decrypt(data){
-if(data.length>16){
-const offset=data.length-16;
-processBlock(data,offset,false);
-}
-processBlock(data,0,false);
-return data;
-}
-
-return{
-
-reset(key2,ivKey2,newSalt){
-salt=newSalt;
-this.setKey(key2,ivKey2);
-},
-
-setKey(key2,ivKey2){
-rawKey=key2;
-rawIvKey=ivKey2;
-updateKey();
-},
-
-setSalt(newSalt){
-salt=newSalt??null;
-updateKey();
-},
-
-encrypt(rawBytes){
-const result=encrypt(rawBytes);
-rawBytes.set(result);
-},
-
-decrypt(cipherBytes){
-if(cipherBytes==null)return;
-const result=decrypt(cipherBytes);
-cipherBytes.set(result);
-}
-
-};
-
-}
-
-function createEncryptedPacket(packet,crypter){
-const padded=padTo20Bytes(packet);
-const encrypted=new Uint8Array(padded);
-crypter.encrypt(encrypted);
-return encrypted;
-}
-
-const handlers={
-
-161:(reader)=>({
-opCode:reader.readSync(8),
-name:reader.readStringSync(8),
-hardwareVersion:`${reader.readSync(8)}.${reader.readSync(8)}`,
-softwareVersion:`${reader.readSync(8)}.${reader.readSync(8)}`,
-step:reader.readSync(8)
-}),
-
-163:(reader)=>({
-opCode:reader.readSync(8),
-state:Array.from({length:48},()=>reader.readSync(3)),
-step:reader.readSync(8)
-}),
-
-164:(reader)=>({
-opCode:reader.readSync(8),
-batt:reader.readSync(8),
-battStart:reader.readSync(8)
-}),
-
-165:(reader)=>({
-opCode:reader.readSync(8),
-step:reader.readSync(8)
-})
-
-};
-
-function defaultHandler(reader){
-return{
-opCode:reader.readSync(8)
-};
-}
-
-function normalizeMacCandidates(macSuffix){
-
-if(macSuffix.length===17)return[macSuffix];
-if(macSuffix.length!==5)return[];
-
-const prefixes=[
-"CF:30:16:01",
-"CF:30:16:00",
-"CF:30:17:01",
-"CF:30:17:00",
-"CF:30:18:01",
-"CF:30:18:00",
-"E8:89:2C:01",
-"E8:89:2C:00",
-"E8:89:5D:01",
-"E8:89:5D:00"
+const BASE_KEY = [
+  21, 119, 58, 92, 103, 14, 45, 31, 23, 103, 42, 19, 155, 103, 82, 87,
+];
+const BASE_IV = [
+  17, 35, 38, 37, 134, 42, 44, 59, 85, 6, 127, 49, 126, 103, 33, 87,
 ];
 
-return prefixes.map(p=>`${p}:${macSuffix}`);
+// Opcode 172 + payload that switches on gyro (quaternion) notifications.
+const ENABLE_GYRO_PAYLOAD = [
+  172, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
+const GYRO_SCALE = 1073741824; // 2^30
+
+function toByteArray(data) {
+  if (data instanceof Uint8Array) return Array.from(data);
+  if (ArrayBuffer.isView(data)) return Array.from(new Uint8Array(data.buffer));
+  return Array.from(data || []);
 }
 
-export function createProtocol(mac){
+class Moyu32Crypter {
+  constructor(macBytes) {
+    this.key = BASE_KEY.slice();
+    this.iv = BASE_IV.slice();
+    for (let i = 0; i < 6; i++) {
+      const s = macBytes[5 - i] | 0;
+      this.key[i] = (this.key[i] + s) % 255;
+      this.iv[i] = (this.iv[i] + s) % 255;
+    }
+  }
 
-const reader=new BitstreamReader();
-const crypter=createCrypter();
+  _cipher() {
+    return new aesjs.ModeOfOperation.ecb(new Uint8Array(this.key));
+  }
 
-if(mac.length===17){
-crypter.reset(KEY,IV,mac.split(":").map(b=>parseInt(b,16)));
+  decrypt(data) {
+    const ret = toByteArray(data);
+    const cipher = this._cipher();
+    if (ret.length > 16) {
+      const offset = ret.length - 16;
+      const block = cipher.decrypt(new Uint8Array(ret.slice(offset)));
+      for (let i = 0; i < 16; i++) ret[i + offset] = block[i] ^ (~~this.iv[i]);
+    }
+    const block = cipher.decrypt(new Uint8Array(ret.slice(0, 16)));
+    for (let i = 0; i < 16; i++) ret[i] = block[i] ^ (~~this.iv[i]);
+    return ret;
+  }
+
+  encrypt(data) {
+    const ret = toByteArray(data);
+    while (ret.length < 20) ret.push(0);
+    const cipher = this._cipher();
+    for (let i = 0; i < 16; i++) ret[i] ^= ~~this.iv[i];
+    const head = cipher.encrypt(new Uint8Array(ret.slice(0, 16)));
+    for (let i = 0; i < 16; i++) ret[i] = head[i];
+    if (ret.length > 16) {
+      const offset = ret.length - 16;
+      for (let i = 0; i < 16; i++) ret[i + offset] ^= ~~this.iv[i];
+      const tail = cipher.encrypt(new Uint8Array(ret.slice(offset, offset + 16)));
+      for (let i = 0; i < 16; i++) ret[i + offset] = tail[i];
+    }
+    return new Uint8Array(ret);
+  }
 }
 
-return{
-
-checkMac(macSuffix,packet){
-
-const candidates=normalizeMacCandidates(macSuffix);
-
-for(const fullMac of candidates){
-
-try{
-
-crypter.reset(KEY,IV,fullMac.split(":").map(b=>parseInt(b,16)));
-
-const decrypted=new Uint8Array(packet);
-crypter.decrypt(decrypted);
-
-if(decrypted[0]===161){
-return fullMac;
+// MoYu facelet packet: 6 faces * 8 stickers * 3 bits, parsed in URFDLB order
+// (source face order FBUDLR -> [2,5,0,3,4,1]) with the center re-inserted.
+function parseFacelet(faceletBits) {
+  const state = [];
+  const faces = [2, 5, 0, 3, 4, 1];
+  for (let i = 0; i < 6; i++) {
+    const face = faceletBits.slice(faces[i] * 24, 24 + faces[i] * 24);
+    for (let j = 0; j < 8; j++) {
+      state.push("FBUDLR".charAt(parseInt(face.slice(j * 3, 3 + j * 3), 2)));
+      if (j === 3) state.push("FBUDLR".charAt(faces[i]));
+    }
+  }
+  return state.join("");
 }
 
-}catch(e){}
-
+function bitsOf(decoded) {
+  return decoded
+    .map((b) => ((b + 256) & 0xff).toString(2).padStart(8, "0"))
+    .join("");
 }
 
-return null;
+/**
+ * @param {number[]} macBytes  6 MAC octets in display order (aa:bb:cc:dd:ee:ff).
+ */
+export function createMoyuProtocol(macBytes) {
+  const crypter = new Moyu32Crypter(macBytes || [0, 0, 0, 0, 0, 0]);
 
-},
+  function simplePacket(opcode) {
+    const p = new Array(20).fill(0);
+    p[0] = opcode;
+    return crypter.encrypt(p);
+  }
 
-handlePacket(packet){
+  return {
+    /** Encrypt a plaintext 20-byte packet (mainly for tests / replay). */
+    encryptPacket: (bytes) => crypter.encrypt(toByteArray(bytes)),
 
-const decrypted=new Uint8Array(packet);
-crypter.decrypt(decrypted);
+    getCubeInfoPacket: () => simplePacket(161),
+    getCubeStatusPacket: () => simplePacket(163),
+    getBatteryPacket: () => simplePacket(164),
+    getEnableGyroPacket: () => crypter.encrypt(ENABLE_GYRO_PAYLOAD.slice()),
 
-reader.reset();
-reader.addBuffer(decrypted);
+    /** Just the decrypted 20 bytes (for sanity checks / debug hex). */
+    decrypt: (raw) => crypter.decrypt(raw),
 
-const opCode=decrypted[0];
+    /** Decrypt + decode an incoming notification. */
+    decode(raw) {
+      const decoded = crypter.decrypt(raw);
+      const opCode = decoded[0] & 0xff;
 
-const handler=handlers[opCode]??defaultHandler;
+      if (opCode === 171) {
+        const dv = new DataView(Uint8Array.from(decoded).buffer);
+        let w = dv.getInt32(1, true) / GYRO_SCALE;
+        let x = dv.getInt32(5, true) / GYRO_SCALE;
+        let y = dv.getInt32(9, true) / GYRO_SCALE;
+        let z = dv.getInt32(13, true) / GYRO_SCALE;
+        const len = Math.hypot(w, x, y, z);
+        if (len > 0) {
+          w /= len;
+          x /= len;
+          y /= len;
+          z /= len;
+        }
+        return { opCode, type: "GYRO", quaternion: { x, y, z, w } };
+      }
 
-return handler(reader);
+      const bits = bitsOf(decoded);
 
-},
+      if (opCode === 161) {
+        let name = "";
+        for (let i = 0; i < 8; i++) {
+          name += String.fromCharCode(
+            parseInt(bits.slice(8 + i * 8, 16 + i * 8), 2)
+          );
+        }
+        return {
+          opCode,
+          type: "HARDWARE",
+          name: name.trim(),
+          hardwareVersion: `${parseInt(bits.slice(88, 96), 2)}.${parseInt(
+            bits.slice(96, 104),
+            2
+          )}`,
+          softwareVersion: `${parseInt(bits.slice(72, 80), 2)}.${parseInt(
+            bits.slice(80, 88),
+            2
+          )}`,
+        };
+      }
 
-getCubeInfoPacketCheckMac(macSuffix){
+      if (opCode === 163) {
+        return {
+          opCode,
+          type: "FACELETS",
+          facelets: parseFacelet(bits.slice(8, 152)),
+          serial: parseInt(bits.slice(152, 160), 2),
+        };
+      }
 
-const candidates=normalizeMacCandidates(macSuffix);
+      if (opCode === 164) {
+        return {
+          opCode,
+          type: "BATTERY",
+          battery: parseInt(bits.slice(8, 16), 2),
+        };
+      }
 
-const packets=[];
+      if (opCode === 165) {
+        const moveCnt = parseInt(bits.slice(88, 96), 2);
+        const moves = [];
+        const timeOffsets = [];
+        let invalid = false;
+        for (let i = 0; i < 5; i++) {
+          const m = parseInt(bits.slice(96 + i * 5, 101 + i * 5), 2);
+          timeOffsets[i] = parseInt(bits.slice(8 + i * 16, 24 + i * 16), 2);
+          if (m >= 12) {
+            invalid = true;
+            moves[i] = null;
+          } else {
+            moves[i] = "FBUDLR".charAt(m >> 1) + (m & 1 ? "'" : "");
+          }
+        }
+        return { opCode, type: "MOVE", moveCnt, moves, timeOffsets, invalid };
+      }
 
-for(const fullMac of candidates){
-
-crypter.reset(KEY,IV,fullMac.split(":").map(b=>parseInt(b,16)));
-
-const packet=new Uint8Array([161]);
-
-packets.push({
-mac:fullMac,
-packet:createEncryptedPacket(packet,crypter)
-});
-
+      return { opCode, type: "UNKNOWN", bytes: decoded };
+    },
+  };
 }
 
-return packets;
+/**
+ * MoYu names carry only the last 2 MAC bytes (e.g. WCU_MY32_AB12). Build the
+ * full-MAC candidate list from the known MoYu OUI + hardware-revision byte, for
+ * the brute-force probe fallback used when BLE advertisement data is
+ * unavailable. Mirrors buildMoyu32MacCandidatesFromName in the reference lib.
+ */
+export function macCandidatesFromName(name) {
+  const t = String(name || "").trim();
+  const out = [];
+  const seen = new Set();
+  const push = (mac) => {
+    if (!seen.has(mac)) {
+      seen.add(mac);
+      out.push(mac);
+    }
+  };
 
-},
+  const my32 = /^WCU_MY32_([0-9A-Fa-f]{4})$/.exec(t);
+  if (my32) {
+    const a = `${my32[1].slice(0, 2)}:${my32[1].slice(2, 4)}`.toUpperCase();
+    for (const mid of ["00", "01", "02"]) push(`CF:30:16:${mid}:${a}`);
+  }
 
-getCubeInfoPacket(){
-return createEncryptedPacket(new Uint8Array([161]),crypter);
-},
+  const my33 = /^WCU_MY33_([0-9A-Fa-f]{4})$/.exec(t);
+  if (my33) {
+    const a = `${my33[1].slice(0, 2)}:${my33[1].slice(2, 4)}`.toUpperCase();
+    for (const mid of ["02", "01", "00"]) push(`CF:30:16:${mid}:${a}`);
+  }
 
-getCubeStatusPacket(){
-return createEncryptedPacket(new Uint8Array([163]),crypter);
-},
+  // Generic WCU_*_XXXX / *-XXXX fallback: try the known MoYu OUI with a few
+  // revision bytes.
+  if (!out.length) {
+    const generic = /[_-]([0-9A-Fa-f]{4})$/.exec(t);
+    if (generic) {
+      const a = `${generic[1].slice(0, 2)}:${generic[1].slice(2, 4)}`.toUpperCase();
+      for (const oui of ["CF:30:16", "CF:30:17", "CF:30:18"]) {
+        for (const mid of ["00", "01", "02"]) push(`${oui}:${mid}:${a}`);
+      }
+    }
+  }
 
-getCubePowerPacket(){
-return createEncryptedPacket(new Uint8Array([164]),crypter);
+  return out;
 }
 
-};
-
+export function macStringToBytes(mac) {
+  return String(mac || "")
+    .split(/[:\-\s]+/)
+    .map((c) => parseInt(c, 16) & 0xff);
 }

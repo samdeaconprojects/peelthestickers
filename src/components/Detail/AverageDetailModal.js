@@ -4,7 +4,11 @@ import StatFocusModal from "../Stats/StatFocusModal";
 import TimeTable from "../Stats/TimeTable";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import { currentEventToString } from "../scrambleUtils";
-import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
+import {
+  calculateAverage,
+  formatTime,
+  getTrimmedSideByIndex,
+} from "../TimeList/TimeUtils";
 import tagBadge from "../../assets/Tag.svg";
 import {
   DEFAULT_TAG_CONFIG,
@@ -38,12 +42,16 @@ function getSolveValue(solve) {
   return Number.isFinite(time) ? time : "DNF";
 }
 
-function calculateSelectionMetric(values) {
+function calculateSelectionResult(values) {
   const input = Array.isArray(values) ? values : [];
   if (!input.length) return null;
+  // A three-solve selection is a mean, so nothing is trimmed from it.
   const isMo3 = input.length === 3;
-  const result = calculateAverage(input, !isMo3);
-  return result?.average ?? null;
+  return calculateAverage(input, !isMo3);
+}
+
+function calculateSelectionMetric(values) {
+  return calculateSelectionResult(values)?.average ?? null;
 }
 
 function getSolveDateTime(solve) {
@@ -242,11 +250,18 @@ function AverageDetailModal({
     );
   }, [activeTagFilters, detail.rows]);
 
-  const filteredAverage = useMemo(() => {
+  const filteredResult = useMemo(() => {
     if (!filteredRows.length) return null;
-    const values = filteredRows.map((row) => getSolveValue(row.solve));
-    return calculateSelectionMetric(values);
+    return calculateSelectionResult(filteredRows.map((row) => getSolveValue(row.solve)));
   }, [filteredRows]);
+
+  const filteredAverage = filteredResult?.average ?? null;
+
+  // Which rows the average discarded, keyed by their position in the list below.
+  const trimmedSideByRow = useMemo(
+    () => getTrimmedSideByIndex(filteredResult),
+    [filteredResult]
+  );
 
   const itemRowSize = filteredRows.length <= 5 ? 5 : 12;
   const canShare = !embedded && typeof addPost === "function" && filteredRows.length > 0;
@@ -466,6 +481,7 @@ function AverageDetailModal({
             key={displayMode}
             solves={filteredRows.map((row, idx) => ({
               ...row.solve,
+              __trimmedSide: trimmedSideByRow.get(idx) || null,
               fullIndex:
                 Number.isFinite(Number(row.solve?.fullIndex))
                   ? Number(row.solve.fullIndex)
@@ -482,6 +498,7 @@ function AverageDetailModal({
             initialItemRowSize={itemRowSize}
             initialTableLimit="all"
             preserveInputOrder={true}
+            highlightTrimmedSolves={trimmedSideByRow.size > 0}
             showSolveAverages={displayMode === "table"}
             containerClassName="averageDetailEmbeddedTable"
             renderSolveFooter={renderSolveAlgorithmTags}

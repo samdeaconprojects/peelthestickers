@@ -91,6 +91,22 @@
   opacity: 100%;
 }
 
+/* Marks only the solve where an offline run starts - a small corner flag,
+   absolutely positioned so it never affects TimeItem's size or layout. */
+.TimeItem.offline-run-start::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #2EC4B6;
+  box-shadow: 0 0 4px rgba(46, 196, 182, 0.9);
+  pointer-events: none;
+  z-index: 20;
+}
+
 .TimeItem.session-single-beaten {
   opacity: 1;
   background:

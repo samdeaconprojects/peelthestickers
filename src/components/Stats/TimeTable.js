@@ -215,6 +215,7 @@ const TimeTable = ({
   initialItemRowSize = 12,
   initialTableLimit = "1000",
   preserveInputOrder = false,
+  highlightTrimmedSolves = false,
   showSolveAverages = true,
   containerClassName = "",
   renderSolveFooter = null,
@@ -634,8 +635,15 @@ const TimeTable = ({
           {tableRows.map((solve, index) => {
             const ms = getSolveMs(solve);
             const tablePerfClass = getPerfClassByRank01(overallVisibleRankMap[index]);
-            const isBest = tableBestWorst.bestIndex === index;
-            const isWorst = tableBestWorst.worstIndex === index;
+            // In average-detail mode the dashed borders mark what the average threw
+            // away, which for anything past an Ao12 is more than one solve per end.
+            const trimmedSide = highlightTrimmedSolves ? solve?.__trimmedSide || null : null;
+            const isBest = highlightTrimmedSolves
+              ? trimmedSide === "low"
+              : tableBestWorst.bestIndex === index;
+            const isWorst = highlightTrimmedSolves
+              ? trimmedSide === "high"
+              : tableBestWorst.worstIndex === index;
 
             const selected = selection.isIndexSelected(index);
             const selectStyleInline = selected
@@ -762,14 +770,23 @@ const TimeTable = ({
                 {row.solves.map((solve, solveIndex) => {
                   const perfKey = sortBy === "time" ? solve.__flatIndex : solveIndex;
                   const perfClass = getPerfClassByRank01(row.rankMap[perfKey]);
+                  // Trim highlighting replaces the best/worst borders entirely: every
+                  // discarded solve gets the dashed treatment, not just the extremes.
+                  const trimmedSide = highlightTrimmedSolves ? solve?.__trimmedSide || null : null;
                   const isOverallBest =
-                    hasMultipleItemRows && tableBestWorst.bestIndex === solve.__flatIndex;
+                    !highlightTrimmedSolves &&
+                    hasMultipleItemRows &&
+                    tableBestWorst.bestIndex === solve.__flatIndex;
                   const isOverallWorst =
-                    hasMultipleItemRows && tableBestWorst.worstIndex === solve.__flatIndex;
-                  const isRowBest =
-                    !isOverallBest && sortBy !== "time" && row.bestIndex === solveIndex;
-                  const isRowWorst =
-                    !isOverallWorst && sortBy !== "time" && row.worstIndex === solveIndex;
+                    !highlightTrimmedSolves &&
+                    hasMultipleItemRows &&
+                    tableBestWorst.worstIndex === solve.__flatIndex;
+                  const isRowBest = highlightTrimmedSolves
+                    ? trimmedSide === "low"
+                    : !isOverallBest && sortBy !== "time" && row.bestIndex === solveIndex;
+                  const isRowWorst = highlightTrimmedSolves
+                    ? trimmedSide === "high"
+                    : !isOverallWorst && sortBy !== "time" && row.worstIndex === solveIndex;
                   const useOverallHighlight = hasMultipleItemRows && (isOverallBest || isOverallWorst);
                   const useRowBorder = isRowBest || isRowWorst;
 
@@ -917,6 +934,7 @@ TimeTable.propTypes = {
   initialItemRowSize: PropTypes.oneOf([5, 12]),
   initialTableLimit: PropTypes.oneOf(TABLE_LIMITS),
   preserveInputOrder: PropTypes.bool,
+  highlightTrimmedSolves: PropTypes.bool,
   showSolveAverages: PropTypes.bool,
   containerClassName: PropTypes.string,
   renderSolveFooter: PropTypes.func,

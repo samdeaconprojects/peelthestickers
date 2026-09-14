@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import "./Profile.css";
 import { useDbStatus } from "../../contexts/DbStatusContext";
 import Post from "./Post";
@@ -22,8 +22,16 @@ import { getPosts } from "../../services/getPosts";
 import { getUser } from "../../services/getUser";
 import { updateUser } from "../../services/updateUser";
 import { updatePostComments } from "../../services/updatePostComments";
-import { getSessions } from "../../services/getSessions";
-import { getLastNSolvesByEvent, getLastNSolvesBySession, getSolvesBySession } from "../../services/getSolvesBySession";
+import { getSessions, invalidateSessionsCache } from "../../services/getSessions";
+import {
+  getLastNSolvesByEvent,
+  getLastNSolvesBySession,
+  getSolvesBySession,
+  invalidateLastNSolvesCache,
+  invalidateSolvesSessionCache,
+} from "../../services/getSolvesBySession";
+import useOnlineStatus from "../../hooks/useOnlineStatus";
+import OfflineSolvesPanel from "./OfflineSolvesPanel";
 
 const PROFILE_SOLVE_QUERY_LIMIT = 200;
 
@@ -486,13 +494,30 @@ function getProfileStatsChromeStyle(profile) {
   };
 }
 
-function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = true }) {
+function Profile({
+  user,
+  setUser,
+  deletePost: deletePostProp,
+  showPlayerBar = true,
+  onJoinLiveRoom,
+  liveRoomBusy = false,
+}) {
   const { runDb } = useDbStatus();
   const { userID: paramID } = useParams();
+  const location = useLocation();
   const isOwn = !paramID || paramID === user?.UserID;
   const viewID = isOwn ? user?.UserID : paramID;
 
   const isFriend = user?.Friends?.includes(viewID);
+  const isOnline = useOnlineStatus();
+
+  // Arriving via the offline banner's "Review offline solves" link - scroll
+  // straight to the panel instead of leaving the user to hunt for it.
+  useEffect(() => {
+    if (location.hash !== "#offline-solves") return;
+    const el = document.getElementById("offline-solves");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [location.hash]);
 
   const [viewedProfile, setViewedProfile] = useState(null);
   const [viewedSessions, setViewedSessions] = useState({});
@@ -595,6 +620,52 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
 
     loadSessions();
   }, [viewID]);
+
+  // After the user syncs their offline queue, the server has fresh
+  // sessions/solves for the affected events - blow away the caches and
+  // refetch so stats/charts pick them up without a full page reload.
+  const handleOfflineSynced = async (affectedEvents = []) => {
+    if (!viewID) return;
+
+    invalidateSessionsCache(viewID);
+    affectedEvents.forEach((ev) => {
+      invalidateLastNSolvesCache(viewID, ev);
+      invalidateSolvesSessionCache(viewID, ev);
+    });
+
+    try {
+      const sessionItems = await getSessions(viewID, { force: true });
+
+      const catalog = {};
+      const statsByEvent = {};
+
+      for (const session of sessionItems) {
+        const ev = (session.Event || "UNKNOWN").toUpperCase();
+        const sid = session.SessionID || "main";
+
+        if (!catalog[ev]) catalog[ev] = [];
+        if (!statsByEvent[ev]) statsByEvent[ev] = {};
+
+        if (!catalog[ev].includes(sid)) catalog[ev].push(sid);
+        statsByEvent[ev][sid] = session.Stats || null;
+      }
+
+      setViewedSessionCatalog(catalog);
+      setViewedSessionStats(statsByEvent);
+      // Drop cached per-stat solve lists for the affected events so the
+      // solves-fetch effect below refetches them from the server.
+      setViewedSessions((prev) => {
+        const next = { ...prev };
+        Object.keys(next).forEach((cacheKey) => {
+          const ev = cacheKey.split("::")[0];
+          if (affectedEvents.includes(ev)) delete next[cacheKey];
+        });
+        return next;
+      });
+    } catch (err) {
+      console.error("Failed to refresh profile after offline sync:", err);
+    }
+  };
 
   useEffect(() => {
     if (!viewID) return;
@@ -898,7 +969,15 @@ function Profile({ user, setUser, deletePost: deletePostProp, showPlayerBar = tr
         sessionStats={viewedSessionStats}
         isOwn={isOwn}
         onEditStats={openStatsEditor}
+        onJoinLiveRoom={!isOwn ? onJoinLiveRoom : null}
+        liveRoomBusy={liveRoomBusy}
       />
+
+      {isOwn && (
+        <div id="offline-solves">
+          <OfflineSolvesPanel userID={viewID} isOnline={isOnline} onSynced={handleOfflineSynced} />
+        </div>
+      )}
 
       {!isOwn && (
         <button

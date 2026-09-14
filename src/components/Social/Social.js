@@ -1,4 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import "./Social.css";
 import { useDbStatus } from "../../contexts/DbStatusContext";
@@ -37,6 +44,7 @@ import SocialHomeIcon from "../../assets/SocialHome.svg";
 import SocialMessagesIcon from "../../assets/SocialMessages.svg";
 
 import { hexToRgbString } from "../../utils/colorUtils";
+import { buildTournament } from "../../utils/tournament";
 
 const FEED_POST_LIMIT = 25;
 const GROUP_POST_LIMIT = 25;
@@ -499,8 +507,7 @@ function Social({
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [messageInput, setMessageInput] = useState("");
-  const [showConversationStats, setShowConversationStats] = useState(false);
-  const [showConversationHeader, setShowConversationHeader] = useState(true);
+  const [showConversationHeader, setShowConversationHeader] = useState(false);
   const [showSharedModal, setShowSharedModal] = useState(false);
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [creatingGroup, setCreatingGroup] = useState(false);
@@ -518,6 +525,9 @@ function Social({
 
   const activityEndRef = useRef(null);
   const activityPanelRef = useRef(null);
+  const conversationStripRef = useRef(null);
+  const selectedTileRef = useRef(null);
+  const [detailsToggleLeft, setDetailsToggleLeft] = useState(null);
   const messagesPanelRef = useRef(null);
   const messagesEndRef = useRef(null);
   const sharedMessageRefs = useRef({});
@@ -544,7 +554,7 @@ function Social({
   }, [conversations]);
 
   useEffect(() => {
-    setShowConversationStats(false);
+    setShowConversationHeader(false);
   }, [selectedConversation?.conversationID]);
 
   useEffect(() => {
@@ -1701,9 +1711,13 @@ function Social({
       opponentEvents,
       creatorScrambles,
       opponentScrambles,
+      participantPlans,
+      tournament,
       creatorID,
       mode,
       targetWins,
+      roundCount,
+      setCount,
       batchSize,
       saveSessionID,
       hostID,
@@ -1751,6 +1765,11 @@ function Social({
             sharedID,
             mode: mode || sourceMessage?.mode || sourceMessage?.type || "average",
             targetWins: targetWins || sourceMessage?.targetWins || null,
+            roundCount: roundCount || sourceMessage?.roundCount || null,
+            setCount: setCount || sourceMessage?.setCount || null,
+            participantPlans:
+              participantPlans || sourceMessage?.participantPlans || null,
+            tournament: tournament || sourceMessage?.tournament || null,
             batchSize: batchSize || sourceMessage?.batchSize || null,
             saveSessionID:
               saveSessionID || sourceMessage?.saveSessionID || (mode === "hosted" ? "main" : null),
@@ -2002,6 +2021,68 @@ function Social({
     );
   }, [activeRoomConversationID, sortedConversations]);
 
+  // Keep the "conversation details" drop-down arrow lined up under whichever
+  // tile is selected in the header strip, tracking horizontal scroll / resize.
+  useLayoutEffect(() => {
+    if (activeTab !== 1) return undefined;
+
+    const measure = () => {
+      const strip = conversationStripRef.current;
+      const tile = selectedTileRef.current;
+      if (!strip || !tile) {
+        setDetailsToggleLeft(null);
+        return;
+      }
+      const stripRect = strip.getBoundingClientRect();
+      const tileRect = tile.getBoundingClientRect();
+      const rawCenter = tileRect.left - stripRect.left + tileRect.width / 2;
+      const clamped = Math.max(
+        28,
+        Math.min(rawCenter, stripRect.width - 28)
+      );
+      setDetailsToggleLeft(Number.isFinite(clamped) ? clamped : null);
+    };
+
+    measure();
+
+    const strip = conversationStripRef.current;
+    strip?.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", measure);
+
+    let observer;
+    if (strip && typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(measure);
+      observer.observe(strip);
+    }
+
+    return () => {
+      strip?.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", measure);
+      observer?.disconnect();
+    };
+  }, [
+    activeTab,
+    selectedConversation?.conversationID,
+    conversations,
+    activeRoomConversation?.conversationID,
+  ]);
+
+  // Stable list of members handed to the shared-session modal, so its in-progress
+  // per-player event plans survive unrelated re-renders of this component.
+  const sharedModalMembers = useMemo(() => {
+    if (selectedConversation?.type !== "GROUP") return [];
+    return (selectedConversation?.memberProfiles || []).map((member) => ({
+      id: member.id,
+      name: member.name || member.username || member.id,
+      event: member.profileEvent || "333",
+      isYou: member.isYou || member.id === user?.UserID,
+    }));
+  }, [
+    selectedConversation?.type,
+    selectedConversation?.memberProfiles,
+    user?.UserID,
+  ]);
+
   useEffect(() => {
     const preferredConversationID = String(location.state?.conversationID || "").trim();
     if (!preferredConversationID || !conversations.length) return;
@@ -2171,21 +2252,123 @@ function Social({
     }
   };
 
+  const startTournamentSharedSession = async (conversation, config) => {
+    const conversationID = conversation?.conversationID;
+    if (!conversationID || !user?.UserID) return;
+
+    const memberProfiles = Array.isArray(conversation?.memberProfiles)
+      ? conversation.memberProfiles
+      : [];
+    const players = (memberProfiles.length
+      ? memberProfiles
+      : [{ id: user.UserID, name: user.Username || user.Name || user.UserID }]
+    )
+      .map((member) => ({
+        id: String(member?.id || member?.userID || "").trim(),
+        name: member?.name || member?.username || member?.id || "Player",
+      }))
+      .filter((player) => player.id);
+
+    if (players.length < 2) return;
+
+    const event = String(config?.event || currentEvent || "333");
+    const eventKey = event.toUpperCase();
+
+    // Best-effort seeding by PB, from whatever profiles are already cached.
+    const pbById = {};
+    players.forEach((player) => {
+      const profile = profileCacheRef.current.get(player.id);
+      const entry =
+        profile?.ProfileSolvesByEvent?.[eventKey] ||
+        profile?.profileSolvesByEvent?.[eventKey] ||
+        null;
+      const candidates = [];
+      if (Number.isFinite(Number(entry?.solve?.time))) candidates.push(Number(entry.solve.time));
+      (Array.isArray(entry?.solves) ? entry.solves : []).forEach((solve) => {
+        const t = Number(solve?.time ?? solve?.finalTimeMs ?? solve?.rawTimeMs);
+        if (Number.isFinite(t) && t > 0) candidates.push(t);
+      });
+      if (candidates.length) pbById[player.id] = Math.min(...candidates);
+    });
+
+    const tournament = buildTournament({
+      format: config?.format === "roundrobin" ? "roundrobin" : "bracket",
+      players,
+      seeding: config?.seeding || "random",
+      seedOrder: Array.isArray(config?.seedOrder) ? config.seedOrder : [],
+      matchRule: config?.matchRule || "average",
+      params: config?.params || {},
+      pbById,
+    });
+
+    const totalSolves = Math.max(1, Number(tournament.totalSolves) || 1);
+    const scrambles = Array.from({ length: totalSolves }, () => generateScramble(event));
+    const events = Array.from({ length: totalSolves }, () => event);
+
+    const sessionID = `SHARED#${conversationID}#${event}`;
+    const sharedRunID = `${sessionID}#${Date.now()}`;
+
+    const scrambleText = `[sharedAoN]${JSON.stringify({
+      v: 2,
+      mode: "tournament",
+      type: "tournament",
+      sharedID: sharedRunID,
+      count: totalSolves,
+      creatorID: user.UserID,
+      hostID: user.UserID,
+      hostName: user?.Username || user?.Name || user.UserID,
+      roomCode: selectedConversation?.roomCode || null,
+      creatorEvent: event,
+      opponentEvent: event,
+      creatorEvents: events,
+      opponentEvents: events,
+      creatorScrambles: scrambles,
+      opponentScrambles: scrambles,
+      tournament,
+    })}`;
+
+    try {
+      const saved = await sendMessage(conversationID, user.UserID, scrambleText);
+      const savedMessage = {
+        sender: saved?.SenderID || user.UserID,
+        text: saved?.Text || scrambleText,
+        timestamp: saved?.CreatedAt || new Date().toISOString(),
+      };
+      upsertConversation({
+        ...conversation,
+        messages: mergeMessagesByKey(conversation.messages || [], [savedMessage]),
+        lastMessageAt: savedMessage.timestamp,
+        lastMessagePreview: "[Tournament]",
+      });
+    } catch (err) {
+      console.error("Failed to start tournament:", err);
+    }
+  };
+
   const handleConfirmSharedAverage = async ({
     mode = "average",
     creatorEvent,
     opponentEvent,
     count,
     targetWins,
+    roundCount,
+    setCount,
     batchSize,
     creatorPlan,
     opponentPlan,
+    participantPlans,
+    tournament,
   }) => {
     if (!selectedConversationRef.current || !user?.UserID) return;
 
     const conversation = await ensureSelectedConversationExists();
     const conversationID = conversation?.conversationID;
     if (!conversationID) return;
+
+    if (mode === "tournament" && tournament) {
+      await startTournamentSharedSession(conversation, tournament);
+      return;
+    }
 
     const expandPlanToEvents = (plan, fallbackEvent, fallbackCount) => {
       if (Array.isArray(plan) && plan.length) {
@@ -2203,23 +2386,94 @@ function Social({
 
     const creatorEntries = expandPlanToEvents(creatorPlan, creatorEvent, count);
     const opponentEntries = expandPlanToEvents(opponentPlan, opponentEvent, count);
-    const creatorEvents = creatorEntries.map((entry) => entry.event);
-    const opponentEvents = opponentEntries.map((entry) => entry.event);
-    const roundCount = Math.max(creatorEvents.length, opponentEvents.length);
-    const creatorScrambles = [];
-    const opponentScrambles = [];
+    let creatorEvents = creatorEntries.map((entry) => entry.event);
+    let opponentEvents = opponentEntries.map((entry) => entry.event);
 
-    for (let i = 0; i < roundCount; i += 1) {
-      const creatorRoundEvent = creatorEvents[i] || creatorEvent || "333";
-      const opponentRoundEvent = opponentEvents[i] || opponentEvent || "333";
+    // Head to head runs round-by-round for the full length a match could reach,
+    // so pad both sides out to `count`, repeating each side's event plan so the
+    // two line up solve-for-solve (e.g. 1x 5x5 vs 1x 4x4 + 2x 3x3).
+    if (mode === "head_to_head" && Number(count) > 0) {
+      const cycleTo = (arr, len, fallback) =>
+        arr.length
+          ? Array.from({ length: len }, (_, i) => arr[i % arr.length])
+          : Array.from({ length: len }, () => fallback || "333");
+      creatorEvents = cycleTo(creatorEvents, Number(count), creatorEvent);
+      opponentEvents = cycleTo(opponentEvents, Number(count), opponentEvent);
+    }
 
-      if (String(creatorRoundEvent).toUpperCase() === String(opponentRoundEvent).toUpperCase()) {
-        const sharedScramble = generateScramble(creatorRoundEvent);
-        creatorScrambles.push(sharedScramble);
-        opponentScrambles.push(sharedScramble);
-      } else {
-        creatorScrambles.push(generateScramble(creatorRoundEvent));
-        opponentScrambles.push(generateScramble(opponentRoundEvent));
+    // Group "different events per player": expand every member's plan, line them
+    // up solve-for-solve (shorter plans repeat), and share a scramble whenever two
+    // members are on the same event for the same round.
+    let participantPlansOut = null;
+    if (participantPlans && typeof participantPlans === "object") {
+      const memberIDs = Object.keys(participantPlans).filter(Boolean);
+      const expandedByMember = {};
+      memberIDs.forEach((memberID) => {
+        expandedByMember[memberID] = expandPlanToEvents(
+          participantPlans[memberID],
+          currentEvent,
+          1
+        ).map((entry) => entry.event);
+      });
+
+      const groupTotal = Math.max(
+        1,
+        ...memberIDs.map((memberID) => expandedByMember[memberID].length || 0)
+      );
+
+      participantPlansOut = {};
+      memberIDs.forEach((memberID) => {
+        const source = expandedByMember[memberID];
+        const events = source.length
+          ? Array.from({ length: groupTotal }, (_, i) => source[i % source.length])
+          : Array.from({ length: groupTotal }, () => currentEvent || "333");
+        participantPlansOut[memberID] = { events, scrambles: [] };
+      });
+
+      for (let i = 0; i < groupTotal; i += 1) {
+        const scrambleByEvent = {};
+        memberIDs.forEach((memberID) => {
+          const event = participantPlansOut[memberID].events[i] || currentEvent || "333";
+          const key = String(event).toUpperCase();
+          if (!scrambleByEvent[key]) scrambleByEvent[key] = generateScramble(event);
+          participantPlansOut[memberID].scrambles.push(scrambleByEvent[key]);
+        });
+      }
+
+      const creatorPlanOut =
+        participantPlansOut[user.UserID] ||
+        participantPlansOut[memberIDs[0]] ||
+        { events: [], scrambles: [] };
+      creatorEvents = creatorPlanOut.events.slice();
+      opponentEvents = creatorPlanOut.events.slice();
+    }
+
+    const totalRounds = participantPlansOut
+      ? Math.max(1, creatorEvents.length)
+      : Math.max(creatorEvents.length, opponentEvents.length);
+    let creatorScrambles = [];
+    let opponentScrambles = [];
+
+    if (participantPlansOut) {
+      const creatorPlanOut =
+        participantPlansOut[user.UserID] ||
+        participantPlansOut[Object.keys(participantPlansOut)[0]] ||
+        { scrambles: [] };
+      creatorScrambles = creatorPlanOut.scrambles.slice();
+      opponentScrambles = creatorPlanOut.scrambles.slice();
+    } else {
+      for (let i = 0; i < totalRounds; i += 1) {
+        const creatorRoundEvent = creatorEvents[i] || creatorEvent || "333";
+        const opponentRoundEvent = opponentEvents[i] || opponentEvent || "333";
+
+        if (String(creatorRoundEvent).toUpperCase() === String(opponentRoundEvent).toUpperCase()) {
+          const sharedScramble = generateScramble(creatorRoundEvent);
+          creatorScrambles.push(sharedScramble);
+          opponentScrambles.push(sharedScramble);
+        } else {
+          creatorScrambles.push(generateScramble(creatorRoundEvent));
+          opponentScrambles.push(generateScramble(opponentRoundEvent));
+        }
       }
     }
 
@@ -2233,8 +2487,10 @@ function Social({
       mode,
       type: mode,
       sharedID: sharedRunID,
-      count: roundCount,
+      count: totalRounds,
       targetWins: Number(targetWins) || null,
+      roundCount: Number(roundCount) || null,
+      setCount: Number(setCount) || null,
       batchSize: Number(batchSize) || null,
       isHosted: mode === "hosted",
       saveSessionID: mode === "hosted" ? "main" : null,
@@ -2248,6 +2504,7 @@ function Social({
       opponentEvents,
       creatorScrambles,
       opponentScrambles,
+      participantPlans: participantPlansOut,
     })}`;
 
     try {
@@ -2303,19 +2560,21 @@ function Social({
         </div>
 
         {activeTab === 1 && (
-          <div className="headerConversationStrip">
+          <div className="headerConversationArea">
+            <div className="headerConversationStrip" ref={conversationStripRef}>
             {visibleConversations.map((conv) => (
               (() => {
                 const groupGrid = getGroupAvatarGridConfig((conv.memberProfiles || []).length);
+                const isSelectedConv =
+                  selectedConversation?.conversationID === conv.conversationID;
 
                 return (
                   <button
                     type="button"
                     key={conv.conversationID}
+                    ref={isSelectedConv ? selectedTileRef : undefined}
                     className={`conversationPreview ${
-                      selectedConversation?.conversationID === conv.conversationID
-                        ? "selected"
-                        : ""
+                      isSelectedConv ? "selected" : ""
                     }`}
                     onClick={() => {
                       setSelectedConversation(conv);
@@ -2392,6 +2651,11 @@ function Social({
               <button
                 type="button"
                 key={activeRoomConversation.conversationID}
+                ref={
+                  selectedConversation?.conversationID === activeRoomConversation.conversationID
+                    ? selectedTileRef
+                    : undefined
+                }
                 className={`conversationPreview ${
                   selectedConversation?.conversationID === activeRoomConversation.conversationID
                     ? "selected"
@@ -2418,6 +2682,32 @@ function Social({
                 </div>
               </button>
             ) : null}
+            </div>
+
+            {selectedConversation && (
+              <button
+                type="button"
+                className={`conversationDetailsToggle ${
+                  showConversationHeader ? "is-open" : ""
+                } ${detailsToggleLeft != null ? "is-anchored" : ""}`}
+                style={
+                  detailsToggleLeft != null
+                    ? { left: `${detailsToggleLeft}px` }
+                    : undefined
+                }
+                onClick={() => setShowConversationHeader((prev) => !prev)}
+                aria-expanded={showConversationHeader}
+                aria-label={
+                  showConversationHeader
+                    ? "Hide conversation details"
+                    : "Show conversation details"
+                }
+              >
+                <span className="conversationDetailsToggleArrow" aria-hidden="true">
+                  {"›"}
+                </span>
+              </button>
+            )}
           </div>
         )}
 
@@ -2613,31 +2903,8 @@ function Social({
             <div className="conversationView">
               {selectedConversation ? (
                 <>
-                  <div className="conversationHeaderToggleWrap">
-                    <button
-                      type="button"
-                      className="conversationHeaderToggle"
-                      onClick={() => setShowConversationHeader((prev) => !prev)}
-                      aria-label={
-                        showConversationHeader
-                          ? "Collapse conversation details"
-                          : "Expand conversation details"
-                      }
-                    >
-                      <span className="conversationHeaderToggleLabel">Details</span>
-                      <span
-                        className={`conversationHeaderToggleArrow ${
-                          showConversationHeader ? "is-open" : ""
-                        }`}
-                        aria-hidden="true"
-                      >
-                        ^
-                      </span>
-                    </button>
-                  </div>
-
                   {showConversationHeader && (
-                    <>
+                    <div className="conversationDetailsPanel">
                       {selectedConversation.type === "GROUP" && (
                         <div className="groupThreadMeta">
                           <div className="groupThreadTitleRow">
@@ -2698,19 +2965,7 @@ function Social({
                         </div>
                       )}
 
-                      <div className="sharedConversationStatsWrap">
-                        <button
-                          type="button"
-                          className="sharedConversationStatsToggle"
-                          onClick={() => setShowConversationStats((prev) => !prev)}
-                        >
-                          <span>Chat stats</span>
-                          <span>{showConversationStats ? "Hide" : "Show"}</span>
-                        </button>
-
-                        {showConversationStats && (
-                          <div className="sharedConversationStats">
-                            <div className="sharedConversationStatsTitle">Shared totals</div>
+                      <div className="sharedConversationStats">
                             <div className="sharedConversationStatsGrid">
                               <div className="sharedConversationStatCard">
                                 <div className="sharedConversationStatValue">
@@ -2765,10 +3020,8 @@ function Social({
                                 ))}
                               </div>
                             )}
-                          </div>
-                        )}
                       </div>
-                    </>
+                    </div>
                   )}
 
                   <div
@@ -2998,6 +3251,7 @@ function Social({
         allowHostedMode={selectedConversation?.isStreamRoom === true}
         yourLabel={user?.Username || user?.Name || "You"}
         theirLabel={selectedConversation?.username || selectedConversation?.name || "Them"}
+        members={sharedModalMembers}
         onConfirm={handleConfirmSharedAverage}
       />
 

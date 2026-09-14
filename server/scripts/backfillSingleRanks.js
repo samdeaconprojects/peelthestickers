@@ -6,6 +6,7 @@ const { ddb, TABLE } = require("../ddb");
 const {
   normalizeEvent,
   normalizeSessionID,
+  normalizePenalty,
   getFinalTimeMs,
   parseSolveSK,
 } = require("../lib/ptsCore");
@@ -47,6 +48,7 @@ function buildRankItemsForSolve(userID, event, solve, sessionFilter = null) {
       Event: ev,
       SessionID: sid,
       FinalTimeMs: Number(finalMs),
+      Penalty: normalizePenalty(solve?.Penalty) || "",
       SolveSK: solveSK,
       SolveID: solveID || null,
       CreatedAt: createdAt || null,
@@ -60,6 +62,7 @@ function buildRankItemsForSolve(userID, event, solve, sessionFilter = null) {
       Event: ev,
       SessionID: sid,
       FinalTimeMs: Number(finalMs),
+      Penalty: normalizePenalty(solve?.Penalty) || "",
       SolveSK: solveSK,
       SolveID: solveID || null,
       CreatedAt: createdAt || null,

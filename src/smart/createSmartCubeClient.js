@@ -7,6 +7,8 @@ export function createSmartCubeClient(provider = "auto") {
 
   switch (p) {
     case "moyu-wcu":
+    case "moyu":
+    case "moyu-ai":
       return new MoyuCubeClient();
 
     case "gan-gen2-compatible":

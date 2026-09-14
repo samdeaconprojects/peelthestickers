@@ -266,9 +266,49 @@ body {
   padding-left: 4px;
 }
 
-.left-slot-auth .nametagCube .puzzle-svg-wrap,
-.left-slot-auth .nametagCube .puzzle-svg-inner {
+/* Only nudge NxN cubes. Non-NxN puzzles (pyraminx, megaminx, skewb, clock, sq1)
+   rely on the scale() transform set in NameTag.css for the same wrap element;
+   this selector is more specific, so guarding it keeps their scale-down intact. */
+.left-slot-auth .nametagCube:not(.nametagCube--pyraminx):not(.nametagCube--megaminx):not(.nametagCube--skewb):not(.nametagCube--clock):not(.nametagCube--sq1) .puzzle-svg-wrap,
+.left-slot-auth .nametagCube:not(.nametagCube--pyraminx):not(.nametagCube--megaminx):not(.nametagCube--skewb):not(.nametagCube--clock):not(.nametagCube--sq1) .puzzle-svg-inner {
   transform: translateY(2px);
+}
+
+/* Home nametag only: shift megaminx / square-1 slightly left of the shared
+   default in NameTag.css (translate runs before scale, so these are pre-scale px). */
+.left-slot-auth .nametagCube--megaminx > * {
+  transform: scale(0.22) translate(-4px, -1px);
+}
+.left-slot-auth .nametagCube--sq1 > * {
+  transform: scale(0.34) translate(-6px, -1px);
+}
+.left-slot-auth .nametagCube--skewb > * {
+  transform: scale(0.30) translate(-4px, 3px);
+}
+.left-slot-auth .nametagCube--clock > * {
+  transform: scale(0.26) translate(6px, 20px);
+}
+
+/* Home nametag only: 2x2 sits a touch small and high-left — enlarge and shift it
+   down/right. !important beats the long :not() guard rule above. */
+.left-slot-auth .nametagCube--222 .puzzle-svg-wrap {
+  transform: translate(3px, 10px) scale(1.12) !important;
+}
+
+.left-slot-auth .nametagCube--333 .puzzle-svg-wrap {
+  transform: translate(2px, 2px) !important;
+}
+
+.left-slot-auth .nametagCube--555 .puzzle-svg-wrap {
+  transform: translate(0, 0) !important;
+}
+
+.left-slot-auth .nametagCube--666 .puzzle-svg-wrap {
+  transform: translate(-1px, 2px) !important;
+}
+
+.left-slot-auth .nametagCube--777 .puzzle-svg-wrap {
+  transform: translate(-1px, 2px) !important;
 }
 
 .scramble-container {
@@ -316,10 +356,11 @@ body {
 
 .cube-and-event .puzzle-hud {
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
   align-items: center;
   width: 100%;
   padding-top: 18px;
+  padding-right: 26px;
   box-sizing: border-box;
 }
 

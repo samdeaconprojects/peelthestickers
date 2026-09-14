@@ -1,5 +1,5 @@
 // src/components/Timer/Timer.js
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import './Timer.css';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useGanTimer } from '../../contexts/GanTimerContext';
@@ -7,6 +7,8 @@ import { useGanTimer } from '../../contexts/GanTimerContext';
 import { createSmartCubeClient } from '../../smart/createSmartCubeClient';
 import { getSmartCubeProviderLabel } from '../../smart/smartCubeProviderMeta';
 import { computeBasicCFOPSplits } from '../../smart/solveSplits';
+
+const SmartCube3D = React.lazy(() => import('../SmartCube3D/SmartCube3D'));
 
 function normalizePenaltyValue(penalty) {
   const value = String(penalty || '').trim().toUpperCase();
@@ -311,6 +313,11 @@ function Timer({
 
   const cubeFinalizingRef = useRef(false);
   const solveScrambleRef = useRef("");
+
+  // live 3D cube view (moves + gyro)
+  const smartCube3DRef = useRef(null);
+  const cubeGyroRef = useRef(null);
+  const show3DCube = isCubeMode && settings?.cubeShow3D !== false && !inPlayerBar;
 
   // -------------------------
   // Inspection state
@@ -867,6 +874,9 @@ function Timer({
           }
 
           if (solved && cubePhaseRef.current !== 'solving') {
+            // physical cube is solved -> re-sync the 3D view to solved
+            smartCube3DRef.current?.resetToSolved();
+
             cubeArmedRef.current = false;
             setCubeArmed(false);
 
@@ -880,9 +890,22 @@ function Timer({
           }
         },
 
+        onGyro: ({ quaternion }) => {
+          if (!quaternion) return;
+          cubeGyroRef.current = quaternion;
+          smartCube3DRef.current?.setQuaternion(quaternion);
+          try {
+            window.dispatchEvent(
+              new CustomEvent('pts:cubeGyro', { detail: { quaternion } })
+            );
+          } catch (_) {}
+        },
+
         onMove: ({ move, cubeTs, hostTs }) => {
           const mv = normalizeMoveToken(move);
           if (!mv) return;
+
+          smartCube3DRef.current?.addMove(mv);
 
           if (cubePhaseRef.current === 'finalizing') return;
 
@@ -1428,6 +1451,15 @@ function Timer({
               </div>
             )}
           </div>
+
+          {show3DCube && cubeConnected && (
+            <Suspense fallback={null}>
+              <SmartCube3D
+                ref={smartCube3DRef}
+                className={compact ? "smart-cube-3d--compact" : ""}
+              />
+            </Suspense>
+          )}
 
           {/* FULLSCREEN INSPECTION */}
           {isInspecting && fullscreenInspectionOn && !isGanMode && !isCubeMode ? (

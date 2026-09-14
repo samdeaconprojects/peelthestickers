@@ -177,6 +177,7 @@ export const defaultSettings = {
   timeColorMode: "index",
   sharedTimeColorMode: "profile",
   showStrictAverages: false,
+  tolerateDnfInMeans: true,
   whitePuzzleSVGs: false,
 
   eventKeyBindings: defaultEventBindings,
@@ -194,6 +195,7 @@ export const defaultSettings = {
   cubeAutoStart: true,
   cubeAutoStop: true,
   cubeStopIdleMs: 5000,
+  cubeShow3D: true,
 
   showPlayerBar: true,
   lastEvent: "333",

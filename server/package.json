@@ -6,11 +6,13 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "test": "node --test",
     "deleteStats": "node scripts/deleteSessionStats.js",
     "printStats": "node scripts/printSessionStats.js",
     "recomputeStats": "node scripts/recomputeSessionStats.js",
     "backfillStats": "node scripts/backfillSessionStats.js",
     "backfillDayBuckets": "node scripts/backfillDayBuckets.js",
+  "backfillAverageTrim": "node scripts/backfillAverageTrim.js",
     "backfillConversationShared": "node scripts/backfillConversationSharedStats.js",
     "backfillSingles": "node scripts/backfillSingleRanks.js",
     "backfillSolveSource": "node scripts/backfillSolveSource.js",

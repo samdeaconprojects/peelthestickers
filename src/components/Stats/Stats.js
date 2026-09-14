@@ -1536,7 +1536,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const [overallStatsForEvent, setOverallStatsForEvent] = useState(null);
   const [cachedEventMatrixStats, setCachedEventMatrixStats] = useState({});
   const [loadingOverallStats, setLoadingOverallStats] = useState(false);
-  const [overallStatsLoadSettledKey, setOverallStatsLoadSettledKey] = useState("");
+  // Written to track which scope's overall-stats load has settled; the only
+  // reader was the cached-stats repair effect, which is gone.
+  const [, setOverallStatsLoadSettledKey] = useState("");
   const [loadingEventMatrixStats, setLoadingEventMatrixStats] = useState(false);
   const [recomputeStatusText, setRecomputeStatusText] = useState("");
 
@@ -1553,8 +1555,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const [timeScopeCacheKey, setTimeScopeCacheKey] = useState("");
   const [overallScopeSolves, setOverallScopeSolves] = useState([]);
   const [overallScopeCacheKey, setOverallScopeCacheKey] = useState("");
-  const [sessionOverallFallbackSolves, setSessionOverallFallbackSolves] = useState([]);
-  const [sessionOverallFallbackCacheKey, setSessionOverallFallbackCacheKey] = useState("");
   const [tagScopeSolves, setTagScopeSolves] = useState([]);
   const [tagScopeCacheKey, setTagScopeCacheKey] = useState("");
   const [dateScopedSessionSolves, setDateScopedSessionSolves] = useState([]);
@@ -1575,7 +1575,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
   const requestTokenRef = useRef(0);
   const previousHasActiveTagFilterRef = useRef(false);
-  const summaryFallbackDecisionRef = useRef(new Map());
 
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const sessionMenuWrapRef = useRef(null);
@@ -3751,9 +3750,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const stableOverallSolves = useMemo(() => {
     if (statsViewMode === "time") return allLoadedFilteredRawSolves;
     if (hasActiveTagFilter) return activeStandardSolves || [];
-    if (!isAllEventsMode && !isAllSessionsMode && sessionOverallFallbackSolves.length > 0) {
-      return withSolveFullIndices(sessionOverallFallbackSolves);
-    }
     if (overallScopeSolves.length > 0) return overallScopeSolves;
     if (isAllEventsMode) return allLoadedSolves || [];
     if (isAllSessionsMode) {
@@ -3770,7 +3766,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     isAllEventsMode,
     isAllSessionsMode,
     overallScopeSolves,
-    sessionOverallFallbackSolves,
     selectedSessionSolves,
     sessionCachedSolves,
     statsEvent,
@@ -3789,24 +3784,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       : statsViewMode === "time"
         ? summaryCurrentSolves.length
         : activeStandardSolves.length;
-  const overallStatsSolveCount = Number(overallStatsForEvent?.SolveCountTotal || 0);
-  const overallStatsMissingPlus2Best = useMemo(() => {
-    if (!overallStatsForEvent) return false;
-    if (overallStatsSolveCount <= 0) return false;
-    const plus2Count = Number(overallStatsForEvent?.Plus2Count || 0);
-    if (plus2Count <= 0) return false;
-    return !Number.isFinite(Number(overallStatsForEvent?.Plus2BestMs));
-  }, [overallStatsForEvent, overallStatsSolveCount]);
-  const overallStatsMissingFirstSolveAt = useMemo(() => {
-    if (!overallStatsForEvent) return false;
-    if (overallStatsSolveCount <= 0) return false;
-    return !String(overallStatsForEvent?.FirstSolveAt || "").trim();
-  }, [overallStatsForEvent, overallStatsSolveCount]);
-  const overallStatsNeedsTopSinglesRepair = useMemo(() => {
-    if (!overallStatsForEvent) return false;
-    if (overallStatsSolveCount <= 0) return false;
-    return overallStatsForEvent?.NeedsTopSinglesRepair === true;
-  }, [overallStatsForEvent, overallStatsSolveCount]);
+  // Plus2BestMs / FirstSolveAt / TopSingles10 used to be detected as "missing"
+  // here and repaired with a full recompute, because the incremental stats
+  // writer never maintained them. It maintains them now (and repairs a stale
+  // row on its next write), so there is nothing left to detect: the recompute
+  // in Settings is the only remaining entry point, and it is manual.
 
   const overallCount = useMemo(() => {
     if (canonicalOverallStats?.SolveCountTotal != null) return canonicalOverallStats.SolveCountTotal;
@@ -4821,94 +4803,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     runDb,
   ]);
 
-  useEffect(() => {
-    const userID = user?.UserID;
-    const repairScopeKey =
-      !!userID
-        ? `${userID}::${String(statsEvent || "").toUpperCase()}::${String(sessionId || "main")}`
-        : "";
-    const shouldRepairCachedOverviewStats =
-      !!userID &&
-      statsViewMode === "standard" &&
-      !hasActiveTagFilter &&
-      !hasActiveDateFilter &&
-      !isAllEventsMode &&
-      !isAllSessionsMode &&
-      (
-        overallStatsMissingPlus2Best ||
-        overallStatsMissingFirstSolveAt ||
-        overallStatsNeedsTopSinglesRepair
-      );
-
-    if (!shouldRepairCachedOverviewStats) {
-      setSessionOverallFallbackSolves([]);
-      setSessionOverallFallbackCacheKey("");
-      return;
-    }
-
-    if (overallStatsLoadSettledKey !== repairScopeKey) return;
-
-    const cacheKey = repairScopeKey;
-    if (sessionOverallFallbackCacheKey === cacheKey && sessionOverallFallbackSolves.length > 0) return;
-    const priorDecision = summaryFallbackDecisionRef.current.get(cacheKey);
-    if (priorDecision === false) return;
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        if (priorDecision !== true) {
-          const approved = await warnBeforeSolveScan({
-            title: "Repair cached overview stats?",
-            intro: "Overview is missing cached fields like top singles, the first solve date, or +2 best.",
-            event: statsEvent,
-            sessionID: sessionId,
-            confirmLabel: "Recompute Stats",
-            estimateLabel: "Estimated solves to rescan",
-            extraLines: [
-              "This will recompute the stored session stats record so the fix persists on future visits.",
-              "If you decline, overview will keep using cached values and may omit those fields.",
-            ],
-          });
-          if (cancelled) return;
-          summaryFallbackDecisionRef.current.set(cacheKey, approved);
-          if (!approved) return;
-        }
-
-        await runOverallRecompute();
-        if (cancelled) return;
-        setSessionOverallFallbackSolves([]);
-        setSessionOverallFallbackCacheKey("");
-      } catch (error) {
-        if (cancelled) return;
-        console.error("Failed to repair cached overview stats:", error);
-        setSessionOverallFallbackSolves([]);
-        setSessionOverallFallbackCacheKey("");
-        summaryFallbackDecisionRef.current.delete(cacheKey);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    hasActiveDateFilter,
-    hasActiveTagFilter,
-    isAllEventsMode,
-    isAllSessionsMode,
-    overallStatsLoadSettledKey,
-    overallStatsMissingFirstSolveAt,
-    overallStatsMissingPlus2Best,
-    overallStatsNeedsTopSinglesRepair,
-    runOverallRecompute,
-    sessionId,
-    sessionOverallFallbackCacheKey,
-    sessionOverallFallbackSolves.length,
-    statsEvent,
-    statsViewMode,
-    user?.UserID,
-    warnBeforeSolveScan,
-  ]);
 
   const handleRecomputeOverall = useCallback(async () => {
     if (!user?.UserID) return;

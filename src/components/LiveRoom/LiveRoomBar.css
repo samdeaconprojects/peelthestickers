@@ -1,0 +1,194 @@
+.liveRoomPill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 60, 60, 0.06);
+  border: 1px solid rgba(255, 60, 60, 0.18);
+  font-size: 11px;
+  color: inherit;
+  opacity: 0.7;
+  transition: opacity 140ms ease;
+}
+
+.liveRoomPill:hover {
+  opacity: 1;
+}
+
+.liveRoomPill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #ff3c3c;
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+
+.liveRoomPill__label {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.liveRoomPill__meta {
+  opacity: 0.6;
+}
+
+.liveRoomPill__button {
+  margin-left: 4px;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.liveRoomFollowBar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(80, 182, 255, 0.12);
+  border: 1px solid rgba(80, 182, 255, 0.35);
+  font-size: 12px;
+  max-width: 320px;
+}
+
+.liveRoomFollowBar__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.liveRoomFollowBar__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.liveRoomFollowBar__info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.liveRoomFollowBar__label {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.liveRoomFollowBar__status {
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.liveRoomFollowBar__leaderboard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.liveRoomFollowBar__empty {
+  opacity: 0.6;
+  padding: 4px 0;
+}
+
+.liveRoomFollowBar__row2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.liveRoomFollowBar__row2--me {
+  font-weight: 700;
+}
+
+.liveRoomFollowBar__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.liveRoomFollowBar__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.liveRoomFollowBar__index {
+  opacity: 0.7;
+}
+
+.liveRoomFollowBar__time {
+  min-width: 48px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.liveRoomPromptOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.liveRoomPromptModal {
+  background: #1b1d22;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 20px;
+  max-width: 320px;
+  width: 90%;
+  color: #fff;
+}
+
+.liveRoomPromptModal h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.liveRoomPromptModal p {
+  margin: 0 0 16px;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.liveRoomPromptModal__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.liveRoomPromptModal__actions button {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.liveRoomPromptModal__leave {
+  background: rgba(255, 60, 60, 0.15);
+  border-color: rgba(255, 60, 60, 0.35);
+}

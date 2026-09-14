@@ -5,31 +5,31 @@
 }
 
 .puzzle-svg-wrap--oh {
-  --puzzle-oh-width: 104px;
+  --puzzle-oh-width: 78px;
   --puzzle-oh-left: 50%;
   --puzzle-oh-top: 100%;
-  --puzzle-oh-transform: translate(-52%, -26px);
-}
-
-.puzzle-svg-wrap--oh.puzzle-svg-wrap--musicPlayer {
-  --puzzle-oh-width: 88px;
   --puzzle-oh-transform: translate(-52%, -20px);
 }
 
-.puzzle-svg-wrap--oh.puzzle-svg-wrap--statsHeader {
-  --puzzle-oh-width: 72px;
+.puzzle-svg-wrap--oh.puzzle-svg-wrap--musicPlayer {
+  --puzzle-oh-width: 66px;
   --puzzle-oh-transform: translate(-52%, -15px);
 }
 
+.puzzle-svg-wrap--oh.puzzle-svg-wrap--statsHeader {
+  --puzzle-oh-width: 54px;
+  --puzzle-oh-transform: translate(-52%, -11px);
+}
+
 .puzzle-svg-wrap--oh.puzzle-svg-wrap--nameTag {
-  --puzzle-oh-width: 64px;
-  --puzzle-oh-transform: translate(-52%, -12px);
+  --puzzle-oh-width: 48px;
+  --puzzle-oh-transform: translate(-52%, -9px);
 }
 
 .puzzle-svg-wrap--oh.puzzle-svg-wrap--avatar,
 .puzzle-svg-wrap--oh.puzzle-svg-wrap--profile {
-  --puzzle-oh-width: 96px;
-  --puzzle-oh-transform: translate(-52%, -22px);
+  --puzzle-oh-width: 72px;
+  --puzzle-oh-transform: translate(-52%, -16px);
 }
 
 /* isolate transforms so flip icon never gets transformed/mirrored */
@@ -54,10 +54,10 @@
   position: absolute;
   left: var(--puzzle-oh-left, 50%);
   top: var(--puzzle-oh-top, 100%);
-  width: var(--puzzle-oh-width, 52px);
+  width: var(--puzzle-oh-width, 39px);
   max-width: none;
   transform: var(--puzzle-oh-transform, translate(-52%, -10px));
-  opacity: 0.7;
+  opacity: 0.55;
   pointer-events: none;
   z-index: 0;
 }

@@ -1,6 +1,7 @@
 // src/components/Social/SharedAverageModal.js
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import "./SharedAverageModal.css";
+import { matchBlockSize } from "../../utils/tournament";
 
 const EVENT_OPTIONS = [
   { value: "222", label: "2x2" },
@@ -19,13 +20,30 @@ const EVENT_OPTIONS = [
 ];
 
 const COUNT_OPTIONS = [1, 2, 3, 5, 12, 50, 100];
-const TARGET_WIN_OPTIONS = [1, 2, 3, 5];
+const ROUND_COUNT_OPTIONS = [1, 2, 3, 4, 5];
+const SET_COUNT_OPTIONS = [1, 2, 3, 4, 5];
+const AVERAGE_OF_OPTIONS = [3, 5];
+const BEST_OF_OPTIONS = [3, 5, 7];
+
+// Longest a "first to `setCount` sets, each set first to `roundCount` rounds"
+// match can run: every set goes the distance and the match goes the distance.
+const maxHeadToHeadSolves = (roundCount, setCount) =>
+  Math.max(1, (2 * Number(setCount) - 1) * (2 * Number(roundCount) - 1));
 
 const createEventRow = (event = "333") => ({
   id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   event,
   count: 1,
 });
+
+const planLength = (rows) =>
+  (rows || []).reduce((sum, row) => sum + (Number(row.count) || 1), 0);
+
+const nextPow2 = (n) => {
+  let p = 1;
+  while (p < n) p *= 2;
+  return p;
+};
 
 function EventSelect({ value, onChange }) {
   return (
@@ -104,90 +122,224 @@ function SharedAverageModal({
   isTwoPerson = false,
   yourLabel = "You",
   theirLabel = "Them",
+  // Group conversations: [{ id, name, event, isYou }] for every member.
+  members = [],
   allowHostedMode = false,
 }) {
+  // Ordered list of participants that can be given their own event plan.
+  const participants = useMemo(() => {
+    if (isTwoPerson) {
+      return [
+        { key: "creator", label: yourLabel, event: yourDefaultEvent || defaultEvent || "333" },
+        { key: "opponent", label: theirLabel, event: theirDefaultEvent || defaultEvent || "333" },
+      ];
+    }
+    return (Array.isArray(members) ? members : [])
+      .map((member) => ({
+        key: String(member?.id || member?.userID || "").trim(),
+        label: member?.name || member?.username || member?.id || "Player",
+        event: member?.event || member?.profileEvent || defaultEvent || "333",
+        isYou: !!member?.isYou,
+      }))
+      .filter((participant) => participant.key);
+  }, [
+    isTwoPerson,
+    members,
+    yourLabel,
+    theirLabel,
+    yourDefaultEvent,
+    theirDefaultEvent,
+    defaultEvent,
+  ]);
+
+  // Per-participant event plans can be offered whenever there are at least two
+  // distinct people — 1-1 or a whole group.
+  const canSeparateEvents = participants.length >= 2;
+  const isGroup = !isTwoPerson;
+  const canRunTournament = isGroup && participants.length >= 2;
+
+  // mode: "average" | "head_to_head" | "tournament" | "hosted"
   const [mode, setMode] = useState("average");
+  // eventFormat: "same" | "separate"
+  const [eventFormat, setEventFormat] = useState("same");
   const [sharedEvent, setSharedEvent] = useState(defaultEvent);
   const [count, setCount] = useState(5);
-  const [targetWins, setTargetWins] = useState(3);
-  const [casualEvent, setCasualEvent] = useState(defaultEvent);
-  const [yourRows, setYourRows] = useState([createEventRow(yourDefaultEvent)]);
-  const [theirRows, setTheirRows] = useState([createEventRow(theirDefaultEvent)]);
+  const [roundsPerSet, setRoundsPerSet] = useState(3);
+  const [setsToWin, setSetsToWin] = useState(3);
+  const [hostEvent, setHostEvent] = useState(defaultEvent);
+  // { [participantKey]: EventRow[] }
+  const [plans, setPlans] = useState({});
+
+  // Tournament config
+  const [tFormat, setTFormat] = useState("bracket"); // "bracket" | "roundrobin"
+  const [matchRule, setMatchRule] = useState("average"); // "average" | "bestof" | "sets"
+  const [averageOf, setAverageOf] = useState(5);
+  const [bestOf, setBestOf] = useState(5);
+  const [seeding, setSeeding] = useState("random"); // "random" | "pb" | "host"
+  const [seedOrder, setSeedOrder] = useState([]); // participant keys
 
   useEffect(() => {
     if (!isOpen) return;
     setMode("average");
+    setEventFormat("same");
     setSharedEvent(defaultEvent || "333");
     setCount(5);
-    setTargetWins(3);
-    setCasualEvent(defaultEvent || "333");
-    setYourRows([createEventRow(yourDefaultEvent || defaultEvent || "333")]);
-    setTheirRows([createEventRow(theirDefaultEvent || defaultEvent || "333")]);
-  }, [defaultEvent, isOpen, theirDefaultEvent, yourDefaultEvent]);
+    setRoundsPerSet(3);
+    setSetsToWin(3);
+    setHostEvent(defaultEvent || "333");
+    setTFormat("bracket");
+    setMatchRule("average");
+    setAverageOf(5);
+    setBestOf(5);
+    setSeeding("random");
+    setSeedOrder(participants.map((participant) => participant.key));
+    // Every player starts on the same event — the shared default — so "different
+    // events" is an opt-in change per row, not a pre-filled grid of profile events.
+    setPlans(
+      Object.fromEntries(
+        participants.map((participant) => [
+          participant.key,
+          [createEventRow(defaultEvent || "333")],
+        ])
+      )
+    );
+  }, [isOpen, defaultEvent, participants]);
 
   if (!isOpen) return null;
 
-  const updateRowSet = (setter) => (rowID, nextRow) => {
-    setter((prev) => prev.map((row) => (row.id === rowID ? nextRow : row)));
+  const rowsFor = (key) => plans[key] || [createEventRow(defaultEvent || "333")];
+
+  const updatePlanRow = (key) => (rowID, nextRow) => {
+    setPlans((prev) => ({
+      ...prev,
+      [key]: (prev[key] || []).map((row) => (row.id === rowID ? nextRow : row)),
+    }));
   };
 
-  const removeRow = (setter) => (rowID) => {
-    setter((prev) => (prev.length > 1 ? prev.filter((row) => row.id !== rowID) : prev));
+  const removePlanRow = (key) => (rowID) => {
+    setPlans((prev) => {
+      const current = prev[key] || [];
+      if (current.length <= 1) return prev;
+      return { ...prev, [key]: current.filter((row) => row.id !== rowID) };
+    });
   };
 
-  const addRow = (setter, fallbackEvent) => () => {
-    setter((prev) => [...prev, createEventRow(fallbackEvent || "333")]);
+  const addPlanRow = (key, fallbackEvent) => () => {
+    setPlans((prev) => ({
+      ...prev,
+      [key]: [...(prev[key] || []), createEventRow(fallbackEvent || "333")],
+    }));
   };
+
+  const buildPlan = (rows) =>
+    (rows || []).map((row) => ({
+      event: row.event,
+      count: Number(row.count) || 1,
+    }));
+
+  const useSeparateEvents = canSeparateEvents && eventFormat === "separate";
+
+  const longestPlan = () =>
+    Math.max(1, ...participants.map((participant) => planLength(rowsFor(participant.key))));
+
+  const moveSeed = (key, dir) => {
+    setSeedOrder((prev) => {
+      const idx = prev.indexOf(key);
+      const next = idx + dir;
+      if (idx < 0 || next < 0 || next >= prev.length) return prev;
+      const copy = [...prev];
+      [copy[idx], copy[next]] = [copy[next], copy[idx]];
+      return copy;
+    });
+  };
+
+  const tournamentParams = {
+    averageOf: Number(averageOf) || 5,
+    bestOf: Number(bestOf) || 5,
+    roundCount: Number(roundsPerSet) || 3,
+    setCount: Number(setsToWin) || 3,
+  };
+  const tournamentBlock = matchBlockSize(matchRule, tournamentParams);
+  const bracketRounds = Math.max(1, Math.round(Math.log2(nextPow2(participants.length || 2))));
+  const roundRobinMatches = (participants.length * (participants.length - 1)) / 2;
+  const tournamentTotalSolves =
+    tFormat === "bracket" ? tournamentBlock * bracketRounds : tournamentBlock;
+
+  const orderedSeedParticipants = seedOrder
+    .map((key) => participants.find((p) => p.key === key))
+    .filter(Boolean);
 
   const handleConfirm = () => {
-    if (mode === "average-separate" && isTwoPerson) {
-      onConfirm({
-        mode: "average",
-        creatorPlan: yourRows.map((row) => ({
-          event: row.event,
-          count: Number(row.count) || 1,
-        })),
-        opponentPlan: theirRows.map((row) => ({
-          event: row.event,
-          count: Number(row.count) || 1,
-        })),
-      });
-      onClose();
-      return;
-    }
-
-    if (mode === "head_to_head") {
-      onConfirm({
-        mode: "head_to_head",
-        count: Math.max(1, Number(targetWins) * 2 - 1),
-        targetWins: Number(targetWins) || 3,
-        creatorEvent: sharedEvent,
-        opponentEvent: sharedEvent,
-      });
-      onClose();
-      return;
-    }
-
-    if (mode === "casual") {
-      onConfirm({
-        mode: "casual",
-        count: 25,
-        batchSize: 25,
-        creatorEvent: casualEvent,
-        opponentEvent: casualEvent,
-      });
-      onClose();
-      return;
-    }
-
     if (mode === "hosted") {
       onConfirm({
         mode: "hosted",
         count: 25,
         batchSize: 25,
-        creatorEvent: casualEvent,
-        opponentEvent: casualEvent,
+        creatorEvent: hostEvent,
+        opponentEvent: hostEvent,
       });
+      onClose();
+      return;
+    }
+
+    if (mode === "tournament") {
+      onConfirm({
+        mode: "tournament",
+        tournament: {
+          format: tFormat,
+          matchRule,
+          params: tournamentParams,
+          event: sharedEvent,
+          seeding,
+          seedOrder: seeding === "host" ? seedOrder : [],
+        },
+      });
+      onClose();
+      return;
+    }
+
+    const separatePayload = () => {
+      if (isGroup) {
+        return {
+          participantPlans: Object.fromEntries(
+            participants.map((participant) => [
+              participant.key,
+              buildPlan(rowsFor(participant.key)),
+            ])
+          ),
+        };
+      }
+      return {
+        creatorPlan: buildPlan(rowsFor("creator")),
+        opponentPlan: buildPlan(rowsFor("opponent")),
+      };
+    };
+
+    if (mode === "head_to_head") {
+      const payload = {
+        mode: "head_to_head",
+        roundCount: Number(roundsPerSet) || 3,
+        setCount: Number(setsToWin) || 3,
+      };
+
+      if (useSeparateEvents) {
+        Object.assign(payload, separatePayload());
+        // Group head to head has no set structure — run it like a mixed average.
+        payload.count = isGroup ? longestPlan() : maxHeadToHeadSolves(roundsPerSet, setsToWin);
+      } else {
+        payload.count = maxHeadToHeadSolves(roundsPerSet, setsToWin);
+        payload.creatorEvent = sharedEvent;
+        payload.opponentEvent = sharedEvent;
+      }
+
+      onConfirm(payload);
+      onClose();
+      return;
+    }
+
+    // mode === "average"
+    if (useSeparateEvents) {
+      onConfirm({ mode: "average", ...separatePayload() });
       onClose();
       return;
     }
@@ -201,6 +353,144 @@ function SharedAverageModal({
     onClose();
   };
 
+  const renderTournamentConfig = () => (
+    <>
+      <div className="sharedAverageModeToggle" role="tablist" aria-label="Tournament format">
+        <button
+          type="button"
+          className={tFormat === "bracket" ? "isActive" : ""}
+          onClick={() => setTFormat("bracket")}
+        >
+          Bracket
+        </button>
+        <button
+          type="button"
+          className={tFormat === "roundrobin" ? "isActive" : ""}
+          onClick={() => setTFormat("roundrobin")}
+        >
+          Round Robin
+        </button>
+      </div>
+
+      <label>
+        Event
+        <EventSelect value={sharedEvent} onChange={setSharedEvent} />
+      </label>
+
+      <label>
+        Each match
+        <select value={matchRule} onChange={(e) => setMatchRule(e.target.value)}>
+          <option value="average">Single average</option>
+          <option value="bestof">Best of N solves</option>
+          <option value="sets">Sets &amp; rounds</option>
+        </select>
+      </label>
+
+      {matchRule === "average" && (
+        <label>
+          Average of
+          <select value={averageOf} onChange={(e) => setAverageOf(Number(e.target.value))}>
+            {AVERAGE_OF_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                Ao{n}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {matchRule === "bestof" && (
+        <label>
+          Best of
+          <select value={bestOf} onChange={(e) => setBestOf(Number(e.target.value))}>
+            {BEST_OF_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n} solves
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {matchRule === "sets" && (
+        <div className="sharedAverageSplitFields">
+          <label>
+            Rounds per set
+            <select
+              value={roundsPerSet}
+              onChange={(e) => setRoundsPerSet(Number(e.target.value))}
+            >
+              {ROUND_COUNT_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  First to {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Sets to win
+            <select value={setsToWin} onChange={(e) => setSetsToWin(Number(e.target.value))}>
+              {SET_COUNT_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  First to {n}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+      <label>
+        Seeding
+        <select value={seeding} onChange={(e) => setSeeding(e.target.value)}>
+          <option value="random">Random draw</option>
+          <option value="pb">By personal best</option>
+          <option value="host">Host order</option>
+        </select>
+      </label>
+
+      {seeding === "host" && (
+        <div className="sharedAverageSeedList">
+          {orderedSeedParticipants.map((participant, index) => (
+            <div key={participant.key} className="sharedAverageSeedRow">
+              <span className="sharedAverageSeedNum">{index + 1}</span>
+              <span className="sharedAverageSeedName">
+                {participant.label}
+                {participant.isYou ? " (you)" : ""}
+              </span>
+              <button
+                type="button"
+                onClick={() => moveSeed(participant.key, -1)}
+                disabled={index === 0}
+                aria-label="Move up"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={() => moveSeed(participant.key, 1)}
+                disabled={index === orderedSeedParticipants.length - 1}
+                aria-label="Move down"
+              >
+                ↓
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="sharedAverageHelperText">
+        {tFormat === "bracket"
+          ? `${participants.length}-player knockout · ${bracketRounds} round${
+              bracketRounds === 1 ? "" : "s"
+            } · ~${tournamentTotalSolves} solves each if you go the distance.`
+          : `${participants.length}-player round robin · ${roundRobinMatches} matchup${
+              roundRobinMatches === 1 ? "" : "s"
+            } · ${tournamentTotalSolves} solves each.`}
+      </p>
+    </>
+  );
+
   return (
     <div className="sharedAverageOverlay">
       <div className="sharedAverageModal">
@@ -209,25 +499,29 @@ function SharedAverageModal({
         <div className="sharedAverageModeToggle" role="tablist" aria-label="Shared mode">
           <button
             type="button"
-            className={mode === "average" || mode === "average-separate" ? "isActive" : ""}
+            className={mode === "average" ? "isActive" : ""}
             onClick={() => setMode("average")}
           >
             Average
           </button>
-          <button
-            type="button"
-            className={mode === "head_to_head" ? "isActive" : ""}
-            onClick={() => setMode("head_to_head")}
-          >
-            Head to Head
-          </button>
-          <button
-            type="button"
-            className={mode === "casual" ? "isActive" : ""}
-            onClick={() => setMode("casual")}
-          >
-            Casual
-          </button>
+          {isTwoPerson && (
+            <button
+              type="button"
+              className={mode === "head_to_head" ? "isActive" : ""}
+              onClick={() => setMode("head_to_head")}
+            >
+              Head to Head
+            </button>
+          )}
+          {canRunTournament && (
+            <button
+              type="button"
+              className={mode === "tournament" ? "isActive" : ""}
+              onClick={() => setMode("tournament")}
+            >
+              Tournament
+            </button>
+          )}
           {allowHostedMode && (
             <button
               type="button"
@@ -239,42 +533,98 @@ function SharedAverageModal({
           )}
         </div>
 
-        {(mode === "average" || mode === "average-separate") && isTwoPerson && (
-          <div className="sharedAverageModeToggle" role="tablist" aria-label="Average format">
+        {(mode === "average" || mode === "head_to_head") && canSeparateEvents && (
+          <div className="sharedAverageModeToggle" role="tablist" aria-label="Event format">
             <button
               type="button"
-              className={mode === "average" ? "isActive" : ""}
-              onClick={() => setMode("average")}
+              className={eventFormat === "same" ? "isActive" : ""}
+              onClick={() => setEventFormat("same")}
             >
               Same Event
             </button>
             <button
               type="button"
-              className={mode === "average-separate" ? "isActive" : ""}
-              onClick={() => setMode("average-separate")}
+              className={eventFormat === "separate" ? "isActive" : ""}
+              onClick={() => setEventFormat("separate")}
             >
-              Separate Events
+              {isGroup ? "Different Events Per Player" : "Different Events"}
             </button>
           </div>
         )}
 
-        {mode === "average-separate" && isTwoPerson ? (
-          <div className="sharedAverageSplitGrid">
-            <EventRows
-              label={yourLabel}
-              rows={yourRows}
-              onChange={updateRowSet(setYourRows)}
-              onAdd={addRow(setYourRows, yourDefaultEvent || defaultEvent)}
-              onRemove={removeRow(setYourRows)}
-            />
-            <EventRows
-              label={theirLabel}
-              rows={theirRows}
-              onChange={updateRowSet(setTheirRows)}
-              onAdd={addRow(setTheirRows, theirDefaultEvent || defaultEvent)}
-              onRemove={removeRow(setTheirRows)}
-            />
+        {mode === "head_to_head" && (
+          <div className="sharedAverageSplitFields">
+            <label>
+              Rounds per set
+              <select
+                value={roundsPerSet}
+                onChange={(e) => setRoundsPerSet(Number(e.target.value))}
+              >
+                {ROUND_COUNT_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    First to {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Sets to win
+              <select
+                value={setsToWin}
+                onChange={(e) => setSetsToWin(Number(e.target.value))}
+              >
+                {SET_COUNT_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    First to {n}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
+        )}
+
+        {mode === "tournament" ? (
+          renderTournamentConfig()
+        ) : mode === "hosted" ? (
+          <>
+            <label>
+              Event
+              <EventSelect value={hostEvent} onChange={setHostEvent} />
+            </label>
+
+            <p className="sharedAverageHelperText">
+              Host-led scramble stream. Everyone solves the same feed, and their solves can
+              still save to main.
+            </p>
+          </>
+        ) : useSeparateEvents ? (
+          <>
+            <div
+              className={
+                isGroup ? "sharedAverageMemberPlans" : "sharedAverageSplitGrid"
+              }
+            >
+              {participants.map((participant) => (
+                <EventRows
+                  key={participant.key}
+                  label={participant.isYou ? `${participant.label} (you)` : participant.label}
+                  rows={rowsFor(participant.key)}
+                  onChange={updatePlanRow(participant.key)}
+                  onAdd={addPlanRow(participant.key, defaultEvent)}
+                  onRemove={removePlanRow(participant.key)}
+                />
+              ))}
+            </div>
+
+            <p className="sharedAverageHelperText">
+              {isGroup
+                ? "Each player gets their own events. They line up solve-for-solve; shorter lists repeat to match the longest."
+                : mode === "head_to_head"
+                ? `Each side's events line up solve-for-solve (the shorter list repeats). First to ${setsToWin} sets wins the match; each set goes to the first to ${roundsPerSet} round wins.`
+                : "Each side gets their own events, lined up solve-for-solve."}
+            </p>
+          </>
         ) : mode === "head_to_head" ? (
           <>
             <label>
@@ -282,32 +632,9 @@ function SharedAverageModal({
               <EventSelect value={sharedEvent} onChange={setSharedEvent} />
             </label>
 
-            <label>
-              First to
-              <select value={targetWins} onChange={(e) => setTargetWins(Number(e.target.value))}>
-                {TARGET_WIN_OPTIONS.map((wins) => (
-                  <option key={wins} value={wins}>
-                    {wins} win{wins === 1 ? "" : "s"}
-                  </option>
-                ))}
-              </select>
-            </label>
-
             <p className="sharedAverageHelperText">
-              Shared scrambles, round-by-round scoring, match ends when someone reaches the target.
-            </p>
-          </>
-        ) : mode === "casual" || mode === "hosted" ? (
-          <>
-            <label>
-              Event
-              <EventSelect value={casualEvent} onChange={setCasualEvent} />
-            </label>
-
-            <p className="sharedAverageHelperText">
-              {mode === "hosted"
-                ? "Host-led scramble stream. Everyone solves the same feed, and their solves can still save to main."
-                : "Shared scrambles in a long-running session. It behaves like normal solving and grows automatically as you go."}
+              Shared scrambles, round-by-round scoring. First to {setsToWin} sets wins the
+              match; each set goes to the first to {roundsPerSet} round wins.
             </p>
           </>
         ) : (
@@ -334,7 +661,11 @@ function SharedAverageModal({
         <div className="sharedAverageButtons">
           <button type="button" onClick={onClose}>Cancel</button>
           <button type="button" onClick={handleConfirm}>
-            {mode === "hosted" ? "Start Hosting" : "Start"}
+            {mode === "hosted"
+              ? "Start Hosting"
+              : mode === "tournament"
+              ? "Start Tournament"
+              : "Start"}
           </button>
         </div>
       </div>

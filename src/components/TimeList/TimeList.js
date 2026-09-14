@@ -111,6 +111,10 @@ function hasMutableSolveRef(solve) {
   return typeof ref === "string" && (ref.startsWith("SOLVE#") || ref.startsWith("LOCAL#"));
 }
 
+function isOfflinePendingSolve(solve) {
+  return !!(solve?.offlinePending || solve?.tags?.OfflinePending);
+}
+
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -215,6 +219,22 @@ function TimeList({
         })
       : [];
   }, [solves]);
+
+  // Only the solve where an offline run *starts* gets marked - a single
+  // small marker rather than badging every offline solve, so the list's
+  // look is otherwise untouched.
+  const offlineRunStartRefs = useMemo(() => {
+    const refs = new Set();
+    let prevWasOffline = false;
+    for (const solve of solvesSafe) {
+      const isOffline = isOfflinePendingSolve(solve);
+      if (isOffline && !prevWasOffline && solve?.solveRef) {
+        refs.add(solve.solveRef);
+      }
+      prevWasOffline = isOffline;
+    }
+    return refs;
+  }, [solvesSafe]);
 
   const isHorizontal = inPlayerBar ? false : settings.horizontalTimeList;
   const horizontalScrollEnabled = !!settings.horizontalTimeListScroll;
@@ -801,7 +821,7 @@ function TimeList({
     ao12ByKey,
   ]);
 
-  if (solvesSafe.length === 0 && !sharedAverageMeta?.active) {
+  if (solvesSafe.length === 0 && (!sharedAverageMeta?.active || inPlayerBar)) {
     return (
       <div className="time-list-container">
         <p>No solves available</p>
@@ -870,10 +890,11 @@ function TimeList({
                 isRowWorst ? "row-border-max" : ""
               } ${isCurrentFive ? "current-five" : ""} ${
                 beatSessionSingle ? "session-single-beaten" : ""
-              }`}
+              } ${offlineRunStartRefs.has(solve?.solveRef) ? "offline-run-start" : ""}`}
               data-bulk-select-item="true"
               style={{ ...(perfStyle || {}), ...(selectStyleInline || {}) }}
               key={index}
+              title={offlineRunStartRefs.has(solve?.solveRef) ? "Offline solves start here - not yet synced to your profile" : undefined}
               onClick={(e) => onSolveClick(e, solve, solveIndex)}
               onMouseDown={(e) => {
                 if (e.shiftKey || e.ctrlKey || e.metaKey || selection.selectionCount > 0) {
@@ -1145,9 +1166,12 @@ function TimeList({
                     key={index}
                     className={`TimeItem ${perfClass} ${isBest ? "dashed-border-min" : ""} ${
                       isWorst ? "dashed-border-max" : ""
-                    } ${beatSessionSingle ? "session-single-beaten" : ""}`}
+                    } ${beatSessionSingle ? "session-single-beaten" : ""} ${
+                      offlineRunStartRefs.has(solve?.solveRef) ? "offline-run-start" : ""
+                    }`}
                     data-bulk-select-item="true"
                     style={{ ...(perfStyle || {}), ...(selectStyleInline || {}) }}
+                    title={offlineRunStartRefs.has(solve?.solveRef) ? "Offline solves start here - not yet synced to your profile" : undefined}
                     onClick={(e) => onSolveClick(e, solve, globalIdx)}
                     onMouseDown={(e) => {
                       if (e.shiftKey || e.ctrlKey || e.metaKey || selection.selectionCount > 0) {
@@ -1265,7 +1289,7 @@ function TimeList({
         </div>
       ) : (
         <div className="time-list-content">
-          {sharedAverageMeta?.active && sharedMirrorRows.length > 0 && (
+          {!inPlayerBar && sharedAverageMeta?.active && sharedMirrorRows.length > 0 && (
             <div className="timeListSharedMirror">
               <div className="timeListSharedMirrorHeader">
                 <span className="timeListSharedMirrorName">

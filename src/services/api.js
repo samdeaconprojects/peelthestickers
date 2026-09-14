@@ -1,4 +1,5 @@
 // src/services/api.js
+import { reportNetworkFailure, reportNetworkSuccess } from "./connectivity.js";
 
 // If REACT_APP_API_BASE is set (e.g. "https://api.ptstimer.com"), use it.
 // Otherwise, use relative URLs so CRA proxy works in dev.
@@ -96,8 +97,32 @@ async function request(method, path, body) {
     options.body = JSON.stringify(body ?? {});
   }
 
+  let res;
   try {
-    const res = await fetch(url, options);
+    res = await fetch(url, options);
+  } catch (networkError) {
+    // fetch() only rejects for network-level failures (offline, DNS
+    // failure, connection reset, CORS block, timeout) - it never rejects
+    // for HTTP error status codes. This is the real "we're offline" signal.
+    const durationMs = Date.now() - startedAt;
+    reportNetworkFailure();
+    logApiRequest("error", {
+      requestID,
+      method,
+      path,
+      ok: false,
+      durationMs,
+      error: networkError?.message || "Network request failed",
+      ...summarizeBody(body),
+    });
+    const err = new Error(networkError?.message || `${method} ${path} failed: network unreachable`);
+    err.__apiLogged = true;
+    err.isNetworkError = true;
+    err.cause = networkError;
+    throw err;
+  }
+
+  try {
     const data = await parseResponse(res);
     const durationMs = Date.now() - startedAt;
 
@@ -113,11 +138,30 @@ async function request(method, path, body) {
     });
 
     if (!res.ok) {
+      // The server itself can be reachable while whatever it depends on
+      // (its database, an upstream API) isn't - e.g. running the backend
+      // locally while your machine's internet is down: the browser reaches
+      // localhost fine, but the server's AWS calls fail. It flags that case
+      // with `upstreamUnreachable` so we still treat it as "can't save
+      // right now" rather than a real rejection of the data.
+      const upstreamUnreachable = data?.upstreamUnreachable === true;
+      if (upstreamUnreachable) {
+        reportNetworkFailure();
+      } else {
+        reportNetworkSuccess();
+      }
+
       const msg = data?.error || data?.text || `${method} ${path} failed (${res.status})`;
       const err = new Error(msg);
       err.__apiLogged = true;
+      err.status = res.status;
+      if (upstreamUnreachable) err.isNetworkError = true;
       throw err;
     }
+
+    // Reaching the server AND getting a successful response back proves
+    // the connection (all the way through) is up.
+    reportNetworkSuccess();
 
     return data;
   } catch (error) {

@@ -1,5 +1,7 @@
 // src/services/sessionStatsUtils.js
 
+import { getTrimCountForWindow } from "../components/TimeList/TimeUtils";
+
 /**
  * Convert a solve item from DynamoDB (Time, Penalty, DateTime, etc.)
  * into an effective time in ms, handling +2 and DNF.
@@ -22,19 +24,17 @@ export function computeWindowAverageMs(solvesSlice) {
   if (!solvesSlice || solvesSlice.length === 0) return Infinity;
 
   const times = solvesSlice.map(getEffectiveTimeMs);
+  const trimCount = getTrimCountForWindow(times.length);
 
-  // If more than 1 DNF in window, average is DNF (Infinity).
+  // DNFs sort as the slowest solves and get trimmed away; the average is only a DNF
+  // once there are more of them than there are trimmed slots.
   const dnfCount = times.filter((t) => !Number.isFinite(t)).length;
-  if (dnfCount > 1) return Infinity;
+  if (dnfCount > trimCount) return Infinity;
 
-  // Sort copy for min/max removal
   const sorted = [...times].sort((a, b) => a - b);
-
-  // Remove fastest + slowest
-  const trimmed = sorted.slice(1, sorted.length - 1);
+  const trimmed = sorted.slice(trimCount, sorted.length - trimCount);
   if (trimmed.length === 0) return Infinity;
 
-  // If exactly 1 DNF, it's already in trimmed; Infinity will dominate and avg is Infinity.
   const sum = trimmed.reduce((acc, t) => acc + t, 0);
   const avg = sum / trimmed.length;
   return Number.isFinite(avg) ? avg : Infinity;

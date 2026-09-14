@@ -33,6 +33,28 @@ const slugify = (s) =>
 
 const normalizeEventId = (id) => String(id || "").toUpperCase();
 
+// Best-effort "last used" timestamp for a session, used to order the session list.
+const getSessionLastUsedTs = (raw) => {
+  if (!raw || typeof raw !== "object") return 0;
+  const candidates = [
+    raw?.Stats?.LastSolveAt,
+    raw?.Stats?.lastSolveAt,
+    raw?.Stats?.UpdatedAt,
+    raw?.Stats?.updatedAt,
+    raw?.LastSolveAt,
+    raw?.lastSolveAt,
+    raw?.UpdatedAt,
+    raw?.updatedAt,
+  ];
+  let max = 0;
+  for (const value of candidates) {
+    if (!value) continue;
+    const ts = new Date(value).getTime();
+    if (Number.isFinite(ts) && ts > max) max = ts;
+  }
+  return max;
+};
+
 const getPuzzleIconEvent = (eventId) => {
   const ev = normalizeEventId(eventId);
   if (isRelayEventId(ev)) return "RELAY";
@@ -45,10 +67,10 @@ const getPuzzleIconEvent = (eventId) => {
 const getEventAccent = (eventId) => {
   const ev = normalizeEventId(eventId);
 
-  if (isRelayEventId(ev)) return "#9be15d";
+  if (isRelayEventId(ev)) return "var(--es-accent, #9be15d)";
 
   if (["222", "333", "444", "555", "666", "777", "333OH", "333BLD", "444BLD", "555BLD", "333MULTIBLD", "333FEW"].includes(ev)) {
-    return "#6ee7d8";
+    return "var(--es-accent, #6ee7d8)";
   }
   if (ev === "PYRAMINX") return "#f6c453";
   if (ev === "SKEWB") return "#7ab8ff";
@@ -88,26 +110,29 @@ const getEventIconClassKey = (eventId) => {
 function EventOptionVisual({ eventId, eventName }) {
   const iconEvent = getPuzzleIconEvent(eventId);
   const visualEvent = normalizeEventId(eventId) === "333OH" ? "333OH" : iconEvent;
+  const isRelay = isRelayEventId(eventId);
   const canRenderPuzzle = !["RELAY"].includes(visualEvent) && !!visualEvent;
   const iconClass = `event-chip-icon event-chip-icon--${getEventIconClassKey(eventId)}`;
 
   return (
     <>
-      <div
-        className={iconClass}
-        aria-hidden="true"
-        style={{ "--event-accent": getEventAccent(eventId) }}
-      >
-        {canRenderPuzzle ? (
-          <div className="event-chip-puzzle-scale">
-            <PuzzleSVG event={visualEvent} scramble="" isNameTagCube={true} />
-          </div>
-        ) : (
-          <div className="event-chip-fallback-mark">
-            {getEventBadge(eventId) || String(eventName || "?").slice(0, 2)}
-          </div>
-        )}
-      </div>
+      {!isRelay && (
+        <div
+          className={iconClass}
+          aria-hidden="true"
+          style={{ "--event-accent": getEventAccent(eventId) }}
+        >
+          {canRenderPuzzle ? (
+            <div className="event-chip-puzzle-scale">
+              <PuzzleSVG event={visualEvent} scramble="" isNameTagCube={true} />
+            </div>
+          ) : (
+            <div className="event-chip-fallback-mark">
+              {getEventBadge(eventId) || String(eventName || "?").slice(0, 2)}
+            </div>
+          )}
+        </div>
+      )}
       <div className="event-card-copy">
         <span className="event-card-title">{eventName}</span>
       </div>
@@ -127,9 +152,12 @@ const EventSelector = forwardRef(function EventSelector(
     onSessionChange,
     onSelectSessionObj, // lets App start relay mode using full session data
     compact = false,
+    textOnly = false,
+    profileColor = "#2EC4B6",
   },
   ref
 ) {
+  const accentStyle = { "--es-accent": profileColor || "#2EC4B6" };
   const { runDb } = useDbStatus();
   const [isOpen, setIsOpen] = useState(false);
 
@@ -434,7 +462,18 @@ const EventSelector = forwardRef(function EventSelector(
         id: s.SessionID,
         name: s.SessionName,
         raw: s,
-      }));
+      }))
+      // Main always first, then most-recently-used sessions before older ones.
+      .sort((a, b) => {
+        const aMain = String(a.id || "main") === "main";
+        const bMain = String(b.id || "main") === "main";
+        if (aMain !== bMain) return aMain ? -1 : 1;
+
+        const tsDiff = getSessionLastUsedTs(b.raw) - getSessionLastUsedTs(a.raw);
+        if (tsDiff !== 0) return tsDiff;
+
+        return String(a.name || a.id || "").localeCompare(String(b.name || b.id || ""));
+      });
   }, [sessions, activeEvent]);
 
   // ✅ NEW: group "import" sessions separately so they don't clutter
@@ -719,7 +758,7 @@ const EventSelector = forwardRef(function EventSelector(
   const sessionLabel =
     activeSharedLabel ||
     normalSessionsForEvent.find((s) => s.id === activeSession)?.name ||
-    activeSession;
+    (String(activeSession || "main") === "main" ? "Main" : activeSession);
 
   // -----------------------------
   // Create session / relay session
@@ -854,24 +893,47 @@ const EventSelector = forwardRef(function EventSelector(
   return (
     <>
       {/* Trigger */}
-      <div
-        className={`event-selector-trigger ${compact ? "event-selector-trigger--compact" : ""}`}
-        onClick={open}
-      >
-        <div className="event-selector-box">
-          <div className="event-selector-text">
-            <div className="event-selector-event">{eventName}</div>
-            {activeSession !== "main" && (
-              <div className="event-selector-session">{sessionLabel}</div>
-            )}
-          </div>
-          <span className="dropdown-arrow">▼</span>
+      {textOnly ? (
+        <div
+          className="event-selector-trigger event-selector-trigger--text"
+          onClick={open}
+          style={accentStyle}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              open();
+            }
+          }}
+        >
+          <span className="event-selector-textline">
+            <span className="event-selector-textline__event">{eventName}</span>
+            <span className="event-selector-textline__sep"> • </span>
+            <span className="event-selector-textline__session">{sessionLabel}</span>
+          </span>
         </div>
-      </div>
+      ) : (
+        <div
+          className={`event-selector-trigger ${compact ? "event-selector-trigger--compact" : ""}`}
+          onClick={open}
+          style={accentStyle}
+        >
+          <div className="event-selector-box">
+            <div className="event-selector-text">
+              <div className="event-selector-event">{eventName}</div>
+              {activeSession !== "main" && (
+                <div className="event-selector-session">{sessionLabel}</div>
+              )}
+            </div>
+            <span className="dropdown-arrow">▼</span>
+          </div>
+        </div>
+      )}
 
       {/* Modal */}
       {isOpen && (
-        <div className="detailPopup" role="dialog" aria-modal="true">
+        <div className="detailPopup" role="dialog" aria-modal="true" style={accentStyle}>
           <div className="detailPopupContent eventSelectorContent" ref={modalRef}>
             <span className="closePopup" onClick={close}>
               x
@@ -880,49 +942,6 @@ const EventSelector = forwardRef(function EventSelector(
             {/* MAIN LIST VIEW */}
             {!showAddSession && !showAddEvent && (
               <div className="event-groups-wrapper">
-                <div className="event-selector-hero">
-                  <div>
-                    <div className="event-selector-eyebrow">Choose your puzzle</div>
-                    <h3 className="event-selector-title">Event Selector</h3>
-                  </div>
-
-                  {userID && (
-                    <div className="event-selector-actions">
-                      {canDeleteActiveSession && (
-                        <button
-                          type="button"
-                          className="event-selector-danger-btn"
-                          onClick={handleDeleteActiveSession}
-                        >
-                          {deletingMainDeletesEvent ? "Delete Event" : "Delete Session"}
-                        </button>
-                      )}
-
-                      <button
-                        className="add-session-btn"
-                        onClick={() => {
-                          setTargetEvent(activeEvent);
-                          setShowAddSession(true);
-                          setNewSessionName("");
-                        }}
-                      >
-                        + Add Session
-                      </button>
-
-                      <button
-                        className="add-event-btn"
-                        onClick={() => {
-                          setShowAddEvent(true);
-                          setNewEventName("");
-                          setRelayBuilderLegs([]);
-                        }}
-                      >
-                        {isRelayContext ? "+ Create Custom Relay Event" : "+ Add Custom Event"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-
                 <div className="event-selector-layout">
                   <div className="event-selector-main">
                     {curatedEventSections.map((group) => (
@@ -995,6 +1014,42 @@ const EventSelector = forwardRef(function EventSelector(
                     </aside>
                   )}
                 </div>
+
+                {userID && (
+                  <div className="event-selector-footer">
+                    {canDeleteActiveSession && (
+                      <button
+                        type="button"
+                        className="event-selector-danger-btn"
+                        onClick={handleDeleteActiveSession}
+                      >
+                        {deletingMainDeletesEvent ? "Delete Event" : "Delete Session"}
+                      </button>
+                    )}
+
+                    <button
+                      className="add-session-btn"
+                      onClick={() => {
+                        setTargetEvent(activeEvent);
+                        setShowAddSession(true);
+                        setNewSessionName("");
+                      }}
+                    >
+                      + Add Session
+                    </button>
+
+                    <button
+                      className="add-event-btn"
+                      onClick={() => {
+                        setShowAddEvent(true);
+                        setNewEventName("");
+                        setRelayBuilderLegs([]);
+                      }}
+                    >
+                      {isRelayContext ? "+ Create Custom Relay Event" : "+ Add Custom Event"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

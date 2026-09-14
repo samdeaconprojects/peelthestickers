@@ -127,8 +127,16 @@
 
 /* ---------- Header Conversation Strip ---------- */
 
-.headerConversationStrip {
+.headerConversationArea {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.headerConversationStrip {
+  width: 100%;
   min-width: 0;
   display: flex;
   flex-direction: row;
@@ -159,13 +167,12 @@
   display: none;
 }
 
-/* Make the top-bar tiles smaller */
+/* Make the top-bar tiles smaller. `zoom` (not transform:scale) so the layout
+   box shrinks too and two-line names aren't clipped by the strip. */
 .headerConversationStrip .conversationPreview {
-  transform: scale(0.7);
-  transform-origin: top left;
-  padding: 0;
+  zoom: 0.7;
+  padding: 0 0 2px;
   margin: 0;
-  margin-bottom: -40px;
   opacity: 0.78;
 }
 
@@ -184,6 +191,54 @@
   overflow-wrap: normal;
   word-break: keep-all;
   hyphens: none;
+}
+
+/* Drop-down arrow shown directly beneath the selected conversation tile.
+   Matches the tag bar's home collapse toggle styling. */
+.conversationDetailsToggle {
+  align-self: flex-start;
+  position: relative;
+  left: 0;
+  margin: 6px 0 2px 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: color 140ms ease, transform 140ms ease, opacity 140ms ease;
+}
+
+.conversationDetailsToggle.is-anchored {
+  margin-left: 0;
+  transform: translateX(-50%);
+}
+
+.conversationDetailsToggle:hover {
+  color: rgba(255, 255, 255, 1);
+}
+
+.conversationDetailsToggle.is-open {
+  color: rgba(255, 255, 255, 1);
+}
+
+.conversationDetailsToggleArrow {
+  display: inline-block;
+  font-size: 28px;
+  line-height: 1;
+  transform: rotate(90deg);
+  transition: transform 160ms ease;
+}
+
+.conversationDetailsToggle.is-open .conversationDetailsToggleArrow {
+  transform: rotate(-90deg);
 }
 
 /* Make the whole Social page a flex column that fills its area */
@@ -525,56 +580,17 @@
   --ay: 0px;
 }
 
+.conversationDetailsPanel {
+  flex-shrink: 0;
+  padding: 10px 14px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .groupThreadMeta {
   flex-shrink: 0;
-  padding: 10px 12px 6px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-}
-
-.conversationHeaderToggleWrap {
-  flex-shrink: 0;
-  display: flex;
-  justify-content: flex-end;
-  padding: 4px 12px 2px;
-}
-
-.conversationHeaderToggle {
-  width: auto;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: rgba(232, 232, 232, 0.72);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.72;
-  cursor: pointer;
-}
-
-.conversationHeaderToggle:hover {
-  opacity: 1;
-}
-
-.conversationHeaderToggleLabel {
-  line-height: 1;
-}
-
-.conversationHeaderToggleArrow {
-  display: inline-block;
-  font-size: 12px;
-  line-height: 1;
-  transform: rotate(180deg);
-  transition: transform 160ms ease;
-}
-
-.conversationHeaderToggleArrow.is-open {
-  transform: rotate(0deg);
 }
 
 .groupThreadTitle {
@@ -622,11 +638,6 @@
   letter-spacing: 0.06em;
 }
 
-.sharedConversationStatsWrap {
-  flex-shrink: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
 .sharedConversationStatsToggle {
   width: 100%;
   display: flex;
@@ -647,17 +658,10 @@
 
 .sharedConversationStats {
   flex-shrink: 0;
-  padding: 0 12px 10px;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.sharedConversationStatsTitle {
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #c8c8c8;
 }
 
 .sharedConversationStatsGrid {

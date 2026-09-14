@@ -236,11 +236,12 @@
 }
 
 .profileStatsItem--pie .pieChartRoot {
-  grid-template-columns: minmax(0, 0.82fr) minmax(140px, 1fr);
+  grid-template-columns: minmax(0, 1.08fr) minmax(118px, 0.8fr);
+  gap: 10px;
 }
 
 .profileStatsItem--pie .pieChartCanvas {
-  padding: 10px;
+  padding: 6px;
   box-sizing: border-box;
 }
 
@@ -881,6 +882,34 @@
 
 .profileHeaderButton:hover {
     background: rgba(255, 255, 255, 0.05);
+}
+
+.profileLiveRoomBadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid rgba(255, 60, 60, 0.45);
+    background: rgba(255, 60, 60, 0.14);
+    color: white;
+    border-radius: 999px;
+    padding: 5px 12px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+.profileLiveRoomBadge:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.profileLiveRoomBadge__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #ff3c3c;
+    box-shadow: 0 0 0 3px rgba(255, 60, 60, 0.25);
 }
 
 .statsEditorOverlay {

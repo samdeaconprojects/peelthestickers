@@ -200,11 +200,13 @@
   --tag-home-toggle-width: 28px;
   --tag-home-toggle-gap: 6px;
   --tag-home-toggle-top: 52px;
+  --tag-home-max-width: min(200px, 28vw);
   position: relative;
   z-index: 220;
   display: flex;
   justify-content: flex-end;
   align-items: flex-start;
+  max-width: var(--tag-home-max-width);
 }
 
 .tagHomeWrap--collapsible {
@@ -218,7 +220,9 @@
 .tagHomeContent {
   position: relative;
   overflow: visible;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
   opacity: 1;
   transform: translateX(0);
   transform-origin: right top;
@@ -242,6 +246,8 @@
   flex-wrap: nowrap;
   gap: 4px;
   align-items: stretch;
+  min-width: 0;
+  max-width: 100%;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -284,6 +290,8 @@
   flex-direction: column;
   gap: 4px;
   align-items: stretch;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .tagHomeItemLabel {
@@ -434,6 +442,11 @@
   max-height: 52vh;
   overflow: auto;
   padding-right: 2px;
+}
+
+.home-tag-dock--shared .tagHomeWrap {
+  --tag-home-max-width: 100%;
+  width: 100%;
 }
 
 .home-tag-dock--shared .tagHomeSummary {

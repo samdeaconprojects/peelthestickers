@@ -18,6 +18,25 @@ const SPARSE_TAG_INDEX_CONFIG = Object.freeze({
   Method: { attr: "MethodIdx", prefix: "MT", indexName: "GSI6" },
 });
 
+// Earliest of two ISO timestamps, ignoring blanks. ISO-8601 in a fixed offset
+// sorts correctly as a string, which is how every other date comparison in
+// here works.
+function minIsoTimestamp(a, b) {
+  const left = String(a || "").trim();
+  const right = String(b || "").trim();
+  if (!left) return right || null;
+  if (!right) return left || null;
+  return left < right ? left : right;
+}
+
+// Number(null) is 0 and Number("") is 0, so a stats field that is genuinely
+// absent would otherwise read back as a legitimate zero millisecond time.
+function asFiniteMsOrNull(value) {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -194,16 +213,32 @@ function getSortTimeMsForStats(solve) {
   return Number.isFinite(finalMs) ? finalMs : Infinity;
 }
 
+const AVERAGE_TRIM_PERCENT = 0.05;
+
+// Community standard (csTimer and the timers that followed it): trim ceil(5%) of the
+// window from each end, never fewer than one. The 5% rule reproduces the WCA definitions
+// on its own -- Ao5 and Ao12 both land on one trimmed solve per side -- so Mo3/Ao5/Ao12
+// stay WCA-legal without being special-cased. Must stay in sync with
+// getTrimCountForWindow in src/components/TimeList/TimeUtils.js.
+function getTrimCountForWindow(windowSize) {
+  const n = Number(windowSize);
+  if (!Number.isFinite(n) || n < 3) return 0;
+  return Math.max(1, Math.ceil(n * AVERAGE_TRIM_PERCENT));
+}
+
 function computeWindowAverageMs(solvesSlice) {
   if (!Array.isArray(solvesSlice) || solvesSlice.length === 0) return Infinity;
 
   const times = solvesSlice.map(getSortTimeMsForStats);
+  const trimCount = getTrimCountForWindow(times.length);
   const dnfCount = times.filter((t) => !Number.isFinite(t)).length;
 
-  if (dnfCount > 1) return Infinity;
+  // DNFs sort as the slowest solves and get trimmed away; the average is only a DNF
+  // once there are more of them than there are trimmed slots.
+  if (dnfCount > trimCount) return Infinity;
 
   const sorted = [...times].sort((a, b) => a - b);
-  const trimmed = sorted.slice(1, sorted.length - 1);
+  const trimmed = sorted.slice(trimCount, sorted.length - trimCount);
 
   if (trimmed.length === 0) return Infinity;
 
@@ -213,14 +248,34 @@ function computeWindowAverageMs(solvesSlice) {
   return Number.isFinite(avg) ? Math.round(avg) : Infinity;
 }
 
-function computeWindowMeanMs(solvesSlice) {
+const MEAN_DNF_TOLERANCE_PERCENT = 0.05;
+
+// A mean trims nothing, so a DNF has no slot to fall into the way it does in a
+// trimmed average -- tolerating one means "Mo100" is really a mean of 95. That is
+// the deliberate trade: strictly clean windows get vanishingly rare at these sizes
+// (a 1000-solve session with 11 DNFs has zero clean Mo1000 windows), so both the
+// tolerant and the strictly-clean best are stored and the user picks which to see.
+// Mo3 is WCA-defined and stays strict: any DNF voids it.
+function getMeanDnfToleranceForWindow(windowSize) {
+  const n = Number(windowSize);
+  if (!Number.isFinite(n) || n < 5) return 0;
+  return Math.max(1, Math.ceil(n * MEAN_DNF_TOLERANCE_PERCENT));
+}
+
+// dnfTolerance defaults to 0, which is the WCA mean rule and what every existing
+// Mo3 call site relies on.
+function computeWindowMeanMs(solvesSlice, { dnfTolerance = 0 } = {}) {
   if (!Array.isArray(solvesSlice) || solvesSlice.length === 0) return Infinity;
 
   const times = solvesSlice.map(getFinalTimeMs);
-  if (times.some((t) => !Number.isFinite(t))) return Infinity;
+  const valid = times.filter((t) => Number.isFinite(t));
+  const dnfCount = times.length - valid.length;
 
-  const sum = times.reduce((acc, t) => acc + t, 0);
-  const avg = sum / times.length;
+  if (dnfCount > Math.max(0, Number(dnfTolerance) || 0)) return Infinity;
+  if (valid.length === 0) return Infinity;
+
+  const sum = valid.reduce((acc, t) => acc + t, 0);
+  const avg = sum / valid.length;
   return Number.isFinite(avg) ? Math.round(avg) : Infinity;
 }
 
@@ -534,6 +589,86 @@ function bestAoForWindow(solves, n) {
   }
 
   return { value: best, startSolveSK: bestStart };
+}
+
+const MEAN_WINDOW_CONFIGS = Object.freeze(
+  [5, 12, 25, 50, 100, 1000].map((size) =>
+    Object.freeze({
+      windowSize: size,
+      valueField: `BestMo${size}Ms`,
+      startField: `BestMo${size}StartSolveSK`,
+      noDnfValueField: `BestMo${size}NoDnfMs`,
+      noDnfStartField: `BestMo${size}NoDnfStartSolveSK`,
+    })
+  )
+);
+
+// Both variants in one rolling-sum pass: O(solves) rather than the O(solves * window)
+// that slicing per position would cost, which matters at Mo1000 over a 50k-solve scope.
+// Times are integer ms, so the running sum stays exact.
+function bestMeansForWindow(solves, n) {
+  const out = {
+    tolerant: { value: null, startSolveSK: null },
+    strict: { value: null, startSolveSK: null },
+  };
+
+  const size = Number(n);
+  if (!Array.isArray(solves) || !Number.isFinite(size) || size < 1 || solves.length < size) {
+    return out;
+  }
+
+  const tolerance = getMeanDnfToleranceForWindow(size);
+  const times = solves.map(getFinalTimeMs);
+
+  let sum = 0;
+  let dnfCount = 0;
+
+  const consider = (start) => {
+    const validCount = size - dnfCount;
+    if (validCount <= 0 || dnfCount > tolerance) return;
+
+    const mean = Math.round(sum / validCount);
+    if (!Number.isFinite(mean)) return;
+
+    if (out.tolerant.value === null || mean < out.tolerant.value) {
+      out.tolerant.value = mean;
+      out.tolerant.startSolveSK = solves[start]?.SK || null;
+    }
+    if (dnfCount === 0 && (out.strict.value === null || mean < out.strict.value)) {
+      out.strict.value = mean;
+      out.strict.startSolveSK = solves[start]?.SK || null;
+    }
+  };
+
+  for (let i = 0; i < size; i += 1) {
+    const t = times[i];
+    if (Number.isFinite(t)) sum += t;
+    else dnfCount += 1;
+  }
+  consider(0);
+
+  for (let i = size; i < times.length; i += 1) {
+    const incoming = times[i];
+    const outgoing = times[i - size];
+    if (Number.isFinite(incoming)) sum += incoming;
+    else dnfCount += 1;
+    if (Number.isFinite(outgoing)) sum -= outgoing;
+    else dnfCount -= 1;
+    consider(i - size + 1);
+  }
+
+  return out;
+}
+
+function buildMeanWindowStatsFromSolves(solves) {
+  return MEAN_WINDOW_CONFIGS.reduce((acc, config) => {
+    const { tolerant, strict } = bestMeansForWindow(solves, config.windowSize);
+    acc[config.valueField] = tolerant.value;
+    acc[config.startField] = tolerant.startSolveSK;
+    acc[config.noDnfValueField] = strict.value;
+    acc[config.noDnfStartField] = strict.startSolveSK;
+    return acc;
+  }, {});
 }
 
 function bestMeanForWindow(solves, n) {
@@ -1025,6 +1160,30 @@ function buildStatsFromSolves(solves = []) {
       BestAo100StartSolveSK: null,
 
       BestAo1000Ms: null,
+      BestMo5Ms: null,
+      BestMo5StartSolveSK: null,
+      BestMo5NoDnfMs: null,
+      BestMo5NoDnfStartSolveSK: null,
+      BestMo12Ms: null,
+      BestMo12StartSolveSK: null,
+      BestMo12NoDnfMs: null,
+      BestMo12NoDnfStartSolveSK: null,
+      BestMo25Ms: null,
+      BestMo25StartSolveSK: null,
+      BestMo25NoDnfMs: null,
+      BestMo25NoDnfStartSolveSK: null,
+      BestMo50Ms: null,
+      BestMo50StartSolveSK: null,
+      BestMo50NoDnfMs: null,
+      BestMo50NoDnfStartSolveSK: null,
+      BestMo100Ms: null,
+      BestMo100StartSolveSK: null,
+      BestMo100NoDnfMs: null,
+      BestMo100NoDnfStartSolveSK: null,
+      BestMo1000Ms: null,
+      BestMo1000StartSolveSK: null,
+      BestMo1000NoDnfMs: null,
+      BestMo1000NoDnfStartSolveSK: null,
       BestAo1000StartSolveSK: null,
 
       TopSingles10: [],
@@ -1044,6 +1203,8 @@ function buildStatsFromSolves(solves = []) {
   let SumFinalTimeMs = 0;
   let SumFinalTimeSqMs = 0;
   let Plus2BestMs = null;
+  let Plus2BestSolveSK = null;
+  let Plus2BestAt = null;
   const includedFinalTimes = [];
 
   let BestSingleMs = null;
@@ -1075,6 +1236,8 @@ function buildStatsFromSolves(solves = []) {
 
       if (penalty === "+2" && (Plus2BestMs === null || finalMs < Plus2BestMs)) {
         Plus2BestMs = finalMs;
+        Plus2BestSolveSK = solve?.SK || null;
+        Plus2BestAt = solve?.CreatedAt || null;
       }
 
       if (BestSingleMs === null || finalMs < BestSingleMs) {
@@ -1137,6 +1300,7 @@ function buildStatsFromSolves(solves = []) {
   const ao100 = bestAoForWindow(solves, 100);
   const ao1000 = bestAoForWindow(solves, 1000);
   const cachedWindowStats = buildCachedWindowCandidateStatsFromSolves(solves, 10);
+  const meanWindowStats = buildMeanWindowStatsFromSolves(solves);
   const lastSolve = solves[solves.length - 1];
 
   return {
@@ -1150,6 +1314,8 @@ function buildStatsFromSolves(solves = []) {
     MeanMs,
     MedianMs,
     Plus2BestMs,
+    Plus2BestSolveSK,
+    Plus2BestAt,
 
     BestSingleMs,
     BestSingleSolveSK,
@@ -1189,6 +1355,8 @@ function buildStatsFromSolves(solves = []) {
 
     BestAo1000Ms: ao1000.value,
     BestAo1000StartSolveSK: ao1000.startSolveSK,
+
+    ...meanWindowStats,
 
     TopSingles10,
     ...cachedWindowStats,
@@ -1409,6 +1577,14 @@ async function buildStatsFromSolveIterator(iterable) {
     recent: [],
   }));
 
+  const meanWindowState = MEAN_WINDOW_CONFIGS.map((config) => ({
+    config,
+    recent: [],
+    sum: 0,
+    dnfCount: 0,
+    tolerance: getMeanDnfToleranceForWindow(config.windowSize),
+  }));
+
   const strictConfigs = [
     { kind: "mo3", windowSize: 3, valueField: "BestMo3StrictMs", startField: "BestMo3StrictStartSolveSK" },
     { kind: "ao", windowSize: 5, valueField: "BestAo5StrictMs", startField: "BestAo5StrictStartSolveSK" },
@@ -1458,6 +1634,8 @@ async function buildStatsFromSolveIterator(iterable) {
 
       if (penalty === "+2" && (stats.Plus2BestMs === null || finalMs < stats.Plus2BestMs)) {
         stats.Plus2BestMs = finalMs;
+        stats.Plus2BestSolveSK = solve?.SK || null;
+        stats.Plus2BestAt = solve?.CreatedAt || null;
       }
 
       if (stats.BestSingleMs === null || finalMs < stats.BestSingleMs) {
@@ -1475,6 +1653,41 @@ async function buildStatsFromSolveIterator(iterable) {
     }
 
     stats.LastSolveAt = solve?.CreatedAt || stats.LastSolveAt || null;
+
+    for (const state of meanWindowState) {
+      const { config } = state;
+      state.recent.push(solve);
+
+      const incoming = getFinalTimeMs(solve);
+      if (Number.isFinite(incoming)) state.sum += incoming;
+      else state.dnfCount += 1;
+
+      if (state.recent.length > config.windowSize) {
+        const outgoing = getFinalTimeMs(state.recent.shift());
+        if (Number.isFinite(outgoing)) state.sum -= outgoing;
+        else state.dnfCount -= 1;
+      }
+      if (state.recent.length !== config.windowSize) continue;
+
+      const validCount = config.windowSize - state.dnfCount;
+      if (validCount <= 0 || state.dnfCount > state.tolerance) continue;
+
+      const mean = Math.round(state.sum / validCount);
+      if (!Number.isFinite(mean)) continue;
+
+      const startSK = state.recent[0]?.SK || null;
+      if (stats[config.valueField] == null || mean < stats[config.valueField]) {
+        stats[config.valueField] = mean;
+        stats[config.startField] = startSK;
+      }
+      if (
+        state.dnfCount === 0 &&
+        (stats[config.noDnfValueField] == null || mean < stats[config.noDnfValueField])
+      ) {
+        stats[config.noDnfValueField] = mean;
+        stats[config.noDnfStartField] = startSK;
+      }
+    }
 
     for (const config of windowConfigs) {
       config.recent.push(solve);
@@ -2395,6 +2608,160 @@ async function getLastNSolvesByTag(
   return solves.sort((a, b) => String(a?.CreatedAt || "").localeCompare(String(b?.CreatedAt || "")));
 }
 
+// ---- Scope extremes (FirstSolveAt / Plus2BestMs / WorstSingleMs) ----
+//
+// These three are the fields a counter delta cannot derive on its own. They are
+// split into a "what do I need to read" half and a "given those reads, what is
+// the answer" half so both can be tested without a table in front of them.
+//
+// The asymmetry that makes this work: an add can only ever tighten an extreme,
+// so it folds in arithmetically. A remove can only loosen one, and only if it
+// removed the record holder -- any other removal provably leaves the extreme
+// alone and does not earn a read.
+
+function planScopeExtremeReads({ prev, core, addSolve = null, removeSolve = null }) {
+  const prevFirstSolveAt = String(prev?.FirstSolveAt || "").trim();
+  const prevPlus2BestMs = asFiniteMsOrNull(prev?.Plus2BestMs);
+  const prevWorstSingleMs = asFiniteMsOrNull(prev?.WorstSingleMs);
+
+  // A row written before these fields were maintained can hold a null while the
+  // scope really does have matching solves. Folding the incoming solve into
+  // that null would enshrine a wrong answer (FirstSolveAt would jump to today),
+  // so such a row is repaired by reading rather than by arithmetic.
+  const firstSolveAtIsStale = !prevFirstSolveAt && Number(prev?.SolveCountTotal || 0) > 0;
+  const worstSingleIsStale =
+    !Number.isFinite(prevWorstSingleMs) && Number(prev?.SolveCountIncluded || 0) > 0;
+
+  // Plus2Best is the one repair that depends on SINGLERANK items carrying a
+  // Penalty attribute. Rank items written before that existed do not, so on a
+  // table that has not been backfilled the repair read legitimately finds
+  // nothing -- and without this marker it would re-run, paginating the whole
+  // rank list, on every subsequent solve. Recording the count it was resolved
+  // against means an unresolvable scope is attempted once per +2, not forever.
+  const plus2BestIsStale =
+    !Number.isFinite(prevPlus2BestMs) &&
+    Number(prev?.Plus2Count || 0) > 0 &&
+    Number(prev?.Plus2BestResolvedForCount) !== Number(prev?.Plus2Count || 0);
+
+  const removedSolveSK = String(removeSolve?.SK || "");
+  const removeFinalMs = removeSolve ? getFinalTimeMs(removeSolve) : null;
+
+  const removedFirstSolve =
+    !!removeSolve &&
+    !!prevFirstSolveAt &&
+    String(removeSolve?.CreatedAt || "") === prevFirstSolveAt;
+
+  // A missing SolveSK on prev means we cannot prove the removal was harmless,
+  // so it is treated as if it hit the record holder.
+  const removedPlus2Best =
+    !!removeSolve &&
+    normalizePenalty(removeSolve?.Penalty) === "+2" &&
+    (!prev?.Plus2BestSolveSK || removedSolveSK === String(prev.Plus2BestSolveSK));
+
+  const removedWorstSingle =
+    !!removeSolve &&
+    Number.isFinite(removeFinalMs) &&
+    (!prev?.WorstSingleSolveSK || removedSolveSK === String(prev.WorstSingleSolveSK));
+
+  return {
+    needsFirstSolveAt: removedFirstSolve || firstSolveAtIsStale,
+    needsPlus2Best:
+      Number(core?.Plus2Count || 0) > 0 && (removedPlus2Best || plus2BestIsStale),
+    needsWorstSingle:
+      Number(core?.SolveCountIncluded || 0) > 0 && (removedWorstSingle || worstSingleIsStale),
+  };
+}
+
+function applyScopeExtremes(
+  next,
+  { prev, core, addSolve = null, reads = {}, plan = {} }
+) {
+  const prevFirstSolveAt = String(prev?.FirstSolveAt || "").trim();
+  const prevPlus2BestMs = asFiniteMsOrNull(prev?.Plus2BestMs);
+  const prevWorstSingleMs = asFiniteMsOrNull(prev?.WorstSingleMs);
+
+  const addFinalMs = addSolve ? getFinalTimeMs(addSolve) : null;
+  const addIsIncluded = Number.isFinite(addFinalMs);
+  const addIsPlus2 = normalizePenalty(addSolve?.Penalty) === "+2";
+
+  if (plan.needsFirstSolveAt) {
+    next.FirstSolveAt = reads.firstSolveAt ?? null;
+  } else if (addSolve?.CreatedAt) {
+    next.FirstSolveAt = minIsoTimestamp(prevFirstSolveAt, addSolve.CreatedAt);
+  } else {
+    next.FirstSolveAt = prevFirstSolveAt || null;
+  }
+
+  if (Number(core?.Plus2Count || 0) <= 0) {
+    next.Plus2BestMs = null;
+    next.Plus2BestSolveSK = null;
+    next.Plus2BestAt = null;
+    next.Plus2BestResolvedForCount = 0;
+  } else if (plan.needsPlus2Best) {
+    next.Plus2BestMs = reads.plus2Best?.Plus2BestMs ?? null;
+    next.Plus2BestSolveSK = reads.plus2Best?.Plus2BestSolveSK || null;
+    next.Plus2BestAt = reads.plus2Best?.Plus2BestAt || null;
+    next.Plus2BestResolvedForCount = Number(core.Plus2Count || 0);
+  } else if (
+    addIsPlus2 &&
+    addIsIncluded &&
+    (!Number.isFinite(prevPlus2BestMs) || addFinalMs < prevPlus2BestMs)
+  ) {
+    next.Plus2BestMs = addFinalMs;
+    next.Plus2BestSolveSK = addSolve?.SK || null;
+    next.Plus2BestAt = addSolve?.CreatedAt || null;
+    next.Plus2BestResolvedForCount = Number(core.Plus2Count || 0);
+  } else {
+    next.Plus2BestMs = Number.isFinite(prevPlus2BestMs) ? prevPlus2BestMs : null;
+    next.Plus2BestSolveSK = prev?.Plus2BestSolveSK || null;
+    next.Plus2BestAt = prev?.Plus2BestAt || null;
+  }
+
+  if (Number(core?.SolveCountIncluded || 0) <= 0) {
+    next.WorstSingleMs = null;
+    next.WorstSingleSolveSK = null;
+  } else if (plan.needsWorstSingle) {
+    next.WorstSingleMs = reads.worstSingle?.WorstSingleMs ?? null;
+    next.WorstSingleSolveSK = reads.worstSingle?.WorstSingleSolveSK || null;
+  } else if (
+    addIsIncluded &&
+    (!Number.isFinite(prevWorstSingleMs) || addFinalMs > prevWorstSingleMs)
+  ) {
+    next.WorstSingleMs = addFinalMs;
+    next.WorstSingleSolveSK = addSolve?.SK || null;
+  } else {
+    next.WorstSingleMs = Number.isFinite(prevWorstSingleMs) ? prevWorstSingleMs : null;
+    next.WorstSingleSolveSK = prev?.WorstSingleSolveSK || null;
+  }
+
+  return next;
+}
+
+// A full recompute is authoritative -- it is derived from the solves
+// themselves -- so it writes unconditionally. It still has to carry the
+// version forward: dropping the attribute would leave the row unguarded, and
+// reusing a stale number would let an in-flight incremental write think its
+// own stale read is still current.
+async function putStatsItemWithVersionBump(ddb, tableName, item) {
+  const current = await ddb.send(
+    new GetCommand({
+      TableName: tableName,
+      Key: { PK: item.PK, SK: item.SK },
+      ConsistentRead: true,
+      ProjectionExpression: "StatsVersion",
+    })
+  );
+
+  const prevVersion = Number(current?.Item?.StatsVersion);
+  const next = {
+    ...item,
+    StatsVersion: (Number.isFinite(prevVersion) ? prevVersion : 0) + 1,
+  };
+
+  await ddb.send(new PutCommand({ TableName: tableName, Item: next }));
+  return next;
+}
+
 async function recomputeSessionStats(ddb, tableName, userID, event, sessionID) {
   const ev = normalizeEvent(event);
   const sid = normalizeSessionID(sessionID);
@@ -2420,8 +2787,7 @@ async function recomputeSessionStats(ddb, tableName, userID, event, sessionID) {
     ...stats,
   };
 
-  await ddb.send(new PutCommand({ TableName: tableName, Item: item }));
-  return item;
+  return putStatsItemWithVersionBump(ddb, tableName, item);
 }
 
 async function recomputeEventStats(ddb, tableName, userID, event) {
@@ -2447,8 +2813,7 @@ async function recomputeEventStats(ddb, tableName, userID, event) {
     ...stats,
   };
 
-  await ddb.send(new PutCommand({ TableName: tableName, Item: item }));
-  return item;
+  return putStatsItemWithVersionBump(ddb, tableName, item);
 }
 
 async function recomputeTagStats(
@@ -2491,8 +2856,7 @@ async function recomputeTagStats(
   };
   if (sid) item.SessionID = sid;
 
-  await ddb.send(new PutCommand({ TableName: tableName, Item: item }));
-  return item;
+  return putStatsItemWithVersionBump(ddb, tableName, item);
 }
 
 function mergeIncrementalStats(
@@ -2519,10 +2883,9 @@ function mergeIncrementalStats(
       DNFCount: Number(prev.DNFCount || 0) + (penalty === "DNF" ? 1 : 0),
       Plus2Count: Number(prev.Plus2Count || 0) + (penalty === "+2" ? 1 : 0),
       SumFinalTimeMs: Number(prev.SumFinalTimeMs || 0) + (isIncluded ? finalMs : 0),
-      FirstSolveAt:
-        prev.FirstSolveAt && String(prev.FirstSolveAt)
-          ? String(prev.FirstSolveAt)
-          : solveItem?.CreatedAt || null,
+      // Take the earliest of the two rather than keeping whatever landed
+      // first, so backdated solves (WCA/CSV imports) can pull this earlier.
+      FirstSolveAt: minIsoTimestamp(prev.FirstSolveAt, solveItem?.CreatedAt),
       LastSolveAt: solveItem?.CreatedAt || prev.LastSolveAt || null,
       LastRecomputedAt: nowIso(),
     };
@@ -2543,6 +2906,19 @@ function mergeIncrementalStats(
         next.BestSingleSolveSK = solveItem?.SK || null;
         next.BestSingleAt = solveItem?.CreatedAt || null;
       }
+
+      if (next.WorstSingleMs == null || finalMs > next.WorstSingleMs) {
+        next.WorstSingleMs = finalMs;
+        next.WorstSingleSolveSK = solveItem?.SK || null;
+      }
+
+      // Plus2Count is incremented above; without this the paired best stays
+      // null forever and reads as "cached stats are broken, recompute me".
+      if (penalty === "+2" && (next.Plus2BestMs == null || finalMs < next.Plus2BestMs)) {
+        next.Plus2BestMs = finalMs;
+        next.Plus2BestSolveSK = solveItem?.SK || null;
+        next.Plus2BestAt = solveItem?.CreatedAt || null;
+      }
     }
   }
 
@@ -2557,6 +2933,37 @@ function mergeIncrementalStats(
   };
 
   const fields = windowMap[windowSize] || null;
+
+  // Best means ride the same recentSolves buffer as the trimmed averages above.
+  const meanConfig = MEAN_WINDOW_CONFIGS.find(
+    (config) => config.windowSize === Number(windowSize)
+  );
+  if (meanConfig && Array.isArray(recentSolves) && recentSolves.length >= windowSize) {
+    const slice = recentSolves.slice(-windowSize);
+    const times = slice.map(getFinalTimeMs);
+    const valid = times.filter((t) => Number.isFinite(t));
+    const dnfCount = times.length - valid.length;
+    const tolerance = getMeanDnfToleranceForWindow(windowSize);
+
+    if (valid.length > 0 && dnfCount <= tolerance) {
+      const mean = Math.round(valid.reduce((acc, t) => acc + t, 0) / valid.length);
+      if (Number.isFinite(mean)) {
+        const startSK = slice[0]?.SK || null;
+        if (next[meanConfig.valueField] == null || mean < next[meanConfig.valueField]) {
+          next[meanConfig.valueField] = mean;
+          next[meanConfig.startField] = startSK;
+        }
+        if (
+          dnfCount === 0 &&
+          (next[meanConfig.noDnfValueField] == null ||
+            mean < next[meanConfig.noDnfValueField])
+        ) {
+          next[meanConfig.noDnfValueField] = mean;
+          next[meanConfig.noDnfStartField] = startSK;
+        }
+      }
+    }
+  }
 
   if (Array.isArray(recentSolves) && recentSolves.length >= windowSize) {
     const candidateSlice = recentSolves.slice(-windowSize);
@@ -2799,9 +3206,17 @@ module.exports = {
   getRawTimeMs,
   getFinalTimeMs,
   isDnfSolve,
+  getTrimCountForWindow,
+  getMeanDnfToleranceForWindow,
+  MEAN_WINDOW_CONFIGS,
+  bestMeansForWindow,
   computeWindowAverageMs,
   computeWindowMeanMs,
   buildStatsFromSolves,
+  mergeIncrementalStats,
+  minIsoTimestamp,
+  planScopeExtremeReads,
+  applyScopeExtremes,
   STRICT_WINDOW_VERSION,
   DAY_BUCKET_VERSION,
   BEST_WINDOW_CONFIGS,

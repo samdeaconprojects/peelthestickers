@@ -17,6 +17,11 @@ import SharedAverageMessage from "./components/Social/SharedAverageMessage";
 import Settings from "./components/Settings/Settings";
 import Navigation from "./components/Navigation/Navigation";
 import PlayerBar from "./components/PlayerBar/PlayerBar";
+import {
+  LiveRoomHostPill,
+  LiveRoomFollowBar,
+  LiveRoomEventPromptModal,
+} from "./components/LiveRoom/LiveRoomBar";
 import HomeStatsOverlay from "./components/HomeStats/HomeStatsOverlay";
 import EventSelector from "./components/EventSelector";
 import Scramble from "./components/Scramble/Scramble";
@@ -60,6 +65,16 @@ import { getSolveWindowFromStart } from "./services/getSolveWindow";
 import { sendMessage } from "./services/sendMessage";
 import { getTagValues } from "./services/getTagValues";
 import { getGroups } from "./services/getGroups";
+import {
+  openRoom,
+  closeRoom,
+  publishRoomScramble,
+  joinRoom,
+  leaveRoom,
+  reportRoomSolve,
+  getRoomState,
+  getRoomLeaderboard,
+} from "./services/liveRoom";
 import { setGanCurrentScramble } from "./smart/ganScrambleProgress";
 import {
   clearScrambleQueue,
@@ -106,6 +121,15 @@ import {
   normalizeProfileEventKey,
   normalizeProfileEventSolvesMap,
 } from "./utils/profileEventSolves";
+import {
+  computeTournamentState as computeTournamentStateHelper,
+  playerState as tournamentPlayerState,
+  matchRuleLabel as tournamentMatchRuleLabel,
+} from "./utils/tournament";
+import useOnlineStatus from "./hooks/useOnlineStatus";
+import useOfflineQueue from "./hooks/useOfflineQueue";
+import { addOfflineSolve } from "./services/offlineQueue";
+import OfflineBanner from "./components/Offline/OfflineBanner";
 
 const INITIAL_SESSIONS = {
   "222": [],
@@ -582,16 +606,33 @@ function formatSharedTimeLabel(value) {
 }
 
 function getSharedSolveCount(sharedSession) {
+  const planLengths = sharedSession?.participantPlans
+    ? Object.values(sharedSession.participantPlans).map((plan) =>
+        Array.isArray(plan?.scrambles) ? plan.scrambles.length : 0
+      )
+    : [];
   return Math.max(
     Array.isArray(sharedSession?.scrambles) ? sharedSession.scrambles.length : 0,
     Array.isArray(sharedSession?.creatorScrambles) ? sharedSession.creatorScrambles.length : 0,
-    Array.isArray(sharedSession?.opponentScrambles) ? sharedSession.opponentScrambles.length : 0
+    Array.isArray(sharedSession?.opponentScrambles) ? sharedSession.opponentScrambles.length : 0,
+    0,
+    ...planLengths
   );
 }
 
 function findSharedNextIndex(sharedSession, userID) {
   const total = getSharedSolveCount(sharedSession);
   if (!total) return 0;
+
+  if (getSharedTournament(sharedSession)) {
+    const ps = getTournamentPlayerState(sharedSession, userID);
+    if (ps && Number.isFinite(Number(ps.nextIndex))) {
+      return Math.min(Math.max(0, Number(ps.nextIndex)), total - 1);
+    }
+    // Nothing to solve right now (eliminated / waiting / champion) — sit on the
+    // last relevant index.
+    return Math.max(total - 1, 0);
+  }
 
   for (let i = 0; i < total; i++) {
     const row = sharedSession?.roundResults?.[i] || {};
@@ -834,6 +875,28 @@ function getSharedMode(session) {
   return String(session?.mode || session?.type || "average").trim().toLowerCase();
 }
 
+function getSharedTournament(session) {
+  const t = session?.tournament;
+  return t && typeof t === "object" && Array.isArray(t.matches) ? t : null;
+}
+
+function getTournamentState(session) {
+  const tournament = getSharedTournament(session);
+  if (!tournament) return null;
+  return computeTournamentStateHelper(tournament, session?.roundResults || {});
+}
+
+function getTournamentPlayerState(session, userID) {
+  const tournament = getSharedTournament(session);
+  if (!tournament) return null;
+  return tournamentPlayerState(
+    tournament,
+    computeTournamentStateHelper(tournament, session?.roundResults || {}),
+    session?.roundResults || {},
+    userID
+  );
+}
+
 function isHostedSharedSession(session) {
   return getSharedMode(session) === "hosted" || session?.isHosted === true;
 }
@@ -846,16 +909,31 @@ function getSharedSaveSessionID(session) {
 
 function getSharedSolveSourceLabel(session) {
   if (!session?.sharedID) return "Standard";
-  if (!isHostedSharedSession(session)) return "Shared";
 
-  const hostLabel = String(
-    session?.hostName ||
-      session?.creatorName ||
-      session?.creatorUsername ||
-      session?.creatorID ||
-      ""
+  if (isHostedSharedSession(session)) {
+    const hostLabel = String(
+      session?.hostName ||
+        session?.creatorName ||
+        session?.creatorUsername ||
+        session?.creatorID ||
+        ""
+    ).trim();
+
+    return hostLabel ? `Room - ${hostLabel}` : "Room";
+  }
+
+  // Casual shared session: opponentName already carries either the other
+  // person's name (DM) or the group's name (GROUP conversation) — see
+  // Social.js's loadSharedSession, which sets it from baseConversation.name.
+  const withLabel = String(
+    session?.opponentName || session?.theirLabel || session?.theirUsername || ""
   ).trim();
 
+  return withLabel ? `Shared - ${withLabel}` : "Shared";
+}
+
+function getLiveRoomSolveSourceLabel(follow) {
+  const hostLabel = String(follow?.hostName || follow?.hostID || "").trim();
   return hostLabel ? `Room - ${hostLabel}` : "Room";
 }
 
@@ -864,18 +942,111 @@ function getSharedTargetWins(session) {
   return Number.isFinite(n) && n > 0 ? n : 3;
 }
 
+// Head to head: "first to `setCount` sets, each set first to `roundCount` round wins".
+// Falls back to the legacy single-set "first to `targetWins`" shape for old sessions.
+function getSharedRoundConfig(session) {
+  const rawRounds = Number(session?.roundCount || 0);
+  const rawSets = Number(session?.setCount || 0);
+  if (Number.isFinite(rawRounds) && rawRounds > 0 && Number.isFinite(rawSets) && rawSets > 0) {
+    return { roundCount: rawRounds, setCount: rawSets };
+  }
+  return { roundCount: getSharedTargetWins(session), setCount: 1 };
+}
+
+// Ordered list of "you" | "them" | "tie" per solve index, oldest first.
+function computeSharedRoundWinners(session, currentUserID) {
+  const roundResults = session?.roundResults || {};
+  const opponentID = session?.opponentID || null;
+  const total = getSharedSolveCount(session);
+
+  const winners = [];
+  for (let i = 0; i < total; i += 1) {
+    const row = roundResults?.[i];
+    if (!row) break;
+    const myTime = Number(row?.[currentUserID]?.time);
+    const peers = getSharedRoundParticipants(session, i, currentUserID);
+    const other =
+      peers.find((entry) => entry.participantID === opponentID) || peers[0] || null;
+    const theirTime = Number(other?.time);
+    if (!Number.isFinite(myTime) || !Number.isFinite(theirTime)) break;
+    if (myTime < theirTime) winners.push("you");
+    else if (theirTime < myTime) winners.push("them");
+    else winners.push("tie");
+  }
+  return winners;
+}
+
+function computeHeadToHeadStanding(roundWinners, roundConfig) {
+  const R = Math.max(1, Number(roundConfig?.roundCount) || 1);
+  const S = Math.max(1, Number(roundConfig?.setCount) || 1);
+
+  let yourSets = 0;
+  let theirSets = 0;
+  let yourRoundsThisSet = 0;
+  let theirRoundsThisSet = 0;
+  let matchWinner = null;
+
+  for (const w of roundWinners || []) {
+    if (matchWinner) break;
+    if (w === "you") yourRoundsThisSet += 1;
+    else if (w === "them") theirRoundsThisSet += 1;
+    else continue;
+
+    if (yourRoundsThisSet >= R) {
+      yourSets += 1;
+      yourRoundsThisSet = 0;
+      theirRoundsThisSet = 0;
+    } else if (theirRoundsThisSet >= R) {
+      theirSets += 1;
+      yourRoundsThisSet = 0;
+      theirRoundsThisSet = 0;
+    }
+
+    if (yourSets >= S) matchWinner = "you";
+    else if (theirSets >= S) matchWinner = "them";
+  }
+
+  return {
+    yourSets,
+    theirSets,
+    yourRoundsThisSet,
+    theirRoundsThisSet,
+    roundCount: R,
+    setCount: S,
+    isComplete: !!matchWinner,
+    matchWinner,
+  };
+}
+
+function computeSharedMatchStanding(session, currentUserID) {
+  return computeHeadToHeadStanding(
+    computeSharedRoundWinners(session, currentUserID),
+    getSharedRoundConfig(session)
+  );
+}
+
 function getSharedPerspective(session, userID, fallbackEvent = "333") {
   const creatorID = session?.creatorID || null;
   const isCreator = creatorID && userID ? creatorID === userID : true;
 
-  const yourEvents = isCreator
+  // Group "different events per player": each member carries their own plan.
+  const myPlan =
+    session?.participantPlans && userID
+      ? session.participantPlans[userID] || null
+      : null;
+
+  const yourEvents = myPlan?.events?.length
+    ? myPlan.events
+    : isCreator
     ? session?.creatorEvents || session?.events || []
     : session?.opponentEvents || session?.events || [];
   const theirEvents = isCreator
     ? session?.opponentEvents || session?.events || []
     : session?.creatorEvents || session?.events || [];
 
-  const yourScrambles = isCreator
+  const yourScrambles = myPlan?.scrambles?.length
+    ? myPlan.scrambles
+    : isCreator
     ? session?.creatorScrambles || session?.scrambles || []
     : session?.opponentScrambles || session?.scrambles || [];
   const theirScrambles = isCreator
@@ -888,9 +1059,11 @@ function getSharedPerspective(session, userID, fallbackEvent = "333") {
     theirEvents,
     yourScrambles,
     theirScrambles,
-    yourFallbackEvent: isCreator
-      ? session?.creatorEvent || session?.event || fallbackEvent
-      : session?.opponentEvent || session?.event || fallbackEvent,
+    yourFallbackEvent:
+      myPlan?.events?.[0] ||
+      (isCreator
+        ? session?.creatorEvent || session?.event || fallbackEvent
+        : session?.opponentEvent || session?.event || fallbackEvent),
     theirFallbackEvent: isCreator
       ? session?.opponentEvent || session?.event || fallbackEvent
       : session?.creatorEvent || session?.event || fallbackEvent,
@@ -934,6 +1107,8 @@ function buildHostedSharedSession(payload, currentSession, messages = []) {
       mode: payload?.mode || payload?.type || "hosted",
       type: payload?.type || payload?.mode || "hosted",
       targetWins: payload?.targetWins || null,
+      roundCount: payload?.roundCount || currentSession?.roundCount || null,
+      setCount: payload?.setCount || currentSession?.setCount || null,
       batchSize: payload?.batchSize || currentSession?.batchSize || null,
       saveSessionID:
         payload?.saveSessionID || currentSession?.saveSessionID || currentSession?.sessionID || "main",
@@ -1000,9 +1175,21 @@ function shouldCompleteSharedSessionNow(session, nextIndex, currentUserID) {
   const mode = getSharedMode(session);
   if (mode === "casual" || mode === "hosted") return false;
 
-  if (mode === "head_to_head") {
-    const { yourWins, theirWins } = computeSharedScore(session, currentUserID);
-    return yourWins >= getSharedTargetWins(session) || theirWins >= getSharedTargetWins(session);
+  // Set-structured head to head is a 1-1 concept. A "head to head" in a group (or
+  // one built from per-player plans) just plays out every round like an average.
+  const isPairwiseH2H =
+    mode === "head_to_head" && !session?.participantPlans && !!session?.opponentID;
+
+  if (isPairwiseH2H) {
+    if (computeSharedMatchStanding(session, currentUserID).isComplete) return true;
+    // Safety net: match ran out of pre-generated rounds without a decisive result.
+    return nextIndex >= getSharedSolveCount(session);
+  }
+
+  if (getSharedTournament(session)) {
+    // Done for now = eliminated, crowned, or waiting on an opponent / next round.
+    const ps = getTournamentPlayerState(session, currentUserID);
+    return !ps || !Number.isFinite(Number(ps.nextIndex));
   }
 
   const total = getSharedSolveCount(session);
@@ -1380,6 +1567,39 @@ function App() {
   const [showDetail, setShowDetail] = useState(false);
   const [user, setUser] = useState(null);
   const [isSignedIn, setIsSignedIn] = useState(false);
+  const isOnline = useOnlineStatus();
+  const offlineQueue = useOfflineQueue(user?.UserID);
+
+  // Once a solve is synced (or otherwise cleared) from the offline queue -
+  // e.g. via the "Add to profile" flow on the Profile page - drop the
+  // offline-pending flag from any matching entry still sitting in the live
+  // session list so its badge disappears.
+  useEffect(() => {
+    const activeIds = new Set(offlineQueue.items.map((item) => item.localId));
+    setSessions((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const ev of Object.keys(next)) {
+        const arr = next[ev];
+        if (!Array.isArray(arr) || !arr.length) continue;
+        let evChanged = false;
+        const nextArr = arr.map((s) => {
+          if (s?.offlinePending && s?.offlineLocalId && !activeIds.has(s.offlineLocalId)) {
+            evChanged = true;
+            const { offlinePending, offlineLocalId, ...rest } = s;
+            return { ...rest, tags: { ...(s.tags || {}), OfflinePending: false } };
+          }
+          return s;
+        });
+        if (evChanged) {
+          next[ev] = nextArr;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [offlineQueue.items]);
+
   const [showSignInPopup, setShowSignInPopup] = useState(false);
   const [showSettingsPopup, setShowSettingsPopup] = useState(false);
   const [showPostSignUpProfileSetup, setShowPostSignUpProfileSetup] = useState(false);
@@ -1414,6 +1634,16 @@ function App() {
   const [selectedAverageSolve, setSelectedAverageSolve] = useState(null);
   const [sharedSession, setSharedSession] = useState(null);
   const [sharedIndex, setSharedIndex] = useState(0);
+
+  // "Live Room" broadcast: a host keeps solving normally with "Go Live" on,
+  // and anyone who joins from their profile gets their exact scramble feed
+  // plus a small leaderboard. Independent of the sharedSession/group system.
+  const [liveRoomHost, setLiveRoomHost] = useState(null); // { roomID, event } | null
+  const [liveRoomFollow, setLiveRoomFollow] = useState(null);
+  const [liveRoomEventPrompt, setLiveRoomEventPrompt] = useState(null);
+  const [liveRoomBusy, setLiveRoomBusy] = useState(false);
+  const [liveRoomError, setLiveRoomError] = useState("");
+  const [liveRoomSpectatorCount, setLiveRoomSpectatorCount] = useState(0);
   const [shareComposer, setShareComposer] = useState({
     isOpen: false,
     post: null,
@@ -1492,6 +1722,15 @@ function App() {
   useEffect(() => {
     sharedSessionRef.current = sharedSession;
   }, [sharedSession]);
+
+  const liveRoomFollowRef = useRef(null);
+  const liveRoomHostIndexRef = useRef(-1);
+  const liveRoomPublishedScrambleRef = useRef("");
+  const liveRoomPollTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    liveRoomFollowRef.current = liveRoomFollow;
+  }, [liveRoomFollow]);
 
   const setDbPhase = useCallback((phase, op = "") => {
     setDbStatus((prev) => ({
@@ -1673,9 +1912,20 @@ function App() {
       currentEvent
     : null;
 
+  const liveRoomCurrentEntry = liveRoomFollow
+    ? liveRoomFollow.scrambles?.[liveRoomFollow.localIndex] || null
+    : null;
+  const liveRoomWaitingForHost = !!(
+    liveRoomFollow &&
+    !liveRoomEventPrompt &&
+    liveRoomFollow.localIndex >= (liveRoomFollow.scrambles?.length || 0)
+  );
+
   const displayedScramble = useMemo(() => {
     return sharedSession
       ? sharedPerspective.yourScrambles?.[sharedIndex] || sharedSession.scrambles?.[sharedIndex] || ""
+      : liveRoomFollow
+      ? liveRoomCurrentEntry?.scramble || ""
       : isRelayActive
       ? relayCurrentScramble
       : scrambles[currentEvent]?.[0] || "";
@@ -1683,6 +1933,8 @@ function App() {
     sharedSession,
     sharedPerspective,
     sharedIndex,
+    liveRoomFollow,
+    liveRoomCurrentEntry,
     isRelayActive,
     relayCurrentScramble,
     scrambles,
@@ -1692,10 +1944,20 @@ function App() {
   const displayedSvgEvent = useMemo(() => {
     return sharedSession
       ? sharedCurrentEvent || currentEvent
+      : liveRoomFollow
+      ? liveRoomCurrentEntry?.event || liveRoomFollow.event || currentEvent
       : isRelayActive
       ? relayCurrentEvent
       : currentEvent;
-  }, [sharedCurrentEvent, sharedSession, isRelayActive, relayCurrentEvent, currentEvent]);
+  }, [
+    sharedCurrentEvent,
+    sharedSession,
+    liveRoomFollow,
+    liveRoomCurrentEntry,
+    isRelayActive,
+    relayCurrentEvent,
+    currentEvent,
+  ]);
 
   const scrambleProgressMode = "steps";
 
@@ -2018,6 +2280,7 @@ function App() {
 
     if (practiceMode) base.SolveSource = "Practice";
     else if (sharedSession?.sharedID) base.SolveSource = getSharedSolveSourceLabel(sharedSession);
+    else if (liveRoomFollow) base.SolveSource = getLiveRoomSolveSourceLabel(liveRoomFollow);
     else if (activeSessionObj?.SessionType === "RELAY") {
       base.SolveSource = "Relay";
     } else if (String(settings?.timerInput || "").trim() === "GAN Cube") {
@@ -2033,6 +2296,7 @@ function App() {
     settings,
     practiceMode,
     sharedSession,
+    liveRoomFollow,
     activeSessionObj?.SessionType,
     tagScopeEventKey,
   ]);
@@ -2103,6 +2367,7 @@ function App() {
       if (payload.IsShared || payload.Shared) {
         payload.SolveSource = getSharedSolveSourceLabel(sharedSession);
       }
+      else if (payload.LiveRoom) payload.SolveSource = getLiveRoomSolveSourceLabel(liveRoomFollow);
       else if (payload.IsRelay) payload.SolveSource = "Relay";
       else if (payload.SmartCube) payload.SolveSource = "SmartCube";
       else payload.SolveSource = "Standard";
@@ -2679,6 +2944,310 @@ function App() {
     restorePreviousSessionAfterShared();
     return true;
   }, [sharedSession, user?.UserID, user?.Username, user?.Name, restorePreviousSessionAfterShared]);
+
+  // -------------------- Live Room (broadcast) --------------------
+
+  const stopLiveRoomPolling = useCallback(() => {
+    if (liveRoomPollTimeoutRef.current) {
+      clearTimeout(liveRoomPollTimeoutRef.current);
+      liveRoomPollTimeoutRef.current = null;
+    }
+  }, []);
+
+  const goLive = useCallback(async () => {
+    if (!isSignedIn || !user?.UserID || liveRoomBusy) return false;
+    setLiveRoomBusy(true);
+    setLiveRoomError("");
+    try {
+      const meta = await openRoom({
+        hostID: user.UserID,
+        hostName: user?.Username || user?.Name || user.UserID,
+        hostColor: user?.Color || "",
+        event: currentEvent,
+      });
+      liveRoomHostIndexRef.current = -1;
+      liveRoomPublishedScrambleRef.current = "";
+      setLiveRoomHost({ roomID: meta?.RoomID || user.UserID, event: currentEvent, active: true });
+      return true;
+    } catch (err) {
+      console.error("Failed to go live:", err);
+      setLiveRoomError(err?.message || "Failed to go live.");
+      return false;
+    } finally {
+      setLiveRoomBusy(false);
+    }
+  }, [isSignedIn, user, liveRoomBusy, currentEvent]);
+
+  const stopGoingLive = useCallback(async () => {
+    if (!liveRoomHost?.roomID || !user?.UserID) return;
+    try {
+      await closeRoom({ roomID: liveRoomHost.roomID, hostID: user.UserID });
+    } catch (err) {
+      console.warn("Failed to close live room:", err);
+    }
+    setLiveRoomHost(null);
+    liveRoomHostIndexRef.current = -1;
+    liveRoomPublishedScrambleRef.current = "";
+  }, [liveRoomHost, user?.UserID]);
+
+  const leaveLiveRoom = useCallback(async () => {
+    const follow = liveRoomFollowRef.current;
+    stopLiveRoomPolling();
+    setLiveRoomFollow(null);
+    setLiveRoomEventPrompt(null);
+    if (follow?.roomID && user?.UserID) {
+      try {
+        await leaveRoom({ roomID: follow.roomID, userID: user.UserID });
+      } catch (err) {
+        console.warn("Failed to leave live room:", err);
+      }
+    }
+  }, [stopLiveRoomPolling, user?.UserID]);
+
+  const jumpLiveRoomToLatest = useCallback(() => {
+    const follow = liveRoomFollowRef.current;
+    if (!follow || !follow.scrambles?.length) return;
+
+    const latestIndex = follow.scrambles.length - 1;
+    const latestEntry = follow.scrambles[latestIndex];
+
+    setLiveRoomFollow((prev) =>
+      prev && prev.roomID === follow.roomID
+        ? { ...prev, localIndex: latestIndex, event: latestEntry?.event || prev.event }
+        : prev
+    );
+
+    if (latestEntry?.event) setCurrentEvent(latestEntry.event);
+
+    // Skipping ahead resolves any pending "host switched events" prompt.
+    setLiveRoomEventPrompt(null);
+  }, []);
+
+  const joinLiveRoom = useCallback(
+    async (hostID) => {
+      const id = String(hostID || "").trim();
+      if (!id || !user?.UserID || liveRoomBusy) return false;
+      setLiveRoomBusy(true);
+      setLiveRoomError("");
+      try {
+        const { item, scrambles: initialScrambles, leaderboard } = await joinRoom({
+          roomID: id,
+          userID: user.UserID,
+          name: user?.Username || user?.Name || user.UserID,
+          color: user?.Color || "",
+        });
+        if (!item) throw new Error("That room isn't live anymore.");
+
+        setCurrentEvent(item.Event || "333");
+        setLiveRoomFollow({
+          roomID: id,
+          hostID: item.HostID || id,
+          hostName: item.HostName || id,
+          hostColor: item.HostColor || "",
+          event: item.Event || "333",
+          hostIndex: item.HostIndex ?? -1,
+          scrambles: initialScrambles,
+          leaderboard,
+          localIndex: 0,
+          active: true,
+        });
+        setShowPlayerBar(true);
+        navigate("/");
+        return true;
+      } catch (err) {
+        console.error("Failed to join live room:", err);
+        setLiveRoomError(err?.message || "Failed to join room.");
+        return false;
+      } finally {
+        setLiveRoomBusy(false);
+      }
+    },
+    [user, liveRoomBusy, navigate]
+  );
+
+  const resolveLiveRoomEventPrompt = useCallback(
+    (choice) => {
+      const prompt = liveRoomEventPrompt;
+      if (!prompt) return;
+
+      if (choice === "leave") {
+        setLiveRoomEventPrompt(null);
+        leaveLiveRoom();
+        return;
+      }
+
+      if (choice === "now") {
+        setCurrentEvent(prompt.newEvent);
+        setLiveRoomFollow((prev) =>
+          prev ? { ...prev, event: prompt.newEvent, localIndex: prompt.changeIndex } : prev
+        );
+        setLiveRoomEventPrompt(null);
+        return;
+      }
+
+      // "finish" — keep solving the current (old-event) scramble; the jump
+      // to the new event is applied automatically once that solve is saved.
+      setLiveRoomEventPrompt((prev) => (prev ? { ...prev, applyOnNextSolve: true } : prev));
+    },
+    [liveRoomEventPrompt, leaveLiveRoom]
+  );
+
+  // Host: whenever the free-solve queue's next scramble changes while live,
+  // publish it to the room feed (this is literally their real session).
+  useEffect(() => {
+    if (!liveRoomHost?.active || !isSignedIn || !user?.UserID) return;
+    if (isRelayActive || sharedSession || liveRoomFollow) return;
+
+    const scramble = String(scrambles[currentEvent]?.[0] || "").trim();
+    if (!scramble || scramble === liveRoomPublishedScrambleRef.current) return;
+
+    liveRoomPublishedScrambleRef.current = scramble;
+    liveRoomHostIndexRef.current += 1;
+    const index = liveRoomHostIndexRef.current;
+
+    publishRoomScramble({
+      roomID: liveRoomHost.roomID,
+      hostID: user.UserID,
+      index,
+      event: currentEvent,
+      scramble,
+    }).catch((err) => {
+      console.warn("Failed to publish live room scramble:", err);
+    });
+  }, [liveRoomHost, isSignedIn, user?.UserID, isRelayActive, sharedSession, liveRoomFollow, scrambles, currentEvent]);
+
+  // Spectator: poll for new scrambles + leaderboard. Polling (not push)
+  // keeps this cheap at hundreds of concurrent spectators.
+  useEffect(() => {
+    if (!liveRoomFollow?.active || !user?.UserID) {
+      stopLiveRoomPolling();
+      return;
+    }
+
+    let cancelled = false;
+
+    const tick = async () => {
+      const follow = liveRoomFollowRef.current;
+      if (!follow || cancelled) return;
+
+      try {
+        const { item, scrambles: newScrambles, leaderboard } = await getRoomState(
+          follow.roomID,
+          follow.scrambles.length
+        );
+
+        if (cancelled) return;
+
+        if (!item || item.Active !== true) {
+          setLiveRoomFollow(null);
+          setLiveRoomEventPrompt(null);
+          return;
+        }
+
+        if (newScrambles.length) {
+          const priorEvent = follow.scrambles.length
+            ? follow.scrambles[follow.scrambles.length - 1].event
+            : follow.event;
+          const eventSwitch = newScrambles.find((s) => s.event !== priorEvent);
+
+          setLiveRoomFollow((prev) =>
+            prev && prev.roomID === follow.roomID
+              ? {
+                  ...prev,
+                  scrambles: [...prev.scrambles, ...newScrambles],
+                  hostIndex: item.HostIndex,
+                }
+              : prev
+          );
+
+          if (eventSwitch && eventSwitch.index > follow.localIndex) {
+            setLiveRoomEventPrompt({
+              previousEvent: priorEvent,
+              newEvent: eventSwitch.event,
+              changeIndex: eventSwitch.index,
+              applyOnNextSolve: false,
+            });
+          }
+        } else {
+          setLiveRoomFollow((prev) =>
+            prev && prev.roomID === follow.roomID ? { ...prev, hostIndex: item.HostIndex } : prev
+          );
+        }
+
+        setLiveRoomFollow((prev) =>
+          prev && prev.roomID === follow.roomID ? { ...prev, leaderboard } : prev
+        );
+      } catch (err) {
+        console.warn("Live room poll failed:", err);
+      } finally {
+        if (!cancelled) {
+          liveRoomPollTimeoutRef.current = setTimeout(tick, 2500);
+        }
+      }
+    };
+
+    tick();
+    return () => {
+      cancelled = true;
+      stopLiveRoomPolling();
+    };
+  }, [liveRoomFollow?.active, liveRoomFollow?.roomID, user?.UserID, stopLiveRoomPolling]);
+
+  // Host: light poll for a spectator count on the pill (no need to be instant).
+  useEffect(() => {
+    if (!liveRoomHost?.active) {
+      setLiveRoomSpectatorCount(0);
+      return;
+    }
+
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const rows = await getRoomLeaderboard(liveRoomHost.roomID);
+        if (!cancelled) setLiveRoomSpectatorCount(Math.max(0, rows.length - 1));
+      } catch (err) {
+        // non-fatal, just skip this tick
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [liveRoomHost?.active, liveRoomHost?.roomID]);
+
+  const advanceLiveRoomFollowAfterSolve = useCallback(
+    (newTime) => {
+      const follow = liveRoomFollowRef.current;
+      if (!follow) return;
+      const solvedIndex = follow.localIndex;
+      const prompt = liveRoomEventPrompt;
+      const jumpToChange = prompt?.applyOnNextSolve ? prompt.changeIndex : null;
+
+      setLiveRoomFollow((prev) => {
+        if (!prev || prev.roomID !== follow.roomID) return prev;
+        return {
+          ...prev,
+          localIndex: jumpToChange !== null ? jumpToChange : solvedIndex + 1,
+          event: jumpToChange !== null ? prompt.newEvent : prev.event,
+        };
+      });
+
+      if (jumpToChange !== null) {
+        setCurrentEvent(prompt.newEvent);
+        setLiveRoomEventPrompt(null);
+      }
+
+      reportRoomSolve({
+        roomID: follow.roomID,
+        userID: user?.UserID,
+        index: solvedIndex,
+        time: newTime,
+      }).catch((err) => console.warn("Failed to report live room solve:", err));
+    },
+    [user?.UserID, liveRoomEventPrompt]
+  );
 
   const goForwardScramble = useCallback(async () => {
     const isRelay = activeSessionObj?.SessionType === "RELAY";
@@ -3295,6 +3864,72 @@ function App() {
       adjustSessionSolveCount(ev, currentSession, -1, sessions[ev]?.length || 0);
     };
 
+    // Whether a failed solve save should be queued offline and retried
+    // later, rather than treated as a hard rejection of the data. We'd
+    // rather over-queue than lose a solve: a raw fetch failure (definitely
+    // offline) always qualifies, and so does anything else EXCEPT a 400 -
+    // the one status our own /api/solve route only ever sends back for a
+    // genuinely malformed payload (missing userID/event, bad time), which
+    // retrying unchanged would never fix. Everything else (500s, the
+    // upstream-unreachable 503, or an unrecognized failure shape we can't
+    // positively identify) is treated as "can't save right now" so we never
+    // silently drop a solve because a server error didn't look exactly the
+    // way we expected.
+    const isRetryableSaveError = (err) => {
+      if (err?.isNetworkError) return true;
+      const status = Number(err?.status);
+      return !Number.isFinite(status) || status !== 400;
+    };
+
+    // Called when a solve save fails in a way we're treating as "can't
+    // reach the database right now" rather than a real rejection. The
+    // optimistic entry stays right where it is in the live session list -
+    // so it's still visible where you solved it - but gets flagged as
+    // offline-pending and mirrored into the local offline queue, which is
+    // what the Profile sync flow reads from. The DB-status logo is pushed
+    // back to its normal success flash instead of the red error flash
+    // `runDb` already queued, since the solve itself is safe.
+    const queueSolveOffline = (ev, sessionID, pendingSolve, saveArgs) => {
+      let localId = null;
+      try {
+        const queued = addOfflineSolve(user.UserID, {
+          event: ev,
+          sessionID,
+          sessionName: activeSessionObj?.SessionName || null,
+          rawTimeMs: saveArgs.rawTimeMs,
+          penalty: saveArgs.penalty ?? null,
+          scramble: saveArgs.scramble ?? "",
+          note: saveArgs.note ?? "",
+          createdAt: saveArgs.createdAt,
+          tags: saveArgs.tags ?? {},
+        });
+        localId = queued?.localId || null;
+      } catch (queueErr) {
+        console.error("Failed to queue solve offline:", queueErr);
+      }
+
+      setSessions((prev) => ({
+        ...prev,
+        [ev]: (prev[ev] || []).map((s) =>
+          s.solveRef === pendingSolve.solveRef
+            ? {
+                ...s,
+                offlinePending: true,
+                offlineLocalId: localId,
+                tags: { ...(s.tags || {}), OfflinePending: true },
+              }
+            : s
+        ),
+      }));
+
+      if (dbErrorTimeoutRef.current) clearTimeout(dbErrorTimeoutRef.current);
+      if (dbSuccessTimeoutRef.current) clearTimeout(dbSuccessTimeoutRef.current);
+      setDbPhase("success", "Saved offline");
+      dbSuccessTimeoutRef.current = setTimeout(() => {
+        setDbPhase("idle", "");
+      }, 1250);
+    };
+
     if (practiceMode) {
       const practiceEvent = currentEventRef.current;
       const shownScramble = String(displayedScrambleRef.current || "").trim();
@@ -3395,6 +4030,19 @@ function App() {
               mergeCanonicalSessionStats(currentEvent, currentSession, res.sessionStats);
             }
           } catch (err) {
+            if (isRetryableSaveError(err)) {
+              queueSolveOffline(currentEvent, currentSession, pendingSolve, {
+                rawTimeMs: totalMs,
+                penalty: null,
+                scramble: "Relay",
+                note: "",
+                createdAt: timestamp,
+                tags: fullRelayTags,
+              });
+              console.warn("Offline - relay solve saved locally, will sync later:", err);
+              await resetRelaySet();
+              return true;
+            }
             removePendingSolve(currentEvent, pendingSolve.solveRef);
             console.error("Error adding relay solve:", err);
             return false;
@@ -3461,6 +4109,19 @@ function App() {
             mergeCanonicalSessionStats(currentEvent, currentSession, res.sessionStats);
           }
         } catch (err) {
+          if (isRetryableSaveError(err)) {
+            queueSolveOffline(currentEvent, currentSession, pendingSolve, {
+              rawTimeMs: totalMs,
+              penalty: null,
+              scramble: "Relay",
+              note: "",
+              createdAt: timestamp,
+              tags: relayTags,
+            });
+            console.warn("Offline - relay solve saved locally, will sync later:", err);
+            await resetRelaySet();
+            return true;
+          }
           removePendingSolve(currentEvent, pendingSolve.solveRef);
           console.error("Error adding relay solve:", err);
           return false;
@@ -3586,6 +4247,16 @@ function App() {
           ...(manualTimerInput ? { TimerInput: manualTimerInput } : {}),
           ...smartTagPayload,
         })
+      : liveRoomFollow
+      ? buildTagPayload({
+          LiveRoom: true,
+          LiveRoomID: liveRoomFollow.roomID,
+          LiveRoomIndex: liveRoomFollow.localIndex,
+          LiveRoomHostID: liveRoomFollow.hostID,
+          LiveRoomHostName: liveRoomFollow.hostName,
+          ...(manualTimerInput ? { TimerInput: manualTimerInput } : {}),
+          ...smartTagPayload,
+        })
       : buildTagPayload({
           ...(manualTimerInput ? { TimerInput: manualTimerInput } : {}),
           ...smartTagPayload,
@@ -3660,9 +4331,21 @@ function App() {
           mergeCanonicalSessionStats(activeSolveEvent, sharedSaveSessionID, res.sessionStats);
         }
       } catch (err) {
-        removePendingSolve(activeSolveEvent, pendingSolve.solveRef);
-        console.error("Error adding solve (DB write failed):", err);
-        return false;
+        if (isRetryableSaveError(err)) {
+          queueSolveOffline(activeSolveEvent, sharedSaveSessionID, pendingSolve, {
+            rawTimeMs: newTime,
+            penalty: null,
+            scramble,
+            note: "",
+            createdAt: timestamp,
+            tags: newTags,
+          });
+          console.warn("Offline - solve saved locally, will sync later:", err);
+        } else {
+          removePendingSolve(activeSolveEvent, pendingSolve.solveRef);
+          console.error("Error adding solve (DB write failed):", err);
+          return false;
+        }
       }
 
       if (activeSharedID) {
@@ -3691,6 +4374,20 @@ function App() {
         nextSharedIndex >= getSharedSolveCount(nextSharedSessionState)
       ) {
         nextSharedSessionState = await extendCasualSharedSession(nextSharedSessionState);
+      }
+
+      if (
+        activeSharedID &&
+        !shouldCompleteSharedSession &&
+        getSharedTournament(nextSharedSessionState || sharedSession)
+      ) {
+        const ps = getTournamentPlayerState(
+          nextSharedSessionState || sharedSession,
+          user.UserID
+        );
+        if (ps && Number.isFinite(Number(ps.nextIndex))) {
+          nextSharedIndex = Number(ps.nextIndex);
+        }
       }
 
       if (shouldCompleteSharedSession) {
@@ -3734,6 +4431,15 @@ function App() {
     }
 
     return true;
+  };
+
+  const addSolveWithLiveRoom = async (newTime, smartMeta = null, options = {}) => {
+    const wasFollowingRoom = !!liveRoomFollowRef.current;
+    const ok = await addSolve(newTime, smartMeta, options);
+    if (ok && wasFollowingRoom) {
+      advanceLiveRoomFollowAfterSolve(newTime);
+    }
+    return ok;
   };
 
   const openManualSolveModal = () => {
@@ -5591,22 +6297,63 @@ function App() {
         : primaryOtherParticipant?.participantID || opponentLabel;
 
     const score = computeSharedScore(sharedSession, currentUserID);
-    const modeLabel =
-      mode === "head_to_head" ? "Head to Head" : mode === "casual" ? "Casual" : "Average";
-    const centerLabel =
-      mode === "head_to_head"
-        ? `${samePlan ? sharedEventLabel(yourFallbackEvent) : "Mixed"} first to ${targetWins}`
-        : mode === "casual"
-        ? samePlan
-          ? `${sharedEventLabel(yourFallbackEvent)} shared session`
-          : "Mixed shared session"
-        : samePlan
-        ? `${yourPlanLabel} average`
-        : "Mixed match";
-    const subLabel =
-      mode === "head_to_head"
-        ? `Score ${score.yourWins}-${score.theirWins}`
-        : `Round ${solveNumber}/${safeTotal}`;
+    const roundConfig = getSharedRoundConfig(sharedSession);
+    const standing = computeHeadToHeadStanding(
+      computeSharedRoundWinners(sharedSession, currentUserID),
+      roundConfig
+    );
+    // Set-structured scoring only applies to a genuine 1-1 match.
+    const isPairwiseH2H =
+      mode === "head_to_head" && !sharedSession?.participantPlans && !!opponentID;
+
+    const tournament = getSharedTournament(sharedSession);
+    const tournamentState = tournament ? getTournamentState(sharedSession) : null;
+    const tournamentPS = tournament
+      ? getTournamentPlayerState(sharedSession, currentUserID)
+      : null;
+    const tournamentStatusLabel = tournamentPS
+      ? {
+          solving: "Your match",
+          waiting: "Waiting for the bracket",
+          eliminated: "Knocked out",
+          champion: "Champion 🏆",
+          done: "Done",
+          spectator: "Spectating",
+        }[tournamentPS.status] || ""
+      : "";
+
+    const modeLabel = tournament
+      ? tournament.format === "roundrobin"
+        ? "Round Robin"
+        : "Tournament"
+      : mode === "head_to_head"
+      ? "Head to Head"
+      : mode === "casual"
+      ? "Casual"
+      : "Average";
+    const centerLabel = tournament
+      ? `${sharedEventLabel(yourFallbackEvent)} · ${tournamentMatchRuleLabel(
+          tournament.matchRule,
+          tournament.params
+        )}`
+      : isPairwiseH2H
+      ? `${samePlan ? sharedEventLabel(yourFallbackEvent) : "Mixed"} · first to ${
+          roundConfig.setCount
+        } set${roundConfig.setCount === 1 ? "" : "s"}`
+      : mode === "casual"
+      ? samePlan
+        ? `${sharedEventLabel(yourFallbackEvent)} shared session`
+        : "Mixed shared session"
+      : samePlan
+      ? `${yourPlanLabel} average`
+      : "Mixed match";
+    const subLabel = tournament
+      ? tournamentState?.champion
+        ? `Winner: ${tournamentState.champion.name}`
+        : tournamentStatusLabel
+      : isPairwiseH2H
+      ? `Sets ${standing.yourSets}-${standing.theirSets} · set ${standing.yourRoundsThisSet}-${standing.theirRoundsThisSet} (first to ${roundConfig.roundCount})`
+      : `Round ${solveNumber}/${safeTotal}`;
 
     return {
       active: true,
@@ -5631,9 +6378,14 @@ function App() {
       currentIndex: sharedIndex,
       count: total,
       targetWins,
+      roundCount: roundConfig.roundCount,
+      setCount: roundConfig.setCount,
       mode,
       yourWins: score.yourWins,
       theirWins: score.theirWins,
+      yourSets: standing.yourSets,
+      theirSets: standing.theirSets,
+      matchWinner: standing.matchWinner,
     };
   }, [sharedSession, sharedIndex, user?.UserID, currentEvent]);
 
@@ -5686,6 +6438,8 @@ function App() {
         sharedID: sharedSession.sharedID,
         count,
         targetWins: sharedSession.targetWins || null,
+        roundCount: sharedSession.roundCount || null,
+        setCount: sharedSession.setCount || null,
         batchSize: sharedSession.batchSize || null,
         isHosted: isHostedSharedSession(sharedSession),
         saveSessionID: getSharedSaveSessionID(sharedSession),
@@ -5704,6 +6458,8 @@ function App() {
         opponentEvents,
         creatorScrambles,
         opponentScrambles,
+        participantPlans: sharedSession.participantPlans || null,
+        tournament: sharedSession.tournament || null,
       })}`,
     };
   }, [sharedSession, user?.UserID]);
@@ -6147,6 +6903,11 @@ function App() {
   return (
     <DbStatusProvider value={dbStatusValue}>
       <div className={`App ${!isHomePage ? "music-player-mode" : ""}`}>
+        <OfflineBanner
+          isOnline={isOnline}
+          pendingCount={offlineQueue.count}
+          isSignedIn={isSignedIn}
+        />
         <div
           className={`navAndPage ${
             isHomePage || !showPlayerBar ? "fullHeight" : "reducedHeight"
@@ -6255,18 +7016,28 @@ function App() {
                             flexDirection: "column",
                             alignItems: "center",
                             width: "100%",
+                            gap: "6px",
+                            paddingRight: "40px",
+                            boxSizing: "border-box",
                           }}
                         >
                           <div
                             style={{
                               display: "flex",
+                              flexDirection: "column",
                               alignItems: "center",
-                              gap: "10px",
-                              justifyContent: "center",
-                              width: "100%",
+                              gap: "6px",
+                              width: "fit-content",
+                              marginLeft: "auto",
                             }}
                           >
-                            <EventSelector
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                              }}
+                            >
+                              <EventSelector
                               ref={homeEventSelectorRef}
                               currentEvent={currentEvent}
                               handleEventChange={handleEventChange}
@@ -6275,6 +7046,7 @@ function App() {
                               sessions={sessionsList}
                               customEvents={customEvents}
                               userID={user?.UserID}
+                              profileColor={user?.Color || user?.color || "#2EC4B6"}
                               onSessionChange={() => {
                                 sharedReturnTargetRef.current = null;
                                 setSharedSession(null);
@@ -6289,58 +7061,162 @@ function App() {
                                 setActiveSessionObj(sessionObj);
                               }}
                             />
+                          </div>
 
+                          <div
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              justifyContent: "center",
+                              flexWrap: "wrap",
+                              userSelect: "none",
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!practiceMode) startPractice();
+                                else requestEndPractice();
+                              }}
+                              aria-pressed={practiceMode}
+                              title={practiceMode ? "End Practice" : "Start Practice"}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                height: "18px",
+                                padding: "0px 6px",
+                                boxSizing: "border-box",
+                                lineHeight: "16px",
+                                borderRadius: "6px",
+                                border: practiceMode
+                                  ? "1px solid rgba(52,199,89,0.55)"
+                                  : "1px solid rgba(255,255,255,0.14)",
+                                background: practiceMode
+                                  ? "rgba(52,199,89,0.18)"
+                                  : "rgba(255,255,255,0.05)",
+                                color: practiceMode
+                                  ? "#34c759"
+                                  : "rgba(255,255,255,0.6)",
+                                fontSize: "10px",
+                                fontWeight: practiceMode ? 700 : 500,
+                                letterSpacing: "0.02em",
+                                cursor: "pointer",
+                                transition: "background 140ms ease, border-color 140ms ease, color 140ms ease",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  width: "5px",
+                                  height: "5px",
+                                  borderRadius: "999px",
+                                  background: practiceMode
+                                    ? "#34c759"
+                                    : "rgba(255,255,255,0.3)",
+                                  flexShrink: 0,
+                                }}
+                              />
+                              Practice
+                            </button>
+
+                            {isSignedIn &&
+                            !practiceMode &&
+                            !sharedSession &&
+                            !isRelayActive &&
+                            !liveRoomFollow ? (
+                              liveRoomHost?.active ? (
+                                <LiveRoomHostPill
+                                  roomID={liveRoomHost.roomID}
+                                  spectatorCount={liveRoomSpectatorCount}
+                                  onStop={stopGoingLive}
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={goLive}
+                                  disabled={liveRoomBusy}
+                                  title="Broadcast your scrambles to anyone who joins"
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                    height: "18px",
+                                    padding: "0px 6px",
+                                    boxSizing: "border-box",
+                                    lineHeight: "16px",
+                                    borderRadius: "6px",
+                                    border: "1px solid rgba(255,60,60,0.3)",
+                                    background: "rgba(255,60,60,0.08)",
+                                    color: "rgba(255,130,130,0.85)",
+                                    fontSize: "10px",
+                                    fontWeight: 500,
+                                    letterSpacing: "0.02em",
+                                    cursor: liveRoomBusy ? "default" : "pointer",
+                                    opacity: liveRoomBusy ? 0.5 : 1,
+                                    transition: "background 140ms ease, border-color 140ms ease",
+                                  }}
+                                >
+                                  <span
+                                    style={{
+                                      width: "5px",
+                                      height: "5px",
+                                      borderRadius: "999px",
+                                      background: "#ff3c3c",
+                                      flexShrink: 0,
+                                    }}
+                                  />
+                                  Go Live
+                                </button>
+                              )
+                            ) : null}
+                          </div>
+                          </div>
+
+                          {liveRoomFollow ? (
+                            <div
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ position: "absolute", top: "110px", left: "12px", zIndex: 200 }}
+                            >
+                              <LiveRoomFollowBar
+                                follow={liveRoomFollow}
+                                waitingForHost={liveRoomWaitingForHost}
+                                currentUserID={user?.UserID}
+                                onLeave={leaveLiveRoom}
+                                onJumpToLatest={jumpLiveRoomToLatest}
+                              />
+                            </div>
+                          ) : null}
+
+                          <LiveRoomEventPromptModal
+                            prompt={liveRoomEventPrompt}
+                            onChoice={resolveLiveRoomEventPrompt}
+                          />
+
+                          {liveRoomError ? (
                             <div
                               onMouseDown={(e) => e.stopPropagation()}
                               onClick={(e) => e.stopPropagation()}
                               style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                alignItems: "center",
-                                gap: "8px",
-                                userSelect: "none",
+                                position: "absolute",
+                                top: "110px",
+                                left: "12px",
+                                zIndex: 200,
+                                fontSize: "12px",
+                                color: "#ff8080",
+                                background: "rgba(0,0,0,0.4)",
+                                borderRadius: "8px",
+                                padding: "4px 8px",
+                                cursor: "pointer",
                               }}
+                              onClickCapture={() => setLiveRoomError("")}
                             >
-                              <span style={{ fontSize: "12px", opacity: 0.85 }}>
-                                Practice
-                              </span>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!practiceMode) startPractice();
-                                  else requestEndPractice();
-                                }}
-                                style={{
-                                  width: "44px",
-                                  height: "24px",
-                                  borderRadius: "999px",
-                                  border: "1px solid rgba(255,255,255,0.25)",
-                                  background: practiceMode
-                                    ? "#2EC4B6"
-                                    : "rgba(255,255,255,0.12)",
-                                  position: "relative",
-                                  cursor: "pointer",
-                                  padding: 0,
-                                }}
-                                aria-pressed={practiceMode}
-                                title={practiceMode ? "End Practice" : "Start Practice"}
-                              >
-                                <div
-                                  style={{
-                                    width: "20px",
-                                    height: "20px",
-                                    borderRadius: "999px",
-                                    background: "white",
-                                    position: "absolute",
-                                    top: "1px",
-                                    left: practiceMode ? "22px" : "2px",
-                                    transition: "left 140ms ease",
-                                  }}
-                                />
-                              </button>
+                              {liveRoomError}
                             </div>
-                          </div>
+                          ) : null}
 
                           {isSignedIn && (
                             <div
@@ -6349,7 +7225,7 @@ function App() {
                               }`}
                               style={{
                                 position: "absolute",
-                                top: "76px",
+                                top: "110px",
                                 right: "12px",
                                 left: "auto",
                                 display: "flex",
@@ -6397,7 +7273,7 @@ function App() {
                                 collapsible
                                 hideAutomaticFields={!!settings.hideAutomaticHomeTags}
                                 collapseToggleTop={
-                                  settings.hideAutomaticHomeTags ? "36px" : "92px"
+                                  settings.hideAutomaticHomeTags ? "70px" : "126px"
                                 }
                                 allowAdditions
                                 showFooterAction={showLoadLastSolveTagsButton}
@@ -6488,7 +7364,7 @@ function App() {
                   />
 
                   <Timer
-                    addTime={addSolve}
+                    addTime={addSolveWithLiveRoom}
                     activeScramble={displayedScramble}
                     compact={isSharedHomeView}
                     latestSolve={currentSolves[currentSolves.length - 1] || null}
@@ -6669,6 +7545,8 @@ function App() {
                     showPlayerBar={showPlayerBar}
                     updateComments={handleUpdateComments}
                     sessions={sessions}
+                    onJoinLiveRoom={joinLiveRoom}
+                    liveRoomBusy={liveRoomBusy}
                   />
                 ) : (
                   renderSignedOutScreen("Profile")
@@ -6687,6 +7565,8 @@ function App() {
                     showPlayerBar={showPlayerBar}
                     updateComments={handleUpdateComments}
                     sessions={sessions}
+                    onJoinLiveRoom={joinLiveRoom}
+                    liveRoomBusy={liveRoomBusy}
                   />
                 ) : (
                   renderSignedOutScreen("Profile")
@@ -6877,7 +7757,7 @@ function App() {
           customEvents={customEvents}
           handleEventChange={handleEventChange}
           deleteTime={deleteTime}
-          addTime={addSolve}
+          addTime={addSolveWithLiveRoom}
           scramble={displayedScramble}
           onScrambleClick={onScrambleClick}
           goForwardScramble={goForwardScramble}

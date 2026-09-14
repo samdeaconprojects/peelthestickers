@@ -6,6 +6,7 @@ import NameTag from "./NameTag";
 import { getUser } from "../../services/getUser";
 import { updateUser } from "../../services/updateUser";
 import { getProfileEventScramble } from "../../utils/profileEventSolves";
+import { getRoomByHost } from "../../services/liveRoom";
 
 function getFavoriteEvent(sessionStats) {
   if (!sessionStats || typeof sessionStats !== "object") return null;
@@ -34,6 +35,8 @@ export default function ProfileHeader({
   sessionStats,
   isOwn = false,
   onEditStats,
+  onJoinLiveRoom,
+  liveRoomBusy = false,
 }) {
   const {
     Name,
@@ -46,6 +49,7 @@ export default function ProfileHeader({
     Friends = [],
   } = user;
 
+  const [liveRoom, setLiveRoom] = useState(null);
   const [openWidget, setOpenWidget] = useState(null);
   const [friendProfiles, setFriendProfiles] = useState([]);
   const [isLoadingFriends, setIsLoadingFriends] = useState(false);
@@ -102,6 +106,30 @@ export default function ProfileHeader({
       isCancelled = true;
     };
   }, [Friends, openWidget]);
+
+  useEffect(() => {
+    if (!UserID || isOwn) {
+      setLiveRoom(null);
+      return;
+    }
+
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const room = await getRoomByHost(UserID);
+        if (!cancelled) setLiveRoom(room);
+      } catch (err) {
+        // non-fatal: just leave the badge hidden this cycle
+      }
+    };
+
+    tick();
+    const interval = setInterval(tick, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [UserID, isOwn]);
 
   const cubeTransforms = {
     "222": "translate(15px, 18px) scale(0.7)",
@@ -348,6 +376,18 @@ export default function ProfileHeader({
         <div className="profileNameAndUsername">
           <div className="profileIdentityRow">
             <div className="profileName">{Name || "Guest"}</div>
+            {!isOwn && liveRoom && typeof onJoinLiveRoom === "function" && (
+              <button
+                type="button"
+                className="profileLiveRoomBadge"
+                disabled={liveRoomBusy}
+                onClick={() => onJoinLiveRoom(UserID)}
+                title={`${liveRoom.memberCount || 0} watching`}
+              >
+                <span className="profileLiveRoomBadge__dot" />
+                Live — Join
+              </button>
+            )}
             {isOwn && typeof onEditStats === "function" && (
               <div className="profileHeaderActions">
                 <button

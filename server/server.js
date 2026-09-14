@@ -28,6 +28,9 @@ const {
   getDayKey,
   getDayBucketTimeZone,
   normalizePenalty,
+  minIsoTimestamp,
+  planScopeExtremeReads,
+  applyScopeExtremes,
   STRICT_WINDOW_VERSION,
   DAY_BUCKET_VERSION,
   CACHED_WINDOW_CONFIGS,
@@ -57,11 +60,46 @@ const {
   putSolveAndTagItems,
   replaceSolveAndTagItems,
   deleteSolveAndTagItems,
-  upsertTagStatsOnNewSolve,
   querySolvesBySparseTag,
   getSparseTagIndexConfig,
   buildSparseTagIndexPK,
 } = require("./lib/ptsCore");
+
+// True when a caught error means we never got a real response from AWS -
+// DNS failure, connection refused/reset, or a request that timed out
+// waiting on the socket - as opposed to AWS actually answering with a
+// service-level error (bad request, throttling, etc). Distinguishing this
+// lets routes tell clients "try again, this wasn't your data's fault" so
+// they can queue the write locally instead of discarding it. Most common
+// when the server process itself has lost its path to the internet while
+// still being reachable from the browser over localhost/LAN.
+function isUpstreamNetworkError(err) {
+  if (!err) return false;
+  const code = err.code || err.cause?.code || err.$metadata?.cfId;
+  const name = err.name || err.cause?.name || "";
+  const message = String(err?.message || err?.cause?.message || "");
+
+  const networkCodes = new Set([
+    "ENOTFOUND",
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "EAI_AGAIN",
+    "ETIMEDOUT",
+    "ENETUNREACH",
+    "EHOSTUNREACH",
+  ]);
+  if (networkCodes.has(code)) return true;
+  if (name === "TimeoutError" || name === "NetworkingError") return true;
+
+  // AWS SDK v3 requests that never reached AWS at all generally have no
+  // $metadata.httpStatusCode - actual AWS service errors (ValidationException,
+  // ResourceNotFoundException, throttling, etc) always carry one.
+  if (err.$metadata && err.$metadata.httpStatusCode == null) return true;
+
+  if (/fetch failed|getaddrinfo|network is unreachable/i.test(message)) return true;
+
+  return false;
+}
 
 const REGION = process.env.AWS_REGION || "us-east-1";
 const TABLE = process.env.PTS_TABLE || "PTSProd";
@@ -2468,6 +2506,10 @@ function buildSingleRankItemsForSolve(userID, solve) {
     Event: ev,
     SessionID: sid,
     FinalTimeMs: Number(finalMs),
+    // Penalty is denormalized onto the rank item so scope minimums that are
+    // restricted to a penalty class (currently Plus2BestMs) can be answered by
+    // a filtered query on this index instead of rescanning every solve.
+    Penalty: normalizePenalty(solve?.Penalty) || "",
     SolveSK: solveSK,
     SolveID: solveID || null,
     CreatedAt: createdAt || null,
@@ -2641,6 +2683,76 @@ async function getTopSinglesForScope({ userID, event, sessionID = null, limit = 
   return out.slice(0, max);
 }
 
+function getSingleRankPrefix(event, sessionID = null) {
+  const ev = normalizeEvent(event);
+  const sid = sessionID ? normalizeSessionID(sessionID) : null;
+  return sid ? `SINGLERANK#SESSION#${ev}#${sid}#` : `SINGLERANK#EVENT#${ev}#`;
+}
+
+// Best (fastest) +2 solve in a scope. SINGLERANK is ordered by final time, so
+// the first item matching the penalty filter is the minimum; in practice that
+// is found within the first page or two.
+async function getPlus2BestForScope({ userID, event, sessionID = null }) {
+  const prefix = getSingleRankPrefix(event, sessionID);
+
+  let cursor;
+  do {
+    const res = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        ConsistentRead: true,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+        FilterExpression: "Penalty = :plus2",
+        ExpressionAttributeValues: {
+          ":pk": `USER#${userID}`,
+          ":skPrefix": prefix,
+          ":plus2": "+2",
+        },
+        ScanIndexForward: true,
+        ExclusiveStartKey: cursor,
+        Limit: 200,
+      })
+    );
+
+    const hit = (res?.Items || [])[0];
+    if (hit) {
+      return {
+        Plus2BestMs: Number.isFinite(Number(hit.FinalTimeMs)) ? Number(hit.FinalTimeMs) : null,
+        Plus2BestSolveSK: hit.SolveSK || null,
+        Plus2BestAt: hit.CreatedAt || null,
+      };
+    }
+    cursor = res?.LastEvaluatedKey;
+  } while (cursor);
+
+  return { Plus2BestMs: null, Plus2BestSolveSK: null, Plus2BestAt: null };
+}
+
+// Slowest included single in a scope: the same ordered index read backwards.
+async function getWorstSingleForScope({ userID, event, sessionID = null }) {
+  const res = await ddb.send(
+    new QueryCommand({
+      TableName: TABLE,
+      ConsistentRead: true,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+      ExpressionAttributeValues: {
+        ":pk": `USER#${userID}`,
+        ":skPrefix": getSingleRankPrefix(event, sessionID),
+      },
+      ScanIndexForward: false,
+      Limit: 1,
+    })
+  );
+
+  const worst = (res?.Items || [])[0];
+  if (!worst) return { WorstSingleMs: null, WorstSingleSolveSK: null };
+
+  return {
+    WorstSingleMs: Number.isFinite(Number(worst.FinalTimeMs)) ? Number(worst.FinalTimeMs) : null,
+    WorstSingleSolveSK: worst.SolveSK || null,
+  };
+}
+
 function applyTopSinglesToStats(next, topSingles) {
   const items = Array.isArray(topSingles) ? topSingles : [];
   next.TopSingles10 = items.map((it) => ({
@@ -2779,16 +2891,9 @@ function maybePreserveBestForAddOnly(next, prev, { removeSolve = null, addSolve 
     next.BestSingleAt = prev?.BestSingleAt || next?.BestSingleAt || null;
   }
 
-  const prevWorstSingleMs = Number(prev?.WorstSingleMs);
-  const nextWorstSingleMs = Number(next?.WorstSingleMs);
-  if (
-    Number.isFinite(prevWorstSingleMs) &&
-    (!Number.isFinite(nextWorstSingleMs) || nextWorstSingleMs < prevWorstSingleMs)
-  ) {
-    next.WorstSingleMs = prevWorstSingleMs;
-    next.WorstSingleSolveSK =
-      prev?.WorstSingleSolveSK || next?.WorstSingleSolveSK || null;
-  }
+  // WorstSingleMs is derived directly in applyIncrementalStatsForScope, which
+  // can also repair a stale value downwards; preserving prev here would undo
+  // that repair.
 
   for (const config of CACHED_WINDOW_CONFIGS) {
     const prevValue = Number(prev?.[config.valueField]);
@@ -3105,6 +3210,26 @@ async function getLastSolveAtForScope({ userID, event, sessionID = null }) {
   return items[0]?.CreatedAt || null;
 }
 
+// Earliest solve in a scope. Read forwards off the scope index so a backdated
+// import (or deleting the oldest solve) can move FirstSolveAt in either
+// direction, which a running minimum against the incoming solve cannot do.
+async function getFirstSolveAtForScope({ userID, event, sessionID = null }) {
+  const { indexName, pkAttr, pkValue } = getScopeQueryParts({ userID, event, sessionID });
+
+  const out = await ddb.send(
+    new QueryCommand({
+      TableName: TABLE,
+      IndexName: indexName,
+      KeyConditionExpression: `${pkAttr} = :pk`,
+      ExpressionAttributeValues: { ":pk": pkValue },
+      ScanIndexForward: true,
+      Limit: 1,
+    })
+  );
+
+  return (out.Items || [])[0]?.CreatedAt || null;
+}
+
 async function getLastSolveAtForTagScope({
   userID,
   event,
@@ -3155,7 +3280,11 @@ async function getOrBuildStatsBase({
   return empty;
 }
 
-async function applyIncrementalStatsForScope({
+// Sentinel: another writer updated this scope between our read and our write,
+// so everything derived from that read is stale and the attempt must be redone.
+const STATS_WRITE_CONFLICT = Symbol("statsWriteConflict");
+
+async function attemptIncrementalStatsForScope({
   userID,
   event,
   sessionID = null,
@@ -3199,7 +3328,18 @@ async function applyIncrementalStatsForScope({
     : getScopeSortKeyFromSolve(removeSolve, sid);
 
   const canUseAddFastPath = !removeSolve && !!addSolve;
-  const [topSingles, lastSolveAt, neighborhood] = await Promise.all([
+
+  const extremesPlan = planScopeExtremeReads({ prev, core, addSolve, removeSolve });
+  const { needsFirstSolveAt, needsPlus2Best, needsWorstSingle } = extremesPlan;
+
+  const [
+    topSingles,
+    lastSolveAt,
+    neighborhood,
+    queriedFirstSolveAt,
+    queriedPlus2Best,
+    queriedWorstSingle,
+  ] = await Promise.all([
     canUseAddFastPath
       ? Promise.resolve(mergeSolveIntoTopSingles(prev?.TopSingles10, addSolve, 10))
       : getTopSinglesForScope({
@@ -3226,6 +3366,15 @@ async function applyIncrementalStatsForScope({
           includeAnchor: !!addSolve,
         })
       : Promise.resolve({ before: [], after: [] }),
+    needsFirstSolveAt
+      ? getFirstSolveAtForScope({ userID, event: ev, sessionID: isSession ? sid : null })
+      : Promise.resolve(null),
+    needsPlus2Best
+      ? getPlus2BestForScope({ userID, event: ev, sessionID: isSession ? sid : null })
+      : Promise.resolve(null),
+    needsWorstSingle
+      ? getWorstSingleForScope({ userID, event: ev, sessionID: isSession ? sid : null })
+      : Promise.resolve(null),
   ]);
 
   const next = {
@@ -3238,6 +3387,18 @@ async function applyIncrementalStatsForScope({
   };
 
   applyTopSinglesToStats(next, topSingles);
+
+  applyScopeExtremes(next, {
+    prev,
+    core,
+    addSolve,
+    plan: extremesPlan,
+    reads: {
+      firstSolveAt: queriedFirstSolveAt,
+      plus2Best: queriedPlus2Best,
+      worstSingle: queriedWorstSingle,
+    },
+  });
 
   const combinedNeighborhood = [...(neighborhood?.before || []), ...(neighborhood?.after || [])];
   const boundaryIndex = (neighborhood?.before || []).length;
@@ -3269,8 +3430,72 @@ async function applyIncrementalStatsForScope({
 
   maybePreserveBestForAddOnly(next, prev, { removeSolve, addSolve });
 
-  await ddb.send(new PutCommand({ TableName: TABLE, Item: next }));
+  // Everything above was derived from `prev`, which we read a few round trips
+  // ago. Publish it only if nobody else has written this scope in the meantime;
+  // otherwise our counters are built on a stale base and would drop the other
+  // writer's solve entirely. Legacy rows carry no version yet, so the first
+  // writer to stamp one wins and the loser retries against the stamped row.
+  const prevStatsVersion = Number(prev?.StatsVersion);
+  const hasPrevStatsVersion = Number.isFinite(prevStatsVersion);
+  next.StatsVersion = (hasPrevStatsVersion ? prevStatsVersion : 0) + 1;
+
+  try {
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: next,
+        ConditionExpression: hasPrevStatsVersion
+          ? "StatsVersion = :expected"
+          : "attribute_not_exists(StatsVersion)",
+        ...(hasPrevStatsVersion
+          ? { ExpressionAttributeValues: { ":expected": prevStatsVersion } }
+          : {}),
+      })
+    );
+  } catch (e) {
+    if (e?.name === "ConditionalCheckFailedException") return STATS_WRITE_CONFLICT;
+    throw e;
+  }
+
   return next;
+}
+
+// Two solves saved at once against the same session used to each read the same
+// counters and each write them back, silently losing one of the two. The
+// conditional write above now catches that.
+//
+// The response to a conflict is a full recompute rather than a retry of the
+// delta. Retrying looks cheaper but is not safe: the writer that beat us may
+// have been a recompute that already counted this very solve, and re-applying
+// the delta on top of that row would count it twice. A rebuild from the solves
+// themselves cannot be wrong either way.
+async function applyIncrementalStatsForScope({
+  userID,
+  event,
+  sessionID = null,
+  removeSolve = null,
+  addSolve = null,
+}) {
+  const result = await attemptIncrementalStatsForScope({
+    userID,
+    event,
+    sessionID,
+    removeSolve,
+    addSolve,
+  });
+
+  if (result !== STATS_WRITE_CONFLICT) return result;
+
+  const ev = normalizeEvent(event);
+  const sid = sessionID ? normalizeSessionID(sessionID) : null;
+
+  console.warn(
+    `applyIncrementalStatsForScope: concurrent write to ${userID} ${ev} ${sid || "(event scope)"}; rebuilding the scope from its solves`
+  );
+
+  return sid
+    ? recomputeSessionStats(ddb, TABLE, userID, ev, sid)
+    : recomputeEventStats(ddb, TABLE, userID, ev);
 }
 
 async function getOrBuildTagStatsBase({
@@ -3313,7 +3538,7 @@ async function getOrBuildTagStatsBase({
   return empty;
 }
 
-async function applyIncrementalTagStatsForScope({
+async function attemptIncrementalTagStatsForScope({
   userID,
   event,
   sessionID = null,
@@ -3348,10 +3573,25 @@ async function applyIncrementalTagStatsForScope({
   const removes = (Array.isArray(removeSolves) ? removeSolves : []).filter(Boolean);
   const adds = (Array.isArray(addSolves) ? addSolves : []).filter(Boolean);
 
-  if (
+  // Removing the solve that holds a scope extreme loosens it, and the new
+  // value is not derivable from what is cached here, so the scope is rebuilt.
+  // Plus2Best and FirstSolveAt are in this list for the same reason the best
+  // and worst singles are; leaving them out is what let them go stale.
+  const removedRecordHolder =
     removes.some((solve) => String(solve?.SK || "") === String(prev?.BestSingleSolveSK || "")) ||
-    removes.some((solve) => String(solve?.SK || "") === String(prev?.WorstSingleSolveSK || ""))
-  ) {
+    removes.some((solve) => String(solve?.SK || "") === String(prev?.WorstSingleSolveSK || "")) ||
+    removes.some((solve) => String(solve?.SK || "") === String(prev?.Plus2BestSolveSK || "")) ||
+    removes.some(
+      (solve) =>
+        normalizePenalty(solve?.Penalty) === "+2" && !prev?.Plus2BestSolveSK
+    ) ||
+    removes.some(
+      (solve) =>
+        !!String(prev?.FirstSolveAt || "").trim() &&
+        String(solve?.CreatedAt || "") === String(prev.FirstSolveAt)
+    );
+
+  if (removedRecordHolder) {
     return recomputeTagStats(ddb, TABLE, userID, ev, sid, key, value);
   }
 
@@ -3417,7 +3657,21 @@ async function applyIncrementalTagStatsForScope({
     next.WorstSingleSolveSK = null;
   }
 
+  if (Number(next.Plus2Count || 0) <= 0) {
+    next.Plus2BestMs = null;
+    next.Plus2BestSolveSK = null;
+    next.Plus2BestAt = null;
+  }
+
+  if (Number(next.SolveCountTotal || 0) <= 0) {
+    next.FirstSolveAt = null;
+  }
+
   for (const solve of adds) {
+    // FirstSolveAt covers every solve, including DNFs, so it is folded in
+    // before the included-only extremes below.
+    next.FirstSolveAt = minIsoTimestamp(next.FirstSolveAt, solve?.CreatedAt);
+
     const finalMs = getFinalTimeMs(solve);
     if (!Number.isFinite(finalMs)) continue;
 
@@ -3435,6 +3689,15 @@ async function applyIncrementalTagStatsForScope({
     if (next.WorstSingleMs == null || finalMs > next.WorstSingleMs) {
       next.WorstSingleMs = finalMs;
       next.WorstSingleSolveSK = solve?.SK || null;
+    }
+
+    if (
+      normalizePenalty(solve?.Penalty) === "+2" &&
+      (next.Plus2BestMs == null || finalMs < next.Plus2BestMs)
+    ) {
+      next.Plus2BestMs = finalMs;
+      next.Plus2BestSolveSK = solve?.SK || null;
+      next.Plus2BestAt = solve?.CreatedAt || null;
     }
   }
 
@@ -3486,8 +3749,50 @@ async function applyIncrementalTagStatsForScope({
   };
   if (sid) item.SessionID = sid;
 
-  await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+  const prevStatsVersion = Number(prev?.StatsVersion);
+  const hasPrevStatsVersion = Number.isFinite(prevStatsVersion);
+  item.StatsVersion = (hasPrevStatsVersion ? prevStatsVersion : 0) + 1;
+
+  try {
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: item,
+        ConditionExpression: hasPrevStatsVersion
+          ? "StatsVersion = :expected"
+          : "attribute_not_exists(StatsVersion)",
+        ...(hasPrevStatsVersion
+          ? { ExpressionAttributeValues: { ":expected": prevStatsVersion } }
+          : {}),
+      })
+    );
+  } catch (e) {
+    if (e?.name === "ConditionalCheckFailedException") return STATS_WRITE_CONFLICT;
+    throw e;
+  }
+
   return item;
+}
+
+// Same conflict handling as the session/event scopes, and for the same reason:
+// a solve carrying several tags fans out to several of these rows at once, so
+// they contend, and re-applying a delta over a row someone else rebuilt would
+// double count.
+async function applyIncrementalTagStatsForScope(args) {
+  const result = await attemptIncrementalTagStatsForScope(args);
+  if (result !== STATS_WRITE_CONFLICT) return result;
+
+  const userID = String(args?.userID || "").trim();
+  const ev = normalizeEvent(args?.event);
+  const sid = args?.sessionID ? normalizeSessionID(args.sessionID) : null;
+  const key = String(args?.tagKey || "").trim();
+  const value = String(args?.tagValue || "").trim();
+
+  console.warn(
+    `applyIncrementalTagStatsForScope: concurrent write to ${userID} ${ev} ${key}=${value}; rebuilding the scope from its solves`
+  );
+
+  return recomputeTagStats(ddb, TABLE, userID, ev, sid, key, value);
 }
 
 function buildTagStatsDirtySK(event, sessionID = null, tagKey, tagValue) {
@@ -6130,6 +6435,12 @@ app.post("/api/solve", async (req, res) => {
     });
   } catch (e) {
     console.error("POST /api/solve error:", e);
+    if (isUpstreamNetworkError(e)) {
+      return res.status(503).json({
+        error: "Database temporarily unreachable",
+        upstreamUnreachable: true,
+      });
+    }
     return res.status(500).json({ error: e?.message || "Server error" });
   }
 });
@@ -7986,6 +8297,445 @@ app.get("/api/groups/:userID", async (req, res) => {
     return res.json({ ok: true, items });
   } catch (e) {
     console.error("GET /api/groups error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+// -------------------- LIVE ROOMS --------------------
+// A "live room" is a lightweight broadcast: a host keeps doing their normal
+// solving session with "Go Live" on, and every scramble they draw gets
+// published to anyone who has joined. Deliberately separate from the
+// GROUP/conversation system used for battles + shared sessions above.
+// roomID is always the hostID — one active room per host, discoverable
+// straight from their profile with no separate join code.
+
+async function getRoomMeta(roomID) {
+  const out = await ddb.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: { PK: `ROOM#${roomID}`, SK: "META" },
+      ConsistentRead: true,
+    })
+  );
+  return out.Item || null;
+}
+
+async function listRoomMembers(roomID) {
+  const out = await ddb.send(
+    new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
+      ExpressionAttributeValues: {
+        ":pk": `ROOM#${roomID}`,
+        ":pfx": "MEMBER#",
+      },
+    })
+  );
+  return out.Items || [];
+}
+
+async function listRoomScrambles(roomID, fromIndex = 0) {
+  const out = await ddb.send(
+    new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: "PK = :pk AND SK >= :from",
+      ExpressionAttributeValues: {
+        ":pk": `ROOM#${roomID}`,
+        ":from": `SCRAMBLE#${String(fromIndex).padStart(8, "0")}`,
+      },
+    })
+  );
+  return (out.Items || [])
+    .filter((item) => item.SK.startsWith("SCRAMBLE#"))
+    .sort((a, b) => (a.Index || 0) - (b.Index || 0));
+}
+
+function normalizeRoomEvent(event) {
+  return String(event || "333").trim() || "333";
+}
+
+app.post("/api/room/open", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const hostID = String(req.body?.hostID || "").trim();
+    const hostName = String(req.body?.hostName || hostID).trim();
+    const hostColor = String(req.body?.hostColor || "").trim();
+    const event = normalizeRoomEvent(req.body?.event);
+    if (!hostID) return res.status(400).json({ error: "Missing hostID" });
+
+    const roomID = hostID;
+    const ts = nowIso();
+
+    // Clear out any stale scrambles/members from a previous broadcast.
+    const [oldScrambles, oldMembers] = await Promise.all([
+      listRoomScrambles(roomID, 0),
+      listRoomMembers(roomID),
+    ]);
+    await deleteItemsByKey([
+      ...oldScrambles.map((item) => ({ PK: item.PK, SK: item.SK })),
+      ...oldMembers.map((item) => ({ PK: item.PK, SK: item.SK })),
+    ]);
+
+    const meta = {
+      PK: `ROOM#${roomID}`,
+      SK: "META",
+      ItemType: "ROOM",
+      RoomID: roomID,
+      HostID: hostID,
+      HostName: hostName,
+      HostColor: hostColor,
+      Event: event,
+      Active: true,
+      HostIndex: -1,
+      CreatedAt: ts,
+      UpdatedAt: ts,
+    };
+    const hostMember = {
+      PK: `ROOM#${roomID}`,
+      SK: `MEMBER#${hostID}`,
+      ItemType: "ROOMMEMBER",
+      RoomID: roomID,
+      UserID: hostID,
+      Name: hostName,
+      Color: hostColor,
+      Role: "HOST",
+      CurrentIndex: -1,
+      LastTime: null,
+      JoinedAt: ts,
+      UpdatedAt: ts,
+    };
+
+    await ddb.send(new PutCommand({ TableName: TABLE, Item: meta }));
+    await ddb.send(new PutCommand({ TableName: TABLE, Item: hostMember }));
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${hostID}`, SK: "PROFILE" },
+        UpdateExpression: "SET ActiveRoomID = :roomID",
+        ExpressionAttributeValues: { ":roomID": roomID },
+      })
+    );
+
+    return res.json({ ok: true, item: meta });
+  } catch (e) {
+    console.error("POST /api/room/open error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.post("/api/room/:roomID/close", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const roomID = String(req.params.roomID || "").trim();
+    const hostID = String(req.body?.hostID || "").trim();
+    if (!roomID) return res.status(400).json({ error: "Missing roomID" });
+
+    const meta = await getRoomMeta(roomID);
+    if (!meta) return res.status(404).json({ error: "Room not found" });
+    if (meta.HostID !== hostID) {
+      return res.status(403).json({ error: "Only the host can close this room" });
+    }
+
+    const ts = nowIso();
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `ROOM#${roomID}`, SK: "META" },
+        UpdateExpression: "SET Active = :active, UpdatedAt = :updated",
+        ExpressionAttributeValues: { ":active": false, ":updated": ts },
+      })
+    );
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${hostID}`, SK: "PROFILE" },
+        UpdateExpression: "REMOVE ActiveRoomID",
+      })
+    );
+
+    const members = await listRoomMembers(roomID);
+    publishNotificationToUsers(
+      members.map((m) => m.UserID).filter(Boolean),
+      { type: "room.closed", roomID },
+      "social"
+    );
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("POST /api/room/:roomID/close error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.get("/api/room/byHost/:hostID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const hostID = String(req.params.hostID || "").trim();
+    if (!hostID) return res.status(400).json({ error: "Missing hostID" });
+
+    const meta = await getRoomMeta(hostID);
+    if (!meta || meta.Active !== true) {
+      return res.json({ ok: true, item: null });
+    }
+
+    const members = await listRoomMembers(hostID);
+    return res.json({ ok: true, item: meta, memberCount: members.length });
+  } catch (e) {
+    console.error("GET /api/room/byHost error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.post("/api/room/:roomID/scramble", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const roomID = String(req.params.roomID || "").trim();
+    const hostID = String(req.body?.hostID || "").trim();
+    const index = Number(req.body?.index);
+    const scramble = String(req.body?.scramble || "").trim();
+    const event = normalizeRoomEvent(req.body?.event);
+    if (!roomID) return res.status(400).json({ error: "Missing roomID" });
+    if (!Number.isFinite(index) || index < 0) {
+      return res.status(400).json({ error: "Missing/invalid index" });
+    }
+    if (!scramble) return res.status(400).json({ error: "Missing scramble" });
+
+    const meta = await getRoomMeta(roomID);
+    if (!meta || meta.Active !== true) {
+      return res.status(404).json({ error: "Room not active" });
+    }
+    if (meta.HostID !== hostID) {
+      return res.status(403).json({ error: "Only the host can publish scrambles" });
+    }
+
+    const ts = nowIso();
+    const previousEvent = meta.Event;
+    const eventChanged = previousEvent !== event;
+
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: {
+          PK: `ROOM#${roomID}`,
+          SK: `SCRAMBLE#${String(index).padStart(8, "0")}`,
+          ItemType: "ROOMSCRAMBLE",
+          RoomID: roomID,
+          Index: index,
+          Event: event,
+          Scramble: scramble,
+          CreatedAt: ts,
+        },
+      })
+    );
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `ROOM#${roomID}`, SK: "META" },
+        UpdateExpression: "SET HostIndex = :index, Event = :event, UpdatedAt = :updated",
+        ExpressionAttributeValues: { ":index": index, ":event": event, ":updated": ts },
+      })
+    );
+
+    const members = await listRoomMembers(roomID);
+    const memberIDs = members.map((m) => m.UserID).filter(Boolean);
+
+    publishNotificationToUsers(
+      memberIDs,
+      {
+        type: "room.scramble",
+        roomID,
+        index,
+        event,
+        scramble,
+        ...(eventChanged ? { eventChanged: true, previousEvent, changeIndex: index } : {}),
+      },
+      "social"
+    );
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("POST /api/room/:roomID/scramble error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.post("/api/room/:roomID/join", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const roomID = String(req.params.roomID || "").trim();
+    const userID = String(req.body?.userID || "").trim();
+    const name = String(req.body?.name || userID).trim();
+    const color = String(req.body?.color || "").trim();
+    if (!roomID) return res.status(400).json({ error: "Missing roomID" });
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+
+    const meta = await getRoomMeta(roomID);
+    if (!meta || meta.Active !== true) {
+      return res.status(404).json({ error: "Room not active" });
+    }
+
+    const ts = nowIso();
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: {
+          PK: `ROOM#${roomID}`,
+          SK: `MEMBER#${userID}`,
+          ItemType: "ROOMMEMBER",
+          RoomID: roomID,
+          UserID: userID,
+          Name: name,
+          Color: color,
+          Role: userID === meta.HostID ? "HOST" : "MEMBER",
+          CurrentIndex: -1,
+          LastTime: null,
+          JoinedAt: ts,
+          UpdatedAt: ts,
+        },
+      })
+    );
+
+    const scrambles = await listRoomScrambles(roomID, 0);
+    const members = await listRoomMembers(roomID);
+
+    return res.json({
+      ok: true,
+      item: meta,
+      scrambles: scrambles.map((s) => ({ index: s.Index, event: s.Event, scramble: s.Scramble })),
+      leaderboard: members.map((m) => ({
+        userID: m.UserID,
+        name: m.Name,
+        color: m.Color,
+        role: m.Role,
+        currentIndex: m.CurrentIndex,
+        lastTime: m.LastTime,
+      })),
+    });
+  } catch (e) {
+    console.error("POST /api/room/:roomID/join error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.post("/api/room/:roomID/leave", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const roomID = String(req.params.roomID || "").trim();
+    const userID = String(req.body?.userID || "").trim();
+    if (!roomID) return res.status(400).json({ error: "Missing roomID" });
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+
+    await ddb.send(
+      new DeleteCommand({
+        TableName: TABLE,
+        Key: { PK: `ROOM#${roomID}`, SK: `MEMBER#${userID}` },
+      })
+    );
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("POST /api/room/:roomID/leave error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.post("/api/room/:roomID/solve", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const roomID = String(req.params.roomID || "").trim();
+    const userID = String(req.body?.userID || "").trim();
+    const index = Number(req.body?.index);
+    const time = req.body?.time ?? null;
+    if (!roomID) return res.status(400).json({ error: "Missing roomID" });
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+    if (!Number.isFinite(index)) return res.status(400).json({ error: "Missing/invalid index" });
+
+    const ts = nowIso();
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `ROOM#${roomID}`, SK: `MEMBER#${userID}` },
+        UpdateExpression: "SET CurrentIndex = :index, LastTime = :time, UpdatedAt = :updated",
+        ExpressionAttributeValues: { ":index": index, ":time": time, ":updated": ts },
+        ConditionExpression: "attribute_exists(PK)",
+      })
+    );
+
+    return res.json({ ok: true });
+  } catch (e) {
+    if (e?.name === "ConditionalCheckFailedException") {
+      return res.status(404).json({ error: "Not a member of this room" });
+    }
+    console.error("POST /api/room/:roomID/solve error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.get("/api/room/:roomID/state", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const roomID = String(req.params.roomID || "").trim();
+    const fromIndex = Math.max(0, Number(req.query?.fromIndex) || 0);
+    if (!roomID) return res.status(400).json({ error: "Missing roomID" });
+
+    const meta = await getRoomMeta(roomID);
+    if (!meta) return res.status(404).json({ error: "Room not found" });
+
+    const [scrambles, members] = await Promise.all([
+      listRoomScrambles(roomID, fromIndex),
+      listRoomMembers(roomID),
+    ]);
+
+    return res.json({
+      ok: true,
+      item: meta,
+      scrambles: scrambles.map((s) => ({ index: s.Index, event: s.Event, scramble: s.Scramble })),
+      leaderboard: members.map((m) => ({
+        userID: m.UserID,
+        name: m.Name,
+        color: m.Color,
+        role: m.Role,
+        currentIndex: m.CurrentIndex,
+        lastTime: m.LastTime,
+      })),
+    });
+  } catch (e) {
+    console.error("GET /api/room/:roomID/state error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.get("/api/room/:roomID/leaderboard", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const roomID = String(req.params.roomID || "").trim();
+    if (!roomID) return res.status(400).json({ error: "Missing roomID" });
+
+    const members = await listRoomMembers(roomID);
+    const leaderboard = members
+      .map((m) => ({
+        userID: m.UserID,
+        name: m.Name,
+        color: m.Color,
+        role: m.Role,
+        currentIndex: m.CurrentIndex,
+        lastTime: m.LastTime,
+        updatedAt: m.UpdatedAt,
+      }))
+      .sort((a, b) => (b.currentIndex || -1) - (a.currentIndex || -1));
+
+    return res.json({ ok: true, leaderboard });
+  } catch (e) {
+    console.error("GET /api/room/:roomID/leaderboard error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
   }
 });

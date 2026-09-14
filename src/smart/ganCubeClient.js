@@ -11,7 +11,7 @@ export class GanCubeClient {
     this.sub = null;
   }
 
-  async connect({ onMove, onFacelets, onDisconnect, onError } = {}) {
+  async connect({ onMove, onFacelets, onGyro, onDisconnect, onError } = {}) {
     this.conn = await connectGanCube();
 
     this.sub = this.conn.events$.subscribe({
@@ -34,6 +34,15 @@ export class GanCubeClient {
 
           if (ev.type === "FACELETS") {
             onFacelets?.({ facelets: ev.facelets });
+            return;
+          }
+
+          if (ev.type === "GYRO") {
+            onGyro?.({
+              quaternion: ev.quaternion,
+              velocity: ev.velocity ?? null,
+              hostTs: Date.now(),
+            });
             return;
           }
         } catch (e) {

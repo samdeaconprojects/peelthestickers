@@ -80,6 +80,75 @@
   gap: 18px;
 }
 
+.sharedAverageSplitFields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.sharedAverageMemberPlans {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+  padding-right: 4px;
+}
+
+.sharedAverageSeedList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.sharedAverageSeedRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+}
+
+.sharedAverageSeedNum {
+  width: 20px;
+  font-weight: 900;
+  opacity: 0.7;
+  text-align: center;
+}
+
+.sharedAverageSeedName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.sharedAverageSeedRow button {
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+}
+
+.sharedAverageSeedRow button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.sharedAverageSplitFields label {
+  margin-bottom: 12px;
+}
+
 .sharedAveragePlan {
   display: flex;
   flex-direction: column;

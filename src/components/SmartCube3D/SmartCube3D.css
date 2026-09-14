@@ -1,0 +1,60 @@
+.smart-cube-3d {
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  margin-right: 28px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 20;
+  pointer-events: auto;
+}
+
+@media (max-width: 900px) {
+  .smart-cube-3d {
+    position: static;
+    transform: none;
+    margin: 12px auto 0;
+  }
+}
+
+.smart-cube-3d__stage {
+  width: 160px;
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  will-change: transform;
+}
+
+.smart-cube-3d__mount {
+  width: 100%;
+  height: 100%;
+}
+
+.smart-cube-3d__player {
+  width: 100%;
+  height: 100%;
+}
+
+.smart-cube-3d__home {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.smart-cube-3d__home:hover {
+  opacity: 1;
+}
+
+.smart-cube-3d--compact .smart-cube-3d__stage {
+  width: 110px;
+  height: 110px;
+}

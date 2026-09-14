@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import "./Settings.css";
 import { useSettings } from "../../contexts/SettingsContext";
+import {
+  AVERAGE_TRIM_PERCENT,
+  MEAN_DNF_TOLERANCE_PERCENT,
+  getTrimCountForWindow,
+  getMeanDnfToleranceForWindow,
+} from "../TimeList/TimeUtils";
 import { useDbStatus } from "../../contexts/DbStatusContext";
 import { getUser } from "../../services/getUser";
 import { updateUser } from "../../services/updateUser";
@@ -32,6 +38,29 @@ import {
   formatShortcutForDisplay,
   getPrimaryModifierLabel,
 } from "../../utils/keybindings";
+
+// Derived from the live trim rule rather than hardcoded, so the table shown to users can
+// never drift from what calculateAverage actually does. Mo3 is a straight mean.
+const AVERAGE_TRIM_ROWS = [
+  { label: "Mo3", size: 3, mean: true },
+  { label: "Ao5", size: 5 },
+  { label: "Ao12", size: 12 },
+  { label: "Ao25", size: 25 },
+  { label: "Ao50", size: 50 },
+  { label: "Ao100", size: 100 },
+  { label: "Ao1000", size: 1000 },
+].map(({ label, size, mean }) => {
+  const trim = mean ? 0 : getTrimCountForWindow(size);
+  return { label, trim, counted: size - trim * 2 };
+});
+
+// Best means are stored for these windows in both variants; the setting picks which
+// one is read. Mo3 is omitted because it is WCA-strict and has no tolerant variant.
+const MEAN_DNF_ROWS = [5, 12, 25, 50, 100, 1000].map((size) => ({
+  label: `Mo${size}`,
+  size,
+  tolerated: getMeanDnfToleranceForWindow(size),
+}));
 
 const WCA_IMPORT_EVENT_OPTIONS = [
   { code: "222", label: "2x2" },
@@ -1142,8 +1171,10 @@ function Settings({
 
           {isSmartCube && smartCubeProvider === "moyu-wcu" ? (
             <div className="settingsHintText">
-              MoYu WCU uses the non-GAN Bluetooth path. If your cube still does not appear,
-              save settings first, then reconnect from the timer so PTS uses the MoYu backend.
+              MoYu AI / WCU uses its own Bluetooth path. Save settings first, then
+              connect from the timer. If the cube is found but won't sync, allow the
+              browser's Bluetooth "device advertisements" permission (Chrome) or pair
+              the cube once so its address is known.
             </div>
           ) : null}
 
@@ -1174,6 +1205,15 @@ function Settings({
                   onChange={(e) =>
                     updateSettings({ cubeStopIdleMs: Number(e.target.value) || 1200 })
                   }
+                />
+              </div>
+
+              <div className="setting-item">
+                <label>Show 3D Cube</label>
+                <input
+                  type="checkbox"
+                  checked={settings.cubeShow3D !== false}
+                  onChange={(e) => updateSettings({ cubeShow3D: e.target.checked })}
                 />
               </div>
             </>
@@ -1290,6 +1330,90 @@ function Settings({
           <div className="settingsHintText settingsHintText--tight">
             Controls the Strict column on the home page averages table and the Strict values in
             overall stats summaries.
+          </div>
+
+          <div className="setting-item setting-item--stacked">
+            <label>Average Trimming</label>
+            <div className="settingsAverageTrim">
+              <div className="settingsAverageTrim__lede">
+                Averages drop the fastest and slowest {AVERAGE_TRIM_PERCENT * 100}% of the window
+                from each end, never fewer than one solve &mdash; the convention csTimer and most
+                other timers use. At Ao5 and Ao12 that works out to a single solve per side, so
+                those stay identical to the WCA definition. Mo3 is a straight mean with nothing
+                removed.
+              </div>
+              <table className="settingsAverageTrim__table">
+                <thead>
+                  <tr>
+                    <th scope="col">Average</th>
+                    <th scope="col">Removed each end</th>
+                    <th scope="col">Solves counted</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {AVERAGE_TRIM_ROWS.map((row) => (
+                    <tr key={row.label}>
+                      <th scope="row">{row.label}</th>
+                      <td>{row.trim === 0 ? "none" : row.trim}</td>
+                      <td>{row.counted}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="settingsAverageTrim__note">
+                DNFs count as the slowest solves, so the trim absorbs them. An average is only a
+                DNF once it holds more DNFs than there are removed slots &mdash; one for Ao5 and
+                Ao12, five for an Ao100.
+              </div>
+            </div>
+          </div>
+
+          <div className="setting-item">
+            <label>Tolerate DNFs In Means</label>
+            <input
+              type="checkbox"
+              checked={settings.tolerateDnfInMeans !== false}
+              onChange={(e) => updateSettings({ tolerateDnfInMeans: e.target.checked })}
+            />
+          </div>
+
+          <div className="setting-item setting-item--stacked">
+            <label />
+            <div className="settingsAverageTrim">
+              <div className="settingsAverageTrim__lede">
+                A mean removes nothing, so a DNF has nowhere to go. With this on, a best mean
+                may contain up to {MEAN_DNF_TOLERANCE_PERCENT * 100}% DNFs, which are left out
+                of the mean &mdash; so a Mo100 holding 5 DNFs is really a mean of 95. With it
+                off, a mean of N requires N successes. Mo3 is always strict either way, matching
+                the WCA definition.
+              </div>
+              <table className="settingsAverageTrim__table">
+                <thead>
+                  <tr>
+                    <th scope="col">Mean</th>
+                    <th scope="col">DNFs allowed</th>
+                    <th scope="col">Solves averaged</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {MEAN_DNF_ROWS.map((row) => (
+                    <tr key={row.label}>
+                      <th scope="row">{row.label}</th>
+                      <td>{settings.tolerateDnfInMeans === false ? "none" : row.tolerated}</td>
+                      <td>
+                        {settings.tolerateDnfInMeans === false
+                          ? row.size
+                          : `${row.size - row.tolerated}\u2013${row.size}`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="settingsAverageTrim__note">
+                Both variants are stored for every window, so this switches instantly and needs
+                no stats recompute.
+              </div>
+            </div>
           </div>
 
           <div className="setting-item">

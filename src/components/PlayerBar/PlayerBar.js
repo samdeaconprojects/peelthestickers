@@ -8,7 +8,6 @@ import Scramble from "../Scramble/Scramble";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import TagBar from "../TagBar/TagBar";
 import { useLocation } from "react-router-dom";
-import { formatTime } from "../TimeList/TimeUtils";
 
 function PlayerBar({
   isSignedIn,
@@ -71,10 +70,14 @@ function PlayerBar({
     ? Number(sharedAverageMeta.currentIndex)
     : 0;
   const currentSharedRow = sharedRows[currentSharedIndex] || null;
-  const playerBarSharedRows = sharedRows.slice(Math.max(0, currentSharedIndex - 2), currentSharedIndex + 3);
+  const sharedRoundLabel = `Round ${Math.min(
+    currentSharedIndex + 1,
+    sharedAverageMeta?.count || 1
+  )} / ${sharedAverageMeta?.count || 1}`;
   return (
     <div
       className="player-bar"
+      data-event={eventKey}
       style={{ borderTop: `1px solid ${currentBorderColor}` }}
     >
       <button
@@ -87,8 +90,23 @@ function PlayerBar({
         <span className="playerbar-toggle-glyph" aria-hidden="true">▼</span>
       </button>
 
-      {/* LEFT: Timer */}
+      {/* LEFT: event line + Timer */}
       <div className="playerbar-left">
+        <div className="playerbar-eventline">
+          <EventSelector
+            textOnly
+            currentEvent={currentEvent}
+            handleEventChange={handleEventChange}
+            currentSession={currentSession}
+            setCurrentSession={setCurrentSession}
+            sessions={sessionsList}
+            customEvents={customEvents}
+            userID={user?.UserID}
+            profileColor={user?.Color || user?.color || "#2EC4B6"}
+            onSessionChange={onSessionChange}
+            onSelectSessionObj={onSelectSessionObj}
+          />
+        </div>
         <div className="playerbar-timer">
           <Timer
             addTime={addTime}
@@ -134,112 +152,55 @@ function PlayerBar({
             </div>
           ) : null}
           {sharedAverageMeta?.active ? (
-            <div className="playerbar-shared-strip">
-              <div className="playerbar-shared-header">
-                <span className="playerbar-shared-name">
-                  {sharedAverageMeta?.theirLabel || "Shared"}
+            <div className="playerbar-shared-pill">
+              <span className="playerbar-shared-pill__label">Shared average</span>
+              {sharedAverageMeta?.theirLabel ? (
+                <span className="playerbar-shared-pill__meta">
+                  vs {sharedAverageMeta.theirLabel}
                 </span>
-                <span className="playerbar-shared-meta">
-                  {`Round ${Math.min(currentSharedIndex + 1, sharedAverageMeta?.count || 1)} / ${
-                    sharedAverageMeta?.count || 1
-                  }`}
-                </span>
-                {((typeof onRefreshSharedAverage === "function") ||
-                  (sharedAverageMeta?.active && typeof onLeaveSharedSession === "function")) && (
-                  <div className="playerbar-shared-actions">
-                    {typeof onRefreshSharedAverage === "function" && (
-                      <button
-                        type="button"
-                        className="playerbar-shared-refresh"
-                        onClick={() => onRefreshSharedAverage()}
-                      >
-                        Refresh
-                      </button>
-                    )}
-                    {sharedAverageMeta?.active && typeof onLeaveSharedSession === "function" && (
-                      <button
-                        type="button"
-                        className="playerbar-shared-refresh"
-                        onClick={() => onLeaveSharedSession()}
-                      >
-                        Exit
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="playerbar-shared-row">
-                {playerBarSharedRows.map((row) => {
-                  const isCurrent = row.index === currentSharedIndex;
-                  return (
-                    <div
-                      key={`pb-shared-${row.index}`}
-                      className={`playerbar-shared-item ${isCurrent ? "is-current" : ""}`}
-                      title={`Round ${row.index + 1}${row.scramble ? `: ${row.scramble}` : ""}`}
-                    >
-                      <span className="playerbar-shared-index">{row.index + 1}</span>
-                      <span className="playerbar-shared-time">
-                        {row.yourTime != null ? formatTime(row.yourTime) : "—"}
-                      </span>
-                      <span className="playerbar-shared-peer">
-                        {row.theirTime != null ? formatTime(row.theirTime) : "—"}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+              ) : null}
+              <span className="playerbar-shared-pill__meta">{sharedRoundLabel}</span>
+              {typeof onRefreshSharedAverage === "function" && (
+                <button
+                  type="button"
+                  className="playerbar-shared-pill__button"
+                  onClick={() => onRefreshSharedAverage()}
+                >
+                  Refresh
+                </button>
+              )}
+              {typeof onLeaveSharedSession === "function" && (
+                <button
+                  type="button"
+                  className="playerbar-shared-pill__button"
+                  onClick={() => onLeaveSharedSession()}
+                >
+                  Exit
+                </button>
+              )}
             </div>
-          ) : (
-            <TimeList
-              user={user}
-              applyPenalty={applyPenalty}
-              solves={currentSolves}
-              deleteTime={(solveRefOrIndex) => deleteTime(eventKey, solveRefOrIndex)}
-              inPlayerBar={true}
-              addPost={addPost}
-              rowsToShow={1}
-              sessionsList={sessionsList}
-              currentEvent={currentEvent}
-              currentSession={currentSession}
-              eventKey={currentEvent}
-              practiceMode={false}
-              sharedAverageMeta={sharedAverageMeta}
-              onRefreshSharedAverage={onRefreshSharedAverage}
-            />
-          )}
+          ) : null}
+          <TimeList
+            user={user}
+            applyPenalty={applyPenalty}
+            solves={currentSolves}
+            deleteTime={(solveRefOrIndex) => deleteTime(eventKey, solveRefOrIndex)}
+            inPlayerBar={true}
+            addPost={addPost}
+            rowsToShow={1}
+            sessionsList={sessionsList}
+            currentEvent={currentEvent}
+            currentSession={currentSession}
+            eventKey={currentEvent}
+            practiceMode={false}
+            sharedAverageMeta={sharedAverageMeta}
+            onRefreshSharedAverage={onRefreshSharedAverage}
+          />
         </div>
       </div>
 
-      {/* RIGHT: selector + cube */}
+      {/* RIGHT: tag list + cube */}
       <div className="playerbar-right">
-        <div className="playerbar-right-top">
-          <div className="playerbar-selector-wrap">
-            <EventSelector
-              currentEvent={currentEvent}
-              handleEventChange={handleEventChange}
-              currentSession={currentSession}
-              setCurrentSession={setCurrentSession}
-              sessions={sessionsList}
-              customEvents={customEvents}
-              userID={user?.UserID}
-              onSessionChange={onSessionChange}
-              onSelectSessionObj={onSelectSessionObj}
-            />
-          </div>
-
-          <div className="playerbar-cube">
-            <div className="playerbar-cube-shell">
-              <PuzzleSVG
-                event={currentEvent}
-                scramble={scramble}
-                isMusicPlayer={true}
-                isTimerCube={false}
-              />
-            </div>
-          </div>
-        </div>
-
         {isSignedIn && (
           <div
             className="playerbar-tagstrip"
@@ -263,6 +224,16 @@ function PlayerBar({
           </div>
         )}
 
+        <div className="playerbar-cube">
+          <div className="playerbar-cube-shell">
+            <PuzzleSVG
+              event={currentEvent}
+              scramble={scramble}
+              isMusicPlayer={true}
+              isTimerCube={false}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );
