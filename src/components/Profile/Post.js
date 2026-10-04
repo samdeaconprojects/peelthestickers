@@ -232,7 +232,12 @@ function Post({
   const averageRangeMax = averageFiniteTimes.length ? Math.max(...averageFiniteTimes) : null;
 
   // Make sure NameTag always gets something useful
-  const safeUser = user || { Name: name, ProfilePic: picture };
+  const safeUser = {
+    Name: name,
+    ProfilePic: picture,
+    ...(user || {}),
+  };
+  if (!safeUser.Color && !safeUser.color && postColor) safeUser.Color = postColor;
 
   const nxn = isNxNEvent(event);
   const prettyDate = formatPostDateTime(date);
@@ -255,7 +260,7 @@ function Post({
 
   return (
     <div
-      className={`postShell ${trimmedNote ? "postShell--withCaption" : ""}`}
+      className="postShell"
       onClick={onClick}
     >
       {resolvedPostType === "stat-share" ? (
@@ -271,10 +276,6 @@ function Post({
         </div>
       ) : (
         <>
-          {trimmedNote ? (
-            <div className="postCaption postCaption--attached">{trimmedNote}</div>
-          ) : null}
-
           <div
             className="post"
             style={{ border: `2px solid ${withAlpha(postColor, 0.5)}` }}
@@ -324,6 +325,9 @@ function Post({
                   </span>
                 </div>
               </div>
+              {trimmedNote ? (
+                <div className="postCaption postCaption--inline">{trimmedNote}</div>
+              ) : null}
             </div>
 
             {showAverageSolveList ? (

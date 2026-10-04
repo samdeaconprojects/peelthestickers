@@ -457,6 +457,69 @@ select {
   width: 100%;
 }
 
+/* Timer row: the side panel is absolutely positioned so the timer stays centered */
+.home-timer-row {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  /* The 30% cap .timer-display had as a direct .home-screen child now lives on the row. */
+  max-height: 30%;
+}
+
+.home-timer-row > .timer-display {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+/* No transform here: it would trap the time list's fixed-position modals. */
+.home-timer-side {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: clamp(8px, 2vw, 40px);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.home-timer-side > * {
+  pointer-events: auto;
+}
+
+/* The averages column shrinks as the gap left of the timer narrows. zoom (not transform)
+   keeps hit-testing correct; it sits on the table so the side's own bounds stay unscaled. */
+@media (max-width: 1279px) {
+  .home-timer-side > .averages-table--vertical {
+    zoom: 0.85;
+  }
+}
+
+@media (max-width: 1079px) {
+  .home-timer-side {
+    left: 4px;
+  }
+
+  .home-timer-side > .averages-table--vertical {
+    zoom: 0.72;
+  }
+}
+
+/* The time list column spans the free band between the scramble and the bottom stack
+   (bounds measured by HomeTimerSide); the list fits as many rows as that height allows. */
+.home-timer-side--timelist {
+  top: var(--home-side-top, 0px);
+  bottom: var(--home-side-bottom, 0px);
+  align-items: stretch;
+}
+
+.home-timer-side--timelist > .time-list-container {
+  height: 100%;
+  padding-bottom: 0;
+}
+
 .home-bottom-stack {
   width: 100%;
   display: flex;
@@ -470,13 +533,33 @@ select {
   order: 1;
   margin-top: auto;
   margin-bottom: auto;
-  transform: translateY(-8px);
+  transform: translateY(-30px);
 }
 
 .home-bottom-stack .time-list-container {
   order: 2;
   margin-top: 0;
   margin-bottom: 0;
+}
+
+/* Averages moved beside the timer: keep the time list pinned to the bottom. */
+.home-bottom-stack > .time-list-container:first-child {
+  margin-top: auto;
+}
+
+/* Time list moved beside the timer (averages are then alone in the stack): drop the
+   averages toward the bottom and keep them centered but narrow enough to stay clear of
+   the time list column. HomeTimerSide sets the width/scale vars; until it has, the
+   scale var is undefined, so --home-averages-scale falls back to the inherited value. */
+.home-bottom-stack > .averages-table:only-child {
+  --home-averages-scale: var(--home-side-avg-scale);
+  width: min(100%, var(--home-side-avg-max-width, 780px));
+  max-width: none;
+  margin-top: auto;
+  margin-bottom: clamp(24px, 7vh, 72px);
+  /* Drop the default 70px right margin so it sits truly centered. */
+  margin-right: 0;
+  transform: none;
 }
 
 .home-screen--shared {
@@ -558,22 +641,29 @@ select {
     --home-scramble-nav-scale: 1.12;
   }
 
-  .home-screen > .timer-display {
+  .home-screen > .home-timer-row {
     flex: 0 0 auto;
+    max-height: none;
+  }
+
+  /* Previously min-height always beat the 30% cap here, so the height is pinned to it. */
+  .home-timer-row > .timer-display {
+    flex: 0 0 auto;
+    height: clamp(220px, 34vh, 420px);
     min-height: clamp(220px, 34vh, 420px);
     padding-block: clamp(12px, 4vh, 32px);
     display: grid;
     place-items: center;
   }
 
-  .home-screen > .timer-display .timer-center-wrap {
+  .home-timer-row > .timer-display .timer-center-wrap {
     width: 100%;
     display: grid;
     place-items: center;
   }
 
-  .home-screen > .timer-display:not(.timer-display--compact) .Timer,
-  .home-screen > .timer-display:not(.timer-display--compact) .Timer--with-minutes {
+  .home-timer-row > .timer-display:not(.timer-display--compact) .Timer,
+  .home-timer-row > .timer-display:not(.timer-display--compact) .Timer--with-minutes {
     margin: 0;
     transform: none;
   }

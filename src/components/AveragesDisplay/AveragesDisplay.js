@@ -1,8 +1,18 @@
-import React from 'react';
-import { formatTime, calculateAverage, calculateBestAverageOfFive } from '../TimeList/TimeUtils';
+import React, { useMemo } from 'react';
+import { formatTime, calculateAverage } from '../TimeList/TimeUtils';
 import { findBestStrictWindow } from '../../utils/strictAverageUtils';
 import { useSettings } from '../../contexts/SettingsContext';
 import './AveragesDisplay.css';
+
+// Columns left to right. `wide` columns drop out on narrow screens.
+const AVERAGE_COLUMNS = [
+  { key: "single", label: "Single", count: 1, bestStat: "BestSingleMs", bestRef: "BestSingleSolveSK" },
+  { key: "ao5", label: "AO5", count: 5, bestStat: "BestAo5Ms", bestRef: "BestAo5StartSolveSK" },
+  { key: "ao12", label: "AO12", count: 12, bestStat: "BestAo12Ms", bestRef: "BestAo12StartSolveSK" },
+  { key: "ao25", label: "AO25", count: 25, bestStat: "BestAo25Ms", bestRef: "BestAo25StartSolveSK" },
+  { key: "ao50", label: "AO50", count: 50, bestStat: "BestAo50Ms", bestRef: "BestAo50StartSolveSK", wide: true },
+  { key: "ao100", label: "AO100", count: 100, bestStat: "BestAo100Ms", bestRef: "BestAo100StartSolveSK", wide: true },
+];
 
 function getPenalty(solve) {
   return String(solve?.penalty ?? solve?.Penalty ?? "").trim().toUpperCase();
@@ -31,9 +41,61 @@ function getComparableSolveTime(solve) {
   return penalty === "+2" ? base + 2000 : base;
 }
 
-function safeAverage(solves, count) {
-  if (solves.length < count) return "N/A";
-  return calculateAverage(solves.slice(-count).map(getComparableSolveTime), true).average;
+function windowValue(times) {
+  if (times.length === 1) {
+    return times[0] === Number.MAX_SAFE_INTEGER ? "DNF" : times[0];
+  }
+  return calculateAverage(times, true).average;
+}
+
+// Singles truncate like the timer and time list; averages round.
+function formatValue(value, isAverage = true) {
+  if (value === "DNF") return "DNF";
+  if (typeof value !== "number" || !Number.isFinite(value)) return "N/A";
+  return formatTime(value, isAverage);
+}
+
+function isNumericValue(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function computeColumnStats(times, solves, column, overallSessionStats, showStrictAverages) {
+  const { count } = column;
+  const hasWindow = times.length >= count;
+
+  const current = hasWindow ? windowValue(times.slice(-count)) : "N/A";
+
+  // Best: prefer the whole-session stat, fall back to the solves loaded here.
+  let best = "N/A";
+  const overallBest = Number(overallSessionStats?.[column.bestStat]);
+  if (Number.isFinite(overallBest)) {
+    best = overallBest;
+  } else if (hasWindow) {
+    let bestNumeric = Infinity;
+    let sawDnf = false;
+    for (let i = 0; i <= times.length - count; i++) {
+      const value = windowValue(times.slice(i, i + count));
+      if (isNumericValue(value) && value < bestNumeric) bestNumeric = value;
+      else if (value === "DNF") sawDnf = true;
+    }
+    if (bestNumeric !== Infinity) best = bestNumeric;
+    else if (sawDnf) best = "DNF";
+  }
+
+  const strict =
+    showStrictAverages && count >= 5 ? findBestStrictWindow(solves, count, "ao") : null;
+
+  // BPA/WPA: best/worst possible result for the next solve.
+  let bpa = null;
+  let wpa = null;
+  if (count >= 5 && times.length >= count - 1) {
+    const pending = times.slice(-(count - 1));
+    const sorted = [...pending].sort((a, b) => a - b);
+    bpa = calculateAverage([...pending, sorted[0]], true).average;
+    wpa = calculateAverage([...pending, sorted[sorted.length - 1]], true).average;
+  }
+
+  return { current, best, strict, bpa, wpa };
 }
 
 function AveragesDisplay({
@@ -41,39 +103,24 @@ function AveragesDisplay({
   overallSessionStats = null,
   setSelectedAverageSolves,
   onRequestBestAverageWindow = null,
+  vertical = false,
 }) {
   const { settings } = useSettings();
   const showStrictAverages = settings?.showStrictAverages !== false;
-  const avgOfFive = safeAverage(currentSolves, 5);
-  const avgOfTwelve = safeAverage(currentSolves, 12);
+  // "single-last" runs AO100 -> Single (left to right, or top to bottom when vertical).
+  const singleFirst = settings?.homeAveragesOrder === "single-first";
 
-  const fallbackBestAvgOfFive = calculateBestAverageOfFive(
-    currentSolves.map(getComparableSolveTime)
-  );
-  const bestAvgOfFiveOverall = Number(overallSessionStats?.BestAo5Ms);
-  const bestAvgOfFive = Number.isFinite(bestAvgOfFiveOverall)
-    ? bestAvgOfFiveOverall
-    : fallbackBestAvgOfFive;
-  const strictAo5 = findBestStrictWindow(currentSolves, 5, "ao");
-
-  // Best AO12
-  let bestAvgOfTwelve = "N/A";
-  if (currentSolves.length >= 12) {
-    let best = Infinity;
-    for (let i = 0; i <= currentSolves.length - 12; i++) {
-      const avgResult = calculateAverage(
-        currentSolves.slice(i, i + 12).map(getComparableSolveTime),
-        true
-      ).average;
-      if (typeof avgResult === "number" && isFinite(avgResult) && avgResult < best) {
-        best = avgResult;
-      }
-    }
-    if (best !== Infinity) bestAvgOfTwelve = best;
-  }
-  const bestAvgOfTwelveOverall = Number(overallSessionStats?.BestAo12Ms);
-  if (Number.isFinite(bestAvgOfTwelveOverall)) bestAvgOfTwelve = bestAvgOfTwelveOverall;
-  const strictAo12 = findBestStrictWindow(currentSolves, 12, "ao");
+  const columnStats = useMemo(() => {
+    const solves = (currentSolves || []).filter(
+      (solve) => typeof getComparableSolveTime(solve) === "number"
+    );
+    const times = solves.map(getComparableSolveTime);
+    const columns = singleFirst ? AVERAGE_COLUMNS : [...AVERAGE_COLUMNS].reverse();
+    return columns.map((column) => ({
+      column,
+      ...computeColumnStats(times, solves, column, overallSessionStats, showStrictAverages),
+    }));
+  }, [currentSolves, overallSessionStats, showStrictAverages, singleFirst]);
 
   const selectBestWindow = async (count, targetAvg, startSolveRef = null) => {
     if (typeof onRequestBestAverageWindow === "function") {
@@ -82,16 +129,19 @@ function AveragesDisplay({
     }
 
     if (!Number.isFinite(Number(targetAvg))) return;
-    let selected = [];
     for (let i = 0; i <= currentSolves.length - count; i++) {
       const slice = currentSolves.slice(i, i + count);
-      const avg = calculateAverage(slice.map(getComparableSolveTime), true).average;
+      const avg = windowValue(slice.map(getComparableSolveTime));
       if (typeof avg === "number" && Math.round(avg) === Math.round(Number(targetAvg))) {
-        selected = slice;
-        break;
+        setSelectedAverageSolves(slice);
+        return;
       }
     }
-    if (selected.length > 0) setSelectedAverageSolves(selected);
+  };
+
+  const selectCurrentWindow = (count) => {
+    if (currentSolves.length < count) return;
+    setSelectedAverageSolves(currentSolves.slice(-count));
   };
 
   const selectStrictWindow = (result) => {
@@ -99,110 +149,168 @@ function AveragesDisplay({
     setSelectedAverageSolves(result.solves);
   };
 
-  // BPA/WPA
-  const lastFour = currentSolves
-    .slice(-4)
-    .map(getComparableSolveTime)
-    .filter((t) => typeof t === "number");
-  let bpa5 = "N/A", wpa5 = "N/A";
-  let bpa12 = "N/A", wpa12 = "N/A";
+  const colClass = (column) =>
+    `avg-col avg-col--${column.key}${column.wide ? " avg-col--wide" : ""}`;
 
-  if (lastFour.length === 4) {
-    // AO5 BPA/WPA
-    const sorted = [...lastFour].sort((a, b) => a - b);
-    const bestHypo = sorted[0];
-    const worstHypo = sorted[3];
+  // Vertical: one row per average, stats across. Used beside the timer.
+  if (vertical) {
+    return (
+      <div
+        className={`averages-table averages-table--vertical${
+          showStrictAverages ? " averages-table--vertical-strict" : ""
+        }`}
+      >
+        <div className="header corner"></div>
+        <div className="header">Current</div>
+        <div className="header">Best</div>
+        {showStrictAverages ? <div className="header strict-header">Strict</div> : null}
+        <div className="header bpa-wpa-header">
+          <span className="bpa">BPA</span>
+          <span className="wpa">WPA</span>
+        </div>
 
-    const bestSet = [...lastFour, bestHypo];
-    const worstSet = [...lastFour, worstHypo];
-
-    const bpaAvg5 = calculateAverage(bestSet, true).average;
-    const wpaAvg5 = calculateAverage(worstSet, true).average;
-
-    bpa5 = bpaAvg5 === "DNF" ? "DNF" : formatTime(bpaAvg5, true);
-    wpa5 = wpaAvg5 === "DNF" ? "DNF" : formatTime(wpaAvg5, true);
+        {columnStats.map(({ column, current, best, strict, bpa, wpa }) => (
+          <React.Fragment key={column.key}>
+            <div
+              className={`row-title col-header avg-col avg-col--${column.key}`}
+              onClick={() => selectCurrentWindow(column.count)}
+            >
+              {column.label}
+            </div>
+            <div
+              className={`cell current avg-col avg-col--${column.key}`}
+              onClick={() => selectCurrentWindow(column.count)}
+            >
+              {formatValue(current, column.count > 1)}
+            </div>
+            <div
+              className={`cell best avg-col avg-col--${column.key}`}
+              onClick={() =>
+                selectBestWindow(column.count, best, overallSessionStats?.[column.bestRef] || null)
+              }
+            >
+              {formatValue(best, column.count > 1)}
+            </div>
+            {showStrictAverages ? (
+              <div
+                className={`cell strict avg-col avg-col--${column.key}`}
+                onClick={() => selectStrictWindow(strict)}
+              >
+                {column.count >= 5 ? formatValue(strict?.value) : ""}
+              </div>
+            ) : null}
+            <div className={`cell bpa-wpa avg-col avg-col--${column.key}`}>
+              {column.count >= 5 ? (
+                <>
+                  <span className="bpa">{formatValue(bpa)}</span>
+                  <span className="wpa">{formatValue(wpa)}</span>
+                </>
+              ) : null}
+            </div>
+          </React.Fragment>
+        ))}
+      </div>
+    );
   }
 
-  if (currentSolves.length >= 11) {
-    // AO12 BPA/WPA
-    const lastEleven = currentSolves
-      .slice(-11)
-      .map(getComparableSolveTime)
-      .filter((t) => typeof t === "number");
-    if (lastEleven.length === 11) {
-      const sorted12 = [...lastEleven].sort((a, b) => a - b);
-      const bestHypo12 = sorted12[0];
-      const worstHypo12 = sorted12[sorted12.length - 1];
-
-      const bestSet12 = [...lastEleven, bestHypo12];
-      const worstSet12 = [...lastEleven, worstHypo12];
-
-      const bpaAvg12 = calculateAverage(bestSet12, true).average;
-      const wpaAvg12 = calculateAverage(worstSet12, true).average;
-
-      bpa12 = bpaAvg12 === "DNF" ? "DNF" : formatTime(bpaAvg12, true);
-      wpa12 = wpaAvg12 === "DNF" ? "DNF" : formatTime(wpaAvg12, true);
-    }
-  }
+  // With Single on the right the table reads right to left, so the row titles move to
+  // the right edge, beside the columns closest to them.
+  const labelsRight = !singleFirst;
+  const renderRow = (key, title, cells) => (
+    <React.Fragment key={key}>
+      {labelsRight ? cells : title}
+      {labelsRight ? title : cells}
+    </React.Fragment>
+  );
 
   return (
     <div
-      className={`averages-table ${
-        showStrictAverages ? 'averages-table--with-strict' : 'averages-table--without-strict'
-      }`}
+      className={`averages-table${labelsRight ? " averages-table--labels-right" : ""}`}
+      style={{ "--avg-cols": AVERAGE_COLUMNS.length }}
     >
-      <div className="header"></div>
-      <div className="header current-col">Current</div>
-      <div className="header">Best</div>
-      {showStrictAverages ? <div className="header strict-header">Strict</div> : null}
-      <div className="header bpa-header">BPA</div>
-      <div className="header wpa-header">WPA</div>
+      {/* Column headers */}
+      {renderRow(
+        "headers",
+        <div className="header corner"></div>,
+        columnStats.map(({ column }) => (
+          <div
+            key={`header-${column.key}`}
+            className={`header col-header ${colClass(column)}`}
+            onClick={() => selectCurrentWindow(column.count)}
+          >
+            {column.label}
+          </div>
+        ))
+      )}
 
-      {/* AO5 row */}
-      <div className="row-title ao5" onClick={() => setSelectedAverageSolves(currentSolves.slice(-5))}>
-        AO5
-      </div>
-      <div className="cell current-col ao5" onClick={() => setSelectedAverageSolves(currentSolves.slice(-5))}>
-        {avgOfFive === "DNF" ? "DNF" : formatTime(avgOfFive, true)}
-      </div>
-      <div
-        className="cell best ao5"
-        onClick={() =>
-          selectBestWindow(5, bestAvgOfFive, overallSessionStats?.BestAo5StartSolveSK || null)
-        }
-      >
-        {bestAvgOfFive === "N/A" ? "N/A" : bestAvgOfFive === "DNF" ? "DNF" : formatTime(bestAvgOfFive, true)}
-      </div>
-      {showStrictAverages ? (
-        <div className="cell strict ao5" onClick={() => selectStrictWindow(strictAo5)}>
-          {strictAo5?.value == null ? "N/A" : formatTime(strictAo5.value, true)}
-        </div>
-      ) : null}
-      <div className="cell less-important bpa ao5-secondary">{bpa5}</div>
-      <div className="cell less-important wpa ao5-secondary">{wpa5}</div>
+      {/* Current row */}
+      {renderRow(
+        "current",
+        <div className="row-title current-row">Current</div>,
+        columnStats.map(({ column, current }) => (
+          <div
+            key={`current-${column.key}`}
+            className={`cell current ${colClass(column)}`}
+            onClick={() => selectCurrentWindow(column.count)}
+          >
+            {formatValue(current, column.count > 1)}
+          </div>
+        ))
+      )}
 
-      {/* AO12 row */}
-      <div className="row-title ao12" onClick={() => setSelectedAverageSolves(currentSolves.slice(-12))}>
-        AO12
-      </div>
-      <div className="cell current-col ao12" onClick={() => setSelectedAverageSolves(currentSolves.slice(-12))}>
-        {avgOfTwelve === "DNF" ? "DNF" : formatTime(avgOfTwelve, true)}
-      </div>
-      <div
-        className="cell best ao12"
-        onClick={() =>
-          selectBestWindow(12, bestAvgOfTwelve, overallSessionStats?.BestAo12StartSolveSK || null)
-        }
-      >
-        {bestAvgOfTwelve === "N/A" ? "N/A" : bestAvgOfTwelve === "DNF" ? "DNF" : formatTime(bestAvgOfTwelve, true)}
-      </div>
-      {showStrictAverages ? (
-        <div className="cell strict ao12" onClick={() => selectStrictWindow(strictAo12)}>
-          {strictAo12?.value == null ? "N/A" : formatTime(strictAo12.value, true)}
-        </div>
-      ) : null}
-      <div className="cell less-important bpa ao12-secondary">{bpa12}</div>
-      <div className="cell less-important wpa ao12-secondary">{wpa12}</div>
+      {/* Best row */}
+      {renderRow(
+        "best",
+        <div className="row-title best-row">Best</div>,
+        columnStats.map(({ column, best }) => (
+          <div
+            key={`best-${column.key}`}
+            className={`cell best ${colClass(column)}`}
+            onClick={() =>
+              selectBestWindow(column.count, best, overallSessionStats?.[column.bestRef] || null)
+            }
+          >
+            {formatValue(best, column.count > 1)}
+          </div>
+        ))
+      )}
+
+      {/* Strict row */}
+      {showStrictAverages
+        ? renderRow(
+            "strict",
+            <div className="row-title strict-row">Strict</div>,
+            columnStats.map(({ column, strict }) => (
+              <div
+                key={`strict-${column.key}`}
+                className={`cell strict ${colClass(column)}`}
+                onClick={() => selectStrictWindow(strict)}
+              >
+                {column.count >= 5 ? formatValue(strict?.value) : ""}
+              </div>
+            ))
+          )
+        : null}
+
+      {/* BPA / WPA row */}
+      {renderRow(
+        "bpa-wpa",
+        <div className="row-title bpa-wpa-row">
+          <span className="bpa">BPA</span>
+          <span className="bpa-wpa-sep">/</span>
+          <span className="wpa">WPA</span>
+        </div>,
+        columnStats.map(({ column, bpa, wpa }) => (
+          <div key={`bpa-wpa-${column.key}`} className={`cell bpa-wpa ${colClass(column)}`}>
+            {column.count >= 5 ? (
+              <>
+                <span className="bpa">{formatValue(bpa)}</span>
+                <span className="wpa">{formatValue(wpa)}</span>
+              </>
+            ) : null}
+          </div>
+        ))
+      )}
     </div>
   );
 }

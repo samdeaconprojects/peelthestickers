@@ -19,8 +19,8 @@
   padding: 20px;
   border-radius: 12px;
   border: 1.5px solid rgba(255,255,255,0.24);
-  max-width: 600px;
-  width: 90%;
+  max-width: 860px;
+  width: 94%;
   max-height: 90%;
   overflow-y: auto;
   position: relative;
@@ -34,33 +34,81 @@
   display: none;
 }
 
-/* Close button */
-.closeButton {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  background: transparent;
-  border: none;
-  color: white;
-  font-size: 24px;
-  cursor: pointer;
-}
-
 .signOutButton {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  padding: 7px 12px;
+  padding: 10px 16px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.35);
   background: rgba(255, 255, 255, 0.06);
   color: white;
-  font-size: 0.9rem;
-  opacity: 1;
+  font-size: 0.95rem;
+  cursor: pointer;
 }
 
 .signOutButton:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+/* Section jump tabs: stick to the top of the scrolling modal. Negative margins
+   stretch the bar across the modal's 20px padding so content never peeks past it. */
+.settingsTabs {
+  position: sticky;
+  top: -20px;
+  z-index: 600; /* above the global button z-index: 500 */
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: -20px -20px 12px;
+  padding: 14px 20px 12px;
+  /* --theme-surface-strong is slightly translucent, so layer it over an opaque
+     base to keep scrolled content from showing through the bar. */
+  background:
+    linear-gradient(var(--theme-surface-strong), var(--theme-surface-strong)),
+    rgb(var(--player-bar-bg-rgb));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.settingsTab {
+  flex: none;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.settingsTab:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.settingsTab--active {
+  background: #50B6FF;
+  border-color: #50B6FF;
+  color: #0b141b;
+}
+
+.settingsSection + .settingsSection {
+  margin-top: 8px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.settingsSectionSubheading {
+  color: #50B6FF;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 18px 0 6px;
+}
+
+.settingsSectionSubheading:first-child {
+  margin-top: 0;
 }
 
 /* Headings inside modal */
@@ -352,6 +400,114 @@
   }
 }
 
+/* Pill-style option pickers that replace most dropdowns */
+.settingsChoice {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: 10px;
+  min-width: 0;
+}
+
+.settingsChoice__option {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.85rem;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.settingsChoice__option:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #fff;
+}
+
+.settingsChoice__option--selected {
+  border-color: #50B6FF;
+  box-shadow: inset 0 0 0 1px #50B6FF;
+  background: rgba(80, 182, 255, 0.12);
+  color: #fff;
+  font-weight: 600;
+}
+
+.settingsChoice--disabled {
+  opacity: 0.45;
+}
+
+.settingsChoice__option:disabled {
+  cursor: not-allowed;
+}
+
+.settingsFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.settingsFooter .save-button {
+  margin-top: 0;
+}
+
+.settingsFooter__save {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settingsFooter__unsaved {
+  color: #ffcf66;
+  font-size: 0.85rem;
+}
+
+/* Confirm-before-close prompt for unsaved profile/tag edits */
+.settingsUnsavedPrompt {
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.settingsUnsavedPrompt__card {
+  width: min(420px, calc(100% - 32px));
+  padding: 20px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.24);
+  background: var(--theme-surface-strong);
+  color: #fff;
+}
+
+.settingsUnsavedPrompt__card h3 {
+  margin: 0 0 8px;
+}
+
+.settingsUnsavedPrompt__card p {
+  margin: 0 0 16px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.settingsUnsavedPrompt__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settingsUnsavedPrompt__actions .settingsActionButton {
+  margin-left: 0;
+}
+
 /* Save button styling */
 .save-button {
   margin-top: 20px;
@@ -401,6 +557,7 @@
   .setting-item input[type="color"],
   .setting-item input[type="text"],
   .setting-item input[type="number"],
+  .settingsChoice,
   .settingsStaticValue,
   .settingsActionButton,
   .settingsActionGroup {

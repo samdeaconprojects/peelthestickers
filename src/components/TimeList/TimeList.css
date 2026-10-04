@@ -183,8 +183,9 @@
   transform: translateX(1px);
 }
 
+/* Up uses the backward (left-pointing) icon, so it turns clockwise to point up. */
 .timelist-nav-icon--up {
-  transform: rotate(-90deg);
+  transform: rotate(90deg);
 }
 
 .timelist-nav-icon--down {
@@ -375,6 +376,115 @@
 .time-list-content {
   flex-grow: 1;
   width: 100%;
+}
+
+/* Vertical list (beside the home timer): newest first, # | time | ao5 | ao12 */
+.vertical-time-list {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.vertical-nav-btn {
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  width: 34px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+}
+
+.vertical-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.TimeList.TimeList--vertical {
+  display: block;
+  width: auto;
+  max-width: none;
+  margin: 0;
+}
+
+.TimeList--vertical thead {
+  display: block;
+}
+
+/* Row gap is set inline from the measured free height. */
+.TimeList.TimeList--vertical tbody {
+  display: flex;
+  flex-direction: column;
+}
+
+/* .TimeList.TimeList--vertical beats the generic .TimeList tr rules, including the
+   max-width: 1100px override later in this file. */
+.TimeList.TimeList--vertical tr {
+  grid-template-columns: 38px 76px 58px 58px;
+  gap: 4px;
+}
+
+@media (max-width: 1279px) {
+  .TimeList.TimeList--vertical tr {
+    grid-template-columns: 34px 68px 52px 52px;
+  }
+
+  .TimeList.TimeList--vertical td {
+    font-size: calc(0.88rem * var(--vertical-row-scale, 1));
+  }
+}
+
+@media (max-width: 1079px) {
+  .TimeList.TimeList--vertical tr {
+    grid-template-columns: 30px 62px 46px 46px;
+    gap: 3px;
+  }
+
+  .TimeList.TimeList--vertical td {
+    padding: calc(3px * var(--vertical-row-scale, 1)) 4px;
+    font-size: calc(0.8rem * var(--vertical-row-scale, 1));
+  }
+
+  .TimeList.TimeList--vertical td.vertical-solve-number {
+    font-size: calc(0.66rem * var(--vertical-row-scale, 1));
+  }
+
+  .TimeList.TimeList--vertical td.vertical-average {
+    font-size: calc(0.74rem * var(--vertical-row-scale, 1));
+  }
+}
+
+.TimeList--vertical th {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #50B6FF;
+  padding-bottom: 2px;
+}
+
+/* --vertical-row-scale (set inline) shrinks rows when 12 don't fit the free height. */
+.TimeList--vertical td {
+  padding: calc(4px * var(--vertical-row-scale, 1)) 6px;
+  font-size: calc(0.95rem * var(--vertical-row-scale, 1));
+}
+
+.TimeList--vertical td.vertical-solve-number {
+  border: none;
+  font-size: calc(0.72rem * var(--vertical-row-scale, 1));
+  opacity: 0.6;
+}
+
+.TimeList--vertical td.vertical-average {
+  border: none;
+  font-size: calc(0.85rem * var(--vertical-row-scale, 1));
+  opacity: 0.85;
+  cursor: pointer;
+}
+
+.TimeList--vertical td.vertical-average:hover {
+  color: #50B6FF;
 }
 
 .pagination-buttons {

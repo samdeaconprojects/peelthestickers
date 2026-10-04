@@ -1,6 +1,7 @@
 .player-bar {
   display: grid;
-  grid-template-columns: minmax(150px, 240px) minmax(400px, 1fr) minmax(210px, 272px);
+  /* side columns must match so the middle column sits on the viewport's true center */
+  grid-template-columns: minmax(210px, 272px) minmax(400px, 1fr) minmax(210px, 272px);
   align-items: center;
   gap: 10px;
 
@@ -16,6 +17,18 @@
   padding: 8px 18px;
   box-sizing: border-box;
   transition: transform 0.4s ease-in-out;
+  /* must match .navAndPage's height transition (App.css) so the nav's bottom
+     icons ride up on the bar's top edge instead of being overtaken by it */
+  animation: playerBarSlideUp 0.3s ease;
+}
+
+@keyframes playerBarSlideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 
 .player-bar.hidden {
@@ -36,7 +49,7 @@
   position: absolute;
   top: 6px;
   /* align with the timer digits' left edge (timer is centered; this matches a 4-char time) */
-  left: 26px;
+  left: calc(50% - 94px);
   right: 0;
   display: flex;
   justify-content: flex-start;
@@ -114,15 +127,30 @@
 
 /* bigger cubes have long scrambles - dial the text down a touch more */
 .player-bar[data-event="555"] .playerbar-center,
-.player-bar[data-event="666"] .playerbar-center,
-.player-bar[data-event="777"] .playerbar-center,
 .player-bar[data-event="MEGAMINX"] .playerbar-center {
   --home-scramble-scale: 0.66;
 }
 
+.player-bar[data-event="666"] .playerbar-center,
+.player-bar[data-event="777"] .playerbar-center {
+  --home-scramble-scale: 0.72;
+  /* let the text use the whole column so it lands in ~3 lines instead of 6 */
+  --home-scramble-max-width: 100%;
+}
+
+.player-bar[data-event="666"] .scramble-box,
+.player-bar[data-event="777"] .scramble-box {
+  max-width: none;
+}
+
+.player-bar[data-event="666"] .scramble-text span:not(:last-child),
+.player-bar[data-event="777"] .scramble-text span:not(:last-child) {
+  margin-right: 6px !important;
+}
+
 /* fixed-height scramble box so TimeList never moves */
 .scramble-box {
-  max-width: 700px;
+  max-width: 786px;
   width: 100%;
   min-height: 48px;
   display: flex;
@@ -150,7 +178,6 @@
 /* TimeList */
 .playerbar-timelist {
   width: 100%;
-  max-width: 700px;
   min-height: 0;
   overflow: visible;
   display: flex;
@@ -244,8 +271,10 @@
   flex-direction: column;
   align-items: stretch;
   padding-bottom: 0;
-  width: fit-content;
-  max-width: 100%;
+  /* size to the fixed-width row so it centers (and overflows) symmetrically */
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: none;
   margin: 0 auto;
 }
 
@@ -253,18 +282,13 @@
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: calc(100% + 108px);
-  max-width: 808px;
+  width: calc(100% + 64px);
   display: flex;
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
   z-index: 15;
   pointer-events: none;
-}
-
-.playerbar-timelist .pagination-buttons button:last-child {
-  transform: translateX(18px);
 }
 
 .playerbar-timelist .pagination-buttons button {
@@ -534,6 +558,8 @@
 /* Lock fixed chip sizes in player bar TimeList */
 .playerbar-timelist .TimeList {
   table-layout: auto;
+  width: max-content;
+  max-width: none;
 }
 
 .playerbar-timelist .TimeList tr {

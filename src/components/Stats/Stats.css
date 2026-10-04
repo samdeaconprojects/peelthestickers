@@ -1265,6 +1265,28 @@ td:nth-child(13) {
   text-align: left;
   text-shadow: 0 1px 10px rgba(0,0,0,0.28);
   pointer-events: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.lineChartCollapsedTitleSep {
+  margin: 0 10px;
+  color: rgba(255,255,255,0.32);
+  font-weight: 500;
+}
+
+.lineChartCollapsedTitleDate {
+  font-size: 19px;
+  font-weight: 800;
+}
+
+.lineChartCollapsedTitleRange {
+  margin-left: 10px;
+  color: rgba(255,255,255,0.42);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .lineChartControls--time {

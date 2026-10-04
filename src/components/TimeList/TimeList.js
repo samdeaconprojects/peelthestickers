@@ -174,6 +174,10 @@ const DEFAULT_HORIZONTAL_AUTO_COLS_BREAKPOINT_PX = 1250;
 const DEFAULT_NON_ROLLING_AUTO_COLS_BREAKPOINT_PX = 1100;
 const DEFAULT_COMPACT_HORIZONTAL_LARGE_MIN_WIDTH_PX = 0;
 
+const VERTICAL_PAGE_SIZE = 12;
+const MIN_VERTICAL_ROW_GAP_PX = 4;
+const MIN_VERTICAL_ROW_SCALE = 0.6;
+
 function TimeList({
   user,
   applyPenalty,
@@ -208,6 +212,8 @@ function TimeList({
   onRefreshSharedAverage,
   onLeaveSharedSession,
   sharedAverageRefreshMs = 10000,
+  // "vertical" renders a single newest-first column (used beside the home timer).
+  layout = "default",
 }) {
   const { settings } = useSettings();
 
@@ -236,7 +242,8 @@ function TimeList({
     return refs;
   }, [solvesSafe]);
 
-  const isHorizontal = inPlayerBar ? false : settings.horizontalTimeList;
+  const isVertical = !inPlayerBar && layout === "vertical";
+  const isHorizontal = inPlayerBar || isVertical ? false : settings.horizontalTimeList;
   const horizontalScrollEnabled = !!settings.horizontalTimeListScroll;
   const navigationArrowStyle = normalizeNavigationArrowStyle(
     settings?.navigationArrowStyle
@@ -251,6 +258,60 @@ function TimeList({
   const [selectedSolveList, setSelectedSolveList] = useState(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [horizontalPage, setHorizontalPage] = useState(0);
+  const [verticalPage, setVerticalPage] = useState(0);
+
+  // Vertical mode always shows VERTICAL_PAGE_SIZE rows and fills its container's height:
+  // spare height goes into the row gap; if the rows don't fit, they shrink (row scale).
+  const verticalListRef = useRef(null);
+  const [verticalFit, setVerticalFit] = useState({ gap: MIN_VERTICAL_ROW_GAP_PX, scale: 1 });
+  const hasSolves = solvesSafe.length > 0;
+
+  useLayoutEffect(() => {
+    const el = verticalListRef.current;
+    if (!isVertical || !el) return undefined;
+
+    const measure = () => {
+      const firstRow = el.querySelector("tbody tr");
+      const rowHeight = firstRow?.offsetHeight || 0;
+      if (!rowHeight) return;
+
+      const navHeight = [...el.querySelectorAll(".vertical-nav-btn")].reduce(
+        (sum, button) => sum + button.offsetHeight,
+        0
+      );
+      const flexGap = parseFloat(getComputedStyle(el).rowGap) || 0;
+      const headHeight = el.querySelector("thead")?.offsetHeight || 0;
+      const available = el.clientHeight - navHeight - headHeight - flexGap * 2;
+      if (available <= 0) return;
+
+      const gapCount = VERTICAL_PAGE_SIZE - 1;
+      const rowsSpace = available - gapCount * MIN_VERTICAL_ROW_GAP_PX;
+
+      setVerticalFit((prev) => {
+        // Row height tracks the scale, so re-scale toward the height that fits (never above 1).
+        const targetScale = Math.min(
+          1,
+          Math.max(MIN_VERTICAL_ROW_SCALE, (prev.scale * rowsSpace) / (VERTICAL_PAGE_SIZE * rowHeight))
+        );
+        if (Math.abs(targetScale - prev.scale) > 0.02) {
+          return { gap: MIN_VERTICAL_ROW_GAP_PX, scale: targetScale };
+        }
+
+        const gap = Math.max(
+          MIN_VERTICAL_ROW_GAP_PX,
+          (available - VERTICAL_PAGE_SIZE * rowHeight) / gapCount
+        );
+        return Math.abs(prev.gap - gap) < 0.5 ? prev : { ...prev, gap };
+      });
+    };
+
+    measure();
+    if (typeof ResizeObserver !== "function") return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+    // verticalFit.scale: re-measure after a re-scale, since the row height changed.
+  }, [isVertical, hasSolves, verticalFit.scale]);
 
   const selection = useSolveSelection();
 
@@ -981,6 +1042,161 @@ function TimeList({
   const selectedSolveListIsMutable =
     Array.isArray(selectedSolveList) && selectedSolveList.every((s) => hasRealSolveRef(s));
 
+  const renderVerticalList = () => {
+    const total = solvesSafe.length;
+    const pageSize = VERTICAL_PAGE_SIZE;
+    const maxVerticalPage = Math.max(0, Math.ceil(total / pageSize) - 1);
+    const page = Math.min(Math.max(verticalPage, 0), maxVerticalPage);
+    const end = total - page * pageSize;
+    const start = Math.max(0, end - pageSize);
+
+    const pageIndices = [];
+    for (let gi = end - 1; gi >= start; gi--) pageIndices.push(gi);
+    const newestFirst = settings?.verticalTimeListOrder !== "newest-last";
+    if (!newestFirst) pageIndices.reverse();
+
+    // The button at the top always pages toward whatever sits above the visible rows.
+    const pageButton = (towardOlder, direction) => (
+      <button
+        type="button"
+        className="vertical-nav-btn"
+        onClick={() => setVerticalPage(page + (towardOlder ? 1 : -1))}
+        disabled={towardOlder ? page >= maxVerticalPage : page === 0}
+        title={`${towardOlder ? "Older" : "Newer"} (${pageSize})`}
+      >
+        <NavigationArrow direction={direction} style={navigationArrowStyle} />
+      </button>
+    );
+
+    const rank01ByIndex = buildRank01Map(
+      pageIndices.map((gi) => ({ key: gi, time: solvesSafe[gi]?.time }))
+    );
+
+    const averageAt = (gi, size) => {
+      if (gi < size - 1) return null;
+      const slice = solvesSafe.slice(gi - size + 1, gi + 1);
+      return { slice, value: calculateAverage(slice.map((s) => s?.time), true).average };
+    };
+
+    return (
+      <div className="vertical-time-list" ref={verticalListRef}>
+        {pageButton(!newestFirst, "up")}
+
+        <table
+          className="TimeList TimeList--vertical"
+          style={{ "--vertical-row-scale": verticalFit.scale }}
+        >
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Time</th>
+              <th>AO5</th>
+              <th>AO12</th>
+            </tr>
+          </thead>
+          <tbody style={{ rowGap: `${verticalFit.gap}px` }}>
+            {pageIndices.map((gi) => {
+              const solve = solvesSafe[gi];
+              const isBest = gi === overallMin;
+              const isWorst = gi === overallMax;
+              const rank01 = timeColorMode === "index" ? rank01ByIndex[gi] ?? 0 : 0;
+              const { perfClass, perfStyle } =
+                !isBest && !isWorst
+                  ? getPerfClassAndStyle(solve.time, overallMinValue, overallMaxValue, rank01)
+                  : { perfClass: "", perfStyle: null };
+              const selectStyleInline = selection.isIndexSelected(gi)
+                ? {
+                    outline: "2px solid rgba(46,196,182,0.95)",
+                    outlineOffset: "-2px",
+                    boxShadow: "0 0 0 3px rgba(46,196,182,0.18)",
+                  }
+                : null;
+              const ao5 = averageAt(gi, 5);
+              const ao12 = averageAt(gi, 12);
+
+              return (
+                <tr key={solve?.solveRef || gi}>
+                  <td className="vertical-solve-number">{globalBaseIndex + gi + 1}</td>
+                  <td
+                    className={`TimeItem ${perfClass} ${isBest ? "overall-border-min" : ""} ${
+                      isWorst ? "overall-border-max" : ""
+                    } ${sessionSingleBeatByIndex[gi] ? "session-single-beaten" : ""} ${
+                      offlineRunStartRefs.has(solve?.solveRef) ? "offline-run-start" : ""
+                    }`}
+                    data-bulk-select-item="true"
+                    style={{ ...(perfStyle || {}), ...(selectStyleInline || {}) }}
+                    title={offlineRunStartRefs.has(solve?.solveRef) ? "Offline solves start here - not yet synced to your profile" : undefined}
+                    onClick={(e) => onSolveClick(e, solve, gi)}
+                    onMouseDown={(e) => {
+                      if (e.shiftKey || e.ctrlKey || e.metaKey || selection.selectionCount > 0) {
+                        e.preventDefault();
+                      }
+                    }}
+                  >
+                    {formatTime(solve.time, false, solve.penalty)}
+                    <span
+                      className="delete-icon"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (canMutateSolve(solve)) {
+                          deleteTime(practiceMode ? gi : solve.solveRef);
+                        }
+                      }}
+                    >
+                      x
+                    </span>
+                  </td>
+                  <td
+                    className="vertical-average"
+                    onClick={() => ao5 && openAverageWindow(ao5.slice)}
+                  >
+                    {ao5 ? formatTime(ao5.value, true) : ""}
+                  </td>
+                  <td
+                    className="vertical-average"
+                    onClick={() => ao12 && openAverageWindow(ao12.slice)}
+                  >
+                    {ao12 ? formatTime(ao12.value, true) : ""}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        {pageButton(newestFirst, "down")}
+
+        {selectedSolve && (
+          <Detail
+            solve={selectedSolve}
+            userID={user?.UserID}
+            profileColor={user?.Color || user?.color || "#2EC4B6"}
+            onClose={() => setSelectedSolve(null)}
+            deleteTime={() => {
+              if (canMutateSolve(selectedSolve)) {
+                deleteTime(
+                  practiceMode
+                    ? solvesSafe.findIndex((s) => s?.solveRef === selectedSolve?.solveRef)
+                    : selectedSolve.solveRef
+                );
+              }
+            }}
+            addPost={addPost}
+            saveToProfile={saveToProfile}
+            applyPenalty={canMutateSolve(selectedSolve) ? applyPenalty : null}
+            setSessions={setSessions}
+            sessionsList={sessionsList}
+            tagConfig={tagConfig}
+            cubeModelOptions={cubeModelOptions}
+            discoveredTagOptions={discoveredTagOptions}
+            tagColors={tagColors}
+            onTagColorsChange={onTagColorsChange}
+          />
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="time-list-container" style={homeCompactHorizontalStyle || undefined}>
       <BulkSolveControls
@@ -1035,7 +1251,7 @@ function TimeList({
         enableShare={true}
       />
 
-      {!!onLoadMore && horizontalScrollEnabled && (
+      {!!onLoadMore && horizontalScrollEnabled && !isVertical && (
         <div className="timelist-loadmore">
           <button
             type="button"
@@ -1048,7 +1264,7 @@ function TimeList({
         </div>
       )}
 
-      {solvesSafe.length > 0 && (isHorizontal ? (
+      {solvesSafe.length > 0 && (isVertical ? renderVerticalList() : isHorizontal ? (
         <div className="horizontal-shell">
           {!horizontalScrollEnabled && (
             <button
@@ -1442,7 +1658,7 @@ function TimeList({
         </div>
       ))}
 
-      {!isHorizontal && solvesSafe.length > 0 && (
+      {!isHorizontal && !isVertical && solvesSafe.length > 0 && (
         <div className="pagination-buttons">
           <button onClick={goToPreviousPage} disabled={validCurrentPage === 0}>
             <NavigationArrow direction={inPlayerBar ? "left" : "up"} style={navigationArrowStyle} />

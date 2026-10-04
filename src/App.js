@@ -9,6 +9,8 @@ import "./App.css";
 import Timer from "./components/Timer/Timer";
 import TimeList from "./components/TimeList/TimeList";
 import AveragesDisplay from "./components/AveragesDisplay/AveragesDisplay";
+import useMediaQuery from "./hooks/useMediaQuery";
+import HomeTimerSide from "./components/HomeTimerSide/HomeTimerSide";
 import AverageDetailModal from "./components/Detail/AverageDetailModal";
 import Profile from "./components/Profile/Profile";
 import Stats from "./components/Stats/Stats";
@@ -1631,6 +1633,10 @@ function App() {
   const [showStatsImportModal, setShowStatsImportModal] = useState(false);
   const [showStatsExportModal, setShowStatsExportModal] = useState(false);
   const [selectedAverageSolves, setSelectedAverageSolves] = useState([]);
+  // Beside-the-timer placement needs room on the left (the column shrinks via CSS zoom
+  // down to 900px); narrower screens keep both below.
+  const canPlaceBesideTimer = useMediaQuery("(min-width: 900px)");
+  const homeLeftOfTimer = canPlaceBesideTimer ? settings?.homeLeftOfTimer || "none" : "none";
   const [selectedAverageSolve, setSelectedAverageSolve] = useState(null);
   const [sharedSession, setSharedSession] = useState(null);
   const [sharedIndex, setSharedIndex] = useState(0);
@@ -5685,8 +5691,11 @@ function App() {
 
   const applyPostSolveTagBinding = useCallback(
     async (updates = {}) => {
+      // Tag bindings work on the home timer and in player-bar mode (the bar's timer
+      // feeds the same current session).
+      const timerSurfaceActive = isHomePage || showPlayerBar;
       if (
-        !isHomePage ||
+        !timerSurfaceActive ||
         (sharedSession && !isHostedSharedSession(sharedSession)) ||
         isRelayActive ||
         tagScopeEventKey !== "333"
@@ -5786,6 +5795,7 @@ function App() {
       schedulePostSolveTagSave,
       settings?.timerInput,
       sharedSession,
+      showPlayerBar,
       tagScopeEventKey,
     ]
   );
@@ -6900,6 +6910,72 @@ function App() {
     </div>
   );
 
+  const showHomeSidePanel =
+    homeLeftOfTimer !== "none" &&
+    !(sharedSession && activeSharedMessage && !isHostedSharedSession(sharedSession));
+
+  // Home time list, rendered below the timer or (layout "vertical") beside it.
+  const renderHomeTimeList = (layout = "default") => (
+    <TimeList
+      layout={layout}
+      user={user}
+      applyPenalty={applyPenalty}
+      solves={currentSolves}
+      sessionBestSingleMs={currentSessionStatsForEvent?.BestSingleMs}
+      horizontalAutoColsBreakpointPx={1200}
+      nonRollingAutoColsBreakpointPx={1050}
+      compactHorizontalLargeMinWidthPx={880}
+      deleteTime={(index) =>
+        practiceMode
+          ? deletePracticeTime(index)
+          : deleteTime(eventKey, index)
+      }
+      addPost={addPost}
+      saveToProfile={addPostToProfile}
+      rowsToShow={3}
+      onAverageClick={(solveArray) => {
+        setSelectedAverageSolves(solveArray);
+      }}
+      setSessions={setSessions}
+      sessionsList={sessionsList}
+      currentEvent={currentEvent}
+      currentSession={currentSession}
+      eventKey={eventKey}
+      practiceMode={practiceMode}
+      tagConfig={homeTagConfig}
+      cubeModelOptions={cubeModelHistoryOptions}
+      discoveredTagOptions={mergedHomeTagOptions}
+      tagColors={currentTagColors}
+      onTagColorsChange={(next) => {
+        let nextCatalog = tagColorCatalog;
+
+        Object.entries(next || {}).forEach(([field, valueMap]) => {
+          Object.entries(valueMap || {}).forEach(([value, color]) => {
+            nextCatalog = setTagColorCatalogValue(
+              nextCatalog,
+              eventKey,
+              field,
+              value,
+              color
+            );
+          });
+        });
+
+        setUser((prev) => ({
+          ...(prev || {}),
+          TagColorCatalog: nextCatalog,
+        }));
+        queueTagColorCatalogSave(nextCatalog);
+      }}
+      totalSolveCount={
+        Number.isFinite(currentSessionTotalSolveCount) &&
+        currentSessionTotalSolveCount >= 0
+          ? currentSessionTotalSolveCount
+          : undefined
+      }
+    />
+  );
+
   return (
     <DbStatusProvider value={dbStatusValue}>
       <div className={`App ${!isHomePage ? "music-player-mode" : ""}`}>
@@ -7363,12 +7439,30 @@ function App() {
                     onSummarySelect={handleHomeSummarySelect}
                   />
 
-                  <Timer
-                    addTime={addSolveWithLiveRoom}
-                    activeScramble={displayedScramble}
-                    compact={isSharedHomeView}
-                    latestSolve={currentSolves[currentSolves.length - 1] || null}
-                  />
+                  <div className="home-timer-row">
+                    {showHomeSidePanel ? (
+                      <HomeTimerSide mode={homeLeftOfTimer}>
+                        {homeLeftOfTimer === "averages" ? (
+                          <AveragesDisplay
+                            vertical
+                            currentSolves={currentSolves}
+                            overallSessionStats={currentSessionStatsForEvent}
+                            setSelectedAverageSolves={setSelectedAverageSolves}
+                            onRequestBestAverageWindow={requestAverageWindow}
+                          />
+                        ) : (
+                          renderHomeTimeList("vertical")
+                        )}
+                      </HomeTimerSide>
+                    ) : null}
+
+                    <Timer
+                      addTime={addSolveWithLiveRoom}
+                      activeScramble={displayedScramble}
+                      compact={isSharedHomeView}
+                      latestSolve={currentSolves[currentSolves.length - 1] || null}
+                    />
+                  </div>
 
                   {sharedSession && activeSharedMessage && !isHostedSharedSession(sharedSession) ? (
                     <SharedAverageMessage
@@ -7390,70 +7484,16 @@ function App() {
                     />
                   ) : (
                     <div className="home-bottom-stack">
-                      <AveragesDisplay
-                        currentSolves={currentSolves}
-                        overallSessionStats={currentSessionStatsForEvent}
-                        setSelectedAverageSolves={setSelectedAverageSolves}
-                        onRequestBestAverageWindow={requestAverageWindow}
-                      />
+                      {homeLeftOfTimer !== "averages" ? (
+                        <AveragesDisplay
+                          currentSolves={currentSolves}
+                          overallSessionStats={currentSessionStatsForEvent}
+                          setSelectedAverageSolves={setSelectedAverageSolves}
+                          onRequestBestAverageWindow={requestAverageWindow}
+                        />
+                      ) : null}
 
-                      <TimeList
-                        user={user}
-                        applyPenalty={applyPenalty}
-                        solves={currentSolves}
-                        sessionBestSingleMs={currentSessionStatsForEvent?.BestSingleMs}
-                        horizontalAutoColsBreakpointPx={1200}
-                        nonRollingAutoColsBreakpointPx={1050}
-                        compactHorizontalLargeMinWidthPx={880}
-                        deleteTime={(index) =>
-                          practiceMode
-                            ? deletePracticeTime(index)
-                            : deleteTime(eventKey, index)
-                        }
-                        addPost={addPost}
-                        saveToProfile={addPostToProfile}
-                        rowsToShow={3}
-                        onAverageClick={(solveArray) => {
-                          setSelectedAverageSolves(solveArray);
-                        }}
-                        setSessions={setSessions}
-                        sessionsList={sessionsList}
-                        currentEvent={currentEvent}
-                        currentSession={currentSession}
-                        eventKey={eventKey}
-                        practiceMode={practiceMode}
-                        tagConfig={homeTagConfig}
-                        cubeModelOptions={cubeModelHistoryOptions}
-                        discoveredTagOptions={mergedHomeTagOptions}
-                        tagColors={currentTagColors}
-                        onTagColorsChange={(next) => {
-                          let nextCatalog = tagColorCatalog;
-
-                          Object.entries(next || {}).forEach(([field, valueMap]) => {
-                            Object.entries(valueMap || {}).forEach(([value, color]) => {
-                              nextCatalog = setTagColorCatalogValue(
-                                nextCatalog,
-                                eventKey,
-                                field,
-                                value,
-                                color
-                              );
-                            });
-                          });
-
-                          setUser((prev) => ({
-                            ...(prev || {}),
-                            TagColorCatalog: nextCatalog,
-                          }));
-                          queueTagColorCatalogSave(nextCatalog);
-                        }}
-                        totalSolveCount={
-                          Number.isFinite(currentSessionTotalSolveCount) &&
-                          currentSessionTotalSolveCount >= 0
-                            ? currentSessionTotalSolveCount
-                            : undefined
-                        }
-                      />
+                      {homeLeftOfTimer !== "timelist" ? renderHomeTimeList() : null}
                     </div>
                   )}
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./Settings.css";
 import { useSettings } from "../../contexts/SettingsContext";
 import {
@@ -230,6 +230,21 @@ const CUBE_MODEL_GROUPS = [
   { key: "OTHER", label: "Other / Shared", aliases: [], color: "#9ca3af" },
 ];
 
+// Tabs at the top of the modal only jump within the single scrolling list; every
+// section stays rendered so nothing is hidden behind a tab.
+const SETTINGS_SECTIONS = [
+  { id: "appearance", tab: "Appearance" },
+  { id: "timer", tab: "Timer" },
+  { id: "layout", tab: "Layout" },
+  { id: "averages", tab: "Averages" },
+  { id: "overlays", tab: "Overlays" },
+  { id: "keys", tab: "Keys" },
+  { id: "profile", tab: "Profile" },
+  { id: "wca", tab: "WCA" },
+  { id: "tags", tab: "Tags" },
+  { id: "stats", tab: "Stats", requiresUser: true },
+];
+
 function normalizeCrossColorLabel(label) {
   const value = String(label || "").trim();
   if (!value || value === "Cross Color") return "Start Color";
@@ -246,6 +261,44 @@ function cleanArrayInput(value) {
 function getCubeModelGroupOptions(tagConfig, groupKey) {
   const byEvent = tagConfig?.Fixed?.CubeModel?.optionsByEvent || {};
   return Array.isArray(byEvent?.[groupKey]) ? byEvent[groupKey] : [];
+}
+
+// Renders a <select>-style control as a row of pill buttons. Accepts the same
+// <option> children and calls onChange with a { target: { value } } shape so the
+// existing select handlers work unchanged.
+function SettingsChoice({ value, onChange, disabled, children }) {
+  const options = React.Children.toArray(children)
+    .filter((child) => React.isValidElement(child))
+    .map((child) => ({
+      value: String(child.props.value),
+      label: child.props.children,
+    }));
+  const current = String(value ?? "");
+
+  return (
+    <div
+      className={`settingsChoice${disabled ? " settingsChoice--disabled" : ""}`}
+      role="radiogroup"
+    >
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={current === option.value}
+          className={`settingsChoice__option${
+            current === option.value ? " settingsChoice__option--selected" : ""
+          }`}
+          disabled={disabled}
+          onClick={() => {
+            if (current !== option.value) onChange?.({ target: { value: option.value } });
+          }}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function CubeCollectionCardEditor({
@@ -526,6 +579,24 @@ function Settings({
   const [tagConfig, setTagConfig] = useState(DEFAULT_TAG_CONFIG);
   const [tagColorCatalog, setTagColorCatalog] = useState({ Global: {}, ByEvent: {} });
 
+  // Settings-context values autosave from App.js, so only profile fields and tag config
+  // need an explicit Save. Track a baseline of those to warn before closing unsaved.
+  const [savedSnapshot, setSavedSnapshot] = useState(null);
+  const captureBaselineRef = useRef(false);
+  const [baselineToken, setBaselineToken] = useState(0);
+  const [showUnsavedPrompt, setShowUnsavedPrompt] = useState(false);
+  const currentSnapshot = useMemo(
+    () => JSON.stringify({ profileData, tagConfig: normalizeTagConfig(tagConfig) }),
+    [profileData, tagConfig]
+  );
+  const hasUnsavedChanges = savedSnapshot !== null && currentSnapshot !== savedSnapshot;
+
+  useEffect(() => {
+    if (!captureBaselineRef.current) return;
+    captureBaselineRef.current = false;
+    setSavedSnapshot(currentSnapshot);
+  }, [currentSnapshot, baselineToken]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -556,6 +627,8 @@ function Settings({
         const sessions = await getSessions(userID);
         if (!cancelled) setSessionItems(Array.isArray(sessions) ? sessions : []);
 
+        captureBaselineRef.current = true;
+        setBaselineToken((n) => n + 1);
         setProfileData({
           Name: user?.Name || "",
           Color: user?.Color || "#0E171D",
@@ -581,13 +654,22 @@ function Settings({
     };
   }, [userID, setAllSettings]);
 
+  const requestClose = () => {
+    if (hasUnsavedChanges) setShowUnsavedPrompt(true);
+    else onClose();
+  };
+  const requestCloseRef = useRef(requestClose);
+  requestCloseRef.current = requestClose;
+
   useEffect(() => {
     const handleKey = (e) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (showUnsavedPrompt) setShowUnsavedPrompt(false);
+      else requestCloseRef.current();
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+  }, [showUnsavedPrompt]);
 
   const handleProfileChange = (key, value) => {
     setProfileData((prev) => ({ ...prev, [key]: value }));
@@ -742,6 +824,8 @@ function Settings({
 
     const fresh = await runDb("Saving settings", () => updateUser(userID, updates), options);
 
+    captureBaselineRef.current = true;
+    setBaselineToken((n) => n + 1);
     setProfileData({
       Name: fresh?.Name || "",
       Color: fresh?.Color || "#0E171D",
@@ -785,6 +869,23 @@ function Settings({
       setTimeout(() => setStatusMessage(""), 2200);
     } catch (err) {
       console.error("❌ Error updating settings/profile:", err);
+      setStatusMessage("❌ Failed to save settings.");
+      setTimeout(() => setStatusMessage(""), 2200);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const saveAndClose = async () => {
+    if (!userID || isSaving) return;
+    try {
+      setIsSaving(true);
+      await persistCurrentSettings();
+      setShowUnsavedPrompt(false);
+      onClose();
+    } catch (err) {
+      console.error("❌ Error updating settings/profile:", err);
+      setShowUnsavedPrompt(false);
       setStatusMessage("❌ Failed to save settings.");
       setTimeout(() => setStatusMessage(""), 2200);
     } finally {
@@ -1022,735 +1123,861 @@ function Settings({
     }
   };
 
+  const scrollContainerRef = useRef(null);
+  const sectionRefs = useRef({});
+  const [activeSectionId, setActiveSectionId] = useState(SETTINGS_SECTIONS[0].id);
+  const visibleSettingsSections = useMemo(
+    () => SETTINGS_SECTIONS.filter((section) => !section.requiresUser || userID),
+    [userID]
+  );
+
+  const registerSection = (id) => (el) => {
+    if (el) sectionRefs.current[id] = el;
+    else delete sectionRefs.current[id];
+  };
+
+  const getTabsOffset = () => {
+    const tabs = scrollContainerRef.current?.querySelector(".settingsTabs");
+    return tabs?.offsetHeight || 0;
+  };
+
+  const handleSettingsScroll = () => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const atBottom =
+      container.scrollTop + container.clientHeight >= container.scrollHeight - 4;
+    if (atBottom) {
+      const last = visibleSettingsSections[visibleSettingsSections.length - 1];
+      if (last) setActiveSectionId(last.id);
+      return;
+    }
+    const threshold = container.scrollTop + getTabsOffset() + 24;
+    let current = visibleSettingsSections[0]?.id;
+    for (const section of visibleSettingsSections) {
+      const el = sectionRefs.current[section.id];
+      if (el && el.offsetTop <= threshold) current = section.id;
+    }
+    if (current) setActiveSectionId(current);
+  };
+
+  const scrollToSection = (id) => {
+    const container = scrollContainerRef.current;
+    const el = sectionRefs.current[id];
+    if (!container || !el) return;
+    setActiveSectionId(id);
+    container.scrollTo({ top: Math.max(0, el.offsetTop - getTabsOffset() + 1), behavior: "smooth" });
+  };
+
   return (
     <div
       className="settingsPopup"
-      onClick={(e) => e.target.className === "settingsPopup" && onClose()}
+      onClick={(e) => e.target.className === "settingsPopup" && requestClose()}
     >
-      <div className="settingsPopupContent">
-        {userID && (
-          <button className="signOutButton" onClick={onSignOut}>
-            Sign Out
-          </button>
-        )}
-
-        <button className="closeButton" onClick={onClose}>
-          ×
-        </button>
-
-        <h2>Customize Theme</h2>
-        <div className="settings-container">
-          <div className="setting-item">
-            <label>Primary Color:</label>
-            <select
-              onChange={(e) => updateSettings({ primaryColor: e.target.value })}
-              value={settings.primaryColor}
+      <div className="settingsPopupContent" ref={scrollContainerRef} onScroll={handleSettingsScroll}>
+        <nav className="settingsTabs" aria-label="Settings sections">
+          {visibleSettingsSections.map((section) => (
+            <button
+              key={section.id}
+              type="button"
+              className={`settingsTab${activeSectionId === section.id ? " settingsTab--active" : ""}`}
+              aria-current={activeSectionId === section.id ? "true" : undefined}
+              onClick={() => scrollToSection(section.id)}
             >
-              <option value="#0E171D">Default</option>
-              <option value="#0c2b40">Medium Blue</option>
-              <option value="#140D21">Purple</option>
-              <option value="#000000">Black</option>
-            </select>
-          </div>
+              {section.tab}
+            </button>
+          ))}
+        </nav>
 
-          <div className="setting-item">
-            <label>Secondary Color:</label>
-            <select
-              onChange={(e) => updateSettings({ secondaryColor: e.target.value })}
-              value={settings.secondaryColor}
-            >
-              <option value="#ffffff">White</option>
-              <option value="#000000">Black</option>
-            </select>
-          </div>
-
-          <div className="setting-item">
-            <label>Timer Input:</label>
-            <select
-              onChange={(e) => updateSettings({ timerInput: e.target.value })}
-              value={settings.timerInput}
-            >
-              <option value="Keyboard">Keyboard</option>
-              <option value="Type">Type</option>
-              <option value="Stackmat">Stackmat</option>
-              <option value="GAN Bluetooth">GAN Timer</option>
-              <option value="GAN Cube">Smart Cube</option>
-            </select>
-          </div>
-
-          <div className="setting-item">
-            <label>Timer Size:</label>
-            <select
-              onChange={(e) => updateSettings({ timerSize: e.target.value })}
-              value={settings.timerSize || "normal"}
-            >
-              {TIMER_SIZE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="setting-item">
-            <label>Timer Font:</label>
-            <select
-              onChange={(e) => updateSettings({ timerFont: e.target.value })}
-              value={settings.timerFont || "default"}
-            >
-              {TIMER_FONT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="setting-item">
-            <label>Scramble Type:</label>
-            <select
-              value={scrambleMode}
-              onChange={(e) =>
-                updateSettings({
-                  scrambleMode: normalizeScrambleModeForUi(e.target.value),
-                })
-              }
-            >
-              {SCRAMBLE_MODE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="setting-item">
-            <label>Navigation Arrows:</label>
-            <select
-              value={navigationArrowStyle}
-              onChange={(e) =>
-                updateSettings({
-                  navigationArrowStyle: normalizeNavigationArrowStyleForUi(
-                    e.target.value
-                  ),
-                })
-              }
-            >
-              {NAVIGATION_ARROW_STYLE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="settingsHintText settingsHintText--tight">
-            Random State uses cubing.js for supported WCA events. Legacy uses your
-            previous scramble generator behavior.
-          </div>
-
-          {isSmartCube && (
+        <section className="settingsSection" id="settings-section-appearance" data-settings-section="appearance" ref={registerSection("appearance")}>
+          <h2>Appearance</h2>
+          <div className="settings-container">
             <div className="setting-item">
-              <label>Smart Cube Provider:</label>
-              <select
-                value={smartCubeProvider}
-                onChange={(e) =>
-                  updateSettings({
-                    smartCubeProvider: normalizeSmartCubeProviderForUi(e.target.value),
-                  })
-                }
+              <label>Primary Color:</label>
+              <SettingsChoice
+                onChange={(e) => updateSettings({ primaryColor: e.target.value })}
+                value={settings.primaryColor}
               >
-                {SMART_CUBE_PROVIDER_OPTIONS.map((option) => (
+                <option value="#0E171D">Default</option>
+                <option value="#0c2b40">Medium Blue</option>
+                <option value="#140D21">Purple</option>
+                <option value="#000000">Black</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="setting-item">
+              <label>Secondary Color:</label>
+              <SettingsChoice
+                onChange={(e) => updateSettings({ secondaryColor: e.target.value })}
+                value={settings.secondaryColor}
+              >
+                <option value="#ffffff">White</option>
+                <option value="#000000">Black</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="setting-item">
+              <label>Timer Size:</label>
+              <SettingsChoice
+                onChange={(e) => updateSettings({ timerSize: e.target.value })}
+                value={settings.timerSize || "normal"}
+              >
+                {TIMER_SIZE_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
                 ))}
-              </select>
+              </SettingsChoice>
             </div>
-          )}
 
-          {isSmartCube && smartCubeProvider === "moyu-wcu" ? (
-            <div className="settingsHintText">
-              MoYu AI / WCU uses its own Bluetooth path. Save settings first, then
-              connect from the timer. If the cube is found but won't sync, allow the
-              browser's Bluetooth "device advertisements" permission (Chrome) or pair
-              the cube once so its address is known.
+            <div className="setting-item">
+              <label>Timer Font:</label>
+              <SettingsChoice
+                onChange={(e) => updateSettings({ timerFont: e.target.value })}
+                value={settings.timerFont || "default"}
+              >
+                {TIMER_FONT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </SettingsChoice>
             </div>
-          ) : null}
 
-          {isGanCube && (
-            <>
-              <div className="setting-item">
-                <label>Cube Auto Start</label>
-                <input
-                  type="checkbox"
-                  checked={!!settings.cubeAutoStart}
-                  onChange={(e) => updateSettings({ cubeAutoStart: e.target.checked })}
-                />
-              </div>
+            <div className="setting-item">
+              <label>Navigation Arrows:</label>
+              <SettingsChoice
+                value={navigationArrowStyle}
+                onChange={(e) =>
+                  updateSettings({
+                    navigationArrowStyle: normalizeNavigationArrowStyleForUi(
+                      e.target.value
+                    ),
+                  })
+                }
+              >
+                {NAVIGATION_ARROW_STYLE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </SettingsChoice>
+            </div>
 
-              <div className="setting-item">
-                <label>Cube Auto Stop</label>
-                <input
-                  type="checkbox"
-                  checked={!!settings.cubeAutoStop}
-                  onChange={(e) => updateSettings({ cubeAutoStop: e.target.checked })}
-                />
-              </div>
+            <div className="setting-item">
+              <label>White Puzzle SVGs</label>
+              <input
+                type="checkbox"
+                checked={settings.whitePuzzleSVGs === true}
+                onChange={(e) => updateSettings({ whitePuzzleSVGs: e.target.checked })}
+              />
+            </div>
 
+            <div className="setting-item">
+              <label>Detail View Surface</label>
+              <SettingsChoice
+                value={settings.detailViewSurfaceMode || "themed"}
+                onChange={(e) =>
+                  updateSettings({ detailViewSurfaceMode: e.target.value })
+                }
+              >
+                <option value="themed">Themed (player bar tint)</option>
+                <option value="legacy">Legacy dark gray</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="setting-item">
+              <label>Time Color Mode</label>
+              <SettingsChoice
+                value={settings.timeColorMode || "binary"}
+                onChange={(e) => updateSettings({ timeColorMode: e.target.value })}
+              >
+                <option value="binary">Binary (only best/worst)</option>
+                <option value="continuous">True spectrum (by time)</option>
+                <option value="bucket">Bucket spectrum (5 bands)</option>
+                <option value="index">Index spectrum (evenly distributed)</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="setting-item">
+              <label>Shared Time Color Mode</label>
+              <SettingsChoice
+                value={settings.sharedTimeColorMode || "profile"}
+                onChange={(e) => updateSettings({ sharedTimeColorMode: e.target.value })}
+              >
+                <option value="profile">Profile color (default)</option>
+                <option value="binary">Binary (only best/worst)</option>
+                <option value="continuous">True spectrum (by time)</option>
+                <option value="bucket">Bucket spectrum (5 bands)</option>
+                <option value="index">Index spectrum (evenly distributed)</option>
+              </SettingsChoice>
+            </div>
+          </div>
+        </section>
+
+        <section className="settingsSection" id="settings-section-timer" data-settings-section="timer" ref={registerSection("timer")}>
+          <h2>Timer</h2>
+          <div className="settings-container">
+            <h3 className="settingsSectionSubheading">Input</h3>
+
+            <div className="setting-item">
+              <label>Timer Input:</label>
+              <SettingsChoice
+                onChange={(e) => updateSettings({ timerInput: e.target.value })}
+                value={settings.timerInput}
+              >
+                <option value="Keyboard">Keyboard</option>
+                <option value="Type">Type</option>
+                <option value="Stackmat">Stackmat</option>
+                <option value="GAN Bluetooth">GAN Timer</option>
+                <option value="GAN Cube">Smart Cube</option>
+              </SettingsChoice>
+            </div>
+
+            {isSmartCube && (
               <div className="setting-item">
-                <label>Auto Stop Idle (ms)</label>
-                <input
-                  value={settings.cubeStopIdleMs ?? 1200}
+                <label>Smart Cube Provider:</label>
+                <SettingsChoice
+                  value={smartCubeProvider}
                   onChange={(e) =>
-                    updateSettings({ cubeStopIdleMs: Number(e.target.value) || 1200 })
+                    updateSettings({
+                      smartCubeProvider: normalizeSmartCubeProviderForUi(e.target.value),
+                    })
                   }
-                />
-              </div>
-
-              <div className="setting-item">
-                <label>Show 3D Cube</label>
-                <input
-                  type="checkbox"
-                  checked={settings.cubeShow3D !== false}
-                  onChange={(e) => updateSettings({ cubeShow3D: e.target.checked })}
-                />
-              </div>
-            </>
-          )}
-
-          <div className="setting-item">
-            <label>Disable On-Screen Keypad</label>
-            <input
-              type="checkbox"
-              checked={!!settings.disableKeypad}
-              onChange={(e) => updateSettings({ disableKeypad: e.target.checked })}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>Show Add Solve Button</label>
-            <input
-              type="checkbox"
-              checked={settings.showAddSolveButton !== false}
-              onChange={(e) => updateSettings({ showAddSolveButton: e.target.checked })}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>Hide Timer Input + Solve Source On Home</label>
-            <input
-              type="checkbox"
-              checked={!!settings.hideAutomaticHomeTags}
-              onChange={(e) =>
-                updateSettings({ hideAutomaticHomeTags: e.target.checked })
-              }
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>Time Color Mode</label>
-            <select
-              value={settings.timeColorMode || "binary"}
-              onChange={(e) => updateSettings({ timeColorMode: e.target.value })}
-            >
-              <option value="binary">Binary (only best/worst)</option>
-              <option value="continuous">True spectrum (by time)</option>
-              <option value="bucket">Bucket spectrum (5 bands)</option>
-              <option value="index">Index spectrum (evenly distributed)</option>
-            </select>
-          </div>
-
-          <div className="setting-item">
-            <label>Shared Time Color Mode</label>
-            <select
-              value={settings.sharedTimeColorMode || "profile"}
-              onChange={(e) => updateSettings({ sharedTimeColorMode: e.target.value })}
-            >
-              <option value="profile">Profile color (default)</option>
-              <option value="binary">Binary (only best/worst)</option>
-              <option value="continuous">True spectrum (by time)</option>
-              <option value="bucket">Bucket spectrum (5 bands)</option>
-              <option value="index">Index spectrum (evenly distributed)</option>
-            </select>
-          </div>
-
-          <div className="setting-item">
-            <label>Relay Timing Mode</label>
-            <select
-              value={settings.relayMode || "total"}
-              onChange={(e) => updateSettings({ relayMode: e.target.value })}
-            >
-              <option value="total">Single total time (default)</option>
-              <option value="legs">Per-leg times (auto-advance)</option>
-            </select>
-          </div>
-
-          <div className="setting-item">
-            <label>Stats Summary Layout</label>
-            <select
-              value={settings.statsSummaryLayout || "row"}
-              onChange={(e) => updateSettings({ statsSummaryLayout: e.target.value })}
-            >
-              <option value="row">Row view</option>
-            </select>
-          </div>
-
-          <div className="setting-item">
-            <label>Detail View Surface</label>
-            <select
-              value={settings.detailViewSurfaceMode || "themed"}
-              onChange={(e) =>
-                updateSettings({ detailViewSurfaceMode: e.target.value })
-              }
-            >
-              <option value="themed">Themed (player bar tint)</option>
-              <option value="legacy">Legacy dark gray</option>
-            </select>
-          </div>
-
-          <div className="setting-item">
-            <label>Show Strict Averages</label>
-            <input
-              type="checkbox"
-              checked={settings.showStrictAverages !== false}
-              onChange={(e) => updateSettings({ showStrictAverages: e.target.checked })}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>White Puzzle SVGs</label>
-            <input
-              type="checkbox"
-              checked={settings.whitePuzzleSVGs === true}
-              onChange={(e) => updateSettings({ whitePuzzleSVGs: e.target.checked })}
-            />
-          </div>
-
-          <div className="settingsHintText settingsHintText--tight">
-            Controls the Strict column on the home page averages table and the Strict values in
-            overall stats summaries.
-          </div>
-
-          <div className="setting-item setting-item--stacked">
-            <label>Average Trimming</label>
-            <div className="settingsAverageTrim">
-              <div className="settingsAverageTrim__lede">
-                Averages drop the fastest and slowest {AVERAGE_TRIM_PERCENT * 100}% of the window
-                from each end, never fewer than one solve &mdash; the convention csTimer and most
-                other timers use. At Ao5 and Ao12 that works out to a single solve per side, so
-                those stay identical to the WCA definition. Mo3 is a straight mean with nothing
-                removed.
-              </div>
-              <table className="settingsAverageTrim__table">
-                <thead>
-                  <tr>
-                    <th scope="col">Average</th>
-                    <th scope="col">Removed each end</th>
-                    <th scope="col">Solves counted</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {AVERAGE_TRIM_ROWS.map((row) => (
-                    <tr key={row.label}>
-                      <th scope="row">{row.label}</th>
-                      <td>{row.trim === 0 ? "none" : row.trim}</td>
-                      <td>{row.counted}</td>
-                    </tr>
+                >
+                  {SMART_CUBE_PROVIDER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
                   ))}
-                </tbody>
-              </table>
-              <div className="settingsAverageTrim__note">
-                DNFs count as the slowest solves, so the trim absorbs them. An average is only a
-                DNF once it holds more DNFs than there are removed slots &mdash; one for Ao5 and
-                Ao12, five for an Ao100.
+                </SettingsChoice>
               </div>
-            </div>
-          </div>
+            )}
 
-          <div className="setting-item">
-            <label>Tolerate DNFs In Means</label>
-            <input
-              type="checkbox"
-              checked={settings.tolerateDnfInMeans !== false}
-              onChange={(e) => updateSettings({ tolerateDnfInMeans: e.target.checked })}
-            />
-          </div>
-
-          <div className="setting-item setting-item--stacked">
-            <label />
-            <div className="settingsAverageTrim">
-              <div className="settingsAverageTrim__lede">
-                A mean removes nothing, so a DNF has nowhere to go. With this on, a best mean
-                may contain up to {MEAN_DNF_TOLERANCE_PERCENT * 100}% DNFs, which are left out
-                of the mean &mdash; so a Mo100 holding 5 DNFs is really a mean of 95. With it
-                off, a mean of N requires N successes. Mo3 is always strict either way, matching
-                the WCA definition.
+            {isSmartCube && smartCubeProvider === "moyu-wcu" ? (
+              <div className="settingsHintText">
+                MoYu AI / WCU uses its own Bluetooth path. Save settings first, then
+                connect from the timer. If the cube is found but won't sync, allow the
+                browser's Bluetooth "device advertisements" permission (Chrome) or pair
+                the cube once so its address is known.
               </div>
-              <table className="settingsAverageTrim__table">
-                <thead>
-                  <tr>
-                    <th scope="col">Mean</th>
-                    <th scope="col">DNFs allowed</th>
-                    <th scope="col">Solves averaged</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {MEAN_DNF_ROWS.map((row) => (
-                    <tr key={row.label}>
-                      <th scope="row">{row.label}</th>
-                      <td>{settings.tolerateDnfInMeans === false ? "none" : row.tolerated}</td>
-                      <td>
-                        {settings.tolerateDnfInMeans === false
-                          ? row.size
-                          : `${row.size - row.tolerated}\u2013${row.size}`}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="settingsAverageTrim__note">
-                Both variants are stored for every window, so this switches instantly and needs
-                no stats recompute.
-              </div>
-            </div>
-          </div>
+            ) : null}
 
-          <div className="setting-item">
-            <label>Non-Rolling Time List</label>
-            <input
-              type="checkbox"
-              checked={!settings.horizontalTimeList}
-              onChange={(e) => updateSettings({ horizontalTimeList: !e.target.checked })}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>Enable Horizontal TimeList Scrolling</label>
-            <input
-              type="checkbox"
-              checked={!!settings.horizontalTimeListScroll}
-              onChange={(e) =>
-                updateSettings({ horizontalTimeListScroll: e.target.checked })
-              }
-              disabled={!settings.horizontalTimeList}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>Horizontal TimeList Columns</label>
-            <select
-              value={settings.horizontalTimeListCols || "auto"}
-              onChange={(e) => updateSettings({ horizontalTimeListCols: e.target.value })}
-              disabled={!settings.horizontalTimeList}
-            >
-              <option value="auto">Auto (12 desktop, 5 small)</option>
-              <option value="12">Force 12</option>
-              <option value="5">Force 5</option>
-            </select>
-          </div>
-
-          <div className="setting-item">
-            <label>Non-Rolling Columns</label>
-            <select
-              value={settings.nonRollingTimeListCols || "auto"}
-              onChange={(e) => updateSettings({ nonRollingTimeListCols: e.target.value })}
-              disabled={!!settings.horizontalTimeList}
-            >
-              <option value="auto">Auto (12 desktop, 5 small)</option>
-              <option value="12">Always 12</option>
-              <option value="5">Always 5</option>
-            </select>
-          </div>
-
-          <div className="setting-item">
-            <label>Non-Rolling Max Rows</label>
-            <select
-              value={String(settings.nonRollingTimeListMaxRows || 3)}
-              onChange={(e) =>
-                updateSettings({ nonRollingTimeListMaxRows: Number(e.target.value) })
-              }
-              disabled={!!settings.horizontalTimeList}
-            >
-              <option value="3">3 rows</option>
-              <option value="2">2 rows</option>
-              <option value="1">1 row</option>
-            </select>
-          </div>
-
-          <div className="setting-item">
-            <label>WCA Inspection</label>
-            <input
-              type="checkbox"
-              checked={!!settings.inspectionEnabled}
-              onChange={(e) => updateSettings({ inspectionEnabled: e.target.checked })}
-              disabled={isGanTimer || isGanCube}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>Inspection Beeps</label>
-            <input
-              type="checkbox"
-              checked={!!settings.inspectionBeeps}
-              onChange={(e) => updateSettings({ inspectionBeeps: e.target.checked })}
-              disabled={!settings.inspectionEnabled || isGanTimer || isGanCube}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>Fullscreen Inspection</label>
-            <input
-              type="checkbox"
-              checked={!!settings.inspectionFullscreen}
-              onChange={(e) => updateSettings({ inspectionFullscreen: e.target.checked })}
-              disabled={!settings.inspectionEnabled || isGanTimer || isGanCube}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>Inspection Style</label>
-            <select
-              value={settings.inspectionCountDirection || "down"}
-              onChange={(e) =>
-                updateSettings({ inspectionCountDirection: e.target.value })
-              }
-              disabled={!settings.inspectionEnabled || isGanTimer || isGanCube}
-            >
-              <option value="down">Countdown (15 → 0)</option>
-              <option value="up">Count up (0 → 15)</option>
-            </select>
-          </div>
-
-          <h2>Home Stat Overlays</h2>
-          <div className="settingsHintText settingsHintText--tight">
-            These charts float on top of the home page without changing the timer or averages
-            layout underneath.
-          </div>
-
-          <div className="setting-item">
-            <label>Home Graph Recent Solves (0 = all)</label>
-            <input
-              type="number"
-              min="0"
-              max="10000"
-              step="1"
-              value={Number.isFinite(homeStatsSolveLimit) ? homeStatsSolveLimit : 50}
-              onChange={(e) =>
-                updateSettings({
-                  homeStatsSolveLimit: Math.max(0, Number(e.target.value) || 0),
-                })
-              }
-            />
-          </div>
-
-          {HOME_STAT_SLOT_ORDER.map((slotKey) => {
-            const slot = homeStatSlots[slotKey];
-            const meta = HOME_STAT_SLOT_META[slotKey];
-            const metricOptions = getHomeStatMetricOptions(slot.chartType);
-
-            return (
-              <div className="settingsSubsection" key={slotKey}>
-                <div className="settingsSubsectionTitle">{meta.label}</div>
-
+            {isGanCube && (
+              <>
                 <div className="setting-item">
-                  <label>Enabled</label>
+                  <label>Cube Auto Start</label>
                   <input
                     type="checkbox"
-                    checked={!!slot.enabled}
-                    onChange={(e) => updateHomeStatSlot(slotKey, { enabled: e.target.checked })}
+                    checked={!!settings.cubeAutoStart}
+                    onChange={(e) => updateSettings({ cubeAutoStart: e.target.checked })}
                   />
                 </div>
 
                 <div className="setting-item">
-                  <label>Chart Type</label>
-                  <select
-                    value={slot.chartType}
-                    onChange={(e) =>
-                      updateHomeStatSlot(slotKey, {
-                        chartType: e.target.value,
-                        ...(e.target.value === "summary" ? { summaryColorCustomized: false } : {}),
-                      })
-                    }
-                  >
-                    {HOME_STAT_CHART_TYPE_OPTIONS.map((option) => (
-                      <option key={`${slotKey}-${option.value}`} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <label>Cube Auto Stop</label>
+                  <input
+                    type="checkbox"
+                    checked={!!settings.cubeAutoStop}
+                    onChange={(e) => updateSettings({ cubeAutoStop: e.target.checked })}
+                  />
                 </div>
 
                 <div className="setting-item">
-                  <label>Color Scheme</label>
-                  <select
-                    value={slot.colorScheme || "default"}
+                  <label>Auto Stop Idle (ms)</label>
+                  <input
+                    value={settings.cubeStopIdleMs ?? 1200}
                     onChange={(e) =>
-                      updateHomeStatSlot(slotKey, {
-                        colorScheme: e.target.value,
-                        ...(slot.chartType === "summary" ? { summaryColorCustomized: true } : {}),
-                      })
+                      updateSettings({ cubeStopIdleMs: Number(e.target.value) || 1200 })
                     }
-                  >
-                    {HOME_STAT_COLOR_SCHEME_OPTIONS.map((option) => (
-                      <option key={`${slotKey}-color-${option.value}`} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
 
-                {metricOptions.length > 0 && (
-                  <div className="setting-item">
-                    <label>{slot.chartType === "pie" ? "Breakdown" : "Metric"}</label>
-                    <select
-                      value={slot.chartType === "pie" ? slot.pieBreakdown : slot.lineMetric}
-                      onChange={(e) =>
-                        updateHomeStatSlot(
-                          slotKey,
-                          slot.chartType === "pie"
-                            ? { pieBreakdown: e.target.value }
-                            : { lineMetric: e.target.value }
-                        )
-                      }
-                    >
-                      {metricOptions.map((option) => (
-                        <option key={`${slotKey}-metric-${option.value}`} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                <div className="setting-item">
+                  <label>Show 3D Cube</label>
+                  <input
+                    type="checkbox"
+                    checked={settings.cubeShow3D !== false}
+                    onChange={(e) => updateSettings({ cubeShow3D: e.target.checked })}
+                  />
+                </div>
+              </>
+            )}
 
-                {slot.chartType === "line" && (
-                  <div className="setting-item">
-                    <label>Group By</label>
-                    <select
-                      value={slot.lineGroupBy}
-                      onChange={(e) => updateHomeStatSlot(slotKey, { lineGroupBy: e.target.value })}
-                    >
-                      {HOME_STAT_LINE_GROUP_OPTIONS.map((option) => (
-                        <option key={`${slotKey}-group-${option.value}`} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+            <div className="setting-item">
+              <label>Disable On-Screen Keypad</label>
+              <input
+                type="checkbox"
+                checked={!!settings.disableKeypad}
+                onChange={(e) => updateSettings({ disableKeypad: e.target.checked })}
+              />
+            </div>
 
-                {slot.chartType === "percent" && (
+            <div className="setting-item">
+              <label>Show Add Solve Button</label>
+              <input
+                type="checkbox"
+                checked={settings.showAddSolveButton !== false}
+                onChange={(e) => updateSettings({ showAddSolveButton: e.target.checked })}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Hide Timer Input + Solve Source On Home</label>
+              <input
+                type="checkbox"
+                checked={!!settings.hideAutomaticHomeTags}
+                onChange={(e) =>
+                  updateSettings({ hideAutomaticHomeTags: e.target.checked })
+                }
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Relay Timing Mode</label>
+              <SettingsChoice
+                value={settings.relayMode || "total"}
+                onChange={(e) => updateSettings({ relayMode: e.target.value })}
+              >
+                <option value="total">Single total time (default)</option>
+                <option value="legs">Per-leg times (auto-advance)</option>
+              </SettingsChoice>
+            </div>
+
+            <h3 className="settingsSectionSubheading">Scramble</h3>
+
+            <div className="setting-item">
+              <label>Scramble Type:</label>
+              <SettingsChoice
+                value={scrambleMode}
+                onChange={(e) =>
+                  updateSettings({
+                    scrambleMode: normalizeScrambleModeForUi(e.target.value),
+                  })
+                }
+              >
+                {SCRAMBLE_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </SettingsChoice>
+            </div>
+
+            <div className="settingsHintText settingsHintText--tight">
+              Random State uses cubing.js for supported WCA events. Legacy uses your
+              previous scramble generator behavior.
+            </div>
+
+            <h3 className="settingsSectionSubheading">Inspection</h3>
+
+            <div className="setting-item">
+              <label>WCA Inspection</label>
+              <input
+                type="checkbox"
+                checked={!!settings.inspectionEnabled}
+                onChange={(e) => updateSettings({ inspectionEnabled: e.target.checked })}
+                disabled={isGanTimer || isGanCube}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Inspection Beeps</label>
+              <input
+                type="checkbox"
+                checked={!!settings.inspectionBeeps}
+                onChange={(e) => updateSettings({ inspectionBeeps: e.target.checked })}
+                disabled={!settings.inspectionEnabled || isGanTimer || isGanCube}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Fullscreen Inspection</label>
+              <input
+                type="checkbox"
+                checked={!!settings.inspectionFullscreen}
+                onChange={(e) => updateSettings({ inspectionFullscreen: e.target.checked })}
+                disabled={!settings.inspectionEnabled || isGanTimer || isGanCube}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Inspection Style</label>
+              <SettingsChoice
+                value={settings.inspectionCountDirection || "down"}
+                onChange={(e) =>
+                  updateSettings({ inspectionCountDirection: e.target.value })
+                }
+                disabled={!settings.inspectionEnabled || isGanTimer || isGanCube}
+              >
+                <option value="down">Countdown (15 → 0)</option>
+                <option value="up">Count up (0 → 15)</option>
+              </SettingsChoice>
+            </div>
+          </div>
+        </section>
+
+        <section className="settingsSection" id="settings-section-layout" data-settings-section="layout" ref={registerSection("layout")}>
+          <h2>Home Layout</h2>
+          <div className="settings-container">
+            <h3 className="settingsSectionSubheading">Time List</h3>
+
+            <div className="setting-item">
+              <label>Non-Rolling Time List</label>
+              <input
+                type="checkbox"
+                checked={!settings.horizontalTimeList}
+                onChange={(e) => updateSettings({ horizontalTimeList: !e.target.checked })}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Enable Horizontal TimeList Scrolling</label>
+              <input
+                type="checkbox"
+                checked={!!settings.horizontalTimeListScroll}
+                onChange={(e) =>
+                  updateSettings({ horizontalTimeListScroll: e.target.checked })
+                }
+                disabled={!settings.horizontalTimeList}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Horizontal TimeList Columns</label>
+              <SettingsChoice
+                value={settings.horizontalTimeListCols || "auto"}
+                onChange={(e) => updateSettings({ horizontalTimeListCols: e.target.value })}
+                disabled={!settings.horizontalTimeList}
+              >
+                <option value="auto">Auto (12 desktop, 5 small)</option>
+                <option value="12">Force 12</option>
+                <option value="5">Force 5</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="setting-item">
+              <label>Non-Rolling Columns</label>
+              <SettingsChoice
+                value={settings.nonRollingTimeListCols || "auto"}
+                onChange={(e) => updateSettings({ nonRollingTimeListCols: e.target.value })}
+                disabled={!!settings.horizontalTimeList}
+              >
+                <option value="auto">Auto (12 desktop, 5 small)</option>
+                <option value="12">Always 12</option>
+                <option value="5">Always 5</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="setting-item">
+              <label>Non-Rolling Max Rows</label>
+              <SettingsChoice
+                value={String(settings.nonRollingTimeListMaxRows || 3)}
+                onChange={(e) =>
+                  updateSettings({ nonRollingTimeListMaxRows: Number(e.target.value) })
+                }
+                disabled={!!settings.horizontalTimeList}
+              >
+                <option value="3">3 rows</option>
+                <option value="2">2 rows</option>
+                <option value="1">1 row</option>
+              </SettingsChoice>
+            </div>
+
+            <h3 className="settingsSectionSubheading">Beside Timer</h3>
+
+            <div className="setting-item">
+              <label>Left Of Timer</label>
+              <SettingsChoice
+                value={settings.homeLeftOfTimer || "none"}
+                onChange={(e) => updateSettings({ homeLeftOfTimer: e.target.value })}
+              >
+                <option value="none">Nothing (both below)</option>
+                <option value="timelist">Time List (vertical)</option>
+                <option value="averages">Averages (vertical)</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="settingsHintText settingsHintText--tight">
+              Moves the time list or averages beside the timer as a vertical column. On narrow
+              screens it falls back to the normal layout below the timer.
+            </div>
+
+            <div className="setting-item">
+              <label>Averages Order</label>
+              <SettingsChoice
+                value={settings.homeAveragesOrder || "single-last"}
+                onChange={(e) => updateSettings({ homeAveragesOrder: e.target.value })}
+              >
+                <option value="single-last">Single last (AO100 → Single)</option>
+                <option value="single-first">Single first (Single → AO100)</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="setting-item">
+              <label>Vertical Time List Order</label>
+              <SettingsChoice
+                value={settings.verticalTimeListOrder || "newest-first"}
+                onChange={(e) => updateSettings({ verticalTimeListOrder: e.target.value })}
+              >
+                <option value="newest-first">Newest at top</option>
+                <option value="newest-last">Newest at bottom</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="settingsHintText settingsHintText--tight">
+              Averages Order flips the columns below the timer and the rows in the vertical
+              averages. Vertical Time List Order applies to the time list beside the timer.
+            </div>
+          </div>
+        </section>
+
+        <section className="settingsSection" id="settings-section-averages" data-settings-section="averages" ref={registerSection("averages")}>
+          <h2>Averages</h2>
+          <div className="settings-container">
+            <div className="setting-item">
+              <label>Stats Summary Layout</label>
+              <SettingsChoice
+                value={settings.statsSummaryLayout || "row"}
+                onChange={(e) => updateSettings({ statsSummaryLayout: e.target.value })}
+              >
+                <option value="row">Row view</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="setting-item">
+              <label>Show Strict Averages</label>
+              <input
+                type="checkbox"
+                checked={settings.showStrictAverages !== false}
+                onChange={(e) => updateSettings({ showStrictAverages: e.target.checked })}
+              />
+            </div>
+
+            <div className="settingsHintText settingsHintText--tight">
+              Controls the Strict column on the home page averages table and the Strict values in
+              overall stats summaries.
+            </div>
+
+            <div className="setting-item setting-item--stacked">
+              <label>Average Trimming</label>
+              <div className="settingsAverageTrim">
+                <div className="settingsAverageTrim__lede">
+                  Averages drop the fastest and slowest {AVERAGE_TRIM_PERCENT * 100}% of the window
+                  from each end, never fewer than one solve &mdash; the convention csTimer and most
+                  other timers use. At Ao5 and Ao12 that works out to a single solve per side, so
+                  those stay identical to the WCA definition. Mo3 is a straight mean with nothing
+                  removed.
+                </div>
+                <table className="settingsAverageTrim__table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Average</th>
+                      <th scope="col">Removed each end</th>
+                      <th scope="col">Solves counted</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {AVERAGE_TRIM_ROWS.map((row) => (
+                      <tr key={row.label}>
+                        <th scope="row">{row.label}</th>
+                        <td>{row.trim === 0 ? "none" : row.trim}</td>
+                        <td>{row.counted}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="settingsAverageTrim__note">
+                  DNFs count as the slowest solves, so the trim absorbs them. An average is only a
+                  DNF once it holds more DNFs than there are removed slots &mdash; one for Ao5 and
+                  Ao12, five for an Ao100.
+                </div>
+              </div>
+            </div>
+
+            <div className="setting-item">
+              <label>Tolerate DNFs In Means</label>
+              <input
+                type="checkbox"
+                checked={settings.tolerateDnfInMeans !== false}
+                onChange={(e) => updateSettings({ tolerateDnfInMeans: e.target.checked })}
+              />
+            </div>
+
+            <div className="setting-item setting-item--stacked">
+              <label />
+              <div className="settingsAverageTrim">
+                <div className="settingsAverageTrim__lede">
+                  A mean removes nothing, so a DNF has nowhere to go. With this on, a best mean
+                  may contain up to {MEAN_DNF_TOLERANCE_PERCENT * 100}% DNFs, which are left out
+                  of the mean &mdash; so a Mo100 holding 5 DNFs is really a mean of 95. With it
+                  off, a mean of N requires N successes. Mo3 is always strict either way, matching
+                  the WCA definition.
+                </div>
+                <table className="settingsAverageTrim__table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Mean</th>
+                      <th scope="col">DNFs allowed</th>
+                      <th scope="col">Solves averaged</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {MEAN_DNF_ROWS.map((row) => (
+                      <tr key={row.label}>
+                        <th scope="row">{row.label}</th>
+                        <td>{settings.tolerateDnfInMeans === false ? "none" : row.tolerated}</td>
+                        <td>
+                          {settings.tolerateDnfInMeans === false
+                            ? row.size
+                            : `${row.size - row.tolerated}\u2013${row.size}`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="settingsAverageTrim__note">
+                  Both variants are stored for every window, so this switches instantly and needs
+                  no stats recompute.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="settingsSection" id="settings-section-overlays" data-settings-section="overlays" ref={registerSection("overlays")}>
+          <h2>Home Stat Overlays</h2>
+          <div className="settings-container">
+            <div className="settingsHintText settingsHintText--tight">
+              These charts float on top of the home page without changing the timer or averages
+              layout underneath.
+            </div>
+
+            <div className="setting-item">
+              <label>Home Graph Recent Solves (0 = all)</label>
+              <input
+                type="number"
+                min="0"
+                max="10000"
+                step="1"
+                value={Number.isFinite(homeStatsSolveLimit) ? homeStatsSolveLimit : 50}
+                onChange={(e) =>
+                  updateSettings({
+                    homeStatsSolveLimit: Math.max(0, Number(e.target.value) || 0),
+                  })
+                }
+              />
+            </div>
+
+            {HOME_STAT_SLOT_ORDER.map((slotKey) => {
+              const slot = homeStatSlots[slotKey];
+              const meta = HOME_STAT_SLOT_META[slotKey];
+              const metricOptions = getHomeStatMetricOptions(slot.chartType);
+
+              return (
+                <div className="settingsSubsection" key={slotKey}>
+                  <div className="settingsSubsectionTitle">{meta.label}</div>
+
                   <div className="setting-item">
-                    <label>Threshold (s)</label>
+                    <label>Enabled</label>
                     <input
-                      type="number"
-                      min="1"
-                      max="300"
-                      step="0.1"
-                      value={slot.percentThresholdSeconds}
+                      type="checkbox"
+                      checked={!!slot.enabled}
+                      onChange={(e) => updateHomeStatSlot(slotKey, { enabled: e.target.checked })}
+                    />
+                  </div>
+
+                  <div className="setting-item">
+                    <label>Chart Type</label>
+                    <SettingsChoice
+                      value={slot.chartType}
                       onChange={(e) =>
                         updateHomeStatSlot(slotKey, {
-                          percentThresholdSeconds: Number(e.target.value) || 10,
+                          chartType: e.target.value,
+                          ...(e.target.value === "summary" ? { summaryColorCustomized: false } : {}),
+                        })
+                      }
+                    >
+                      {HOME_STAT_CHART_TYPE_OPTIONS.map((option) => (
+                        <option key={`${slotKey}-${option.value}`} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </SettingsChoice>
+                  </div>
+
+                  <div className="setting-item">
+                    <label>Color Scheme</label>
+                    <SettingsChoice
+                      value={slot.colorScheme || "default"}
+                      onChange={(e) =>
+                        updateHomeStatSlot(slotKey, {
+                          colorScheme: e.target.value,
+                          ...(slot.chartType === "summary" ? { summaryColorCustomized: true } : {}),
+                        })
+                      }
+                    >
+                      {HOME_STAT_COLOR_SCHEME_OPTIONS.map((option) => (
+                        <option key={`${slotKey}-color-${option.value}`} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </SettingsChoice>
+                  </div>
+
+                  {metricOptions.length > 0 && (
+                    <div className="setting-item">
+                      <label>{slot.chartType === "pie" ? "Breakdown" : "Metric"}</label>
+                      <SettingsChoice
+                        value={slot.chartType === "pie" ? slot.pieBreakdown : slot.lineMetric}
+                        onChange={(e) =>
+                          updateHomeStatSlot(
+                            slotKey,
+                            slot.chartType === "pie"
+                              ? { pieBreakdown: e.target.value }
+                              : { lineMetric: e.target.value }
+                          )
+                        }
+                      >
+                        {metricOptions.map((option) => (
+                          <option key={`${slotKey}-metric-${option.value}`} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </SettingsChoice>
+                    </div>
+                  )}
+
+                  {slot.chartType === "line" && (
+                    <div className="setting-item">
+                      <label>Group By</label>
+                      <SettingsChoice
+                        value={slot.lineGroupBy}
+                        onChange={(e) => updateHomeStatSlot(slotKey, { lineGroupBy: e.target.value })}
+                      >
+                        {HOME_STAT_LINE_GROUP_OPTIONS.map((option) => (
+                          <option key={`${slotKey}-group-${option.value}`} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </SettingsChoice>
+                    </div>
+                  )}
+
+                  {slot.chartType === "percent" && (
+                    <div className="setting-item">
+                      <label>Threshold (s)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="300"
+                        step="0.1"
+                        value={slot.percentThresholdSeconds}
+                        onChange={(e) =>
+                          updateHomeStatSlot(slotKey, {
+                            percentThresholdSeconds: Number(e.target.value) || 10,
+                          })
+                        }
+                      />
+                    </div>
+                  )}
+
+                  {slot.chartType === "summary" && (
+                    <>
+                      <div className="setting-item">
+                        <label>Summary Layout</label>
+                        <SettingsChoice
+                          value={slot.summaryLayout || "tile"}
+                          onChange={(e) =>
+                            updateHomeStatSlot(slotKey, { summaryLayout: e.target.value })
+                          }
+                        >
+                          {HOME_STAT_SUMMARY_LAYOUT_OPTIONS.map((option) => (
+                            <option key={`${slotKey}-summary-layout-${option.value}`} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </SettingsChoice>
+                      </div>
+
+                      <div className="setting-item">
+                        <label>Show Summary Meta</label>
+                        <input
+                          type="checkbox"
+                          checked={!!slot.summaryShowMeta}
+                          onChange={(e) =>
+                            updateHomeStatSlot(slotKey, { summaryShowMeta: e.target.checked })
+                          }
+                        />
+                      </div>
+
+                      <div className="setting-item">
+                        <label>Surface Style</label>
+                        <SettingsChoice
+                          value={slot.summarySurface || "flat"}
+                          onChange={(e) =>
+                            updateHomeStatSlot(slotKey, { summarySurface: e.target.value })
+                          }
+                        >
+                          {HOME_STAT_SUMMARY_SURFACE_OPTIONS.map((option) => (
+                            <option key={`${slotKey}-summary-surface-${option.value}`} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </SettingsChoice>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="setting-item">
+                    <label>Width (px)</label>
+                    <input
+                      type="number"
+                      min="120"
+                      max="1200"
+                      step="10"
+                      value={slot.width}
+                      onChange={(e) =>
+                        updateHomeStatSlot(slotKey, { width: Number(e.target.value) || slot.width })
+                      }
+                    />
+                  </div>
+
+                  <div className="setting-item">
+                    <label>Height (px)</label>
+                    <input
+                      type="number"
+                      min="90"
+                      max="700"
+                      step="10"
+                      value={slot.height}
+                      onChange={(e) =>
+                        updateHomeStatSlot(slotKey, { height: Number(e.target.value) || slot.height })
+                      }
+                    />
+                  </div>
+
+                  <div className="setting-item">
+                    <label>Opacity</label>
+                    <input
+                      type="number"
+                      min="0.05"
+                      max="1"
+                      step="0.05"
+                      value={slot.opacity}
+                      onChange={(e) =>
+                        updateHomeStatSlot(slotKey, {
+                          opacity: Math.max(0.05, Math.min(1, Number(e.target.value) || slot.opacity)),
                         })
                       }
                     />
                   </div>
-                )}
-
-                {slot.chartType === "summary" && (
-                  <>
-                    <div className="setting-item">
-                      <label>Summary Layout</label>
-                      <select
-                        value={slot.summaryLayout || "tile"}
-                        onChange={(e) =>
-                          updateHomeStatSlot(slotKey, { summaryLayout: e.target.value })
-                        }
-                      >
-                        {HOME_STAT_SUMMARY_LAYOUT_OPTIONS.map((option) => (
-                          <option key={`${slotKey}-summary-layout-${option.value}`} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="setting-item">
-                      <label>Show Summary Meta</label>
-                      <input
-                        type="checkbox"
-                        checked={!!slot.summaryShowMeta}
-                        onChange={(e) =>
-                          updateHomeStatSlot(slotKey, { summaryShowMeta: e.target.checked })
-                        }
-                      />
-                    </div>
-
-                    <div className="setting-item">
-                      <label>Surface Style</label>
-                      <select
-                        value={slot.summarySurface || "flat"}
-                        onChange={(e) =>
-                          updateHomeStatSlot(slotKey, { summarySurface: e.target.value })
-                        }
-                      >
-                        {HOME_STAT_SUMMARY_SURFACE_OPTIONS.map((option) => (
-                          <option key={`${slotKey}-summary-surface-${option.value}`} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </>
-                )}
-
-                <div className="setting-item">
-                  <label>Width (px)</label>
-                  <input
-                    type="number"
-                    min="120"
-                    max="1200"
-                    step="10"
-                    value={slot.width}
-                    onChange={(e) =>
-                      updateHomeStatSlot(slotKey, { width: Number(e.target.value) || slot.width })
-                    }
-                  />
                 </div>
+              );
+            })}
+          </div>
+        </section>
 
-                <div className="setting-item">
-                  <label>Height (px)</label>
-                  <input
-                    type="number"
-                    min="90"
-                    max="700"
-                    step="10"
-                    value={slot.height}
-                    onChange={(e) =>
-                      updateHomeStatSlot(slotKey, { height: Number(e.target.value) || slot.height })
-                    }
-                  />
-                </div>
-
-                <div className="setting-item">
-                  <label>Opacity</label>
-                  <input
-                    type="number"
-                    min="0.05"
-                    max="1"
-                    step="0.05"
-                    value={slot.opacity}
-                    onChange={(e) =>
-                      updateHomeStatSlot(slotKey, {
-                        opacity: Math.max(0.05, Math.min(1, Number(e.target.value) || slot.opacity)),
-                      })
-                    }
-                  />
-                </div>
-              </div>
-            );
-          })}
-
+        <section className="settingsSection" id="settings-section-keys" data-settings-section="keys" ref={registerSection("keys")}>
           <h2>Key Bindings</h2>
           <div className="settings-container">
             <div className="setting-item">
@@ -1838,215 +2065,221 @@ function Settings({
               </div>
             ))}
           </div>
-        </div>
+        </section>
 
-        <h2>Profile Settings</h2>
-        <div className="settings-container">
-          <div className="setting-item">
-            <label>Name:</label>
-            <input
-              value={profileData.Name}
-              onChange={(e) => handleProfileChange("Name", e.target.value)}
-            />
+        <section className="settingsSection" id="settings-section-profile" data-settings-section="profile" ref={registerSection("profile")}>
+          <h2>Profile Settings</h2>
+          <div className="settings-container">
+            <div className="setting-item">
+              <label>Name:</label>
+              <input
+                value={profileData.Name}
+                onChange={(e) => handleProfileChange("Name", e.target.value)}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Color:</label>
+              <input
+                type="color"
+                value={profileData.Color}
+                onChange={(e) => handleProfileChange("Color", e.target.value)}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Profile Event:</label>
+              <input
+                value={profileData.ProfileEvent}
+                onChange={(e) => handleProfileChange("ProfileEvent", e.target.value)}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Profile Scramble:</label>
+              <input
+                value={profileData.ProfileScramble}
+                onChange={(e) => handleProfileChange("ProfileScramble", e.target.value)}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Chosen Stats:</label>
+              <input
+                value={profileData.ChosenStats.join(", ")}
+                onChange={(e) => handleCommaListChange("ChosenStats", e.target.value)}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Date Founded:</label>
+              <input
+                value={profileData.DateFounded}
+                onChange={(e) => handleProfileChange("DateFounded", e.target.value)}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Cube Collection:</label>
+              <input
+                value={profileData.CubeCollection.join(", ")}
+                onChange={(e) => handleCommaListChange("CubeCollection", e.target.value)}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>WCA ID:</label>
+              <input
+                value={profileData.WCAID}
+                onChange={(e) => handleProfileChange("WCAID", e.target.value)}
+              />
+            </div>
+
+            <div className="setting-item settingsActionsRow">
+              <label>Tutorial:</label>
+              <div className="settingsActionGroup">
+                <button
+                  type="button"
+                  className="settingsActionButton settingsActionButtonSecondary"
+                  onClick={onOpenTutorial}
+                >
+                  Open Tutorial
+                </button>
+              </div>
+            </div>
           </div>
+        </section>
 
-          <div className="setting-item">
-            <label>Color:</label>
-            <input
-              type="color"
-              value={profileData.Color}
-              onChange={(e) => handleProfileChange("Color", e.target.value)}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>Profile Event:</label>
-            <input
-              value={profileData.ProfileEvent}
-              onChange={(e) => handleProfileChange("ProfileEvent", e.target.value)}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>Profile Scramble:</label>
-            <input
-              value={profileData.ProfileScramble}
-              onChange={(e) => handleProfileChange("ProfileScramble", e.target.value)}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>Chosen Stats:</label>
-            <input
-              value={profileData.ChosenStats.join(", ")}
-              onChange={(e) => handleCommaListChange("ChosenStats", e.target.value)}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>Date Founded:</label>
-            <input
-              value={profileData.DateFounded}
-              onChange={(e) => handleProfileChange("DateFounded", e.target.value)}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>Cube Collection:</label>
-            <input
-              value={profileData.CubeCollection.join(", ")}
-              onChange={(e) => handleCommaListChange("CubeCollection", e.target.value)}
-            />
-          </div>
-
-          <div className="setting-item">
-            <label>WCA ID:</label>
-            <input
-              value={profileData.WCAID}
-              onChange={(e) => handleProfileChange("WCAID", e.target.value)}
-            />
-          </div>
-
-          <div className="setting-item settingsActionsRow">
-            <label>Tutorial:</label>
-            <div className="settingsActionGroup">
+        <section className="settingsSection" id="settings-section-wca" data-settings-section="wca" ref={registerSection("wca")}>
+          <h2>WCA Import</h2>
+          <div className="settings-container">
+            <div className="setting-item">
+              <label>Sync:</label>
               <button
                 type="button"
-                className="settingsActionButton settingsActionButtonSecondary"
-                onClick={onOpenTutorial}
+                className="settingsActionButton"
+                onClick={handleWcaSync}
+                disabled={!userID || isSaving || isSyncingWca || !String(profileData.WCAID || "").trim()}
               >
-                Open Tutorial
+                {isSyncingWca ? "Importing..." : wcaButtonLabel}
               </button>
             </div>
-          </div>
-        </div>
 
-        <h2>WCA Import</h2>
-        <div className="settings-container">
-          <div className="setting-item">
-            <label>Sync:</label>
-            <button
-              type="button"
-              className="settingsActionButton"
-              onClick={handleWcaSync}
-              disabled={!userID || isSaving || isSyncingWca || !String(profileData.WCAID || "").trim()}
-            >
-              {isSyncingWca ? "Importing..." : wcaButtonLabel}
-            </button>
-          </div>
-
-          <div className="setting-item">
-            <label>Last Sync:</label>
-            <div className="settingsStaticValue">{wcaLastSyncText}</div>
-          </div>
-
-          <div className="setting-item">
-            <label>Solve Source:</label>
-            <input
-              type="text"
-              value={defaultWcaSolveSource}
-              onChange={(e) => updateSettings({ wcaImportSolveSource: e.target.value })}
-              placeholder="WCA"
-            />
-          </div>
-
-          {WCA_IMPORT_EVENT_OPTIONS.map(({ code, label }) => (
-            <div className="setting-item" key={code}>
-              <label>{label} Session:</label>
-              <select
-                value={settings?.wcaImportSessionByEvent?.[code] || "main"}
-                onChange={(e) => handleWcaSessionChange(code, e.target.value)}
-              >
-                {(sessionOptionsByEvent?.[code] || [{ id: "main", label: "Main" }]).map(
-                  (option) => (
-                    <option key={`${code}-${option.id}`} value={option.id}>
-                      {option.label}
-                    </option>
-                  )
-                )}
-              </select>
+            <div className="setting-item">
+              <label>Last Sync:</label>
+              <div className="settingsStaticValue">{wcaLastSyncText}</div>
             </div>
-          ))}
 
-          <div className="settingsHintText">
-            WCA imports use the selected session for each event and tag imported solves with
-            the fixed `Solve Source` tag so you can filter them later.
-          </div>
-
-          {wcaSyncSummary ? <div className="settingsHintText">{wcaSyncSummary}</div> : null}
-        </div>
-
-        <h2>Cube Collection</h2>
-        <div className="settings-container">
-          <div className="settingsHintText settingsHintText--sectionStart">
-            Add cube models by puzzle type. Families like `3x3`, `3x3 OH`, and `3x3 BLD` share the same model list.
-          </div>
-
-          <div className="settingsCubeCollectionGrid">
-            {CUBE_MODEL_GROUPS.map((group) => (
-              <CubeCollectionCardEditor
-                key={group.key}
-                title={group.label}
-                meta={
-                  group.aliases.length > 0 ? `Used by: ${group.aliases.join(", ")}` : "Shared list"
-                }
-                options={getCubeModelGroupOptions(tagConfig, group.key)}
-                tagColors={getTagColorMapForEvent(tagColorCatalog, group.key)?.CubeModel || {}}
-                onAddOption={(value) => addCubeModelToGroup(group.key, value)}
-                onRemoveOption={(value) => removeCubeModelFromGroup(group.key, value)}
+            <div className="setting-item">
+              <label>Solve Source:</label>
+              <input
+                type="text"
+                value={defaultWcaSolveSource}
+                onChange={(e) => updateSettings({ wcaImportSolveSource: e.target.value })}
+                placeholder="WCA"
               />
+            </div>
+
+            {WCA_IMPORT_EVENT_OPTIONS.map(({ code, label }) => (
+              <div className="setting-item" key={code}>
+                <label>{label} Session:</label>
+                <select
+                  value={settings?.wcaImportSessionByEvent?.[code] || "main"}
+                  onChange={(e) => handleWcaSessionChange(code, e.target.value)}
+                >
+                  {(sessionOptionsByEvent?.[code] || [{ id: "main", label: "Main" }]).map(
+                    (option) => (
+                      <option key={`${code}-${option.id}`} value={option.id}>
+                        {option.label}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
+            ))}
+
+            <div className="settingsHintText">
+              WCA imports use the selected session for each event and tag imported solves with
+              the fixed `Solve Source` tag so you can filter them later.
+            </div>
+
+            {wcaSyncSummary ? <div className="settingsHintText">{wcaSyncSummary}</div> : null}
+          </div>
+        </section>
+
+        <section className="settingsSection" id="settings-section-tags" data-settings-section="tags" ref={registerSection("tags")}>
+          <h2>Tags & Cubes</h2>
+          <div className="settings-container">
+            <h3 className="settingsSectionSubheading">Cube Collection</h3>
+
+            <div className="settingsHintText settingsHintText--sectionStart">
+              Add cube models by puzzle type. Families like `3x3`, `3x3 OH`, and `3x3 BLD` share the same model list.
+            </div>
+
+            <div className="settingsCubeCollectionGrid">
+              {CUBE_MODEL_GROUPS.map((group) => (
+                <CubeCollectionCardEditor
+                  key={group.key}
+                  title={group.label}
+                  meta={
+                    group.aliases.length > 0 ? `Used by: ${group.aliases.join(", ")}` : "Shared list"
+                  }
+                  options={getCubeModelGroupOptions(tagConfig, group.key)}
+                  tagColors={getTagColorMapForEvent(tagColorCatalog, group.key)?.CubeModel || {}}
+                  onAddOption={(value) => addCubeModelToGroup(group.key, value)}
+                  onRemoveOption={(value) => removeCubeModelFromGroup(group.key, value)}
+                />
+              ))}
+            </div>
+
+            <h3 className="settingsSectionSubheading">Tag Configuration</h3>
+
+            <div className="setting-item">
+              <label>{tagConfig?.Fixed?.CrossColor?.label || "Start Color"} Options:</label>
+              <input
+                value={(tagConfig?.Fixed?.CrossColor?.options || []).join(", ")}
+                onChange={(e) => handleFixedOptionsChange("CrossColor", e.target.value)}
+                placeholder="White, Yellow, Red, Orange, Blue, Green"
+              />
+            </div>
+
+            {customSlots.map((slot, index) => (
+              <React.Fragment key={slot.slot}>
+                <div className="setting-item">
+                  <label>{slot.slot} Label:</label>
+                  <input
+                    value={slot.label || ""}
+                    onChange={(e) =>
+                      handleCustomSlotChange(index, { label: e.target.value })
+                    }
+                    placeholder={`Custom tag ${index + 1}`}
+                  />
+                </div>
+
+                <div className="setting-item">
+                  <label>{slot.slot} Options:</label>
+                  <input
+                    value={(slot.options || []).join(", ")}
+                    onChange={(e) =>
+                      handleCustomSlotChange(index, {
+                        options: cleanArrayInput(e.target.value),
+                      })
+                    }
+                    placeholder="Home, Away, Comp"
+                  />
+                </div>
+              </React.Fragment>
             ))}
           </div>
-        </div>
-
-        <h2>Tag Configuration</h2>
-        <div className="settings-container">
-
-          <div className="setting-item">
-            <label>{tagConfig?.Fixed?.CrossColor?.label || "Start Color"} Options:</label>
-            <input
-              value={(tagConfig?.Fixed?.CrossColor?.options || []).join(", ")}
-              onChange={(e) => handleFixedOptionsChange("CrossColor", e.target.value)}
-              placeholder="White, Yellow, Red, Orange, Blue, Green"
-            />
-          </div>
-
-          {customSlots.map((slot, index) => (
-            <React.Fragment key={slot.slot}>
-              <div className="setting-item">
-                <label>{slot.slot} Label:</label>
-                <input
-                  value={slot.label || ""}
-                  onChange={(e) =>
-                    handleCustomSlotChange(index, { label: e.target.value })
-                  }
-                  placeholder={`Custom tag ${index + 1}`}
-                />
-              </div>
-
-              <div className="setting-item">
-                <label>{slot.slot} Options:</label>
-                <input
-                  value={(slot.options || []).join(", ")}
-                  onChange={(e) =>
-                    handleCustomSlotChange(index, {
-                      options: cleanArrayInput(e.target.value),
-                    })
-                  }
-                  placeholder="Home, Away, Comp"
-                />
-              </div>
-            </React.Fragment>
-          ))}
-        </div>
+        </section>
 
         {userID && (
-          <>
+          <section className="settingsSection" id="settings-section-stats" data-settings-section="stats" ref={registerSection("stats")}>
             <h2>Stats Recompute</h2>
             <div className="settings-container">
               <div className="setting-item">
                 <label>Scope:</label>
-                <select
+                <SettingsChoice
                   value={recomputeScope}
                   onChange={(e) => setRecomputeScope(e.target.value)}
                 >
@@ -2055,7 +2288,7 @@ function Settings({
                       {option.label}
                     </option>
                   ))}
-                </select>
+                </SettingsChoice>
               </div>
 
               <div className="setting-item">
@@ -2091,7 +2324,7 @@ function Settings({
                 <>
                   <div className="setting-item">
                     <label>Tag Key:</label>
-                    <select
+                    <SettingsChoice
                       value={recomputeTagKey}
                       onChange={(e) => setRecomputeTagKey(e.target.value)}
                     >
@@ -2100,7 +2333,7 @@ function Settings({
                           {option.label}
                         </option>
                       ))}
-                    </select>
+                    </SettingsChoice>
                   </div>
 
                   {recomputeTagValueOptions.length > 0 ? (
@@ -2188,13 +2421,63 @@ function Settings({
                 </div>
               </div>
             </div>
-          </>
+          </section>
         )}
 
-        <button className="save-button" onClick={saveAllChanges} disabled={isSaving}>
-          {isSaving ? "Saving..." : "Save All"}
-        </button>
+        <div className="settingsFooter">
+          <div className="settingsFooter__save">
+            <button className="save-button" onClick={saveAllChanges} disabled={isSaving}>
+              {isSaving ? "Saving..." : "Save All"}
+            </button>
+            {hasUnsavedChanges && (
+              <span className="settingsFooter__unsaved">Unsaved profile or tag changes</span>
+            )}
+          </div>
+          {userID && (
+            <button className="signOutButton" onClick={onSignOut}>
+              Sign Out
+            </button>
+          )}
+        </div>
       </div>
+
+      {showUnsavedPrompt && (
+        <div className="settingsUnsavedPrompt" role="alertdialog" aria-modal="true" aria-labelledby="settings-unsaved-title">
+          <div className="settingsUnsavedPrompt__card">
+            <h3 id="settings-unsaved-title">Save your changes?</h3>
+            <p>
+              You changed profile or tag settings that haven&rsquo;t been saved. Other settings
+              are already saved automatically.
+            </p>
+            <div className="settingsUnsavedPrompt__actions">
+              <button
+                type="button"
+                className="settingsActionButton settingsActionButtonSecondary"
+                onClick={() => setShowUnsavedPrompt(false)}
+                disabled={isSaving}
+              >
+                Keep Editing
+              </button>
+              <button
+                type="button"
+                className="settingsActionButton settingsActionButtonSecondary"
+                onClick={onClose}
+                disabled={isSaving}
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                className="settingsActionButton"
+                onClick={saveAndClose}
+                disabled={isSaving || !userID}
+              >
+                {isSaving ? "Saving..." : "Save & Close"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {statusMessage && <div className="status-message">{statusMessage}</div>}
     </div>

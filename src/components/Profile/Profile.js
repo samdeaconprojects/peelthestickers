@@ -1408,6 +1408,7 @@ function Profile({
                 <Post
                   key={`${post.DateTime || post.date}-${idx}`}
                   name={viewedProfile.Name || viewedProfile.name}
+                  user={viewedProfile}
                   date={
                     post.DateTime
                       ? formatPostDate(new Date(post.DateTime))

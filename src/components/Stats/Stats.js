@@ -465,6 +465,26 @@ function formatShortDateRangeLabel(startDay, endDay, fallback = "All Dates") {
   return `→ ${formatDay(endDay)}`;
 }
 
+function formatLongOrdinalDay(dayKey) {
+  if (!dayKey) return "";
+  const date = new Date(`${dayKey}T12:00:00`);
+  if (!isFiniteDate(date)) return "";
+  const day = date.getDate();
+  const teen = day % 100 >= 11 && day % 100 <= 13;
+  const suffix = teen ? "th" : ["th", "st", "nd", "rd"][day % 10] || "th";
+  const month = date.toLocaleDateString(undefined, { month: "long" });
+  return `${month} ${day}${suffix} ${date.getFullYear()}`;
+}
+
+function formatChartTitleDate(startDay, endDay) {
+  if (!startDay && !endDay) return "";
+  if (String(startDay || "") === ALL_TIME_START_DAY) return "All Time";
+  if (startDay && endDay && startDay !== endDay) {
+    return `${formatLongOrdinalDay(startDay)} – ${formatLongOrdinalDay(endDay)}`;
+  }
+  return formatLongOrdinalDay(startDay || endDay);
+}
+
 function parseIsoDayKey(dayKey) {
   if (!dayKey) return null;
   const date = new Date(`${dayKey}T12:00:00`);
@@ -1562,6 +1582,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const [loadingDateScopedSolves, setLoadingDateScopedSolves] = useState(false);
   const [dayBucketRangeData, setDayBucketRangeData] = useState({ items: [], aggregateSummary: null, scope: "" });
   const [dayBucketRangeKey, setDayBucketRangeKey] = useState("");
+  const [dayBucketRangeFailedKey, setDayBucketRangeFailedKey] = useState("");
   const [compareDayBucketRangeData, setCompareDayBucketRangeData] = useState({
     items: [],
     aggregateSummary: null,
@@ -2679,8 +2700,29 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       return;
     }
 
+    // Day buckets render this range on their own, so paging in every raw solve
+    // behind them is wasted work. Fall back to raw solves only when the bucket
+    // load failed or came back empty.
+    const bucketRangeSettledEmpty =
+      dayBucketRangeKey === dayBucketRangeRequestKey && !dayBucketRangeData.aggregateSummary;
+    const bucketRangeFailed = dayBucketRangeFailedKey === dayBucketRangeRequestKey;
+    if (canUseBucketRange && !preferRawDateRangeView && !bucketRangeSettledEmpty && !bucketRangeFailed) {
+      return;
+    }
+
     loadDateScopedSessionSolves();
-  }, [hasActiveDateFilter, isSolveLevelMode, loadDateScopedSessionSolves, statsViewMode]);
+  }, [
+    canUseBucketRange,
+    dayBucketRangeData.aggregateSummary,
+    dayBucketRangeFailedKey,
+    dayBucketRangeKey,
+    dayBucketRangeRequestKey,
+    hasActiveDateFilter,
+    isSolveLevelMode,
+    loadDateScopedSessionSolves,
+    preferRawDateRangeView,
+    statsViewMode,
+  ]);
 
   useEffect(() => {
     if (!canUseBucketRange || !dayBucketRangeRequestKey) {
@@ -2711,11 +2753,13 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           scope: data?.scope || bucketScopeQuery.scopeLabel,
         });
         setDayBucketRangeKey(dayBucketRangeRequestKey);
+        setDayBucketRangeFailedKey("");
       } catch (error) {
         if (cancelled) return;
         console.error("Failed to load day buckets:", error);
         setDayBucketRangeData({ items: [], aggregateSummary: null, scope: "" });
         setDayBucketRangeKey("");
+        setDayBucketRangeFailedKey(dayBucketRangeRequestKey);
       } finally {
         if (!cancelled) setLoadingDayBuckets(false);
       }
@@ -3784,6 +3828,40 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       : statsViewMode === "time"
         ? summaryCurrentSolves.length
         : activeStandardSolves.length;
+  // activeStandardSolves only holds the most recent loaded solves, so their
+  // fullIndex starts at 0. Offset by the older unloaded solves so summary
+  // ranges show real solve numbers. Only trusted when the cached total matches
+  // the loaded scope (standard view, no date/tag filter). Tag-filtered solves
+  // can predate the loaded window, so their numbers are hidden (null).
+  const summarySolveIndexOffset = useMemo(() => {
+    if (hasActiveTagFilter) return null;
+    if (statsViewMode !== "standard" || useBucketBackedRange) return 0;
+    if (hasActiveDateFilter) return 0;
+    const total = Number(effectiveOverallStats?.SolveCountTotal);
+    if (!Number.isFinite(total)) return 0;
+    return Math.max(0, total - activeStandardSolves.length);
+  }, [
+    activeStandardSolves.length,
+    effectiveOverallStats?.SolveCountTotal,
+    hasActiveDateFilter,
+    hasActiveTagFilter,
+    statsViewMode,
+    useBucketBackedRange,
+  ]);
+
+  const lineChartTitleDate = useMemo(
+    () => formatChartTitleDate(dateFilterStart, dateFilterEnd),
+    [dateFilterEnd, dateFilterStart]
+  );
+  const lineChartTitleIndexRange = useMemo(() => {
+    if (compareEnabled || useBucketBackedRange || statsViewMode !== "standard") return "";
+    if (summarySolveIndexOffset === null || !timeViewLineSolves.length) return "";
+    const first = Number(timeViewLineSolves[0]?.fullIndex);
+    const last = Number(timeViewLineSolves[timeViewLineSolves.length - 1]?.fullIndex);
+    if (!Number.isFinite(first) || !Number.isFinite(last)) return "";
+    const offset = summarySolveIndexOffset > 0 ? summarySolveIndexOffset : 0;
+    return `${(first + offset + 1).toLocaleString()}-${(last + offset + 1).toLocaleString()}`;
+  }, [compareEnabled, statsViewMode, summarySolveIndexOffset, timeViewLineSolves, useBucketBackedRange]);
   // Plus2BestMs / FirstSolveAt / TopSingles10 used to be detected as "missing"
   // here and repaired with a full recompute, because the incremental stats
   // writer never maintained them. It maintains them now (and repairs a stale
@@ -4006,7 +4084,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
       setDateFilterStart(start);
       setDateFilterEnd(end);
-      if (!start && !end) {
+      // A day drill-down pins the raw solve view; any range that isn't a single
+      // day has to release it or the charts stay on that day's raw solve page.
+      if (!start || !end || start !== end) {
         setPreferRawDateRangeView(false);
       }
       return true;
@@ -5642,6 +5722,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       selectedEvent: eventSelectLabel,
       selectedSession: selectedSessionDisplay,
       loadedSolveCount: loadedSolveCountForSummary,
+      solveIndexOffset: summarySolveIndexOffset,
       showCurrentMetrics: currentPage === 0,
       viewMode: statsViewMode,
       selectedDay: selectedTimeDay || "",
@@ -6027,6 +6108,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     showEventBreakdownCard,
     showingCount,
     loadedSolveCountForSummary,
+    summarySolveIndexOffset,
     canonicalOverallStats,
     stableOverallSolves,
     stableOverallStats,
@@ -6560,6 +6642,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
             mode={summaryMode}
             loadedSolveCount={loadedSolveCountForSummary}
+            solveIndexOffset={summarySolveIndexOffset}
             showCurrentMetrics={currentPage === 0}
             viewMode={statsViewMode}
             summaryLayout={summaryLayout}
@@ -6583,10 +6666,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             selectedTagLabel={selectedTagLabel}
             selectedTagPills={selectedTagPills}
             loadedSolveCount={loadedSolveCountForSummary}
+            solveIndexOffset={summarySolveIndexOffset}
             onStatSelect={handleSummaryStatSelect}
             profileColor={primaryAccentColor}
             loading={primaryOverallSummaryLoading}
-            showWorstOverview={showAllActive}
+            showWorstOverview={showAllActive || isAllTimeBucketOverview}
           />
         );
       }
@@ -6654,6 +6738,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             seriesStyle={primaryCompareStyle}
             legendItems={compareLegendItems}
             title={buildStatCardTitle(eventSelectLabel, selectedSessionDisplay)}
+            titleDate={lineChartTitleDate}
+            titleIndexRange={lineChartTitleIndexRange}
             deleteTime={handleDeleteSolve}
             addPost={addPost}
             setSessions={setSessions}
@@ -6828,6 +6914,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       sessionsList,
       setSessions,
       loadedSolveCountForSummary,
+      summarySolveIndexOffset,
       canonicalOverallStats,
       stableOverallSolves,
       stableOverallStats,
@@ -7936,6 +8023,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     eventBreakdownData={timeViewEventBreakdownData}
                     mode={summaryMode}
                     loadedSolveCount={loadedSolveCountForSummary}
+                    solveIndexOffset={summarySolveIndexOffset}
                     showCurrentMetrics={currentPage === 0}
                     viewMode={statsViewMode}
                     summaryLayout={summaryLayout}
@@ -7968,6 +8056,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     selectedTagLabel={selectedTagLabel}
                     selectedTagPills={selectedTagPills}
                     loadedSolveCount={loadedSolveCountForSummary}
+                    solveIndexOffset={summarySolveIndexOffset}
                     showCurrentMetrics={currentPage === 0}
                     viewMode={statsViewMode}
                     summaryLayout={summaryLayout}
@@ -8000,6 +8089,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                       selectedTagLabel={selectedTagLabel}
                       selectedTagPills={selectedTagPills}
                       loadedSolveCount={loadedSolveCountForSummary}
+                      solveIndexOffset={summarySolveIndexOffset}
                       showCurrentMetrics={currentPage === 0}
                       viewMode={statsViewMode}
                       summaryLayout={summaryLayout}
@@ -8026,6 +8116,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                       eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
                       mode={summaryMode}
             loadedSolveCount={loadedSolveCountForSummary}
+            solveIndexOffset={summarySolveIndexOffset}
             showCurrentMetrics={currentPage === 0}
             viewMode={statsViewMode}
             summaryLayout={summaryLayout}
@@ -8053,10 +8144,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             selectedTagPills={selectedTagPills}
             summarySource="primary"
             loadedSolveCount={loadedSolveCountForSummary}
+            solveIndexOffset={summarySolveIndexOffset}
             onStatSelect={handleSummaryStatSelect}
             profileColor={primaryAccentColor}
                       loading={primaryOverallSummaryLoading}
-            showWorstOverview={showAllActive}
+            showWorstOverview={showAllActive || isAllTimeBucketOverview}
                     />
                   </div>
                 </>
@@ -8097,6 +8189,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         selectedTagLabel={selectedTagLabel}
                         selectedTagPills={selectedTagPills}
                         loadedSolveCount={loadedSolveCountForSummary}
+                        solveIndexOffset={summarySolveIndexOffset}
                         showCurrentMetrics={currentPage === 0}
                         viewMode={statsViewMode}
                         summaryLayout={summaryLayout}
@@ -8105,7 +8198,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         onStatSelect={handleSummaryStatSelect}
                         profileColor={primaryAccentColor}
                         loading={primaryOverallSummaryLoading}
-                        showWorstOverview={showAllActive}
+                        showWorstOverview={showAllActive || isAllTimeBucketOverview}
                       />
                       </div>
                     ) : (
@@ -8124,6 +8217,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
                         mode={summaryMode}
                       loadedSolveCount={loadedSolveCountForSummary}
+                      solveIndexOffset={summarySolveIndexOffset}
                       showCurrentMetrics={currentPage === 0}
                       viewMode={statsViewMode}
                       summaryLayout={summaryLayout}
@@ -8149,10 +8243,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         selectedTagLabel={selectedTagLabel}
                         selectedTagPills={selectedTagPills}
                         loadedSolveCount={loadedSolveCountForSummary}
+                        solveIndexOffset={summarySolveIndexOffset}
                         onStatSelect={handleSummaryStatSelect}
                         profileColor={primaryAccentColor}
                         loading={primaryOverallSummaryLoading}
-                        showWorstOverview={showAllActive}
+                        showWorstOverview={showAllActive || isAllTimeBucketOverview}
                       />
                     </div>
                       </>
@@ -8319,6 +8414,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   seriesStyle={primaryCompareStyle}
                   legendItems={compareLegendItems}
                   title={buildStatCardTitle(eventSelectLabel, selectedSessionDisplay)}
+                  titleDate={lineChartTitleDate}
+                  titleIndexRange={lineChartTitleIndexRange}
                   deleteTime={handleDeleteSolve}
                   addPost={addPost}
                   setSessions={setSessions}

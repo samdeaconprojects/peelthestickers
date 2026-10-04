@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import LineChartBuilder from "./LineChartBuilder";
 import TimePeriodChart from "./TimePeriodChart";
 import Detail from "../Detail/Detail";
@@ -474,7 +474,14 @@ function buildProcessedChartData(
 
     return {
       label,
-      x: xScaleMode === "datetime" && timestamp != null ? timestamp : ordinalSolveIndex,
+      // "index" spaces points by their real solve number (gaps where filtered-out
+      // solves sit); "ordinal" packs them evenly while keeping the real label.
+      x:
+        xScaleMode === "datetime" && timestamp != null
+          ? timestamp
+          : xScaleMode === "index"
+            ? ordinalSolveIndex
+            : index,
       y: baseTimeMs / 1000,
       color: getColor(baseTimeMs),
       time: formatPointTime(baseTimeMs, solveForDetail, groupMode),
@@ -504,6 +511,8 @@ function LineChart({
   seriesStyle = null,
   legendItems = [],
   title,
+  titleDate = "",
+  titleIndexRange = "",
   deleteTime,
   addPost,
   applyPenalty,
@@ -680,6 +689,17 @@ function LineChart({
   }, [bucketItems, comparisonSeries, groupMode, hasBucketItems, hasComparison, seriesStyle, showAo5, showAo12, solves, xScaleMode]);
 
   const solveLevel = groupMode === "solve" && !hasBucketItems;
+  // Tag/filtered views pull a sparse subset of the full timeline, so their
+  // real solve numbers have holes — only then is "Index Gaps" meaningful.
+  const hasIndexGaps = useMemo(() => {
+    if (!solveLevel || hasComparison) return false;
+    const indices = computed.data
+      .map((point) => Number(point?.fullIndex))
+      .filter((value) => Number.isFinite(value));
+    if (indices.length < 2) return false;
+    return indices.some((value, i) => i > 0 && Math.abs(value - indices[i - 1]) !== 1);
+  }, [computed.data, hasComparison, solveLevel]);
+
   const bulkEnabled = solveLevel && !hasComparison;
   const isTimeView = viewMode === "time";
   const profileColor = normalizeHexColor(user?.Color || user?.color || "#2EC4B6");
@@ -705,6 +725,26 @@ function LineChart({
       setGroupMode("day");
     }
   }, [groupMode, hasBucketItems]);
+
+  // Day buckets force a grouped mode. When they give way to raw solves (a day
+  // drill-down), drop back to per-solve points instead of regrouping that
+  // day's solves into a single dot; restore the grouping if buckets return.
+  const hadBucketItemsRef = useRef(hasBucketItems);
+  const bucketGroupModeRef = useRef("");
+  useEffect(() => {
+    const hadBucketItems = hadBucketItemsRef.current;
+    hadBucketItemsRef.current = hasBucketItems;
+    if (hadBucketItems === hasBucketItems || isTimeView) return;
+
+    if (!hasBucketItems) {
+      bucketGroupModeRef.current = groupMode;
+      setGroupMode("solve");
+      return;
+    }
+
+    if (bucketGroupModeRef.current) setGroupMode(bucketGroupModeRef.current);
+    bucketGroupModeRef.current = "";
+  }, [groupMode, hasBucketItems, isTimeView]);
 
   useEffect(() => {
     if (groupMode !== "solve") return;
@@ -972,7 +1012,18 @@ function LineChart({
       )}
 
       {!showControls && showTitle && title ? (
-        <div className="lineChartCollapsedTitle">{title}</div>
+        <div className="lineChartCollapsedTitle">
+          <span>{title}</span>
+          {titleDate ? (
+            <>
+              <span className="lineChartCollapsedTitleSep">|</span>
+              <span className="lineChartCollapsedTitleDate">{titleDate}</span>
+            </>
+          ) : null}
+          {titleIndexRange ? (
+            <span className="lineChartCollapsedTitleRange">{titleIndexRange}</span>
+          ) : null}
+        </div>
       ) : null}
 
       {allowViewPicker && showControls && (
@@ -1063,6 +1114,19 @@ function LineChart({
               >
                 Date Gaps
               </button>
+
+              {hasIndexGaps && (
+                <button
+                  type="button"
+                  className={`statsToggleBtn ${xScaleMode === "index" ? "is-active" : ""}`}
+                  title="Space solves by their real solve number"
+                  onClick={() =>
+                    setXScaleMode((value) => (value === "index" ? "ordinal" : "index"))
+                  }
+                >
+                  Index Gaps
+                </button>
+              )}
 
               <button
                 type="button"

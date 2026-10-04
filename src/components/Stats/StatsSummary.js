@@ -272,14 +272,20 @@ function formatClockTime(date) {
   });
 }
 
-function formatIndexRange(solves, totalSolveCount = null, loadedSolveCount = null) {
+// fullIndex is relative to the solves loaded in memory; indexOffset is the
+// number of older solves in scope that aren't loaded, so ranges read as
+// absolute solve numbers. A null offset means real numbers can't be known
+// (e.g. tag filters), so the range is left blank rather than shown wrong.
+function formatIndexRange(solves, indexOffset = 0) {
+  if (indexOffset === null) return "";
   const input = Array.isArray(solves) ? solves : [];
   if (!input.length) return "—";
   const first = input[0]?.fullIndex;
   const last = input[input.length - 1]?.fullIndex;
   if (!Number.isFinite(first) || !Number.isFinite(last)) return "—";
+  const offset = Number.isFinite(indexOffset) && indexOffset > 0 ? indexOffset : 0;
 
-  return `${first + 1}-${last + 1}`;
+  return `${(first + offset + 1).toLocaleString()}-${(last + offset + 1).toLocaleString()}`;
 }
 
 function getLastSolveDisplay(solves) {
@@ -341,7 +347,7 @@ function computeWindowStat(solves, spec) {
   };
 }
 
-function buildViewSummary(solves, totalSolveCount = null, loadedSolveCount = null) {
+function buildViewSummary(solves, indexOffset = 0) {
   const input = Array.isArray(solves) ? solves : [];
   if (!input.length) return null;
 
@@ -365,7 +371,7 @@ function buildViewSummary(solves, totalSolveCount = null, loadedSolveCount = nul
   return {
     solveCount: input.length,
     dateRange: formatDateRange(input),
-    indexRange: formatIndexRange(input, totalSolveCount, loadedSolveCount),
+    indexRange: formatIndexRange(input, indexOffset),
     single: {
       current: getLastSolveDisplay(input),
       best: numeric.length ? Math.min(...numeric) : null,
@@ -1326,7 +1332,7 @@ function TimeViewAllEventsSummary({
         <div className="ssViewCountValue">{formatCount(view?.solveCount)}</div>
         <div className="ssViewCountLabel">solves in range</div>
         <div className="ssViewMeta">{view?.dateRange || timeView?.dateLabel || "—"}</div>
-        <div className="ssViewMeta">{view?.indexRange || "—"}</div>
+        {view?.indexRange !== "" && <div className="ssViewMeta">{view?.indexRange || "—"}</div>}
       </div>
 
       <div className="ssTimeAllEventsMeta">
@@ -1362,19 +1368,16 @@ function useStatsSummaryData({
   selectedSession,
   selectedTagLabel = "",
   loadedSolveCount = null,
+  solveIndexOffset = 0,
 }) {
   const view = useMemo(
-    () => buildViewSummary(solves, overallStats?.SolveCountTotal ?? null, loadedSolveCount),
-    [solves, overallStats?.SolveCountTotal, loadedSolveCount]
+    () => buildViewSummary(solves, solveIndexOffset),
+    [solves, solveIndexOffset]
   );
   const overallLoadedSummary = useMemo(
     () =>
-      buildViewSummary(
-        overallSolves,
-        overallStats?.SolveCountTotal ?? null,
-        overallSolves?.length ?? null
-      ),
-    [overallSolves, overallStats?.SolveCountTotal]
+      buildViewSummary(overallSolves),
+    [overallSolves]
   );
   const shouldBuildOverallFallback = !overallStats;
   const overallFallback = shouldBuildOverallFallback ? overallLoadedSummary : null;
@@ -1523,6 +1526,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
   allEventsBreakdown,
   mode = "session",
   loadedSolveCount = null,
+  solveIndexOffset = 0,
   showCurrentMetrics = true,
   viewMode = "standard",
   summaryLayout = "row",
@@ -1540,12 +1544,8 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
   const [timeTrendMode, setTimeTrendMode] = useState("average");
   const overallLoadedSummary = useMemo(
     () =>
-      buildViewSummary(
-        overallSolves,
-        overallStats?.SolveCountTotal ?? null,
-        overallSolves?.length ?? null
-      ),
-    [overallSolves, overallStats?.SolveCountTotal]
+      buildViewSummary(overallSolves),
+    [overallSolves]
   );
   const bucketOverallMetricFallback = useMemo(
     () => ({
@@ -1572,11 +1572,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
   );
   const view = useMemo(
     () => {
-      const visibleRangeSummary = buildViewSummary(
-        solves,
-        overallStats?.SolveCountTotal ?? null,
-        loadedSolveCount
-      );
+      const visibleRangeSummary = buildViewSummary(solves, solveIndexOffset);
 
       return bucketSummary
         ? buildBucketViewSummary(
@@ -1587,10 +1583,10 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
           )
         : visibleRangeSummary;
     },
-    [bucketItems, bucketSummary, bucketOverallMetricFallback, solves, overallStats?.SolveCountTotal, loadedSolveCount]
+    [bucketItems, bucketSummary, bucketOverallMetricFallback, solves, solveIndexOffset]
   );
   const compareView = useMemo(
-    () => buildViewSummary(compareSummary?.solves || [], null, null),
+    () => buildViewSummary(compareSummary?.solves || []),
     [compareSummary?.solves]
   );
   const timeView = useMemo(
@@ -1849,7 +1845,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
               <div className="ssViewCountValue">{formatCount(view?.solveCount)}</div>
               <div className="ssViewCountLabel">solves</div>
               <div className="ssViewMeta ssViewMeta--date">{view?.dateRange || "—"}</div>
-              <div className="ssViewMeta ssViewMeta--range">{view?.indexRange || "—"}</div>
+              {view?.indexRange !== "" && <div className="ssViewMeta ssViewMeta--range">{view?.indexRange || "—"}</div>}
               {Array.isArray(selectedTagPills) && selectedTagPills.length ? (
                 <div className="ssViewTagList">
                   {selectedTagPills.map((tag) => (
@@ -1986,7 +1982,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
                     <div className="ssViewCountValue">{formatCount(view?.solveCount)}</div>
                     <div className="ssViewCountLabel">solves</div>
                     <div className="ssViewMeta ssViewMeta--date">{view?.dateRange || "—"}</div>
-                    <div className="ssViewMeta ssViewMeta--range">{view?.indexRange || "—"}</div>
+                    {view?.indexRange !== "" && <div className="ssViewMeta ssViewMeta--range">{view?.indexRange || "—"}</div>}
                   </>
                 }
                 metricValues={{
@@ -2042,6 +2038,7 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
   selectedTagPills = [],
   summarySource = "primary",
   loadedSolveCount = null,
+  solveIndexOffset = 0,
   onStatSelect,
   compareSummary = null,
   profileColor = "#50B6FF",
@@ -2057,6 +2054,7 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
     selectedSession,
     selectedTagLabel,
     loadedSolveCount,
+    solveIndexOffset,
   });
   const compareOverall = useMemo(
     () => buildOverallDerived(compareSummary?.overallSolves || compareSummary?.solves || []),

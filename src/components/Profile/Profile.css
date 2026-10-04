@@ -631,6 +631,12 @@
   z-index: 2;
 }
 
+.postCaption--inline {
+  width: fit-content;
+  margin: 0 0 14px 14px;
+  padding: 8px 12px;
+}
+
 .postDetailCaption {
   margin: 0 0 14px;
 }

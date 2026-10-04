@@ -178,6 +178,9 @@ export const defaultSettings = {
   sharedTimeColorMode: "profile",
   showStrictAverages: false,
   tolerateDnfInMeans: true,
+  homeLeftOfTimer: "averages",
+  homeAveragesOrder: "single-last",
+  verticalTimeListOrder: "newest-first",
   whitePuzzleSVGs: false,
 
   eventKeyBindings: defaultEventBindings,
@@ -240,6 +243,29 @@ function normalizeSmartCubeProvider(rawValue) {
   return defaultSettings.smartCubeProvider;
 }
 
+const HOME_LEFT_OF_TIMER_OPTIONS = ["none", "timelist", "averages"];
+
+function normalizeHomeLeftOfTimer(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+  return HOME_LEFT_OF_TIMER_OPTIONS.includes(raw) ? raw : defaultSettings.homeLeftOfTimer;
+}
+
+const HOME_AVERAGES_ORDER_OPTIONS = ["single-first", "single-last"];
+
+function normalizeHomeAveragesOrder(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+  return HOME_AVERAGES_ORDER_OPTIONS.includes(raw) ? raw : defaultSettings.homeAveragesOrder;
+}
+
+const VERTICAL_TIME_LIST_ORDER_OPTIONS = ["newest-first", "newest-last"];
+
+function normalizeVerticalTimeListOrder(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+  return VERTICAL_TIME_LIST_ORDER_OPTIONS.includes(raw)
+    ? raw
+    : defaultSettings.verticalTimeListOrder;
+}
+
 function mergeSettings(input) {
   const safe = input && typeof input === "object" ? input : {};
   const normalizedHomeStatsSlots = normalizeHomeStatsSlots(safe.homeStatsSlots);
@@ -283,6 +309,9 @@ function mergeSettings(input) {
     statsSummaryLayout,
     detailViewSurfaceMode,
     playerBarTagFields,
+    homeLeftOfTimer: normalizeHomeLeftOfTimer(safe.homeLeftOfTimer),
+    homeAveragesOrder: normalizeHomeAveragesOrder(safe.homeAveragesOrder),
+    verticalTimeListOrder: normalizeVerticalTimeListOrder(safe.verticalTimeListOrder),
     tagDefaultsByEvent: normalizeTagDefaultsByEvent(safe.tagDefaultsByEvent),
     tagDefaultsBySession: normalizeTagDefaultsBySession(safe.tagDefaultsBySession),
     homeTagVisibilityBySession: normalizeHomeTagVisibilityBySession(
