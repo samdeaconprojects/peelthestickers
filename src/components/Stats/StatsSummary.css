@@ -40,15 +40,20 @@
   --ss-lime: #dff46d;
   --ss-text: #f3f4f6;
   --ss-muted: rgba(243, 244, 246, 0.66);
-  background-color: rgba(100, 100, 100, 0.1);
+  background-color: var(--stats-container-bg, rgba(100, 100, 100, 0.1));
   border-radius: 10px;
-  border: 2px solid rgba(200, 200, 200, 0.3);
+  border: 2px solid var(--ss-card-border, var(--stats-container-border, rgba(200, 200, 200, 0.3)));
   color: var(--ss-text);
+  transition: border-color 0.16s ease;
   overflow: hidden;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   height: auto;
   position: relative;
   isolation: isolate;
+}
+
+.statsCardShell:hover .ssCard {
+  border-color: var(--ss-card-border-hover, var(--stats-container-border-hover, rgba(255, 255, 255, 0.44)));
 }
 
 .ssCard--view {
@@ -289,6 +294,11 @@
   column-gap: 12px;
 }
 
+.ssSharedSummaryGrid--current .ssSharedMetricColumn:not(.ssSharedMetricColumn--meta) {
+  position: relative;
+  top: 6px;
+}
+
 .ssSharedSummaryGrid--current .ssSharedMetricColumn--meta {
   position: relative;
   top: -12px;
@@ -297,7 +307,7 @@
 
 .ssSharedMetricValueLabel,
 .ssSharedMetaLabel {
-  font-size: calc(0.66rem * var(--ss-shared-meta-label-scale, 1));
+  font-size: calc(0.78rem * var(--ss-shared-meta-label-scale, 1));
   line-height: 1;
   font-weight: 700;
   text-transform: uppercase;
@@ -341,12 +351,23 @@
 }
 
 .ssSharedMetaValue {
-  font-size: calc(0.98rem * var(--ss-shared-meta-value-scale, 1));
+  font-size: calc(1.16rem * var(--ss-shared-meta-value-scale, 1));
   line-height: 1.05;
   font-weight: 800;
   white-space: nowrap;
   justify-self: end;
   min-width: 0;
+}
+
+.ssSharedMetaValue--parts {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.ssSharedMetaDivider {
+  color: rgba(243, 244, 246, 0.32);
+  font-weight: 600;
 }
 
 .ssOverviewLead {
@@ -449,11 +470,11 @@
 }
 
 .ssCard--viewRow .ssSharedMetaLabel {
-  font-size: 0.6rem;
+  font-size: 0.72rem;
 }
 
 .ssCard--viewRow .ssSharedMetaValue {
-  font-size: calc(0.92rem * var(--ss-shared-meta-value-scale, 1));
+  font-size: calc(1.1rem * var(--ss-shared-meta-value-scale, 1));
 }
 
 .ssTimeAllEventsLead {
@@ -1214,6 +1235,13 @@
   text-decoration-thickness: 0.08em;
 }
 
+.ssSharedMetaValue .ssStatButton:hover > span,
+.ssSharedMetaValue .ssStatButton:focus-visible > span {
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+  text-decoration-thickness: 0.08em;
+}
+
 .ssMetricValues,
 .ssOverallMetricValues {
   min-width: 0;
@@ -1613,11 +1641,11 @@
 }
 
 .ssSharedSummaryGrid--overall .ssSharedMetaLabel {
-  font-size: 0.56rem;
+  font-size: 0.68rem;
 }
 
 .ssSharedSummaryGrid--overall .ssSharedMetaValue {
-  font-size: clamp(0.8rem, 0.9vw, 0.92rem);
+  font-size: clamp(0.96rem, 1.08vw, 1.1rem);
 }
 
 .ssSharedSummaryGrid--overall .ssSharedMetaValue.ssMetricValue--best {
@@ -1796,4 +1824,89 @@
     grid-template-columns: auto minmax(0, 1fr);
     gap: 8px 10px;
   }
+}
+
+/* Compact overview shown in the stats top bar */
+.ssOverviewMini {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 10px;
+  box-sizing: border-box;
+  width: auto;
+  height: auto;
+  min-height: 54px;
+  max-width: 100%;
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--ss-mini-border, rgba(255, 255, 255, 0.14));
+  border-radius: 14px;
+  color: #f3f4f6;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.16s ease, filter 0.16s ease, opacity 0.16s ease, border-color 0.16s ease;
+}
+
+.ssOverviewMini:not(:disabled):hover {
+  border-color: var(--ss-mini-border-hover, rgba(255, 255, 255, 0.44));
+  filter: brightness(1.12);
+}
+
+.statsPageRoot--hoverGrow .ssOverviewMini:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.ssOverviewMini:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.ssOverviewMini.is-loading {
+  opacity: 0.6;
+}
+
+.ssOverviewMiniCell {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ssOverviewMiniCell--lead {
+  padding-right: 10px;
+  border-right: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.ssOverviewMiniLabel {
+  font-size: 0.6rem;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(243, 244, 246, 0.6);
+  white-space: nowrap;
+}
+
+.ssOverviewMiniCell--lead .ssOverviewMiniLabel {
+  color: rgba(243, 244, 246, 0.92);
+}
+
+.ssOverviewMiniValue {
+  font-size: 0.86rem;
+  line-height: 1;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Clickable meta values (+2 best) and the overall summary's best/worst times: drop the
+   global 35px button box so the text lines up with its label and unclickable neighbours. */
+.ssSharedMetaValue .ssStatButton,
+.ssSharedSummaryGrid--overall .ssStatButton {
+  height: auto;
+  min-height: 0;
+  border-radius: 0;
+  line-height: 1;
+  vertical-align: baseline;
 }

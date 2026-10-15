@@ -48,8 +48,8 @@
 .playerbar-eventline {
   position: absolute;
   top: 6px;
-  /* align with the timer digits' left edge (timer is centered; this matches a 4-char time) */
-  left: calc(50% - 94px);
+  /* pinned to the column's left edge (the bar's own padding is the gutter) */
+  left: 0;
   right: 0;
   display: flex;
   justify-content: flex-start;
@@ -105,6 +105,9 @@
   padding: 0 !important;
   position: static;
   transform: translateY(5px) !important;
+  /* same font/weight as the home timer, but at this size the strokes read thin —
+     thicken them so it carries the same visual weight (no layout shift) */
+  -webkit-text-stroke: 1.5px currentColor;
 }
 
 /* longer readouts (5x5+, anything over a minute) shrink to stay in-column */

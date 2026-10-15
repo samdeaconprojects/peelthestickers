@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { GanTimerClient, GanTimerState } from "../smart/ganTimerClient";
+import { GanTimerClient, GanTimerState, ganTimeToMs } from "../smart/ganTimerClient";
 import { useSettings } from "./SettingsContext";
 
 const GanTimerContext = createContext(null);
@@ -16,6 +16,7 @@ export const useGanTimer = () => useContext(GanTimerContext);
 
 function parseDisplayTimeToMs(displayTime) {
   if (displayTime == null) return null;
+  if (typeof displayTime === "object") return ganTimeToMs(displayTime);
 
   const n = Number(displayTime);
   if (Number.isFinite(n)) {
@@ -40,12 +41,7 @@ function parseDisplayTimeToMs(displayTime) {
 }
 
 function normalizeGanRecordedTimeToMs(ev) {
-  const raw = ev?.recordedTime ?? ev?.time ?? ev?.ms;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return null;
-
-  if (n > 1000) return Math.round(n);
-  return Math.round(n * 1000);
+  return ganTimeToMs(ev?.recordedTime ?? ev?.time ?? ev?.ms);
 }
 
 function normalizePenaltyValue(penalty) {
@@ -144,20 +140,30 @@ export function GanTimerProvider({ children }) {
     if (ganReadFallbackLockRef.current) return;
     ganReadFallbackLockRef.current = true;
 
-    try {
-      const rec = await ganClientRef.current?.getRecordedTimes?.();
-      const ms = parseDisplayTimeToMs(rec?.displayTime);
+    // The GATT read can fail transiently (e.g. another operation in progress),
+    // so retry a few times instead of dropping the solve.
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      if (ganSaveLockRef.current) return;
 
-      if (ms != null) {
-        finalizeGanSolve(ms);
-      } else {
-        const pt0 = rec?.previousTimes?.[0];
-        const ms2 = parseDisplayTimeToMs(pt0);
-        if (ms2 != null) finalizeGanSolve(ms2);
+      try {
+        const rec = await ganClientRef.current?.getRecordedTimes?.();
+        const ms =
+          parseDisplayTimeToMs(rec?.displayTime) ??
+          parseDisplayTimeToMs(rec?.previousTimes?.[0]);
+
+        if (ms != null) {
+          finalizeGanSolve(ms);
+          return;
+        }
+      } catch (e) {
+        console.error("GAN getRecordedTimes fallback failed:", e);
       }
-    } catch (e) {
-      console.error("GAN getRecordedTimes fallback failed:", e);
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
     }
+
+    ganReadFallbackLockRef.current = false;
+    setGanAwaitingFinal(false);
   }, [finalizeGanSolve]);
 
   const disconnectGan = useCallback(async () => {
@@ -219,7 +225,9 @@ export function GanTimerProvider({ children }) {
 
             if (ms != null) {
               finalizeGanSolve(ms);
-            } else {
+            } else if (!ganSaveLockRef.current) {
+              // FINISHED follows STOPPED with no time; only read back if the
+              // STOPPED time never arrived.
               setGanAwaitingFinal(true);
               await tryFallbackReadFromTimer();
             }

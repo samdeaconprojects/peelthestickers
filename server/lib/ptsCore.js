@@ -7,7 +7,8 @@ const {
 } = require("@aws-sdk/lib-dynamodb");
 const crypto = require("crypto");
 const STRICT_WINDOW_VERSION = 2;
-const DAY_BUCKET_VERSION = 3;
+// v4: buckets carry per-tag summaries (TagSummaries).
+const DAY_BUCKET_VERSION = 4;
 const DEFAULT_DAY_BUCKET_TIMEZONE =
   process.env.PTS_DEFAULT_TIMEZONE ||
   Intl.DateTimeFormat().resolvedOptions().timeZone ||
@@ -286,6 +287,8 @@ const DAY_BUCKET_WINDOW_CONFIGS = Object.freeze([
     size: 3,
     bestField: "BestMo3Ms",
     startField: "BestMo3StartSolveSK",
+    worstField: "WorstMo3Ms",
+    worstStartField: "WorstMo3StartSolveSK",
   },
   {
     key: "Ao5",
@@ -293,6 +296,8 @@ const DAY_BUCKET_WINDOW_CONFIGS = Object.freeze([
     size: 5,
     bestField: "BestAo5Ms",
     startField: "BestAo5StartSolveSK",
+    worstField: "WorstAo5Ms",
+    worstStartField: "WorstAo5StartSolveSK",
   },
   {
     key: "Ao12",
@@ -300,6 +305,8 @@ const DAY_BUCKET_WINDOW_CONFIGS = Object.freeze([
     size: 12,
     bestField: "BestAo12Ms",
     startField: "BestAo12StartSolveSK",
+    worstField: "WorstAo12Ms",
+    worstStartField: "WorstAo12StartSolveSK",
   },
 ]);
 const DAY_BUCKET_BOUNDARY_LIMIT = Math.max(
@@ -411,11 +418,13 @@ function evaluateCrossBoundaryWindow(leftSuffix = [], rightPrefix = [], config) 
   const windowSize = Number(config?.size || 0);
 
   if (!config || windowSize < 1 || combined.length < windowSize) {
-    return { value: null, startSolveSK: null };
+    return { value: null, startSolveSK: null, worstValue: null, worstStartSolveSK: null };
   }
 
   let best = null;
   let bestStart = null;
+  let worst = null;
+  let worstStart = null;
   const leftCount = left.length;
 
   for (let i = 0; i <= combined.length - windowSize; i += 1) {
@@ -429,9 +438,13 @@ function evaluateCrossBoundaryWindow(leftSuffix = [], rightPrefix = [], config) 
       best = valueMs;
       bestStart = slice[0]?.SK || null;
     }
+    if (worst == null || valueMs > worst) {
+      worst = valueMs;
+      worstStart = slice[0]?.SK || null;
+    }
   }
 
-  return { value: best, startSolveSK: bestStart };
+  return { value: best, startSolveSK: bestStart, worstValue: worst, worstStartSolveSK: worstStart };
 }
 
 function mergeBoundarySolveLists(prefix = [], suffix = [], limit = DAY_BUCKET_BOUNDARY_LIMIT) {
@@ -816,6 +829,76 @@ function insertTopSingleEntry(entries, solve, finalMs, limit = 10) {
   return deduped.slice(0, Math.max(1, Number(limit || 10)));
 }
 
+// Per tag value: the same count/sum/best/worst fields a TAGSTATS record has, so
+// a date range can draw the tag breakdown from day buckets alone.
+function buildDayBucketTagSummaries(solves = []) {
+  const byTag = new Map();
+  for (const solve of Array.isArray(solves) ? solves : []) {
+    const finalMs = getFinalTimeMs(solve);
+    const included = Number.isFinite(finalMs);
+    for (const { key, value } of getSolveTagPairsFromItem(solve)) {
+      const mapKey = `${key}\u0000${value}`;
+      let entry = byTag.get(mapKey);
+      if (!entry) {
+        entry = {
+          TagKey: key,
+          TagValue: value,
+          SolveCountTotal: 0,
+          SolveCountIncluded: 0,
+          SumFinalTimeMs: 0,
+          BestSingleMs: null,
+          WorstSingleMs: null,
+        };
+        byTag.set(mapKey, entry);
+      }
+      entry.SolveCountTotal += 1;
+      if (!included) continue;
+      entry.SolveCountIncluded += 1;
+      entry.SumFinalTimeMs += finalMs;
+      if (entry.BestSingleMs == null || finalMs < entry.BestSingleMs) entry.BestSingleMs = finalMs;
+      if (entry.WorstSingleMs == null || finalMs > entry.WorstSingleMs) entry.WorstSingleMs = finalMs;
+    }
+  }
+  return Array.from(byTag.values());
+}
+
+function mergeDayBucketTagSummaries(left = [], right = []) {
+  const finiteOrNull = (value) =>
+    value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
+  const byTag = new Map();
+  for (const item of [...(Array.isArray(left) ? left : []), ...(Array.isArray(right) ? right : [])]) {
+    const key = String(item?.TagKey || "").trim();
+    const value = String(item?.TagValue || "").trim();
+    if (!key || !value) continue;
+    const mapKey = `${key}\u0000${value}`;
+    const best = finiteOrNull(item?.BestSingleMs);
+    const worst = finiteOrNull(item?.WorstSingleMs);
+    const existing = byTag.get(mapKey);
+    if (!existing) {
+      byTag.set(mapKey, {
+        TagKey: key,
+        TagValue: value,
+        SolveCountTotal: Number(item?.SolveCountTotal || 0),
+        SolveCountIncluded: Number(item?.SolveCountIncluded || 0),
+        SumFinalTimeMs: Number(item?.SumFinalTimeMs || 0),
+        BestSingleMs: best,
+        WorstSingleMs: worst,
+      });
+      continue;
+    }
+    existing.SolveCountTotal += Number(item?.SolveCountTotal || 0);
+    existing.SolveCountIncluded += Number(item?.SolveCountIncluded || 0);
+    existing.SumFinalTimeMs += Number(item?.SumFinalTimeMs || 0);
+    if (best != null && (existing.BestSingleMs == null || best < existing.BestSingleMs)) {
+      existing.BestSingleMs = best;
+    }
+    if (worst != null && (existing.WorstSingleMs == null || worst > existing.WorstSingleMs)) {
+      existing.WorstSingleMs = worst;
+    }
+  }
+  return Array.from(byTag.values());
+}
+
 function buildDayBucketSummaryFromSolves(solves = []) {
   const input = Array.isArray(solves) ? solves : [];
   const ao25 = bestAoForWindow(input, 25);
@@ -832,6 +915,8 @@ function buildDayBucketSummaryFromSolves(solves = []) {
   let BestSingleMs = null;
   let BestSingleSolveSK = null;
   let BestSingleAt = null;
+  let WorstSingleMs = null;
+  let WorstSingleSolveSK = null;
   let Plus2BestMs = null;
   let FirstSolveAt = null;
   let LastSolveAt = null;
@@ -879,6 +964,10 @@ function buildDayBucketSummaryFromSolves(solves = []) {
       BestSingleAt = createdAt || null;
     }
 
+    if (WorstSingleMs == null || finalMs > WorstSingleMs) {
+      WorstSingleMs = finalMs;
+      WorstSingleSolveSK = solve?.SK || null;
+    }
   }
 
   return {
@@ -894,8 +983,11 @@ function buildDayBucketSummaryFromSolves(solves = []) {
     BestSingleMs,
     BestSingleSolveSK,
     BestSingleAt,
+    WorstSingleMs,
+    WorstSingleSolveSK,
     Plus2BestMs,
     HistogramBySecond,
+    TagSummaries: buildDayBucketTagSummaries(input),
     PrefixSolves: summarizeSolveListForDayBucket(input),
     SuffixSolves: tailSolveListForDayBucket(input),
     ...DAY_BUCKET_WINDOW_CONFIGS.reduce(
@@ -943,8 +1035,11 @@ function mergeDayBucketSummaries(summaries = []) {
         BestSingleMs: asFiniteOrNull(item?.BestSingleMs),
         BestSingleSolveSK: item?.BestSingleSolveSK || null,
         BestSingleAt: item?.BestSingleAt || null,
+        WorstSingleMs: asFiniteOrNull(item?.WorstSingleMs),
+        WorstSingleSolveSK: item?.WorstSingleSolveSK || null,
         Plus2BestMs: asFiniteOrNull(item?.Plus2BestMs),
         HistogramBySecond: mergeHistogramCounts(item?.HistogramBySecond),
+        TagSummaries: mergeDayBucketTagSummaries(item?.TagSummaries),
         PrefixSolves: (Array.isArray(item?.PrefixSolves) ? item.PrefixSolves : [])
           .map(summarizeSolveForDayBucket)
           .filter(Boolean),
@@ -957,6 +1052,14 @@ function mergeDayBucketSummaries(summaries = []) {
         BestAo5StartSolveSK: item?.BestAo5StartSolveSK || null,
         BestAo12Ms: asFiniteOrNull(item?.BestAo12Ms),
         BestAo12StartSolveSK: item?.BestAo12StartSolveSK || null,
+        ...DAY_BUCKET_WINDOW_CONFIGS.reduce(
+          (acc, config) => ({
+            ...acc,
+            [config.worstField]: asFiniteOrNull(item?.[config.worstField]),
+            [config.worstStartField]: item?.[config.worstStartField] || null,
+          }),
+          {}
+        ),
         BestAo25Ms: asFiniteOrNull(item?.BestAo25Ms),
         BestAo25StartSolveSK: item?.BestAo25StartSolveSK || null,
         BestAo50Ms: asFiniteOrNull(item?.BestAo50Ms),
@@ -985,8 +1088,11 @@ function mergeDayBucketSummaries(summaries = []) {
       BestSingleMs: merged.BestSingleMs,
       BestSingleSolveSK: merged.BestSingleSolveSK,
       BestSingleAt: merged.BestSingleAt,
+      WorstSingleMs: merged.WorstSingleMs,
+      WorstSingleSolveSK: merged.WorstSingleSolveSK,
       Plus2BestMs: merged.Plus2BestMs,
       HistogramBySecond: mergeHistogramCounts(merged.HistogramBySecond, item?.HistogramBySecond),
+      TagSummaries: mergeDayBucketTagSummaries(merged.TagSummaries, item?.TagSummaries),
       PrefixSolves: mergeBoundarySolveLists(merged.PrefixSolves, item?.PrefixSolves).prefix,
       SuffixSolves: mergeBoundarySolveLists(merged.SuffixSolves, item?.SuffixSolves).suffix,
       BestMo3Ms: merged.BestMo3Ms,
@@ -995,6 +1101,14 @@ function mergeDayBucketSummaries(summaries = []) {
       BestAo5StartSolveSK: merged.BestAo5StartSolveSK,
       BestAo12Ms: merged.BestAo12Ms,
       BestAo12StartSolveSK: merged.BestAo12StartSolveSK,
+      ...DAY_BUCKET_WINDOW_CONFIGS.reduce(
+        (acc, config) => ({
+          ...acc,
+          [config.worstField]: merged[config.worstField] ?? null,
+          [config.worstStartField]: merged[config.worstStartField] || null,
+        }),
+        {}
+      ),
       BestAo25Ms: merged.BestAo25Ms,
       BestAo25StartSolveSK: merged.BestAo25StartSolveSK,
       BestAo50Ms: merged.BestAo50Ms,
@@ -1019,6 +1133,12 @@ function mergeDayBucketSummaries(summaries = []) {
       next.BestSingleMs = itemBestSingleMs;
       next.BestSingleSolveSK = item?.BestSingleSolveSK || null;
       next.BestSingleAt = itemBestSingleAt || null;
+    }
+
+    const itemWorstSingleMs = asFiniteOrNull(item?.WorstSingleMs);
+    if (itemWorstSingleMs != null && (next.WorstSingleMs == null || itemWorstSingleMs > next.WorstSingleMs)) {
+      next.WorstSingleMs = itemWorstSingleMs;
+      next.WorstSingleSolveSK = item?.WorstSingleSolveSK || null;
     }
 
     const itemPlus2Best = asFiniteOrNull(item?.Plus2BestMs);
@@ -1049,6 +1169,21 @@ function mergeDayBucketSummaries(summaries = []) {
       ) {
         next[bestField] = cross.value;
         next[bestStartField] = cross.startSolveSK;
+      }
+
+      const worstField = config.worstField;
+      const worstStartField = config.worstStartField;
+      const itemWorstValue = asFiniteOrNull(item?.[worstField]);
+      if (itemWorstValue != null && (asFiniteOrNull(next[worstField]) == null || itemWorstValue > next[worstField])) {
+        next[worstField] = itemWorstValue;
+        next[worstStartField] = item?.[worstStartField] || null;
+      }
+      if (
+        Number.isFinite(cross.worstValue) &&
+        (asFiniteOrNull(next[worstField]) == null || cross.worstValue > Number(next[worstField]))
+      ) {
+        next[worstField] = cross.worstValue;
+        next[worstStartField] = cross.worstStartSolveSK;
       }
     }
 

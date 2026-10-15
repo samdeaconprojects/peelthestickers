@@ -18,7 +18,7 @@ export function isValidMoyuDecryptedPacket(bytes) {
       if (bytes[n] === 0) z++;
       else if (bytes[n] === 255) f++;
     }
-    if (z > 14 || f > 14 || new Set(bytes.slice(0, 20)).size > 18) return false;
+    if (z > 14 || f > 14) return false;
 
     let n = "";
     for (let i = 0; i < bytes.length; i++) {

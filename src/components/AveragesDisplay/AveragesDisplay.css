@@ -36,10 +36,15 @@
 
 .header.col-header {
   cursor: pointer;
+  font-size: calc(11pt * var(--home-averages-scale, 1));
+}
+
+.averages-table .col-header {
+  opacity: 0.7;
 }
 
 .header.avg-col--ao5 {
-  font-size: calc(14pt * var(--home-averages-scale, 1));
+  font-size: calc(12.5pt * var(--home-averages-scale, 1));
 }
 
 /* Row titles (Current, Best, Strict, BPA / WPA) */
@@ -76,11 +81,11 @@
 }
 
 .cell.current {
-  font-size: calc(20pt * var(--home-averages-scale, 1)); /* most important */
+  font-size: calc(18pt * var(--home-averages-scale, 1)); /* most important */
 }
 
 .cell.current.avg-col--ao5 {
-  font-size: calc(23pt * var(--home-averages-scale, 1));
+  font-size: calc(21pt * var(--home-averages-scale, 1));
 }
 
 .cell.best {
@@ -99,9 +104,12 @@
 .cell.bpa-wpa {
   cursor: default;
   display: flex;
+  flex-wrap: wrap; /* long times (e.g. 3:30.13) stack BPA over WPA instead of clipping */
   justify-content: center;
-  gap: 6px;
-  font-size: calc(10pt * var(--home-averages-scale, 1));
+  column-gap: 6px;
+  row-gap: 0;
+  line-height: 1.15;
+  font-size: calc(12pt * var(--home-averages-scale, 1));
 }
 
 .bpa {
@@ -138,20 +146,20 @@
 }
 
 .averages-table--vertical .row-title {
-  font-size: calc(12pt * var(--home-averages-scale, 1));
+  font-size: calc(11pt * var(--home-averages-scale, 1));
   cursor: pointer;
 }
 
 .averages-table--vertical .row-title.avg-col--ao5 {
-  font-size: calc(13pt * var(--home-averages-scale, 1));
+  font-size: calc(12pt * var(--home-averages-scale, 1));
 }
 
 .averages-table--vertical .cell.current {
-  font-size: calc(16pt * var(--home-averages-scale, 1));
+  font-size: calc(15pt * var(--home-averages-scale, 1));
 }
 
 .averages-table--vertical .cell.current.avg-col--ao5 {
-  font-size: calc(18pt * var(--home-averages-scale, 1));
+  font-size: calc(17pt * var(--home-averages-scale, 1));
 }
 
 .averages-table--vertical .cell.best {
@@ -170,6 +178,10 @@
   gap: 0;
   line-height: 1.15;
   font-size: calc(9pt * var(--home-averages-scale, 1));
+}
+
+.averages-table--vertical .cell.bpa-wpa {
+  font-size: calc(11pt * var(--home-averages-scale, 1));
 }
 
 @media (max-width: 900px) {

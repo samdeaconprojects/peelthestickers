@@ -36,6 +36,15 @@ import {
 import NameTag from "./components/Profile/NameTag";
 import Detail from "./components/Detail/Detail";
 import SharePostModal from "./components/Social/SharePostModal";
+import SaveToProfileModal from "./components/Profile/SaveToProfileModal";
+import {
+  PROFILE_MAIN_LIST_ID,
+  SAVED_STATS_LIST_ID,
+  addItemToList,
+  createStatList,
+  normalizeStatLists,
+  serializeStatLists,
+} from "./utils/profileStatLists";
 import TagBar from "./components/TagBar/TagBar";
 import { useSettings } from "./contexts/SettingsContext";
 import { DbStatusProvider } from "./contexts/DbStatusContext";
@@ -49,6 +58,14 @@ import { getUser } from "./services/getUser";
 import { updateUser } from "./services/updateUser";
 import { getSessions } from "./services/getSessions";
 import { getLastNSolvesBySession, getSolvesBySession } from "./services/getSolvesBySession";
+import {
+  signUp as authSignUp,
+  signIn as authSignIn,
+  fetchMe as authFetchMe,
+  clearAuthToken,
+  getAuthToken,
+  AUTH_EXPIRED_EVENT,
+} from "./services/auth";
 import { getSessionStats } from "./services/getSessionStats";
 import { recomputeSessionStats as recomputeSessionStatsService } from "./services/recomputeSessionStats";
 import { addSolve as addSolveToDB } from "./services/addSolve";
@@ -132,6 +149,7 @@ import useOnlineStatus from "./hooks/useOnlineStatus";
 import useOfflineQueue from "./hooks/useOfflineQueue";
 import { addOfflineSolve } from "./services/offlineQueue";
 import OfflineBanner from "./components/Offline/OfflineBanner";
+import OfflineSolvesModal from "./components/Offline/OfflineSolvesModal";
 
 const INITIAL_SESSIONS = {
   "222": [],
@@ -1573,7 +1591,7 @@ function App() {
   const offlineQueue = useOfflineQueue(user?.UserID);
 
   // Once a solve is synced (or otherwise cleared) from the offline queue -
-  // e.g. via the "Add to profile" flow on the Profile page - drop the
+  // e.g. via the offline solves popup - drop the
   // offline-pending flag from any matching entry still sitting in the live
   // session list so its badge disappears.
   useEffect(() => {
@@ -1607,6 +1625,7 @@ function App() {
   const [showPostSignUpProfileSetup, setShowPostSignUpProfileSetup] = useState(false);
   const [showTutorialModal, setShowTutorialModal] = useState(false);
   const [showManualSolveModal, setShowManualSolveModal] = useState(false);
+  const [showOfflineSolvesModal, setShowOfflineSolvesModal] = useState(false);
   const [manualSolveTime, setManualSolveTime] = useState("");
   const [manualSolveScramble, setManualSolveScramble] = useState("");
   const [manualSolveError, setManualSolveError] = useState("");
@@ -1662,6 +1681,15 @@ function App() {
     error: "",
   });
   const shareComposerResolveRef = useRef(null);
+  const [profileSavePicker, setProfileSavePicker] = useState({
+    isOpen: false,
+    item: null,
+    extraUpdates: null,
+    isSubmitting: false,
+    error: "",
+  });
+  const profileSaveResolveRef = useRef(null);
+  const lastProfileSaveListIDsRef = useRef([SAVED_STATS_LIST_ID]);
 
   const [socialRefreshTick, setSocialRefreshTick] = useState(0);
 
@@ -2591,6 +2619,75 @@ function App() {
       );
     },
     []
+  );
+
+  const closeOfflineSolvesModal = useCallback(() => setShowOfflineSolvesModal(false), []);
+
+  // The offline popup dropped a queued solve - or added it somewhere other
+  // than where it was timed - so its optimistic entry no longer belongs in
+  // the live session list.
+  const dropOfflinePendingSolve = useCallback(
+    (localId) => {
+      if (!localId) return;
+      for (const ev of Object.keys(sessions || {})) {
+        const match = (sessions[ev] || []).find((s) => s?.offlineLocalId === localId);
+        if (!match) continue;
+        setSessions((prev) => ({
+          ...prev,
+          [ev]: (prev[ev] || []).filter((s) => s?.offlineLocalId !== localId),
+        }));
+        adjustSessionSolveCount(ev, match.sessionID || "main", -1, sessions[ev]?.length || 0);
+        return;
+      }
+    },
+    [sessions, adjustSessionSolveCount]
+  );
+
+  const handleOfflineSolveRemoved = useCallback(
+    (entry) => dropOfflinePendingSolve(entry?.localId),
+    [dropOfflinePendingSolve]
+  );
+
+  const handleOfflineSolveSynced = useCallback(
+    (entry, res) => {
+      const ev = String(entry?.event || "").toUpperCase();
+      const sid = String(entry?.sessionID || "main");
+      const savedSolve = res?.item ? normalizeSolve(res.item) : null;
+
+      const pending = (sessions[ev] || []).find((s) => s?.offlineLocalId === entry?.localId);
+      const stayedPut = !!pending && String(pending.sessionID || "main") === sid;
+
+      if (stayedPut) {
+        // Same event/session it was timed in: swap the optimistic entry for
+        // the saved one in place. (Without a returned item, the queue effect
+        // above just clears its pending flag.)
+        if (savedSolve) {
+          setSessions((prev) => ({
+            ...prev,
+            [ev]: (prev[ev] || []).map((s) => {
+              if (s?.offlineLocalId !== entry.localId) return s;
+              const { offlinePending, offlineLocalId, ...rest } = s;
+              return {
+                ...rest,
+                ...savedSolve,
+                ...(Number.isFinite(Number(s?.fullIndex)) ? { fullIndex: Number(s.fullIndex) } : {}),
+              };
+            }),
+          }));
+        }
+      } else {
+        dropOfflinePendingSolve(entry?.localId);
+        if (savedSolve && ev === String(currentEvent || "").toUpperCase() && sid === String(currentSession || "main")) {
+          setSessions((prev) => ({
+            ...prev,
+            [ev]: mergeSolveIntoListByIdentity(prev?.[ev] || [], savedSolve, true),
+          }));
+        }
+      }
+
+      if (res?.sessionStats) mergeCanonicalSessionStats(ev, sid, res.sessionStats);
+    },
+    [sessions, currentEvent, currentSession, dropOfflinePendingSolve, mergeCanonicalSessionStats]
   );
 
   useEffect(() => {
@@ -3572,9 +3669,18 @@ function App() {
 
   const handleSignUp = async (username, password) => {
     try {
+      let signup;
+      try {
+        signup = await authSignUp(username, password);
+      } catch (error) {
+        alert(error?.message || "Could not create the account.");
+        return;
+      }
+
       const defaultProfileScramble = await generateScrambleForEvent("333");
 
-      await runDb("Creating account", async () => {
+      // A legacy profile claimed with a new password already has its data.
+      if (!signup?.profileExists) await runDb("Creating account", async () => {
         await createUser({
           userID: username,
           name: username,
@@ -3652,6 +3758,21 @@ function App() {
   };
 
   const handleSignIn = async (username, password) => {
+    try {
+      try {
+        await authSignIn(username, password);
+      } catch (error) {
+        return alert(error?.message || "Invalid credentials!");
+      }
+      return applySignedInProfile(username);
+    } catch (error) {
+      console.error("Sign-in error:", error);
+    }
+  };
+
+  // Loads everything the app needs after the server has accepted a token:
+  // used by sign-in and by the reload restore below.
+  const applySignedInProfile = async (username) => {
     try {
       const profile = await getUser(username);
       if (!profile) return alert("Invalid credentials!");
@@ -5013,22 +5134,6 @@ function App() {
       };
     };
 
-    const buildProfileItemKey = (item) => {
-      if (!item || typeof item !== "object") return "";
-      if (item.chart === "solveCard") {
-        const solve = item.solve || {};
-        return `solve::${solve.solveRef || solve.datetime || solve.createdAt || solve.time || ""}`;
-      }
-      if (item.chart === "averageCard") {
-        const solves = Array.isArray(item.solves) ? item.solves : [];
-        const solveKey = solves
-          .map((solve) => solve?.solveRef || solve?.datetime || solve?.createdAt || solve?.time || "")
-          .join("|");
-        return `average::${solveKey}::${solves.length}`;
-      }
-      return JSON.stringify(item);
-    };
-
     const solveList = (Array.isArray(post?.solveList) ? post.solveList : [])
       .map((solve, index) => serializeProfileSolve(solve, index))
       .filter(Boolean);
@@ -5069,46 +5174,112 @@ function App() {
       },
     };
 
+    return saveItemToProfile(nextItem, { ProfileSolvesByEvent: nextProfileSolvesByEvent });
+  };
+
+  const closeProfileSavePicker = (result = { status: "cancelled" }) => {
+    const resolve = profileSaveResolveRef.current;
+    profileSaveResolveRef.current = null;
+    setProfileSavePicker({
+      isOpen: false,
+      item: null,
+      extraUpdates: null,
+      isSubmitting: false,
+      error: "",
+    });
+    if (typeof resolve === "function") resolve(result);
+  };
+
+  // Opens the list picker; resolves with { status: "added" | "exists" | "cancelled" }.
+  const saveItemToProfile = (item, extraUpdates = null) => {
+    if (!user || !item) return Promise.resolve({ status: "error" });
+
+    return new Promise((resolve) => {
+      profileSaveResolveRef.current = resolve;
+      setProfileSavePicker({
+        isOpen: true,
+        item,
+        extraUpdates,
+        isSubmitting: false,
+        error: "",
+      });
+    });
+  };
+
+  const handleConfirmProfileSave = async ({ listIDs = [], newListNames = [] }) => {
+    const { item, extraUpdates } = profileSavePicker;
+    if (!user || !item || profileSavePicker.isSubmitting) return;
+
+    setProfileSavePicker((prev) => ({ ...prev, isSubmitting: true, error: "" }));
+
     const fallbackVisibleStats = [
       { chart: "statsSummary", scope: "all-events", viewMode: "standard" },
       { chart: "lineChart", event: "333", session: "all" },
       { chart: "pieChart" },
     ];
-    const current =
+    let nextVisibleStats =
       Array.isArray(user?.VisibleStats) && user.VisibleStats.length > 0
         ? user.VisibleStats
         : fallbackVisibleStats;
+    const statuses = [];
+    const fullListNames = [];
 
-    const nextKey = buildProfileItemKey(nextItem);
-    const exists = current.some((item) => buildProfileItemKey(item) === nextKey);
-    if (exists) {
-      await runDb("Saving profile stats", () =>
-        updateUser(user.UserID, {
-          ProfileSolvesByEvent: nextProfileSolvesByEvent,
-        })
-      );
-      setUser((prev) => ({
-        ...(prev || {}),
-        ProfileSolvesByEvent: nextProfileSolvesByEvent,
-        profileSolvesByEvent: nextProfileSolvesByEvent,
-      }));
-      return { status: "exists" };
+    if (listIDs.includes(PROFILE_MAIN_LIST_ID)) {
+      const result = addItemToList(nextVisibleStats, item);
+      nextVisibleStats = result.items;
+      statuses.push(result.status);
+      if (result.status === "full") fullListNames.push("Profile page");
     }
 
-    const nextVisibleStats = [...current, nextItem];
-    await runDb("Saving profile stats", () =>
-      updateUser(user.UserID, {
-        VisibleStats: nextVisibleStats,
-        ProfileSolvesByEvent: nextProfileSolvesByEvent,
-      })
-    );
-    setUser((prev) => ({
-      ...(prev || {}),
-      VisibleStats: nextVisibleStats,
-      ProfileSolvesByEvent: nextProfileSolvesByEvent,
-      profileSolvesByEvent: nextProfileSolvesByEvent,
-    }));
-    return { status: "added" };
+    const createdLists = newListNames.map((name) => createStatList(name));
+    const createdIDs = new Set(createdLists.map((list) => list.id));
+    const nextStatLists = [...normalizeStatLists(user?.StatLists), ...createdLists].map((list) => {
+      if (!listIDs.includes(list.id) && !createdIDs.has(list.id)) return list;
+      const result = addItemToList(list.items, item);
+      statuses.push(result.status);
+      if (result.status === "full") fullListNames.push(list.name);
+      return { ...list, items: result.items };
+    });
+
+    if (fullListNames.length) {
+      setProfileSavePicker((prev) => ({
+        ...prev,
+        isSubmitting: false,
+        error: `${fullListNames.join(", ")} is full. Remove something from it first.`,
+      }));
+      return;
+    }
+
+    const updates = {
+      ...(extraUpdates || {}),
+      ...(listIDs.includes(PROFILE_MAIN_LIST_ID) ? { VisibleStats: nextVisibleStats } : {}),
+      StatLists: serializeStatLists(nextStatLists),
+    };
+
+    try {
+      await runDb("Saving profile stats", () => updateUser(user.UserID, updates));
+      setUser((prev) => ({
+        ...(prev || {}),
+        ...updates,
+        ...(updates.ProfileSolvesByEvent
+          ? { profileSolvesByEvent: updates.ProfileSolvesByEvent }
+          : {}),
+      }));
+      lastProfileSaveListIDsRef.current = [
+        ...listIDs,
+        ...createdLists.map((list) => list.id),
+      ];
+      closeProfileSavePicker({
+        status: statuses.includes("added") ? "added" : "exists",
+      });
+    } catch (err) {
+      console.error("Failed to save to profile:", err);
+      setProfileSavePicker((prev) => ({
+        ...prev,
+        isSubmitting: false,
+        error: "Failed to save to your profile.",
+      }));
+    }
   };
 
   const handleConfirmShareComposer = async () => {
@@ -5248,6 +5419,7 @@ function App() {
   const homeEventSelectorRef = useRef(null);
 
   const handleSignOut = () => {
+    clearAuthToken();
     setShowSettingsPopup(false);
     setShowSignInPopup(false);
     setDeleteUndoState(null);
@@ -5297,6 +5469,31 @@ function App() {
     setRelayScrambles([]);
     setRelayLegs([]);
   };
+
+  // Restore the session on reload from the stored token, and drop to
+  // signed-out when the server rejects the token (expired, secret rotated).
+  const authRestoreRef = useRef(false);
+  useEffect(() => {
+    if (authRestoreRef.current) return undefined;
+    authRestoreRef.current = true;
+
+    if (getAuthToken() && !isSignedIn) {
+      authFetchMe()
+        .then((me) => {
+          if (me?.userID && me?.profileExists) return applySignedInProfile(me.userID);
+          clearAuthToken();
+          return null;
+        })
+        .catch((error) => {
+          console.warn("Could not restore the signed-in session:", error);
+        });
+    }
+
+    const onExpired = () => handleSignOut();
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -5985,6 +6182,7 @@ function App() {
       showSettingsPopup ||
       showSignInPopup ||
       showManualSolveModal ||
+      showOfflineSolvesModal ||
       !!selectedAverageSolve ||
       selectedAverageSolves.length > 0 ||
       !!shareComposer.isOpen;
@@ -6200,6 +6398,7 @@ function App() {
     settings.uiKeyBindings,
     shareComposer.isOpen,
     showManualSolveModal,
+    showOfflineSolvesModal,
     showSettingsPopup,
     showSignInPopup,
     switchToEvent,
@@ -6983,6 +7182,10 @@ function App() {
           isOnline={isOnline}
           pendingCount={offlineQueue.count}
           isSignedIn={isSignedIn}
+          onReview={() => {
+            if (!isHomePage) navigate("/");
+            setShowOfflineSolvesModal(true);
+          }}
         />
         <div
           className={`navAndPage ${
@@ -7437,6 +7640,7 @@ function App() {
                     user={user}
                     overallStats={currentSessionStatsForEvent}
                     onSummarySelect={handleHomeSummarySelect}
+                    tagColors={currentTagColors}
                   />
 
                   <div className="home-timer-row">
@@ -7654,6 +7858,7 @@ function App() {
                     }
                     addPost={isViewingSharedStats ? null : addPost}
                     saveToProfile={isViewingSharedStats ? null : addPostToProfile}
+                    saveStatToProfile={isViewingSharedStats ? null : saveItemToProfile}
                     onTagColorsChange={
                       isViewingSharedStats
                         ? null
@@ -8017,6 +8222,19 @@ function App() {
         </div>
       )}
 
+      {showOfflineSolvesModal && isSignedIn && user?.UserID && (
+        <OfflineSolvesModal
+          userID={user.UserID}
+          isOnline={isOnline}
+          sessionsList={sessionsList}
+          customEvents={customEvents}
+          profileColor={user?.Color || user?.color || "#2EC4B6"}
+          onClose={closeOfflineSolvesModal}
+          onSolveSynced={handleOfflineSolveSynced}
+          onSolveRemoved={handleOfflineSolveRemoved}
+        />
+      )}
+
       {showManualSolveModal && (
         <div
           className="manualSolvePopup"
@@ -8146,6 +8364,15 @@ function App() {
         isSubmitting={shareComposer.isSubmitting}
         isLoadingDestinations={shareComposer.isLoadingDestinations}
         error={shareComposer.error}
+      />
+      <SaveToProfileModal
+        isOpen={profileSavePicker.isOpen}
+        lists={normalizeStatLists(user?.StatLists)}
+        initialSelectedIDs={lastProfileSaveListIDsRef.current}
+        onCancel={() => closeProfileSavePicker()}
+        onConfirm={handleConfirmProfileSave}
+        isSubmitting={profileSavePicker.isSubmitting}
+        error={profileSavePicker.error}
       />
       </div>
     </DbStatusProvider>

@@ -20,8 +20,8 @@
 
   background:
     linear-gradient(
-      rgba(var(--primaryRgb), 0.97),
-      rgba(var(--primaryRgb), 0.97)
+      rgba(var(--primaryRgb), 1),
+      rgba(var(--primaryRgb), 1)
     ) padding-box,
     linear-gradient(
       90deg,

@@ -8,9 +8,23 @@ function toNumberOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-// recordedTime should be numeric-ish per README, but we keep this robust.
-function normalizeRecordedTimeToMs(recordedTime) {
-  const n = toNumberOrNull(recordedTime);
+// The library reports recordedTime as a GanTimerTime object
+// ({ minutes, seconds, milliseconds, asTimestamp }), not a number.
+export function ganTimeToMs(time) {
+  if (time == null) return null;
+
+  if (typeof time === "object") {
+    const ts = toNumberOrNull(time.asTimestamp);
+    if (ts != null) return Math.round(ts);
+
+    const min = toNumberOrNull(time.minutes);
+    const sec = toNumberOrNull(time.seconds);
+    const msec = toNumberOrNull(time.milliseconds);
+    if (min == null || sec == null || msec == null) return null;
+    return Math.round(min * 60000 + sec * 1000 + msec);
+  }
+
+  const n = toNumberOrNull(time);
   if (n == null) return null;
 
   // If it's already ms (large), keep it
@@ -73,7 +87,7 @@ export class GanTimerClient {
 
         // Per README: STOPPED includes recorded time
         if (ev?.state === GanTimerState.STOPPED) {
-          const ms = normalizeRecordedTimeToMs(ev.recordedTime);
+          const ms = ganTimeToMs(ev.recordedTime);
           if (ms != null) this.handlers.onSolve?.({ ms, raw: ev, source: "STOPPED.recordedTime" });
         }
 

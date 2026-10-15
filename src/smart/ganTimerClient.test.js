@@ -100,4 +100,23 @@ describe("GanTimerClient", () => {
     expect(mockGetRecordedTimes).toHaveBeenCalled();
     expect(onDisconnect).not.toHaveBeenCalled();
   });
+  it("reports the solve from a STOPPED event's GanTimerTime object", async () => {
+    const client = new GanTimerClient();
+    const onSolve = jest.fn();
+    await client.connect({ onSolve });
+
+    timerLib.__emitTimerEvent({
+      state: GanTimerState.STOPPED,
+      recordedTime: {
+        minutes: 0,
+        seconds: 0,
+        milliseconds: 874,
+        asTimestamp: 874,
+        toString: () => "0:00.874",
+      },
+    });
+
+    expect(onSolve).toHaveBeenCalledTimes(1);
+    expect(onSolve.mock.calls[0][0].ms).toBe(874);
+  });
 });

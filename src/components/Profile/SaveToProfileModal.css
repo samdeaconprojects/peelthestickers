@@ -1,0 +1,131 @@
+.saveToProfileOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2450;
+  background: rgba(6, 10, 14, 0.76);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.saveToProfileModal {
+  width: min(460px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  border-radius: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, rgba(18, 28, 34, 0.98), rgba(10, 16, 20, 0.98));
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  padding: 18px;
+  box-sizing: border-box;
+}
+
+.saveToProfileHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.saveToProfileTitle {
+  color: white;
+  font-size: 1.2rem;
+  font-weight: 900;
+}
+
+.saveToProfileClose {
+  width: 38px;
+  min-width: 38px;
+  padding: 0;
+  font-size: 1.3rem;
+  opacity: 0.8;
+}
+
+.saveToProfileLabel {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.saveToProfileOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.saveToProfileOption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 10px 12px;
+  color: rgba(255, 255, 255, 0.84);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.saveToProfileOption.is-active {
+  border-color: rgba(46, 196, 182, 0.72);
+  background: rgba(46, 196, 182, 0.12);
+  color: white;
+}
+
+.saveToProfileOption input {
+  margin: 0;
+}
+
+.saveToProfileOptionName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saveToProfileOptionHint {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.saveToProfileNewRow {
+  display: flex;
+  gap: 8px;
+}
+
+.saveToProfileInput {
+  flex: 1;
+  min-width: 0;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: white;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  font: inherit;
+  outline: none;
+}
+
+.saveToProfileInput:focus {
+  border-color: rgba(46, 196, 182, 0.7);
+}
+
+.saveToProfileError {
+  margin-top: 10px;
+  color: #ff8f8f;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.saveToProfileActions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}

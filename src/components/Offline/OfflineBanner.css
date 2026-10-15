@@ -50,6 +50,12 @@
 
 .offline-banner__action {
   flex-shrink: 0;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  cursor: pointer;
   color: inherit;
   font-weight: 600;
   text-decoration: underline;

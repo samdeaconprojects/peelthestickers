@@ -1,3 +1,5 @@
+import { apiPost } from "./api.js";
+
 export const recomputeTagStats = async (
   userID,
   { event, sessionID = "", tagKey, tagValue } = {}
@@ -13,24 +15,13 @@ export const recomputeTagStats = async (
   if (!key) throw new Error("recomputeTagStats: tagKey is required");
   if (!value) throw new Error("recomputeTagStats: tagValue is required");
 
-  const res = await fetch("/api/recomputeTagStats", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      userID: id,
-      event: ev,
-      sessionID: sid,
-      tagKey: key,
-      tagValue: value,
-    }),
+  const data = await apiPost("/api/recomputeTagStats", {
+    userID: id,
+    event: ev,
+    sessionID: sid,
+    tagKey: key,
+    tagValue: value,
   });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(txt || `recomputeTagStats failed (${res.status})`);
-  }
-
-  const data = await res.json();
   if (!data?.item) {
     throw new Error("recomputeTagStats: server returned no item");
   }

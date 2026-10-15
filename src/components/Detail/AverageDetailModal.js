@@ -300,7 +300,8 @@ function AverageDetailModal({
         solveList: filteredRows.map((row) => row.solve),
         comments: [],
       });
-      setActionMessage(result?.status === "exists" ? "Already on your profile." : "Added to your profile.");
+      if (result?.status === "cancelled") return;
+      setActionMessage(result?.status === "exists" ? "Already saved there." : "Saved to your profile.");
     } catch (error) {
       console.error("Failed to add average to profile:", error);
       setActionMessage("Failed to add to your profile.");

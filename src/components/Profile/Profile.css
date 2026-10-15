@@ -91,7 +91,13 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
-  align-items: flex-start;
+  /* Cards sharing a row match heights so the row gaps read evenly. */
+  align-items: stretch;
+}
+
+/* A card whose chart rendered nothing would still claim a grid row and add a second gap. */
+.profileStatsGrid > .profileStatsItem:empty {
+  display: none;
 }
 
 .profileStatsLayout {
@@ -122,6 +128,7 @@
   background: rgba(100, 100, 100, 0.1);
   border: 2px solid var(--profile-stats-card-border-soft, rgba(200, 200, 200, 0.3));
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .profileStatsMatrixCardHeader {
@@ -164,6 +171,34 @@
   border-radius: 10px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   overflow: hidden;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+/* Same hover treatment as the Stats page cards (.statsCardShell) */
+.profileStatsItem:hover,
+.profileStatsMatrixCard:hover {
+  border-color: var(--profile-stats-card-border-hover, rgba(255,255,255,0.44));
+  box-shadow: 0 14px 36px rgba(0,0,0,0.18);
+}
+
+.profileStatsItem--summary:hover,
+.profileStatsItem--savedSolve:hover,
+.profileStatsItem--savedAverage:hover {
+  box-shadow: none;
+}
+
+.profileStatsItem--summary:hover .ssCard {
+  border-color: var(--ss-card-border-hover, var(--profile-stats-card-border-hover, rgba(255,255,255,0.44)));
+}
+
+.profilePage .postShell:hover .post {
+  border-color: var(--post-border-hover, rgba(255,255,255,0.44));
+  box-shadow: 0 14px 36px rgba(0,0,0,0.18);
+}
+
+.profilePage--hoverGrow .profileStatsItem:hover,
+.profilePage--hoverGrow .profileStatsMatrixCard:hover {
+  transform: scale(1.004);
 }
 
 .profileStatsItem--summary {
@@ -178,6 +213,8 @@
 
 .profileStatsItem--savedSolve,
 .profileStatsItem--savedAverage {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   padding: 0;
   background: transparent;
@@ -192,13 +229,18 @@
 
 .profileStatsItem--savedSolve .post,
 .profileStatsItem--savedAverage .post {
+  flex: 1 1 auto;
   width: 100%;
   box-sizing: border-box;
+  border-radius: 10px;
+  align-items: center;
   background-color: rgba(100, 100, 100, 0.1);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .profileStatsItem--savedSolve .postShell,
 .profileStatsItem--savedAverage .postShell {
+  flex: 1 1 auto;
   width: 100%;
 }
 
@@ -351,7 +393,8 @@
     display: flex;
     justify-content: space-between;
     border-radius: 12px;
-    transition: border-color 0.2s ease, background-color 0.2s ease;
+    border: 2px solid var(--post-border, rgba(200, 200, 200, 0.3));
+    transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .postShell:hover .post {
@@ -1186,38 +1229,60 @@
 
 .widgetBar {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(68px, max-content));
-    gap: 8px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
     margin: 0;
-    flex: 1;
+    flex: 0 1 560px;
     min-width: 0;
     align-self: center;
-    justify-content: end;
+    margin-left: auto;
   }
   
   .widget {
     background-color: rgba(100, 100, 100, 0.1);
-    padding: 7px 10px;
+    border: 2px solid #8A8F98;
+    padding: 5px 10px;
     border-radius: 9px;
     cursor: pointer;
-    text-align: left;
-    min-height: 52px;
+    min-height: 30px;
+    min-width: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .widgetLabel {
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    gap: 2px;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .widgetSub {
+    font-size: 0.68rem;
+    font-weight: bold;
+    color: #ddd;
+    line-height: 1.1;
+    white-space: nowrap;
   }
   
   .widgetTitle {
-    font-size: 0.64rem;
+    font-size: 0.68rem;
     color: #aaa;
     line-height: 1.1;
+    white-space: nowrap;
   }
   
   .widgetValue {
-    font-size: 0.9rem;
+    font-size: 0.86rem;
     font-weight: bold;
     line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
   
   .widgetOverlay {
@@ -1413,7 +1478,8 @@
   }
 
   .widgetBar {
-    min-width: 100%;
+    flex: 1 1 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .postAverageSnapshotGrid--5,
@@ -1442,5 +1508,290 @@
 
   .titleTextSeparator {
     display: none;
+  }
+}
+
+/* Stat lists (Profile / Saved Stats / custom lists) */
+.profileStatGroups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 14px;
+}
+
+.profileStatGroupChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.8);
+  padding: 7px 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.profileStatGroupChip:hover {
+  border-color: var(--profile-stats-card-border-hover, rgba(255, 255, 255, 0.44));
+}
+
+.profileStatGroupChip.is-active {
+  border-color: var(--profile-stats-card-border, rgba(46, 196, 182, 0.82));
+  background: var(--profile-stats-card-glow, rgba(46, 196, 182, 0.18));
+  color: white;
+}
+
+.profileStatGroupChip--add {
+  border-style: dashed;
+}
+
+.profileStatGroupChip--edit {
+  margin-left: auto;
+}
+
+.profileStatGroupCount {
+  font-size: 0.78rem;
+  opacity: 0.65;
+}
+
+.profileStatGroupNew {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.profileStatGroupNew input,
+.statsEditorListName input {
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: white;
+  padding: 8px 12px;
+  font: inherit;
+  outline: none;
+}
+
+.statsEditorListName {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profileStatGroupEmpty {
+  padding: 28px 16px;
+  border: 2px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.66);
+  font-weight: 700;
+  text-align: center;
+}
+
+.profileStatsLayout--noRail {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.profileStatsMatrixTop {
+  min-width: 0;
+  margin-bottom: 16px;
+}
+
+.statsEditorEventMatrix {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-bottom: 18px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.statsEditorEventMatrixTitle {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.statsEditorCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.statsEditorSegmented.is-disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.statsEditorSegmented {
+  display: inline-flex;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+
+.statsEditorSegmented button {
+  padding: 6px 12px;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.statsEditorSegmented button.is-active {
+  background: rgba(255, 255, 255, 0.14);
+  color: white;
+}
+
+.statsEditorSegmented button:disabled {
+  cursor: default;
+}
+
+/* Stats organizer: draggable mini previews laid out like the profile grid */
+.statsOrganizer .statsEditorHeader {
+  align-items: center;
+}
+
+.statsOrganizer .statsEditorActions {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+.statsOrganizer .statsEditorListName,
+.statsOrganizer .statsEditorLibrary {
+  margin-bottom: 18px;
+}
+
+.statsOrganizerGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.statsOrganizerTile {
+  position: relative;
+  min-width: 0;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.035);
+  cursor: grab;
+}
+
+.statsOrganizerTile--wide {
+  grid-column: 1 / -1;
+}
+
+.statsOrganizerTile:hover {
+  border-color: var(--profile-stats-card-border-hover, rgba(255, 255, 255, 0.44));
+}
+
+.statsOrganizerTile.is-dragging {
+  opacity: 0.35;
+}
+
+.statsOrganizerTile.is-dropBefore::before,
+.statsOrganizerTile.is-dropAfter::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 4px;
+  background: var(--profile-stats-card-border, #2ec4b6);
+}
+
+.statsOrganizerTile.is-dropBefore::before {
+  left: -8px;
+}
+
+.statsOrganizerTile.is-dropAfter::after {
+  right: -8px;
+}
+
+.statsOrganizerBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.statsOrganizerHandle {
+  opacity: 0.5;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.statsOrganizerTitle {
+  font-weight: 800;
+  font-size: 0.92rem;
+  white-space: nowrap;
+  margin-right: 4px;
+}
+
+.statsOrganizerBarSpacer {
+  flex: 1;
+}
+
+.statsOrganizerBar select,
+.statsOrganizerBar button {
+  height: 30px;
+  min-width: 0;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(8, 13, 18, 0.88);
+  color: white;
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.statsOrganizerBar select {
+  width: auto;
+  max-width: 130px;
+}
+
+.statsOrganizerBar button {
+  width: 30px;
+  padding: 0;
+}
+
+.statsOrganizerBar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Real card, rendered at half size and non-interactive. */
+.statsOrganizerPreview {
+  zoom: 0.5;
+  max-height: 340px;
+  overflow: hidden;
+  padding: 16px;
+  pointer-events: none;
+}
+
+.statsOrganizerPreview .profileStatsItem {
+  grid-column: auto;
+}
+
+@media (max-width: 700px) {
+  .statsOrganizerGrid {
+    grid-template-columns: 1fr;
   }
 }

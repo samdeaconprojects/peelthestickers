@@ -9,7 +9,9 @@ import useBulkSolveActions from "../../hooks/useBulkSolveActions";
 import BulkSolveControls from "../SolveBulk/BulkSolveControls";
 import { normalizeEventCode } from "../SolveBulk/solveBulkUtils";
 
-const TABLE_LIMITS = ["100", "250", "500", "1000", "all"];
+// Scope-down sizes; only the ones smaller than what is loaded are offered.
+const TABLE_LIMITS = ["12", "25", "50", "100", "250", "500", "1000", "all"];
+const DEFAULT_SORT_DIRECTION = { date: "desc", time: "asc" };
 const DEFAULT_BOLD_PERF_COLORS = {
   fastest: "#00ff00",
   faster: "#00e676",
@@ -172,12 +174,27 @@ function getSolveKey(solve, fallbackIndex) {
   return `idx:${fallbackIndex}`;
 }
 
-function getSolveDisplayNumber(solve, fallbackNumber, preserveInputOrder = false) {
+function getSolveDisplayNumber(
+  solve,
+  fallbackNumber,
+  preserveInputOrder = false,
+  solveIndexOffset = null
+) {
   const explicitDisplay = Number(solve?.sessionDisplayNumber ?? solve?.__displayNumber);
   if (Number.isFinite(explicitDisplay)) {
     return explicitDisplay;
   }
   const sessionIndex = Number(solve?.fullIndex);
+  // The caller knows how many older solves sit before the loaded window, so
+  // the real session number is recoverable from fullIndex.
+  if (
+    typeof solveIndexOffset === "number" &&
+    Number.isFinite(solveIndexOffset) &&
+    solve?.fullIndex != null &&
+    Number.isFinite(sessionIndex)
+  ) {
+    return sessionIndex + solveIndexOffset + 1;
+  }
   if (preserveInputOrder && Number.isFinite(sessionIndex)) {
     return sessionIndex + 1;
   }
@@ -213,12 +230,13 @@ const TimeTable = ({
   initialSortBy = "date",
   initialSortDirection = "desc",
   initialItemRowSize = 12,
-  initialTableLimit = "1000",
+  initialTableLimit = "all",
   preserveInputOrder = false,
   highlightTrimmedSolves = false,
   showSolveAverages = true,
   containerClassName = "",
   renderSolveFooter = null,
+  solveIndexOffset = null,
 }) => {
   const [selectedSolve, setSelectedSolve] = useState(null);
   const resolvedProfileColor = user?.Color || user?.color || "#2EC4B6";
@@ -228,18 +246,43 @@ const TimeTable = ({
 
   const [displayMode, setDisplayMode] = useState(initialDisplayMode);
   const [sortBy, setSortBy] = useState(initialSortBy);
-  const [sortDirection, setSortDirection] = useState(initialSortDirection);
+  const [dateSortDirection, setDateSortDirection] = useState(
+    initialSortBy === "date" ? initialSortDirection : DEFAULT_SORT_DIRECTION.date
+  );
+  const [timeSortDirection, setTimeSortDirection] = useState(
+    initialSortBy === "time" ? initialSortDirection : DEFAULT_SORT_DIRECTION.time
+  );
   const [itemRowSize, setItemRowSize] = useState(initialItemRowSize);
   const [tableLimit, setTableLimit] = useState(initialTableLimit);
 
+  // Each sort button remembers its own direction: clicking the inactive one
+  // switches to it as it was left, clicking the active one flips it.
+  const sortDirection = sortBy === "time" ? timeSortDirection : dateSortDirection;
+
+  const handleSortToggle = (nextSortBy) => {
+    if (sortBy !== nextSortBy) {
+      setSortBy(nextSortBy);
+      return;
+    }
+    const flip = (prev) => (prev === "asc" ? "desc" : "asc");
+    if (nextSortBy === "time") setTimeSortDirection(flip);
+    else setDateSortDirection(flip);
+  };
+
   const selection = useSolveSelection();
+
+  const loadedCount = Array.isArray(solves) ? solves.length : 0;
+  const limitOptions = TABLE_LIMITS.filter((v) => v !== "all" && Number(v) < loadedCount);
+  // A limit at or above what is loaded shows everything, so it reads as "All".
+  const effectiveTableLimit =
+    tableLimit !== "all" && Number(tableLimit) < loadedCount ? tableLimit : "all";
 
   const limitedSolves = useMemo(() => {
     const arr = Array.isArray(solves) ? solves : [];
-    if (tableLimit === "all") return arr;
-    const n = Math.max(1, Number(tableLimit || 0));
+    if (effectiveTableLimit === "all") return arr;
+    const n = Math.max(1, Number(effectiveTableLimit || 0));
     return arr.slice(-n);
-  }, [solves, tableLimit]);
+  }, [solves, effectiveTableLimit]);
 
   const showAverages = showSolveAverages && sortBy !== "time";
   const totalDisplayed = Array.isArray(limitedSolves) ? limitedSolves.length : 0;
@@ -391,7 +434,12 @@ const TimeTable = ({
         ...solve,
         __ao5: showAverages ? averagesByKey.ao5.get(key) ?? null : null,
         __ao12: showAverages ? averagesByKey.ao12.get(key) ?? null : null,
-        __displayNumber: getSolveDisplayNumber(solve, fallbackNumber, preserveInputOrder),
+        __displayNumber: getSolveDisplayNumber(
+          solve,
+          fallbackNumber,
+          preserveInputOrder,
+          solveIndexOffset
+        ),
         __sortedIndex: index,
       };
     });
@@ -403,6 +451,7 @@ const TimeTable = ({
     sortDirection,
     totalDisplayed,
     preserveInputOrder,
+    solveIndexOffset,
   ]);
 
   const itemRows = useMemo(() => {
@@ -429,7 +478,12 @@ const TimeTable = ({
 
         return {
           ...solve,
-          __displayNumber: getSolveDisplayNumber(solve, fallbackNumber, preserveInputOrder),
+          __displayNumber: getSolveDisplayNumber(
+          solve,
+          fallbackNumber,
+          preserveInputOrder,
+          solveIndexOffset
+        ),
           __flatIndex: flatIndex,
         };
       });
@@ -466,9 +520,25 @@ const TimeTable = ({
     totalDisplayed,
     overallVisibleRankMap,
     preserveInputOrder,
+    solveIndexOffset,
   ]);
 
   const hasMultipleItemRows = itemRows.length > 1;
+
+  // Mean of the per-row averages. Partial rows and DNF averages don't count,
+  // so the figure is always a mean of like-sized averages.
+  const rowAverageMean = useMemo(() => {
+    if (!showAverages) return null;
+    const values = itemRows
+      .filter((row) => row.solves.length === itemRowSize)
+      .map((row) => row.average)
+      .filter((value) => typeof value === "number" && Number.isFinite(value));
+    if (values.length < 2) return null;
+    return {
+      mean: values.reduce((sum, value) => sum + value, 0) / values.length,
+      count: values.length,
+    };
+  }, [itemRows, itemRowSize, showAverages]);
 
   const handleSolvePrimaryAction = (solve) => {
     if (typeof onSolveOpen === "function") {
@@ -561,51 +631,48 @@ const TimeTable = ({
         <div className="time-table-toolbar-group">
           <button
             type="button"
-            className={`time-table-toggle ${sortBy === "date" ? "active" : ""}`}
-            onClick={() => setSortBy("date")}
+            className={`time-table-toggle time-table-sort-toggle time-table-sort-date is-${dateSortDirection} ${
+              sortBy === "date" ? "active" : ""
+            }`}
+            style={{ "--time-table-profile-color": resolvedProfileColor }}
+            aria-pressed={sortBy === "date"}
+            onClick={() => handleSortToggle("date")}
+            aria-label={`Sort by date, ${dateSortDirection === "desc" ? "newest" : "oldest"} first`}
           >
-            Date
+            Date {dateSortDirection === "desc" ? "↓" : "↑"}
           </button>
 
           <button
             type="button"
-            className={`time-table-toggle ${sortBy === "time" ? "active" : ""}`}
-            onClick={() => setSortBy("time")}
+            className={`time-table-toggle time-table-sort-toggle time-table-sort-time is-${timeSortDirection} ${
+              sortBy === "time" ? "active" : ""
+            }`}
+            aria-pressed={sortBy === "time"}
+            onClick={() => handleSortToggle("time")}
           >
-            Best Time
+            {timeSortDirection === "asc" ? "Best Time ↑" : "Worst Time ↓"}
           </button>
         </div>
 
         <div className="time-table-toolbar-group">
           <button
             type="button"
-            className={`time-table-toggle ${sortDirection === "asc" ? "active" : ""}`}
-            onClick={() => setSortDirection("asc")}
+            className={`time-table-toggle ${effectiveTableLimit === "all" ? "active" : ""}`}
+            onClick={() => setTableLimit("all")}
           >
-            ↑
+            All {loadedCount.toLocaleString()}
           </button>
 
-          <button
-            type="button"
-            className={`time-table-toggle ${sortDirection === "desc" ? "active" : ""}`}
-            onClick={() => setSortDirection("desc")}
-          >
-            ↓
-          </button>
-        </div>
-
-        <div className="time-table-toolbar-group">
-          <select
-            className="time-table-select"
-            value={tableLimit}
-            onChange={(e) => setTableLimit(e.target.value)}
-          >
-            {TABLE_LIMITS.map((v) => (
-              <option key={v} value={v}>
-                {v === "all" ? "All loaded" : `Last ${v}`}
-              </option>
-            ))}
-          </select>
+          {limitOptions.map((v) => (
+            <button
+              key={v}
+              type="button"
+              className={`time-table-toggle ${effectiveTableLimit === v ? "active" : ""}`}
+              onClick={() => setTableLimit(v)}
+            >
+              Last {v}
+            </button>
+          ))}
         </div>
 
         {displayMode === "items" && (
@@ -872,6 +939,28 @@ const TimeTable = ({
               </div>
             </div>
           ))}
+
+          {rowAverageMean && (
+            <div className="timelist-row-wrap">
+              <div className="timelist-row timelist-row--summary">
+                <div className="timelist-row-summary-label">
+                  Average of {rowAverageMean.count} Ao{itemRowSize}s
+                </div>
+                <div
+                  className="timelist-row-average"
+                  style={{
+                    borderColor: resolvedProfileColor,
+                    boxShadow: `inset 0 0 0 1px ${resolvedProfileColor}33`,
+                  }}
+                >
+                  <span className="timelist-row-average-label">AVG</span>
+                  <span className="timelist-row-average-value">
+                    {formatTime(rowAverageMean.mean, true)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -938,6 +1027,7 @@ TimeTable.propTypes = {
   showSolveAverages: PropTypes.bool,
   containerClassName: PropTypes.string,
   renderSolveFooter: PropTypes.func,
+  solveIndexOffset: PropTypes.number,
 };
 
 export default TimeTable;

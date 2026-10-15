@@ -394,8 +394,8 @@ function getDefaultDotSizeForSolveCount(count) {
   if (safeCount <= 50) return 7;
   if (safeCount <= 149) return 6;
   if (safeCount <= 249) return 5;
-  if (safeCount <= 349) return 4;
-  if (safeCount <= 749) return 3;
+  if (safeCount <= 499) return 4;
+  if (safeCount <= 999) return 3;
   return 2;
 }
 
@@ -746,10 +746,13 @@ function LineChart({
     bucketGroupModeRef.current = "";
   }, [groupMode, hasBucketItems, isTimeView]);
 
+  // Sized from what is actually plotted, so grouped and bucket-backed views
+  // (which carry no raw solves) shrink their dots as the point count grows too.
+  const plottedPointCount = computed.data.length;
   useEffect(() => {
-    if (groupMode !== "solve") return;
-    setDotSize(getDefaultDotSizeForSolveCount(baseValid.length || solves?.length || DEFAULT_DOT_SIZE));
-  }, [baseValid.length, groupMode, solves]);
+    if (!plottedPointCount) return;
+    setDotSize(getDefaultDotSizeForSolveCount(plottedPointCount));
+  }, [plottedPointCount]);
 
   useEffect(() => {
     if (!controlsSyncKey) return;

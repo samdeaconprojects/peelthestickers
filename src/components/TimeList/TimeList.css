@@ -266,8 +266,20 @@
   font-size: 0.8em;
 }
 
+.horizontal-row > .ao12,
+.horizontal-row > .ao5 {
+  opacity: 0.75;
+}
+
+.horizontal-row > .ao12,
 .horizontal-row > .ao5 {
   font-size: 1em;
+}
+
+.horizontal-row > .ao12:hover,
+.horizontal-row > .ao5:hover {
+  opacity: 1;
+  transform: translateY(-0.5px);
 }
 
 .horizontal-row > .empty {
@@ -453,7 +465,7 @@
   }
 
   .TimeList.TimeList--vertical td.vertical-average {
-    font-size: calc(0.74rem * var(--vertical-row-scale, 1));
+    font-size: calc(0.8rem * var(--vertical-row-scale, 1));
   }
 }
 
@@ -478,12 +490,13 @@
 
 .TimeList--vertical td.vertical-average {
   border: none;
-  font-size: calc(0.85rem * var(--vertical-row-scale, 1));
-  opacity: 0.85;
+  font-size: calc(0.92rem * var(--vertical-row-scale, 1));
+  opacity: 0.75;
   cursor: pointer;
 }
 
 .TimeList--vertical td.vertical-average:hover {
+  opacity: 1;
   color: #50B6FF;
 }
 

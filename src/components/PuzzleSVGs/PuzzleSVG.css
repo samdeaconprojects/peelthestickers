@@ -17,8 +17,8 @@
 }
 
 .puzzle-svg-wrap--oh.puzzle-svg-wrap--statsHeader {
-  --puzzle-oh-width: 54px;
-  --puzzle-oh-transform: translate(-52%, -11px);
+  --puzzle-oh-width: 35px;
+  --puzzle-oh-transform: translate(-50%, 5.5px);
 }
 
 .puzzle-svg-wrap--oh.puzzle-svg-wrap--nameTag {
@@ -48,6 +48,11 @@
   fill: #fff !important;
   stroke: #fff !important;
   opacity: 0.8;
+}
+
+/* scramble colors kept as white -> dark gray shades */
+.puzzle-svg-inner--grayscale svg {
+  filter: grayscale(1);
 }
 
 .puzzle-svg-oh-hand {

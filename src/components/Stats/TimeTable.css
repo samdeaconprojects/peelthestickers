@@ -26,6 +26,7 @@
 
 .time-table-toolbar-group {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
@@ -91,6 +92,41 @@
 .time-table-toggle.active {
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.34);
+}
+
+/* Sort buttons: the one in use gets a coloured border and a faint tint, the
+   other is dimmed. Date runs light -> dark in the profile colour (newest ->
+   oldest), time uses the time list's best/worst green and red. */
+.time-table-sort-toggle {
+  --time-table-sort-color: rgba(255, 255, 255, 0.5);
+  opacity: 0.5;
+}
+
+.time-table-sort-toggle:hover {
+  opacity: 0.8;
+}
+
+.time-table-sort-toggle.active,
+.time-table-sort-toggle.active:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--time-table-sort-color) 14%, transparent);
+  border-color: var(--time-table-sort-color);
+}
+
+.time-table-sort-date.is-desc {
+  --time-table-sort-color: color-mix(in srgb, var(--time-table-profile-color, #2ec4b6) 65%, white);
+}
+
+.time-table-sort-date.is-asc {
+  --time-table-sort-color: color-mix(in srgb, var(--time-table-profile-color, #2ec4b6) 55%, black);
+}
+
+.time-table-sort-time.is-asc {
+  --time-table-sort-color: #00ff00;
+}
+
+.time-table-sort-time.is-desc {
+  --time-table-sort-color: #ff0000;
 }
 
 /* -------------------------
@@ -527,6 +563,16 @@
   border: 2px solid currentColor;
 }
 
+.timelist-row-summary-label {
+  grid-column: 1 / -2;
+  align-self: center;
+  text-align: right;
+  padding-right: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
 .timelist-row-average-label {
   font-size: 0.74rem;
   font-weight: 700;
@@ -714,4 +760,191 @@
   .bucket-items-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* -------------------------
+   BUCKET CALENDAR
+------------------------- */
+.bucket-table-segment {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.bucket-calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: white;
+}
+
+.bucket-calendar-months {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.bucket-calendar-month {
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 8px 10px 10px;
+}
+
+.bucket-calendar-month-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.75;
+  margin-bottom: 6px;
+}
+
+.bucket-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 16px);
+  grid-auto-rows: 16px;
+  gap: 3px;
+}
+
+.bucket-calendar-weekday {
+  font-size: 0.58rem;
+  line-height: 16px;
+  font-weight: 700;
+  text-align: center;
+  opacity: 0.45;
+}
+
+.bucket-calendar-cell {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: default;
+}
+
+.bucket-calendar-cell.has-data,
+.bucket-calendar-legend-square {
+  background:
+    linear-gradient(var(--cell-color), var(--cell-color)) center / var(--cell-fill, 100%) var(--cell-fill, 100%) no-repeat,
+    rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 0 0 1.5px var(--cell-color);
+  opacity: var(--cell-alpha, 1);
+}
+
+.bucket-calendar-cell.has-data {
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease, background-size 0.12s ease;
+}
+
+.bucket-calendar-cell.has-data:hover,
+.bucket-calendar-cell.has-data:focus-visible,
+.bucket-calendar-cell.is-selected {
+  opacity: 1;
+  background-size: 100% 100%, auto;
+}
+
+.bucket-calendar-cell.has-data:hover {
+  transform: scale(1.25);
+  box-shadow: inset 0 0 0 1.5px var(--cell-color), 0 0 0 1px rgba(255, 255, 255, 0.75);
+  position: relative;
+  z-index: 1;
+}
+
+.bucket-calendar-cell.is-selected {
+  box-shadow: inset 0 0 0 1.5px var(--cell-color), 0 0 0 2px rgba(46, 196, 182, 0.95), 0 0 0 4px rgba(46, 196, 182, 0.25);
+}
+
+.bucket-calendar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  opacity: 0.8;
+}
+
+.bucket-calendar-legend-label {
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.bucket-calendar-legend-bar {
+  width: 96px;
+  height: 10px;
+  border-radius: 5px;
+}
+
+.bucket-calendar-legend-gap {
+  width: 12px;
+}
+
+.bucket-calendar-tooltip {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  min-width: 190px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(14, 18, 26, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  color: white;
+  font-size: 0.76rem;
+}
+
+.bucket-calendar-tooltip-title {
+  font-weight: 800;
+  font-size: 0.82rem;
+  margin-bottom: 2px;
+}
+
+.bucket-calendar-tooltip-headline {
+  opacity: 0.85;
+  margin-bottom: 8px;
+}
+
+.bucket-calendar-tooltip-headline span {
+  font-weight: 800;
+}
+
+.bucket-calendar-tooltip-headline em {
+  font-style: normal;
+  opacity: 0.65;
+}
+
+.bucket-calendar-tooltip-grid {
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: 16px;
+  row-gap: 2px;
+}
+
+.bucket-calendar-tooltip-grid span {
+  opacity: 0.6;
+}
+
+.bucket-calendar-tooltip-grid strong {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.bucket-calendar-tooltip-hint {
+  margin-top: 8px;
+  font-size: 0.68rem;
+  opacity: 0.5;
+}
+
+.bucket-calendar-legend-squares {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.bucket-calendar-legend-square {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
 }

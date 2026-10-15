@@ -78,6 +78,11 @@ td:nth-child(13) {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+/* Third column: the add-stat-group button at the far right, after the overview */
+.statsTopBar--addable {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
 .statsTopLeft{
   display: flex;
   align-items: center;
@@ -344,17 +349,21 @@ td:nth-child(13) {
   flex-wrap: wrap;
   padding: 6px 10px;
   border-radius: 12px;
-  background: var(--stats-scope-chip-bg);
-  border: 2px solid var(--stats-scope-chip-border);
+  background: transparent;
+  border: 2px solid var(--stats-scope-row-border, var(--stats-scope-chip-border));
   box-shadow:
     inset 0 0 0 1px rgba(255,255,255,0.04),
     0 2px 4px rgba(0,0,0,0.1);
   transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
 }
 
+.statsPageRoot--topBarFill .statsScopeRow {
+  background: var(--stats-scope-chip-bg);
+}
+
 .statsCompareControls--standard .statsScopeRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -455,131 +464,49 @@ td:nth-child(13) {
   cursor: pointer;
 }
 
+/* Last item in the top bar, to the right of the overview */
 .statsAddCompareRow {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  gap: 0;
-  width: 100%;
-  position: relative;
-  margin-top: -6px;
-  min-height: 18px;
-  padding-top: 0;
+  flex: 0 0 auto;
+  align-self: stretch;
+  /* tighten the 14px top bar gap so the button reads as attached to the overview */
+  margin-left: -6px;
 }
 
 .statsAddCompareBtn {
-  width: 64px;
-  min-width: 64px;
-  min-height: 16px;
-  height: 16px;
+  width: 24px;
+  min-width: 24px;
+  height: auto;
+  min-height: 100%;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0;
-  border-radius: 5px;
-  border-style: solid;
-  border-color: rgba(255,255,255,0.16);
-  background: rgba(255,255,255,0.05);
-  box-shadow:
-    0 0 0 1px rgba(255,255,255,0.03) inset,
-    0 5px 14px rgba(0,0,0,0.18);
-  font-size: 13px;
+  border-radius: 8px;
   line-height: 1;
-  opacity: 0.88;
-  overflow: hidden;
+  opacity: 0.62;
   transition:
-    width 0.18s ease,
-    min-width 0.18s ease,
-    height 0.18s ease,
-    min-height 0.18s ease,
     opacity 0.16s ease,
     background 0.16s ease,
     border-color 0.16s ease,
-    box-shadow 0.16s ease,
-    transform 0.16s ease;
-  transform: translateY(5px);
+    box-shadow 0.16s ease;
 }
 
 .statsAddCompareBtn:hover,
 .statsAddCompareBtn:focus-visible {
   opacity: 1;
-  width: 150px;
-  min-width: 150px;
-  min-height: 22px;
-  height: 22px;
+  border-style: solid;
   background: color-mix(in srgb, var(--stats-profile-accent, #2EC4B6) 18%, rgba(255,255,255,0.08));
   border-color: color-mix(in srgb, var(--stats-profile-accent, #2EC4B6) 62%, rgba(255,255,255,0.28));
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--stats-profile-accent, #2EC4B6) 26%, transparent) inset,
-    0 8px 18px rgba(0,0,0,0.22);
-  transform: translateY(4px);
-}
-
-.statsAddComparePlus,
-.statsAddCompareLabel {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--stats-profile-accent, #2EC4B6) 26%, transparent) inset;
 }
 
 .statsAddComparePlus {
   font-size: 16px;
   font-weight: 800;
   transform: translateY(-0.5px);
-  flex: 0 0 auto;
-}
-
-.statsAddCompareLabel {
-  max-width: 0;
-  margin-left: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  opacity: 0;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  transition: max-width 0.18s ease, margin-left 0.18s ease, opacity 0.16s ease;
-}
-
-.statsAddCompareBtn:hover .statsAddCompareLabel,
-.statsAddCompareBtn:focus-visible .statsAddCompareLabel {
-  max-width: 120px;
-  margin-left: 8px;
-  opacity: 1;
-}
-
-.statsAddCompareHint {
-  position: absolute;
-  left: 50%;
-  top: calc(100% + 6px);
-  z-index: 1;
-  opacity: 0;
-  transform: translateX(-50%) translateY(-4px);
-  color: rgba(255,255,255,0.62);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  transition: opacity 0.16s ease, transform 0.16s ease, color 0.16s ease;
-  pointer-events: none;
-  display: none;
-}
-
-.statsAddCompareBtn:hover + .statsAddCompareHint,
-.statsAddCompareBtn:focus-visible + .statsAddCompareHint {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-  color: rgba(255,255,255,0.78);
-}
-
-.statsCompareControls--standard .statsAddCompareRow {
-  align-self: stretch;
-  flex-basis: 100%;
-  min-height: 20px;
-  padding-left: 0;
-  white-space: nowrap;
 }
 
 .statsScopeSummaryChip--event {
@@ -695,6 +622,11 @@ td:nth-child(13) {
   flex: 0 0 auto;
 }
 
+/* One-handed icon is cube + hand, wider than a bare cube */
+.statsScopeEventIcon--oh {
+  width: 36px;
+}
+
 .statsCompareSharedRail {
   display: flex;
   flex-direction: column;
@@ -702,7 +634,9 @@ td:nth-child(13) {
   align-items: center;
   flex: 0 0 auto;
   align-self: stretch;
-  padding: 8px 0;
+  /* shell gap (6px) + 8px matches the 14px top bar gap, centering the rail */
+  margin-left: 8px;
+  padding: 4px 0;
   min-height: 100%;
 }
 
@@ -713,10 +647,10 @@ td:nth-child(13) {
 }
 
 .statsCompareLinkBtn {
-  width: 34px;
-  min-width: 34px;
-  min-height: 34px;
-  height: 34px;
+  width: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  height: 24px;
   padding: 0;
   display: flex;
   flex-direction: row;
@@ -725,7 +659,7 @@ td:nth-child(13) {
   gap: 0;
   line-height: 1.05;
   text-align: center;
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px dashed rgba(255,255,255,0.24);
   background: rgba(255,255,255,0.04);
   color: white;
@@ -749,8 +683,8 @@ td:nth-child(13) {
 }
 
 .statsCompareLinkIcon {
-  width: 18px;
-  height: 18px;
+  width: 13px;
+  height: 13px;
   display: block;
   opacity: 0.7;
   transition: opacity 0.16s ease, filter 0.16s ease;
@@ -776,10 +710,13 @@ td:nth-child(13) {
 }
 
 .statsCompareSharedRail .statsCompareRemoveBtn {
-  min-width: 34px;
-  width: 34px;
-  height: 34px;
+  min-width: 24px;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
   padding: 0;
+  border-radius: 8px;
+  font-size: 11px;
   border-style: solid;
 }
 
@@ -1154,9 +1091,50 @@ td:nth-child(13) {
   padding: 0 8px;
 }
 
-.statsTopStepBtn {
-  min-width: 44px;
-  padding: 0 8px;
+/* Paired range controls: two half-height buttons stacked into one 38px control */
+.statsScopePair {
+  display: inline-flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.04);
+  overflow: hidden;
+}
+
+.statsScopePair--step {
+  width: 34px;
+}
+
+.statsScopeControls .statsScopePair button {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  font-size: 11px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.statsScopeControls .statsScopePair button + button {
+  border-top: 1px solid rgba(255,255,255,0.12);
+}
+
+.statsScopeControls .statsScopePair button:disabled {
+  opacity: 0.35;
+}
+
+.statsScopeControls {
+  flex: 0 0 auto;
+  gap: 6px;
 }
 
 .lineChart {
@@ -1852,6 +1830,7 @@ td:nth-child(13) {
     "eventmatrix eventmatrix"
     "line   percent"
     "line   bar"
+    "tagbreakdown tagbreakdown"
     "table  table";
   gap: 16px;
   align-items: stretch;
@@ -1871,6 +1850,7 @@ td:nth-child(13) {
     "header header"
     "line   percent"
     "line   bar"
+    "tagbreakdown tagbreakdown"
     "table  table";
 }
 
@@ -1882,19 +1862,12 @@ td:nth-child(13) {
     "table table";
 }
 
-.stats-grid--tagBreakdownOnly,
-.stats-grid--tagBreakdownOnly.stats-grid--noEventMatrix,
-.stats-grid--tagBreakdownOnly.stats-grid--time,
-.stats-grid--tagBreakdownOnly.stats-grid--time.stats-grid--noEventMatrix {
-  grid-template-areas: "tagbreakdown tagbreakdown";
-}
-
 /* -------------------------------------------------
    CARD BASE
 -------------------------------------------------- */
 .stats-item {
-  background-color: rgba(100, 100, 100, 0.1);
-  border: 2px solid rgba(200, 200, 200, 0.3);
+  background-color: var(--stats-container-bg, rgba(100, 100, 100, 0.1));
+  border: 2px solid var(--stats-container-border, rgba(200, 200, 200, 0.3));
   border-radius: 10px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   width: 100%;
@@ -1978,9 +1951,12 @@ td:nth-child(13) {
   outline-offset: 3px;
 }
 
-.statsCardShell:hover {
+.statsPageRoot--hoverGrow .statsCardShell:hover {
   transform: scale(1.004);
-  border-color: rgba(255,255,255,0.44);
+}
+
+.statsCardShell:hover {
+  border-color: var(--stats-container-border-hover, rgba(255,255,255,0.44));
   box-shadow: 0 14px 36px rgba(0,0,0,0.18);
 }
 
@@ -2105,8 +2081,23 @@ td:nth-child(13) {
   --stats-event-matrix-sticky-bg: rgb(25, 40, 42);
 }
 
-.statsEventMatrixCorner--vertical {
-  min-height: 72px;
+.statsEventMatrixToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
+.statsEventMatrixToolbar .statsEventMatrixWorstToggle {
+  padding: 0 12px;
+  font-size: 0.64rem;
+}
+
+.statsEventMatrixToolbar .statsEventMatrixToggle {
+  position: relative;
+  font-size: 0.7rem;
 }
 
 .statsEventMatrixToggle {
@@ -2425,8 +2416,7 @@ td:nth-child(13) {
 }
 
 .statsEventMatrix--vertical .statsEventMatrixEventTitle {
-  justify-content: flex-end;
-  width: 100%;
+  display: contents;
 }
 
 .statsEventMatrix--vertical .statsEventMatrixCell {
@@ -2446,13 +2436,20 @@ td:nth-child(13) {
 }
 
 .statsEventMatrix--vertical .statsEventMatrixEventHead {
-  padding: 10px 8px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-content: center;
+  align-items: center;
+  column-gap: 4px;
+  padding: 10px 8px 10px 4px;
   font-size: 0.82rem;
-  align-items: flex-end;
   text-align: right;
 }
 
 .statsEventMatrix--vertical .statsEventMatrixEventHead small {
+  grid-column: 2;
+  grid-row: 2;
   width: 100%;
   padding-right: 2px;
   margin-top: 2px;
@@ -2462,19 +2459,19 @@ td:nth-child(13) {
 }
 
 .statsEventMatrix--vertical .statsEventMatrixEventLabel {
+  grid-column: 2;
+  grid-row: 1;
   font-size: 0.92rem;
+  text-align: right;
 }
 
 .statsEventMatrix--vertical .statsEventMatrixEventIcon {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  justify-self: center;
+  align-self: center;
   position: relative;
-  top: 5px;
-  left: -8px;
-  margin-left: -4px;
-}
-
-.statsEventMatrix--vertical .statsEventMatrixEventIcon.is-nxn {
-  left: -16px;
-  margin-left: -10px;
+  margin-left: 0;
 }
 
 .statsEventMatrix--vertical .statsEventMatrixValue {
@@ -2777,7 +2774,7 @@ td:nth-child(13) {
   border-radius: inherit;
   background: var(--pie-legend-accent, #2EC4B6);
   border-left: 1px solid var(--pie-legend-accent, #2EC4B6);
-  opacity: 0.45;
+  opacity: 0.65;
   transform: scaleX(1);
   transform-origin: right center;
   transition: opacity 0.18s ease;
@@ -2786,7 +2783,7 @@ td:nth-child(13) {
 .pieChartLegendItem.is-active .pieChartLegendBarFill,
 .pieChartLegendItem:hover .pieChartLegendBarFill,
 .pieChartLegendItem:focus-visible .pieChartLegendBarFill {
-  opacity: 0.6;
+  opacity: 1;
 }
 
 .pieChartLegendSwatch {
@@ -2910,8 +2907,33 @@ td:nth-child(13) {
 
 .tagBreakdownFieldTabs {
   display: flex;
+  align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 2px 0;
+  scrollbar-width: none;
+}
+
+.tagBreakdownFieldTabs::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .tagBreakdownFieldTabs {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+}
+
+.tagBreakdownFieldTabsIcon {
+  width: 20px;
+  height: 20px;
+  margin-right: 2px;
+  display: block;
+  object-fit: contain;
+  flex: 0 0 auto;
+  opacity: 1;
 }
 
 .tagBreakdownTools {
@@ -2921,23 +2943,40 @@ td:nth-child(13) {
 }
 
 .tagBreakdownFieldTab {
+  height: auto;
+  opacity: 0.85;
   min-height: 34px;
   padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(255,255,255,0.04);
-  color: rgba(255,255,255,0.78);
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.28);
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.95);
   font-size: 12px;
   font-weight: 900;
+  white-space: nowrap;
+  flex: 0 0 auto;
   cursor: pointer;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
   transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.tagBreakdownFieldTabCount {
+  color: rgba(255,255,255,0.85);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .tagBreakdownFieldTab:hover,
 .tagBreakdownFieldTab:focus-visible,
 .tagBreakdownFieldTab.is-active {
-  border-color: rgba(46,196,182,0.44);
-  background: rgba(46,196,182,0.14);
+  opacity: 1;
+  border-color: var(--stats-profile-accent-strong, rgba(46,196,182,0.55));
+  background: var(--stats-profile-accent-soft, rgba(46,196,182,0.18));
   color: white;
   transform: translateY(-1px);
 }
@@ -2945,8 +2984,8 @@ td:nth-child(13) {
 .tagBreakdownToolButton {
   min-height: 34px;
   padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.14);
   background: rgba(255,255,255,0.04);
   color: rgba(255,255,255,0.78);
   font-size: 12px;
@@ -2977,13 +3016,15 @@ td:nth-child(13) {
   font-weight: 800;
   text-align: center;
   padding: 32px;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .tagBreakdownBody {
   flex: 1 1 auto;
   min-height: 0;
-  height: 560px;
-  max-height: 560px;
+  height: 520px;
+  max-height: 520px;
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.7fr);
   gap: 16px;
@@ -2999,8 +3040,8 @@ td:nth-child(13) {
 }
 
 .tagBreakdownChartCard {
-  padding: 20px;
-  min-height: 560px;
+  padding: 14px;
+  min-height: 520px;
   display: flex;
   align-items: stretch;
   justify-content: stretch;
@@ -3016,13 +3057,39 @@ td:nth-child(13) {
   position: relative;
 }
 
+/* The svg is pinned to the canvas box so the whole viewBox (labels included)
+   scales to fit the card instead of overflowing it top and bottom. */
 .tagBreakdownChartStage .pieChartCanvas {
-  padding: 10px;
+  position: relative;
+  align-self: stretch;
+  height: 100%;
+  min-height: 320px;
 }
 
 .tagBreakdownChartStage .pieChartSvg {
-  max-width: min(100%, 620px);
-  max-height: min(100%, 620px);
+  position: absolute;
+  inset: -6px 4px 14px;
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
+}
+
+.tagBreakdownChartStage .pieChartCalloutPrimary {
+  font-size: 9.5px;
+  font-weight: 700;
+}
+
+.tagBreakdownChartStage .pieChartCalloutSecondary {
+  font-size: 7px;
+  font-weight: 500;
+}
+
+.tagBreakdownChartStage .pieChartCalloutLine {
+  stroke-width: 1.5;
+}
+
+.tagBreakdownChartStage .pieChartCallout.is-active .pieChartCalloutLine,
+.tagBreakdownChartStage .pieChartCallout.is-active .pieChartCalloutDot {
+  stroke-width: 2.05;
 }
 
 .tagBreakdownChartReset {
@@ -3030,6 +3097,9 @@ td:nth-child(13) {
   top: -4px;
   left: 0;
   z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .tagBreakdownSidebar {
@@ -3046,11 +3116,11 @@ td:nth-child(13) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   padding: 14px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  background-color: rgba(100, 100, 100, 0.1);
+  border: 2px solid rgba(200, 200, 200, 0.3);
 }
 
 .tagBreakdownFocusHeader {
@@ -3069,23 +3139,33 @@ td:nth-child(13) {
 }
 
 .tagBreakdownFocusSwatch {
-  width: 14px;
+  width: 6px;
   height: 48px;
   border-radius: 999px;
   flex: 0 0 auto;
 }
 
 .tagBreakdownFocusLabel {
-  color: white;
-  font-size: 20px;
-  font-weight: 900;
-  line-height: 1.05;
+  max-width: 100%;
+  opacity: 1;
+}
+
+.tagBreakdownFocusLabel .statsScopeTagPillText {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.tagBreakdownFocusLabel .statsScopeTagPillIconWrap,
+.tagBreakdownFocusLabel .statsScopeTagPillIcon {
+  width: 16px;
+  height: 16px;
+  flex-basis: 16px;
 }
 
 .tagBreakdownFocusMeta {
-  margin-top: 4px;
-  color: rgba(255,255,255,0.68);
-  font-size: 12px;
+  margin-top: 6px;
+  color: rgba(243, 244, 246, 0.66);
+  font-size: 0.68rem;
   font-weight: 700;
 }
 
@@ -3094,89 +3174,108 @@ td:nth-child(13) {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 3px;
+  gap: 2px;
 }
 
-.tagBreakdownFocusHeroLabel {
-  color: rgba(255,255,255,0.56);
-  font-size: 10px;
-  font-weight: 900;
+.tagBreakdownFocusHeroLabel,
+.tagBreakdownFocusStatLabel,
+.tagBreakdownRecentLabel {
+  color: rgba(243, 244, 246, 0.8);
+  font-size: 0.72rem;
+  line-height: 1;
+  font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .tagBreakdownFocusHeroValue {
-  color: white;
-  font-size: 28px;
-  line-height: 0.95;
-  font-weight: 900;
-  letter-spacing: -0.04em;
+  color: #f3f4f6;
+  font-size: clamp(1.9rem, 2.4vw, 2.35rem);
+  line-height: 0.92;
+  font-weight: 800;
+  letter-spacing: -0.05em;
 }
 
 .tagBreakdownFocusHeroMeta {
-  color: rgba(255,255,255,0.62);
-  font-size: 11px;
+  color: rgba(243, 244, 246, 0.66);
+  font-size: 0.68rem;
   font-weight: 700;
 }
 
 .tagBreakdownFocusStats {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
 }
 
 .tagBreakdownFocusStat {
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(255,255,255,0.045);
-  border: 1px solid rgba(255,255,255,0.06);
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
 }
 
-.tagBreakdownFocusStatLabel,
-.tagBreakdownRecentLabel {
-  color: rgba(255,255,255,0.6);
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.tagBreakdownFocusStatLabel {
+  color: rgba(243, 244, 246, 0.66);
+  font-size: 0.6rem;
 }
 
 .tagBreakdownFocusStatValue {
-  color: white;
-  font-size: 18px;
-  font-weight: 900;
+  color: #f3f4f6;
+  font-size: clamp(1.08rem, 1.3vw, 1.24rem);
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.tagBreakdownFocusStat--best .tagBreakdownFocusStatValue {
+  color: #00e676;
+}
+
+.tagBreakdownFocusStat--worst .tagBreakdownFocusStatValue {
+  color: #ff6078;
 }
 
 .tagBreakdownRecent {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
 }
 
 .tagBreakdownRecentList {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 70px));
+  gap: 6px;
 }
 
 .tagBreakdownRecentSolve {
-  min-height: 32px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.1);
-  background: rgba(255,255,255,0.04);
+  opacity: 1;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  box-sizing: border-box;
+  border-radius: 5px;
+  border: 1px solid #50B6FF;
+  background-color: transparent;
   color: white;
-  font-size: 12px;
-  font-weight: 800;
+  font: inherit;
+  font-size: clamp(0.8rem, 1.05vw, 1rem);
+  white-space: nowrap;
   cursor: pointer;
+  transition: transform 0.12s ease;
 }
 
 .tagBreakdownRecentSolve:hover,
 .tagBreakdownRecentSolve:focus-visible {
-  background: rgba(255,255,255,0.09);
+  transform: translateY(-2px);
 }
 
 .tagBreakdownLegendCard {
@@ -3255,14 +3354,15 @@ td:nth-child(13) {
 .tagBreakdownLegendRow {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(78px, auto);
+  flex: 0 0 auto;
+  height: auto;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) minmax(78px, auto);
   gap: 12px;
   align-items: center;
-  min-height: 108px;
-  padding: 16px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.04);
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.08);
   color: white;
   cursor: pointer;
   text-align: left;
@@ -3274,7 +3374,7 @@ td:nth-child(13) {
 .tagBreakdownLegendRow.is-active {
   transform: translateX(2px);
   border-color: var(--tag-breakdown-accent, #2EC4B6);
-  background: rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.13);
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
 }
 
@@ -3282,29 +3382,27 @@ td:nth-child(13) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
 }
 
 .tagBreakdownLegendLabel {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: white;
-  font-size: 19px;
-  line-height: 1.05;
-  font-weight: 900;
+  max-width: 150px;
+  opacity: 1;
+}
+
+.tagBreakdownLegendLabel .statsScopeTagPillText {
+  font-weight: 800;
 }
 
 .tagBreakdownLegendStats {
-  color: rgba(255,255,255,0.66);
+  color: rgba(255,255,255,0.78);
   font-size: 11px;
   font-weight: 700;
   line-height: 1.35;
 }
 
 .tagBreakdownLegendStats--primary {
-  color: rgba(255,255,255,0.76);
+  color: rgba(255,255,255,0.9);
 }
 
 .tagBreakdownLegendStats--subtle {
@@ -3321,7 +3419,7 @@ td:nth-child(13) {
 }
 
 .tagBreakdownLegendMetricLabel {
-  color: rgba(255,255,255,0.56);
+  color: rgba(255,255,255,0.7);
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -3337,7 +3435,7 @@ td:nth-child(13) {
 }
 
 .tagBreakdownLegendMetricMeta {
-  color: rgba(255,255,255,0.62);
+  color: rgba(255,255,255,0.76);
   font-size: 10px;
   font-weight: 700;
   text-align: right;
@@ -3429,8 +3527,7 @@ td:nth-child(13) {
 }
 
 .statsScopeRow--clickable:hover {
-  background: var(--stats-scope-chip-bg);
-  border-color: var(--stats-scope-chip-border);
+  border-color: var(--stats-scope-row-border-hover, var(--stats-scope-chip-border-hover));
 }
 
 .statsScopeSummary {
@@ -4221,10 +4318,6 @@ input {
     min-width: 0;
   }
 
-  .tagBreakdownLegendLabel {
-    font-size: 18px;
-  }
-
   .tagBreakdownLegendMetricValue {
     font-size: 28px;
   }
@@ -4282,6 +4375,7 @@ input {
       "line"
       "percent"
       "bar"
+      "tagbreakdown"
       "table";
   }
 
@@ -4318,6 +4412,7 @@ input {
 
   .statsCompareSharedRail {
     width: 100%;
+    margin-left: 0;
     grid-template-columns: 1fr;
     grid-template-rows: auto;
   }
@@ -4349,13 +4444,17 @@ input {
   }
 
   .statsAddCompareRow {
-    padding-left: 0;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .statsAddCompareBtn {
+    width: 100%;
+    min-height: 24px;
   }
 
   .statsCompareControls--standard.statsCompareControls--single .statsScopeRow,
-  .statsCompareControls--standard.statsCompareControls--dual .statsScopeRow,
-  .statsCompareControls--standard .statsAddCompareRow,
-  .statsCompareControls--standard .statsAddCompareBtn {
+  .statsCompareControls--standard.statsCompareControls--dual .statsScopeRow {
     min-height: 0;
     height: auto;
   }
@@ -4449,4 +4548,230 @@ input {
   .statFocusFrame--summaryOverall {
     width: min(100%, 640px) !important;
   }
+}
+
+/* View (Solves / Time) chip in the stats selector row */
+.statsScopeSummaryChip--view {
+  flex: 0 0 auto;
+  height: 38px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.04);
+}
+
+.statsScopeSummaryChip--view:hover,
+.statsScopeSummaryChip--view:focus-visible {
+  background: var(--stats-scope-active-accent-soft, var(--stats-profile-accent-soft, rgba(46,196,182,0.18)));
+  border-color: var(--stats-scope-active-accent-strong, var(--stats-profile-accent-strong, rgba(46,196,182,0.55)));
+}
+
+.statsScopeSummaryChip--view .statsScopeSummaryChipValue {
+  font-size: 14px;
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: 0;
+  color: rgba(255,255,255,0.92);
+}
+
+/* Two overview cards (stat groups A + B) stacked to match the dual selector rows */
+.statsTopIdentity--dual {
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  align-items: center;
+  align-self: stretch;
+  gap: 6px;
+}
+
+.statsTopIdentity--dual .ssOverviewMini {
+  height: 46px;
+  min-height: 0;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+}
+
+/* Fixed cell widths keep the A and B overview columns lined up */
+.statsTopIdentity--dual .ssOverviewMiniCell {
+  min-width: 44px;
+}
+
+.statsTopIdentity--dual .ssOverviewMiniCell--lead {
+  min-width: 96px;
+}
+
+/* Keep selector contents on one line inside the fixed-height row */
+@media (min-width: 901px) {
+  .statsCompareControls--standard .statsScopeSummary,
+  .statsCompareControls--standard .statsScopeControls {
+    flex-wrap: nowrap;
+  }
+}
+
+/* Selector row sizing: the event name always shows in full, the date chip never
+   shrinks, and the session name is the one that gives way when space is tight. */
+.statsScopeSummary {
+  gap: 10px;
+}
+
+.statsScopeSummaryChip--eventIcon,
+.statsScopeSummaryChip--event,
+.statsScopeSummaryChip--tagIcon,
+.statsScopeSummaryChip--source {
+  flex: 0 0 auto;
+}
+
+.statsScopeSummaryChip--event {
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  margin-left: 2px;
+}
+
+.statsScopeSummaryChip--event .statsScopeSummaryChipValue,
+.statsCompareControls--standard .statsScopeSummaryChip--event .statsScopeSummaryChipValue {
+  font-size: 24px;
+  line-height: 1;
+  min-width: max-content;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.statsCompareControls--standard.statsCompareControls--dual .statsScopeSummaryChip--event .statsScopeSummaryChipValue {
+  font-size: 21px;
+}
+
+.statsScopeSummaryChip--session {
+  flex: 0 1 auto;
+  min-width: 48px;
+}
+
+.statsScopeSummaryChip--session .statsScopeSummaryChipValue {
+  font-size: 16px;
+}
+
+.statsScopeSummaryChip--tags {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.statsScopeSummaryChip--tags .statsScopeTagList {
+  flex-wrap: nowrap;
+  min-width: 0;
+  gap: 6px;
+}
+
+.statsScopeSummaryChip--tags .statsScopeTagPill {
+  flex: 0 1 auto;
+  padding: 4px 8px;
+}
+
+.statsScopeSummaryChip--tags .statsScopeTagPillText {
+  font-size: 13px;
+}
+
+.statsScopeRowActions {
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.statsScopeSummaryChip--view {
+  padding: 0 9px;
+}
+
+.statsScopeSummaryChip--view .statsScopeSummaryChipValue {
+  font-size: 13px;
+}
+
+.statsScopeSummaryChip--date {
+  height: 38px;
+  padding: 0 9px;
+  border-radius: 10px;
+  box-sizing: border-box;
+}
+
+.statsScopeSummaryChip--date {
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.statsScopeDatePrimary {
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  color: rgba(255,255,255,0.94);
+}
+
+.statsScopeDateSecondary {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: rgba(255,255,255,0.6);
+}
+
+/* Range chip: centered in the selector row and the most prominent control in it.
+   While a paging/zoom control is hovered it previews that control's result. */
+.statsScopeSummaryChip--date {
+  justify-self: center;
+  align-items: center;
+  min-width: 150px;
+  height: 40px;
+  padding: 0 16px;
+  gap: 3px;
+  text-align: center;
+  opacity: 1;
+  border-color: rgba(255,255,255,0.22);
+  background: rgba(255,255,255,0.06);
+}
+
+.statsScopeSummaryChip--date:hover,
+.statsScopeSummaryChip--date:focus-visible {
+  border-color: rgba(255,255,255,0.4);
+  background: rgba(255,255,255,0.1);
+}
+
+.statsCompareControls--dual .statsScopeSummaryChip--date {
+  height: 36px;
+}
+
+.statsScopeRow--time .statsScopeSummaryChip--date {
+  margin-left: auto;
+}
+
+.statsScopeDatePrimary {
+  font-size: 17px;
+  font-weight: 900;
+}
+
+.statsScopeSummaryChip--date.is-preview {
+  border-style: dashed;
+  border-color: rgba(255,255,255,0.55);
+}
+
+.statsScopeSummaryChip--date.is-preview .statsScopeDateSecondary {
+  color: rgba(255,255,255,0.86);
+}
+
+/* "← Back" / "← All time" chip shown while drilled into a single day. */
+.statsScopeSummaryChip.statsScopeSummaryChip--back {
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--stats-scope-row-border, rgba(255,255,255,0.22));
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 700;
+  white-space: nowrap;
+  opacity: 0.92;
+}
+
+.statsScopeSummaryChip.statsScopeSummaryChip--back:hover,
+.statsScopeSummaryChip.statsScopeSummaryChip--back:focus-visible {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--stats-scope-row-border-hover, rgba(255,255,255,0.4));
 }

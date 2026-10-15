@@ -268,13 +268,13 @@ function computeHeadlineAverage(times = []) {
   };
 }
 
-function buildGroupBorderGradient(members = []) {
+function buildGroupBorderGradient(members = [], hardEdges = false) {
   const safeMembers = (Array.isArray(members) ? members : []).filter(Boolean);
   if (!safeMembers.length) return null;
 
   const minWeight = 0.08;
   const alpha = 0.75;
-  const blendPct = 4;
+  const blendPct = hardEdges ? 0 : 4;
   const weights = safeMembers.map((member) => {
     const wins = Number(member?.wins || 0);
     return Math.max(minWeight, wins + 1);
@@ -363,6 +363,7 @@ function SharedAverageMessage({
   const timeColorModeRaw = settings?.sharedTimeColorMode || "profile";
   const timeColorMode =
     timeColorModeRaw === "spectrum" ? "bucket" : timeColorModeRaw;
+  const hardBorderEdges = settings?.sharedBorderStyle === "hard";
 
   const nameYou =
     yourUsername || user?.Username || user?.Name || user?.UserID || "You";
@@ -1541,8 +1542,9 @@ function SharedAverageMessage({
     "--split": `${computed.splitPercent}%`,
     "--borderAlpha": 0.75,
   };
+  if (hardBorderEdges) cardStyle["--blend"] = "0px";
 
-  const groupBorderGradient = buildGroupBorderGradient(orderedGroupMembers);
+  const groupBorderGradient = buildGroupBorderGradient(orderedGroupMembers, hardBorderEdges);
   const groupMemberCount = orderedGroupMembers.length;
   const compactGroupHeaders = groupMemberCount >= 8;
   const groupDensityClass =
@@ -1578,7 +1580,7 @@ function SharedAverageMessage({
   };
   if (isGroupConversation && groupBorderGradient) {
     cardStyle.background = `
-      linear-gradient(rgba(${primaryRgb}, 0.97), rgba(${primaryRgb}, 0.97)) padding-box,
+      linear-gradient(rgba(${primaryRgb}, 1), rgba(${primaryRgb}, 1)) padding-box,
       ${groupBorderGradient}
     `;
   }

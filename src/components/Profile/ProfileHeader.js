@@ -7,6 +7,12 @@ import { getUser } from "../../services/getUser";
 import { updateUser } from "../../services/updateUser";
 import { getProfileEventScramble } from "../../utils/profileEventSolves";
 import { getRoomByHost } from "../../services/liveRoom";
+import { EVENT_KEYBINDING_LABELS } from "../../utils/keybindings";
+
+function getEventLabel(event) {
+  if (!event) return null;
+  return EVENT_KEYBINDING_LABELS[String(event).toUpperCase()] || String(event);
+}
 
 function getFavoriteEvent(sessionStats) {
   if (!sessionStats || typeof sessionStats !== "object") return null;
@@ -26,6 +32,38 @@ function getFavoriteEvent(sessionStats) {
   });
 
   return best;
+}
+
+function getMostTimeEvent(sessionStats) {
+  if (!sessionStats || typeof sessionStats !== "object") return null;
+
+  let best = null;
+
+  Object.entries(sessionStats).forEach(([event, eventMap]) => {
+    if (!eventMap || typeof eventMap !== "object") return;
+    let totalMs = 0;
+    Object.values(eventMap).forEach((stats) => {
+      totalMs += Number(stats?.SumFinalTimeMs || 0);
+    });
+    if (!(totalMs > 0)) return;
+
+    if (!best || totalMs > best.totalMs || (totalMs === best.totalMs && String(event).localeCompare(String(best.event)) < 0)) {
+      best = { event, totalMs };
+    }
+  });
+
+  return best;
+}
+
+function formatTotalDuration(ms) {
+  const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
 }
 
 export default function ProfileHeader({
@@ -162,6 +200,7 @@ export default function ProfileHeader({
   }, [sessionStats]);
 
   const favoriteEvent = useMemo(() => getFavoriteEvent(sessionStats), [sessionStats]);
+  const mostTimeEvent = useMemo(() => getMostTimeEvent(sessionStats), [sessionStats]);
   const resolvedProfileScramble = useMemo(
     () => getProfileEventScramble(user, ProfileEvent, ProfileScramble),
     [ProfileEvent, ProfileScramble, user]
@@ -245,6 +284,7 @@ export default function ProfileHeader({
   const widgets = [
     {
       key: "solves",
+      color: "#2EC4B6",
       title: "Total Solves",
       value: totalSolveCountAcrossEvents,
       detail: (
@@ -256,18 +296,35 @@ export default function ProfileHeader({
     },
     {
       key: "favorite-event",
-      title: "Most Solved",
-      value: favoriteEvent ? `${favoriteEvent.event} · ${favoriteEvent.total}` : "—",
+      color: "#FF9F1C",
+      title: "Most Solves",
+      sub: getEventLabel(favoriteEvent?.event),
+      value: favoriteEvent ? favoriteEvent.total : "—",
       detail: (
         <div>
-          <h4>Most Solved Event</h4>
-          <p>{favoriteEvent?.event || "—"}</p>
+          <h4>Most Solves Event</h4>
+          <p>{getEventLabel(favoriteEvent?.event) || "—"}</p>
           <p>Solves: {favoriteEvent?.total ?? "—"}</p>
         </div>
       ),
     },
     {
+      key: "most-time-event",
+      color: "#B388FF",
+      title: "Most Time",
+      sub: getEventLabel(mostTimeEvent?.event),
+      value: mostTimeEvent ? formatTotalDuration(mostTimeEvent.totalMs) : "—",
+      detail: (
+        <div>
+          <h4>Most Time Event</h4>
+          <p>{getEventLabel(mostTimeEvent?.event) || "—"}</p>
+          <p>Total time: {mostTimeEvent ? formatTotalDuration(mostTimeEvent.totalMs) : "—"}</p>
+        </div>
+      ),
+    },
+    {
       key: "wca",
+      color: "#FFD166",
       title: "WCA ID",
       value: WCAID || "—",
       detail: (
@@ -278,6 +335,7 @@ export default function ProfileHeader({
     },
     {
       key: "friends",
+      color: "#3A86FF",
       title: "Friends",
       value: Friends.length,
       detail: Friends.length ? (
@@ -342,6 +400,7 @@ export default function ProfileHeader({
     },
     {
       key: "joined",
+      color: "#8A8F98",
       title: "Joined",
       value: joinedDate,
       detail: (
@@ -351,6 +410,10 @@ export default function ProfileHeader({
       ),
     },
   ];
+
+  // top row: solves, friends, wca — bottom row: most solved, most time, joined
+  const widgetOrder = ["solves", "friends", "wca", "favorite-event", "most-time-event", "joined"];
+  const orderedWidgets = widgetOrder.map((key) => widgets.find((w) => w.key === key)).filter(Boolean);
 
   return (
     <div className="profileHeader">
@@ -406,14 +469,17 @@ export default function ProfileHeader({
       </div>
 
       <div className="widgetBar">
-        {widgets.map((w) => (
+        {orderedWidgets.map((w) => (
           <div
             key={w.key}
             className="widget"
-            style={{ border: `2px solid ${Color}` }}
+            style={{ borderColor: w.color }}
             onClick={() => setOpenWidget(openWidget === w.key ? null : w.key)}
           >
-            <div className="widgetTitle">{w.title}</div>
+            <div className="widgetLabel">
+              <div className="widgetTitle">{w.title}</div>
+              {w.sub ? <div className="widgetSub">{w.sub}</div> : null}
+            </div>
             <div className="widgetValue">{w.value}</div>
           </div>
         ))}

@@ -20,11 +20,12 @@ import {
   createMoyuProtocol,
   macCandidatesFromName,
   macStringToBytes,
+  moyuCompanyIds,
 } from "./moyuProtocol";
 import { isValidMoyuDecryptedPacket } from "./moyuPacketSanity";
 
 const NAME_PREFIXES = ["WCU_", "MY32", "MY33", "MHC"];
-const ADVERTISEMENT_TIMEOUT_MS = 5000;
+const ADVERTISEMENT_TIMEOUT_MS = 10000;
 const MAC_RE = /^([0-9A-Fa-f]{2}[:\-\s]){5}[0-9A-Fa-f]{2}$/;
 
 function bytesToHex(bytes) {
@@ -45,19 +46,26 @@ function debugEnabled() {
   }
 }
 
-// Manufacturer-data payload -> "aa:bb:cc:dd:ee:ff". When >= 8 bytes the first two
-// are the company id and are skipped; the six address octets are LSB-first.
-function macFromManufacturerDataView(dv) {
-  if (!dv) return null;
-  const n = dv.byteLength;
-  if (n < 6) return null;
-  const skip = n >= 8 ? 2 : 0;
-  if (n < skip + 6) return null;
+// Advertisement manufacturer data -> "aa:bb:cc:dd:ee:ff". The address is the
+// last six payload bytes, LSB-first. The company id it is filed under varies per
+// cube (see moyuCompanyIds), so take whichever entry is present.
+function macFromManufacturerData(md) {
+  if (!md) return null;
+  let dv = null;
+  if (md instanceof DataView) {
+    // Bluefy hands over the raw field, company id included.
+    dv = new DataView(md.buffer.slice(md.byteOffset + 2, md.byteOffset + md.byteLength));
+  } else if (typeof md.forEach === "function") {
+    md.forEach((value) => {
+      if (!dv && value && value.byteLength >= 6) dv = value;
+    });
+  }
+  if (!dv || dv.byteLength < 6) return null;
   const parts = [];
   for (let i = 0; i < 6; i++) {
-    parts.push((dv.getUint8(skip + 5 - i) + 0x100).toString(16).slice(1));
+    parts.push((dv.getUint8(dv.byteLength - i - 1) + 0x100).toString(16).slice(1));
   }
-  return parts.join(":");
+  return parts.join(":").toUpperCase();
 }
 
 function macCacheKey(device) {
@@ -137,6 +145,9 @@ export class MoyuCubeClient {
       this.device = await navigator.bluetooth.requestDevice({
         filters: NAME_PREFIXES.map((namePrefix) => ({ namePrefix })),
         optionalServices: [MOYU_SERVICE_UUID],
+        // Without this Chrome strips manufacturer data from advertisements,
+        // and that is where the cube's MAC (the AES key seed) lives.
+        optionalManufacturerData: moyuCompanyIds(),
       });
       if (!this.device) throw new Error("No MoYu cube selected.");
 
@@ -155,6 +166,9 @@ export class MoyuCubeClient {
         this._onDisconnected
       );
 
+      // Must run before gatt.connect(): a connected cube stops advertising.
+      this.mac = await this._resolveMacBeforeConnect();
+
       this.server = await this.device.gatt.connect();
       this.service = await this.server.getPrimaryService(MOYU_SERVICE_UUID);
       this.readCharacteristic = await this.service.getCharacteristic(
@@ -164,7 +178,17 @@ export class MoyuCubeClient {
         MOYU_WRITE_CHAR_UUID
       );
 
-      this.mac = await this._resolveMac();
+      this._onReadNotification = (event) => {
+        const value = event?.target?.value;
+        if (value) this._handlePacket(value);
+      };
+      this.readCharacteristic.addEventListener(
+        "characteristicvaluechanged",
+        this._onReadNotification
+      );
+      await this.readCharacteristic.startNotifications();
+
+      if (!this.mac) this.mac = await this._resolveMacAfterConnect();
       if (!this.mac) {
         throw new Error(
           "Couldn't determine this MoYu cube's Bluetooth address. Open the " +
@@ -176,16 +200,6 @@ export class MoyuCubeClient {
       );
       this.protocol = createMoyuProtocol(macStringToBytes(this.mac));
       this._publishDebug();
-
-      this._onReadNotification = (event) => {
-        const value = event?.target?.value;
-        if (value) this._handlePacket(value);
-      };
-      this.readCharacteristic.addEventListener(
-        "characteristicvaluechanged",
-        this._onReadNotification
-      );
-      await this.readCharacteristic.startNotifications();
 
       await this._bootstrap();
       console.log("[PTS][MoYu] connect complete — waiting for cube packets");
@@ -303,7 +317,7 @@ export class MoyuCubeClient {
 
   // ---- MAC resolution -----------------------------------------------------
 
-  async _resolveMac() {
+  async _resolveMacBeforeConnect() {
     const cached = readCachedMac(this.device);
     if (cached) {
       this.macSource = "cache";
@@ -313,25 +327,32 @@ export class MoyuCubeClient {
     const advMac = await this._macFromAdvertisements();
     if (advMac) {
       this.macSource = "advertisement";
-      writeCachedMac(this.device, advMac);
       return advMac;
     }
+    return null;
+  }
 
+  async _resolveMacAfterConnect() {
     const probed = await this._probeMacCandidates();
     if (probed) {
       this.macSource = "probe";
-      writeCachedMac(this.device, probed);
       return probed;
     }
 
     const entered = this._promptForMac();
     if (entered) {
       this.macSource = "manual";
-      writeCachedMac(this.device, entered);
       return entered;
     }
 
     return null;
+  }
+
+  // The MAC is only cached once a packet has actually decoded with it.
+  _markDecryptOk() {
+    if (this._decryptOk) return;
+    this._decryptOk = true;
+    if (this.device && this.mac) writeCachedMac(this.device, this.mac);
   }
 
   _promptForMac() {
@@ -339,7 +360,8 @@ export class MoyuCubeClient {
       const raw = window.prompt(
         `Enter your MoYu cube's Bluetooth MAC address` +
           (this.device?.name ? ` (${this.device.name})` : "") +
-          `.\nIt's shown in the MoYu / WCU app, format AA:BB:CC:DD:EE:FF.`
+          `.\nIt's shown in the MoYu / WCU app, format AA:BB:CC:DD:EE:FF.`,
+        macCandidatesFromName(this.device?.name)[0] || ""
       );
       if (raw && MAC_RE.test(raw.trim())) return raw.trim().toUpperCase();
     } catch (_) {}
@@ -370,14 +392,11 @@ export class MoyuCubeClient {
         resolve(mac || null);
       };
 
+      // Manufacturer data rides in only some advertising packets, so keep
+      // listening past empty ones until the timeout.
       const onAdv = (event) => {
-        const md = event.manufacturerData;
-        if (md && typeof md.forEach === "function") {
-          md.forEach((dv) => {
-            const mac = macFromManufacturerDataView(dv);
-            if (mac && MAC_RE.test(mac)) finish(mac.toUpperCase());
-          });
-        }
+        const mac = macFromManufacturerData(event.manufacturerData);
+        if (mac && MAC_RE.test(mac)) finish(mac);
       };
 
       this.device.addEventListener("advertisementreceived", onAdv);
@@ -411,7 +430,6 @@ export class MoyuCubeClient {
       read = this.readCharacteristic;
       write = this.writeCharacteristic;
       if (!read || !write) return null;
-      await read.startNotifications();
     } catch (err) {
       console.warn("[PTS][MoYu] probe setup failed", err);
       return null;
@@ -449,17 +467,9 @@ export class MoyuCubeClient {
       console.log(
         `[PTS][MoYu] probe ${candidate}: ${good}/${samples} valid`
       );
-      if (good >= 3) {
-        try {
-          await read.stopNotifications();
-        } catch (_) {}
-        return candidate;
-      }
+      if (good >= 3) return candidate;
     }
 
-    try {
-      await read.stopNotifications();
-    } catch (_) {}
     return null;
   }
 
@@ -571,19 +581,19 @@ export class MoyuCubeClient {
         return;
 
       case "HARDWARE":
-        this._decryptOk = true;
+        this._markDecryptOk();
         console.log("[PTS][MoYu] hardware:", JSON.stringify(decoded));
         return;
 
       case "BATTERY":
-        this._decryptOk = true;
+        this._markDecryptOk();
         return;
 
       case "FACELETS": {
         this.latestFacelets = decoded.facelets;
         const res = this.prevCubie.fromFacelet(decoded.facelets);
         if (res !== -1) {
-          this._decryptOk = true;
+          this._markDecryptOk();
           this.moveCnt = decoded.serial;
           this.prevMoveCnt = decoded.serial;
           if (debugEnabled()) {
@@ -607,7 +617,7 @@ export class MoyuCubeClient {
 
   _handleMove(decoded, hostTs) {
     if (decoded.invalid) return;
-    this._decryptOk = true;
+    this._markDecryptOk();
 
     this.moveCnt = decoded.moveCnt;
 

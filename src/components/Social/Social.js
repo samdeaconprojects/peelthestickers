@@ -1,8 +1,8 @@
 import React, {
   useState,
   useEffect,
-  useLayoutEffect,
   useRef,
+  useLayoutEffect,
   useCallback,
   useMemo,
 } from "react";
@@ -51,6 +51,74 @@ const GROUP_POST_LIMIT = 25;
 const CONVERSATION_LIMIT = 100;
 const MESSAGE_PAGE_SIZE = 25;
 const REALTIME_BACKSTOP_REFRESH_MS = 300000;
+
+
+const SHARED_STATS_ICON_SIZE = 18;
+
+function getSharedStatsIconEvent(event) {
+  const ev = String(event || "").trim().toUpperCase();
+  if (["333OH", "333BLD", "333MULTIBLD", "333FEW"].includes(ev)) return "333";
+  if (ev === "444BLD") return "444";
+  if (ev === "555BLD") return "555";
+  return ev;
+}
+
+// PuzzleSVG renders each puzzle at its own natural size, so measure what it
+// actually drew and scale/center that into a small fixed box.
+function SharedStatsEventIcon({ event }) {
+  const boxRef = useRef(null);
+  const innerRef = useRef(null);
+  const [fit, setFit] = useState(null);
+
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const inner = innerRef.current;
+    if (!box || !inner) return;
+    inner.style.transform = "none";
+    const origin = box.getBoundingClientRect();
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    // NxN faces are unsized <svg>s (300x150 default box), so measure the
+    // stickers themselves there; the other puzzles size their <svg> properly.
+    const isNxN = /^\d{3}$/.test(getSharedStatsIconEvent(event));
+    inner.querySelectorAll(isNxN ? "svg rect" : "svg").forEach((svg) => {
+      const r = svg.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      left = Math.min(left, r.left);
+      top = Math.min(top, r.top);
+      right = Math.max(right, r.right);
+      bottom = Math.max(bottom, r.bottom);
+    });
+    if (!Number.isFinite(left)) {
+      setFit(false);
+      return;
+    }
+    const w = right - left;
+    const h = bottom - top;
+    const scale = SHARED_STATS_ICON_SIZE / Math.max(w, h);
+    const x = (SHARED_STATS_ICON_SIZE - w * scale) / 2 - (left - origin.left) * scale;
+    const y = (SHARED_STATS_ICON_SIZE - h * scale) / 2 - (top - origin.top) * scale;
+    const transform = `translate(${x}px, ${y}px) scale(${scale})`;
+    inner.style.transform = transform;
+    setFit(transform);
+  }, [event]);
+
+  if (fit === false) return null;
+
+  return (
+    <span className="sharedStatsEventIcon" ref={boxRef} aria-hidden="true">
+      <span
+        className="sharedStatsEventIconInner"
+        ref={innerRef}
+        style={{ transform: fit || "none", visibility: fit ? "visible" : "hidden" }}
+      >
+        <PuzzleSVG event={getSharedStatsIconEvent(event)} scramble="" />
+      </span>
+    </span>
+  );
+}
 
 const isDocumentVisible = () =>
   typeof document === "undefined" || document.visibilityState === "visible";
@@ -507,7 +575,7 @@ function Social({
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [messageInput, setMessageInput] = useState("");
-  const [showConversationHeader, setShowConversationHeader] = useState(false);
+  const [showConversationPicker, setShowConversationPicker] = useState(false);
   const [showSharedModal, setShowSharedModal] = useState(false);
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [creatingGroup, setCreatingGroup] = useState(false);
@@ -520,14 +588,21 @@ function Social({
   const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = useRef(null);
 
+  const [sharedStatsPopoverPos, setSharedStatsPopoverPos] = useState(null);
+  const openSharedStatsPopover = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setSharedStatsPopoverPos({
+      top: rect.bottom + 8,
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 348)),
+    });
+  };
+  const closeSharedStatsPopover = () => setSharedStatsPopoverPos(null);
+
   const navigate = useNavigate();
   const location = useLocation();
 
   const activityEndRef = useRef(null);
   const activityPanelRef = useRef(null);
-  const conversationStripRef = useRef(null);
-  const selectedTileRef = useRef(null);
-  const [detailsToggleLeft, setDetailsToggleLeft] = useState(null);
   const messagesPanelRef = useRef(null);
   const messagesEndRef = useRef(null);
   const sharedMessageRefs = useRef({});
@@ -554,7 +629,7 @@ function Social({
   }, [conversations]);
 
   useEffect(() => {
-    setShowConversationHeader(false);
+    setShowConversationPicker(false);
   }, [selectedConversation?.conversationID]);
 
   useEffect(() => {
@@ -1113,8 +1188,7 @@ function Social({
           );
 
           const merged = [...ownAnnotated, ...friendsArrays.flat(), ...groupPostArrays.flat()];
-          merged.sort((a, b) => new Date(a.DateTime || a.date) - new Date(b.DateTime || b.date));
-          setFeed(merged.slice(-FEED_POST_LIMIT));
+          setFeed(sortFeedItems(merged));
         }
 
         const normalizedStored = storedConversations.map((item) => {
@@ -2021,52 +2095,6 @@ function Social({
     );
   }, [activeRoomConversationID, sortedConversations]);
 
-  // Keep the "conversation details" drop-down arrow lined up under whichever
-  // tile is selected in the header strip, tracking horizontal scroll / resize.
-  useLayoutEffect(() => {
-    if (activeTab !== 1) return undefined;
-
-    const measure = () => {
-      const strip = conversationStripRef.current;
-      const tile = selectedTileRef.current;
-      if (!strip || !tile) {
-        setDetailsToggleLeft(null);
-        return;
-      }
-      const stripRect = strip.getBoundingClientRect();
-      const tileRect = tile.getBoundingClientRect();
-      const rawCenter = tileRect.left - stripRect.left + tileRect.width / 2;
-      const clamped = Math.max(
-        28,
-        Math.min(rawCenter, stripRect.width - 28)
-      );
-      setDetailsToggleLeft(Number.isFinite(clamped) ? clamped : null);
-    };
-
-    measure();
-
-    const strip = conversationStripRef.current;
-    strip?.addEventListener("scroll", measure, { passive: true });
-    window.addEventListener("resize", measure);
-
-    let observer;
-    if (strip && typeof ResizeObserver !== "undefined") {
-      observer = new ResizeObserver(measure);
-      observer.observe(strip);
-    }
-
-    return () => {
-      strip?.removeEventListener("scroll", measure);
-      window.removeEventListener("resize", measure);
-      observer?.disconnect();
-    };
-  }, [
-    activeTab,
-    selectedConversation?.conversationID,
-    conversations,
-    activeRoomConversation?.conversationID,
-  ]);
-
   // Stable list of members handed to the shared-session modal, so its in-progress
   // per-player event plans survive unrelated re-renders of this component.
   const sharedModalMembers = useMemo(() => {
@@ -2222,7 +2250,7 @@ function Social({
     }))
     .filter((item) => item.solves || item.wins || item.sessions)
     .sort((a, b) => b.solves - a.solves || b.wins - a.wins)
-    .slice(0, 3);
+    .slice(0, 6);
 
   const handleSendMessage = async () => {
     if (!selectedConversationRef.current || !messageInput.trim()) return;
@@ -2526,6 +2554,87 @@ function Social({
     }
   };
 
+  const renderConversationTile = (conv) => {
+      const groupGrid = getGroupAvatarGridConfig((conv.memberProfiles || []).length);
+      const isSelectedConv =
+        selectedConversation?.conversationID === conv.conversationID;
+
+      return (
+        <button
+          type="button"
+          key={conv.conversationID}
+              className={`conversationPreview ${
+            isSelectedConv ? "selected" : ""
+          }`}
+          onClick={() => {
+            setSelectedConversation(conv);
+          setShowConversationPicker(false);
+            setActiveTab(1);
+          }}
+        >
+          <div className="avatarContainer">
+            <div
+              className={`profilePicturePost ${
+                conv.type === "GROUP" ? "profilePicturePost--group" : ""
+              }`}
+              style={
+                conv.type === "GROUP"
+                  ? undefined
+                  : { borderColor: conv.color || "#2EC4B6" }
+              }
+            >
+              {conv.type === "GROUP" ? (
+                <div
+                  className={`groupAvatarCluster ${groupGrid.densityClass}`}
+                  style={{
+                    "--group-grid-cols": groupGrid.cols,
+                    "--group-grid-rows": groupGrid.rows,
+                  }}
+                >
+                  {(conv.memberProfiles || []).slice(0, 9).map((member, idx) => (
+                    <div
+                      key={`${conv.conversationID}-${member.id}-${idx}`}
+                      className="groupAvatarMini"
+                      style={{ borderColor: member.color || "#cccccc" }}
+                    >
+                      <div
+                        className={`groupAvatarMiniCube postNameCube postNameCube--${(
+                          member.profileEvent || "333"
+                        ).toLowerCase()}`}
+                      >
+                        <PuzzleSVG
+                          event={member.profileEvent || "333"}
+                          scramble={member.profileScramble || ""}
+                          isMusicPlayer={false}
+                          isTimerCube={false}
+                          isNameTagCube={true}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div
+                  className={`postNameCube postNameCube--${(
+                    conv.profileEvent || "333"
+                  ).toLowerCase()}`}
+                >
+                  <PuzzleSVG
+                    event={conv.profileEvent || "333"}
+                    scramble={conv.profileScramble || ""}
+                    isMusicPlayer={false}
+                    isTimerCube={false}
+                    isNameTagCube={true}
+                  />
+                </div>
+              )}
+            </div>
+            <div className="avatarName">{conv.name}</div>
+          </div>
+        </button>
+      );
+  };
+
   if (!user) return <div>Please sign in to view your feed.</div>;
 
   return (
@@ -2561,152 +2670,214 @@ function Social({
 
         {activeTab === 1 && (
           <div className="headerConversationArea">
-            <div className="headerConversationStrip" ref={conversationStripRef}>
-            {visibleConversations.map((conv) => (
-              (() => {
-                const groupGrid = getGroupAvatarGridConfig((conv.memberProfiles || []).length);
-                const isSelectedConv =
-                  selectedConversation?.conversationID === conv.conversationID;
+            {selectedConversation && !showConversationPicker ? (
+              <div className="headerConversationCurrent">
+                <button
+                  type="button"
+                  className="conversationBackButton"
+                  onClick={() => setShowConversationPicker(true)}
+                  aria-label="Back to conversations"
+                  title="All conversations"
+                >
+                  <span aria-hidden="true">{"‹"}</span>
+                </button>
+                {renderConversationTile(selectedConversation)}
+                <div className="headerConversationDetails">
+                  {selectedConversation.type !== "GROUP" && (
+                    <div className="groupThreadMeta">
+                      <div className="groupThreadTitle">{selectedConversation.name}</div>
+                    </div>
+                  )}
+                  {selectedConversation.type === "GROUP" && (
+                    <div className="groupThreadMeta">
+                      <div className="groupThreadTitleRow">
+                        <div className="groupThreadTitle">{selectedConversation.name}</div>
+                        {selectedConversation?.isStreamRoom ? (
+                          <span className="groupThreadBadge">Room</span>
+                        ) : null}
+                      </div>
+                      <div className="groupThreadMembers">
+                        {selectedConversationMembers.length
+                          ? selectedConversationMembers.map((member) => member.name).join(", ")
+                          : "No other members"}
+                      </div>
+                      {selectedConversation?.isJoinable && selectedConversation?.roomCode ? (
+                        <div className="groupThreadRoomCode">
+                          Room code: <span>{selectedConversation.roomCode}</span>
+                        </div>
+                      ) : null}
+                      {selectedConversation?.isStreamRoom ? (
+                        <div className="groupThreadRoomCode">
+                          {String(sharedSession?.conversationID || "") ===
+                          String(selectedConversation?.conversationID || "") ? (
+                            <>
+                              <span>
+                                {String(sharedSession?.hostID || sharedSession?.creatorID || "") ===
+                                String(user?.UserID || "")
+                                  ? "You are hosting this room."
+                                  : "You are following this room."}
+                              </span>
+                              <button
+                                type="button"
+                                className="sharedConversationStatsToggle"
+                                onClick={() => {
+                                  if (
+                                    String(sharedSession?.hostID || sharedSession?.creatorID || "") ===
+                                    String(user?.UserID || "")
+                                  ) {
+                                    handleCloseRoom();
+                                  } else {
+                                    leaveSharedRun?.();
+                                  }
+                                }}
+                                style={{ marginLeft: "10px" }}
+                              >
+                                <span>
+                                  {String(sharedSession?.hostID || sharedSession?.creatorID || "") ===
+                                  String(user?.UserID || "")
+                                    ? "Stop room"
+                                    : "Leave room"}
+                                </span>
+                              </button>
+                            </>
+                          ) : (
+                            <span>Open this room to follow the host scramble feed.</span>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
 
-                return (
+                  <div
+                    className="sharedStatsSummary"
+                    tabIndex={0}
+                    aria-label="Shared solve stats"
+                    onMouseEnter={openSharedStatsPopover}
+                    onMouseLeave={closeSharedStatsPopover}
+                    onFocus={openSharedStatsPopover}
+                    onBlur={closeSharedStatsPopover}
+                  >
+                    <span className="sharedStatsSummaryItem">
+                      <strong>{selectedConversationSharedStats.TotalSolves || 0}</strong> shared solves
+                    </span>
+                    <span className="sharedStatsSummaryDivider" aria-hidden="true" />
+                    {selectedConversation?.type === "DM" ? (
+                      <span className="sharedStatsSummaryItem">
+                        <strong>
+                          <span className="sharedStatsWin">{yourSharedStats.Wins || 0}</span>–{theirSharedStats.Wins || 0}
+                        </strong>{" "}
+                        record
+                      </span>
+                    ) : (
+                      <span className="sharedStatsSummaryItem">
+                        <strong className="sharedStatsWin">{yourSharedStats.Wins || 0}</strong> your wins
+                      </span>
+                    )}
+
+                    {sharedStatsPopoverPos && (
+                      <div
+                        className="sharedStatsPopover"
+                        role="tooltip"
+                        style={{ top: sharedStatsPopoverPos.top, left: sharedStatsPopoverPos.left }}
+                      >
+                        <div className="sharedConversationStatsGrid">
+                          <div className="sharedConversationStatCard">
+                            <div className="sharedConversationStatValue">
+                              {selectedConversationSharedStats.TotalSessions || 0}
+                            </div>
+                            <div className="sharedConversationStatLabel">Sessions</div>
+                          </div>
+                          <div className="sharedConversationStatCard">
+                            <div className="sharedConversationStatValue">
+                              {selectedConversationSharedStats.TotalSolves || 0}
+                            </div>
+                            <div className="sharedConversationStatLabel">Shared solves</div>
+                          </div>
+                          <div className="sharedConversationStatCard">
+                            <div className="sharedConversationStatValue sharedStatsWin">
+                              {yourSharedStats.Wins || 0}
+                            </div>
+                            <div className="sharedConversationStatLabel">Your wins</div>
+                          </div>
+                        </div>
+
+                        {selectedConversation?.type === "DM" && (
+                          <div className="sharedConversationHeadToHeadRow">
+                            <div className="sharedConversationHeadToHeadName">
+                              {user?.Username || user?.Name || "You"}:{" "}
+                              {yourSharedStats.Wins || 0}
+                            </div>
+                            <div className="sharedConversationHeadToHeadName">
+                              {selectedConversation?.username ||
+                                selectedConversation?.name ||
+                                "Them"}
+                              : {theirSharedStats.Wins || 0}
+                            </div>
+                          </div>
+                        )}
+
+                        {selectedConversationTopEvents.length > 0 && (
+                          <div className="sharedConversationEventRow">
+                            {selectedConversationTopEvents.map((row) => (
+                              <div
+                                key={`${selectedConversation.conversationID}-${row.eventKey}`}
+                                className="sharedConversationEventPill"
+                              >
+                                <SharedStatsEventIcon event={row.eventKey} />
+                                <span>{currentEventToString(row.eventKey)}</span>
+                                <span>{row.solves} solves</span>
+                                {selectedConversation?.type === "DM" ? (
+                                  <span className="sharedStatsWin">{row.yourWins}-{row.theirWins} wins</span>
+                                ) : (
+                                  <span className="sharedStatsWin">{row.wins} wins</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="headerConversationStrip">
+                {visibleConversations.map(renderConversationTile)}
+                {activeRoomConversation &&
+                !visibleConversations.some(
+                  (conv) => conv.conversationID === activeRoomConversation.conversationID
+                ) ? (
                   <button
                     type="button"
-                    key={conv.conversationID}
-                    ref={isSelectedConv ? selectedTileRef : undefined}
+                    key={activeRoomConversation.conversationID}
                     className={`conversationPreview ${
-                      isSelectedConv ? "selected" : ""
+                      selectedConversation?.conversationID === activeRoomConversation.conversationID
+                        ? "selected"
+                        : ""
                     }`}
                     onClick={() => {
-                      setSelectedConversation(conv);
+                      setSelectedConversation(activeRoomConversation);
+                      setShowConversationPicker(false);
                       setActiveTab(1);
                     }}
                   >
                     <div className="avatarContainer">
-                      <div
-                        className={`profilePicturePost ${
-                          conv.type === "GROUP" ? "profilePicturePost--group" : ""
-                        }`}
-                        style={
-                          conv.type === "GROUP"
-                            ? undefined
-                            : { borderColor: conv.color || "#2EC4B6" }
-                        }
-                      >
-                        {conv.type === "GROUP" ? (
-                          <div
-                            className={`groupAvatarCluster ${groupGrid.densityClass}`}
-                            style={{
-                              "--group-grid-cols": groupGrid.cols,
-                              "--group-grid-rows": groupGrid.rows,
-                            }}
-                          >
-                            {(conv.memberProfiles || []).slice(0, 9).map((member, idx) => (
-                              <div
-                                key={`${conv.conversationID}-${member.id}-${idx}`}
-                                className="groupAvatarMini"
-                                style={{ borderColor: member.color || "#cccccc" }}
-                              >
-                                <div
-                                  className={`groupAvatarMiniCube postNameCube postNameCube--${(
-                                    member.profileEvent || "333"
-                                  ).toLowerCase()}`}
-                                >
-                                  <PuzzleSVG
-                                    event={member.profileEvent || "333"}
-                                    scramble={member.profileScramble || ""}
-                                    isMusicPlayer={false}
-                                    isTimerCube={false}
-                                    isNameTagCube={true}
-                                  />
-                                </div>
-                              </div>
-                            ))}
+                      <div className="profilePicturePost profilePicturePost--group">
+                        <div className="groupAvatarCluster groupAvatarCluster--solo">
+                          <div className="groupAvatarMini" style={{ borderColor: activeRoomConversation.color || "#50B6FF" }}>
+                            <div className="groupAvatarMiniCube postNameCube">
+                              <span style={{ fontSize: "11px", fontWeight: 900, color: "#fff" }}>
+                                Room
+                              </span>
+                            </div>
                           </div>
-                        ) : (
-                          <div
-                            className={`postNameCube postNameCube--${(
-                              conv.profileEvent || "333"
-                            ).toLowerCase()}`}
-                          >
-                            <PuzzleSVG
-                              event={conv.profileEvent || "333"}
-                              scramble={conv.profileScramble || ""}
-                              isMusicPlayer={false}
-                              isTimerCube={false}
-                              isNameTagCube={true}
-                            />
-                          </div>
-                        )}
-                      </div>
-                      <div className="avatarName">{conv.name}</div>
-                    </div>
-                  </button>
-                );
-              })()
-            ))}
-            {activeRoomConversation &&
-            !visibleConversations.some(
-              (conv) => conv.conversationID === activeRoomConversation.conversationID
-            ) ? (
-              <button
-                type="button"
-                key={activeRoomConversation.conversationID}
-                ref={
-                  selectedConversation?.conversationID === activeRoomConversation.conversationID
-                    ? selectedTileRef
-                    : undefined
-                }
-                className={`conversationPreview ${
-                  selectedConversation?.conversationID === activeRoomConversation.conversationID
-                    ? "selected"
-                    : ""
-                }`}
-                onClick={() => {
-                  setSelectedConversation(activeRoomConversation);
-                  setActiveTab(1);
-                }}
-              >
-                <div className="avatarContainer">
-                  <div className="profilePicturePost profilePicturePost--group">
-                    <div className="groupAvatarCluster groupAvatarCluster--solo">
-                      <div className="groupAvatarMini" style={{ borderColor: activeRoomConversation.color || "#50B6FF" }}>
-                        <div className="groupAvatarMiniCube postNameCube">
-                          <span style={{ fontSize: "11px", fontWeight: 900, color: "#fff" }}>
-                            Room
-                          </span>
                         </div>
                       </div>
+                      <div className="avatarName">{activeRoomConversation.name || "Active room"}</div>
                     </div>
-                  </div>
-                  <div className="avatarName">{activeRoomConversation.name || "Active room"}</div>
-                </div>
-              </button>
-            ) : null}
-            </div>
-
-            {selectedConversation && (
-              <button
-                type="button"
-                className={`conversationDetailsToggle ${
-                  showConversationHeader ? "is-open" : ""
-                } ${detailsToggleLeft != null ? "is-anchored" : ""}`}
-                style={
-                  detailsToggleLeft != null
-                    ? { left: `${detailsToggleLeft}px` }
-                    : undefined
-                }
-                onClick={() => setShowConversationHeader((prev) => !prev)}
-                aria-expanded={showConversationHeader}
-                aria-label={
-                  showConversationHeader
-                    ? "Hide conversation details"
-                    : "Show conversation details"
-                }
-              >
-                <span className="conversationDetailsToggleArrow" aria-hidden="true">
-                  {"›"}
-                </span>
-              </button>
+                  </button>
+                ) : null}
+              </div>
             )}
           </div>
         )}
@@ -2903,126 +3074,6 @@ function Social({
             <div className="conversationView">
               {selectedConversation ? (
                 <>
-                  {showConversationHeader && (
-                    <div className="conversationDetailsPanel">
-                      {selectedConversation.type === "GROUP" && (
-                        <div className="groupThreadMeta">
-                          <div className="groupThreadTitleRow">
-                            <div className="groupThreadTitle">{selectedConversation.name}</div>
-                            {selectedConversation?.isStreamRoom ? (
-                              <span className="groupThreadBadge">Room</span>
-                            ) : null}
-                          </div>
-                          <div className="groupThreadMembers">
-                            {selectedConversationMembers.length
-                              ? selectedConversationMembers.map((member) => member.name).join(", ")
-                              : "No other members"}
-                          </div>
-                          {selectedConversation?.isJoinable && selectedConversation?.roomCode ? (
-                            <div className="groupThreadRoomCode">
-                              Room code: <span>{selectedConversation.roomCode}</span>
-                            </div>
-                          ) : null}
-                          {selectedConversation?.isStreamRoom ? (
-                            <div className="groupThreadRoomCode">
-                              {String(sharedSession?.conversationID || "") ===
-                              String(selectedConversation?.conversationID || "") ? (
-                                <>
-                                  <span>
-                                    {String(sharedSession?.hostID || sharedSession?.creatorID || "") ===
-                                    String(user?.UserID || "")
-                                      ? "You are hosting this room."
-                                      : "You are following this room."}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    className="sharedConversationStatsToggle"
-                                    onClick={() => {
-                                      if (
-                                        String(sharedSession?.hostID || sharedSession?.creatorID || "") ===
-                                        String(user?.UserID || "")
-                                      ) {
-                                        handleCloseRoom();
-                                      } else {
-                                        leaveSharedRun?.();
-                                      }
-                                    }}
-                                    style={{ marginLeft: "10px" }}
-                                  >
-                                    <span>
-                                      {String(sharedSession?.hostID || sharedSession?.creatorID || "") ===
-                                      String(user?.UserID || "")
-                                        ? "Stop room"
-                                        : "Leave room"}
-                                    </span>
-                                  </button>
-                                </>
-                              ) : (
-                                <span>Open this room to follow the host scramble feed.</span>
-                              )}
-                            </div>
-                          ) : null}
-                        </div>
-                      )}
-
-                      <div className="sharedConversationStats">
-                            <div className="sharedConversationStatsGrid">
-                              <div className="sharedConversationStatCard">
-                                <div className="sharedConversationStatValue">
-                                  {selectedConversationSharedStats.TotalSessions || 0}
-                                </div>
-                                <div className="sharedConversationStatLabel">Sessions</div>
-                              </div>
-                              <div className="sharedConversationStatCard">
-                                <div className="sharedConversationStatValue">
-                                  {selectedConversationSharedStats.TotalSolves || 0}
-                                </div>
-                                <div className="sharedConversationStatLabel">Shared solves</div>
-                              </div>
-                              <div className="sharedConversationStatCard">
-                                <div className="sharedConversationStatValue">
-                                  {yourSharedStats.Wins || 0}
-                                </div>
-                                <div className="sharedConversationStatLabel">Your wins</div>
-                              </div>
-                            </div>
-
-                            {selectedConversation?.type === "DM" && (
-                              <div className="sharedConversationHeadToHeadRow">
-                                <div className="sharedConversationHeadToHeadName">
-                                  {user?.Username || user?.Name || "You"}:{" "}
-                                  {yourSharedStats.Wins || 0}
-                                </div>
-                                <div className="sharedConversationHeadToHeadName">
-                                  {selectedConversation?.username ||
-                                    selectedConversation?.name ||
-                                    "Them"}
-                                  : {theirSharedStats.Wins || 0}
-                                </div>
-                              </div>
-                            )}
-
-                            {selectedConversationTopEvents.length > 0 && (
-                              <div className="sharedConversationEventRow">
-                                {selectedConversationTopEvents.map((row) => (
-                                  <div
-                                    key={`${selectedConversation.conversationID}-${row.eventKey}`}
-                                    className="sharedConversationEventPill"
-                                  >
-                                    <span>{currentEventToString(row.eventKey)}</span>
-                                    <span>{row.solves} solves</span>
-                                    {selectedConversation?.type === "DM" ? (
-                                      <span>{row.yourWins}-{row.theirWins} wins</span>
-                                    ) : (
-                                      <span>{row.wins} wins</span>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                      </div>
-                    </div>
-                  )}
 
                   <div
                     className="messages"

@@ -74,6 +74,18 @@ function normalizeDetailViewSurfaceMode(rawValue) {
   return raw === "legacy" ? "legacy" : "themed";
 }
 
+export const STATS_CONTAINER_COLOR_MODES = ["profile", "gray", "custom"];
+
+function normalizeStatsContainerColorMode(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+  return STATS_CONTAINER_COLOR_MODES.includes(raw) ? raw : "profile";
+}
+
+function normalizeStatsContainerCustomColor(rawValue) {
+  const raw = String(rawValue || "").trim();
+  return /^#[0-9a-f]{6}$/i.test(raw) ? raw : "#2EC4B6";
+}
+
 function normalizePlayerBarTagFields(rawValue) {
   const incoming = Array.isArray(rawValue) ? rawValue : [];
   const allowed = new Set(SHARED_TAG_FIELDS);
@@ -176,12 +188,14 @@ export const defaultSettings = {
   disableKeypad: false,
   timeColorMode: "index",
   sharedTimeColorMode: "profile",
+  sharedBorderStyle: "gradient",
   showStrictAverages: false,
   tolerateDnfInMeans: true,
-  homeLeftOfTimer: "averages",
+  homeLeftOfTimer: "none",
   homeAveragesOrder: "single-last",
   verticalTimeListOrder: "newest-first",
-  whitePuzzleSVGs: false,
+  matrixPuzzleSvgStyle: "color",
+  statsSelectorPuzzleSvgStyle: "color",
 
   eventKeyBindings: defaultEventBindings,
   pageKeyBindings: defaultPageBindings,
@@ -220,6 +234,11 @@ export const defaultSettings = {
   homeTagVisibilityBySession: {},
   statsSummaryLayout: "row",
   detailViewSurfaceMode: "themed",
+  statsContainerColorMode: "profile",
+  statsContainerCustomColor: "#2EC4B6",
+  statsContainerBackground: false,
+  statsTopBarBackground: false,
+  statsHoverGrow: false,
 
   // random-state = cubing.js default
   // legacy = old generateScramble behavior
@@ -266,6 +285,13 @@ function normalizeVerticalTimeListOrder(rawValue) {
     : defaultSettings.verticalTimeListOrder;
 }
 
+export const PUZZLE_SVG_STYLE_OPTIONS = ["color", "white", "grayscale"];
+
+function normalizePuzzleSvgStyle(rawValue, fallback = "color") {
+  const raw = String(rawValue || "").trim().toLowerCase();
+  return PUZZLE_SVG_STYLE_OPTIONS.includes(raw) ? raw : fallback;
+}
+
 function mergeSettings(input) {
   const safe = input && typeof input === "object" ? input : {};
   const normalizedHomeStatsSlots = normalizeHomeStatsSlots(safe.homeStatsSlots);
@@ -308,10 +334,23 @@ function mergeSettings(input) {
     nonRollingTimeListMaxRows,
     statsSummaryLayout,
     detailViewSurfaceMode,
+    statsContainerColorMode: normalizeStatsContainerColorMode(safe.statsContainerColorMode),
+    statsContainerCustomColor: normalizeStatsContainerCustomColor(
+      safe.statsContainerCustomColor
+    ),
+    statsContainerBackground: safe.statsContainerBackground === true,
+    statsTopBarBackground: safe.statsTopBarBackground === true,
+    statsHoverGrow: safe.statsHoverGrow === true,
     playerBarTagFields,
     homeLeftOfTimer: normalizeHomeLeftOfTimer(safe.homeLeftOfTimer),
     homeAveragesOrder: normalizeHomeAveragesOrder(safe.homeAveragesOrder),
     verticalTimeListOrder: normalizeVerticalTimeListOrder(safe.verticalTimeListOrder),
+    // legacy whitePuzzleSVGs toggle only covered the best time matrix
+    matrixPuzzleSvgStyle: normalizePuzzleSvgStyle(
+      safe.matrixPuzzleSvgStyle,
+      safe.whitePuzzleSVGs === true ? "white" : "color"
+    ),
+    statsSelectorPuzzleSvgStyle: normalizePuzzleSvgStyle(safe.statsSelectorPuzzleSvgStyle),
     tagDefaultsByEvent: normalizeTagDefaultsByEvent(safe.tagDefaultsByEvent),
     tagDefaultsBySession: normalizeTagDefaultsBySession(safe.tagDefaultsBySession),
     homeTagVisibilityBySession: normalizeHomeTagVisibilityBySession(

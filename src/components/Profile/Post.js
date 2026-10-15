@@ -266,7 +266,10 @@ function Post({
       {resolvedPostType === "stat-share" ? (
         <div
           className="post"
-          style={{ border: `2px solid ${withAlpha(postColor, 0.5)}` }}
+          style={{
+            "--post-border": withAlpha(postColor, 0.5),
+            "--post-border-hover": withAlpha(postColor, 0.85),
+          }}
         >
           <div className="titleAndContent">
             <StatSharePost note={trimmedNote} statShare={statShare} shareColor={postColor} />
@@ -278,7 +281,10 @@ function Post({
         <>
           <div
             className="post"
-            style={{ border: `2px solid ${withAlpha(postColor, 0.5)}` }}
+            style={{
+            "--post-border": withAlpha(postColor, 0.5),
+            "--post-border-hover": withAlpha(postColor, 0.85),
+          }}
           >
             <div className="titleAndContent">
               <div className="postTitle">

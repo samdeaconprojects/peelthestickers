@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
 import { findBestStrictWindow } from "../../utils/strictAverageUtils";
-import PieChartBuilder from "./PieChartBuilder";
+import PieChartBuilder, { getPieSliceStrokeWidth } from "./PieChartBuilder";
 import tagBadge from "../../assets/Tag.svg";
 import "./StatsSummary.css";
 
@@ -91,6 +91,11 @@ function formatStatTime(msOrDnf, { average = true } = {}) {
   if (msOrDnf === "DNF") return "DNF";
   if (msOrDnf == null || !isFinite(msOrDnf)) return "—";
   return formatTime(msOrDnf, average);
+}
+
+function formatPlus2Time(ms) {
+  if (ms == null || !isFinite(ms)) return "—";
+  return `+${formatTime(ms, false)}`;
 }
 
 function formatCount(value) {
@@ -388,6 +393,26 @@ function buildViewSummary(solves, indexOffset = 0) {
   };
 }
 
+const BUCKET_METRIC_FIELDS = [
+  ["mo3", "Mo3"],
+  ["ao5", "Ao5"],
+  ["ao12", "Ao12"],
+  ["ao25", "Ao25"],
+  ["ao50", "Ao50"],
+  ["ao100", "Ao100"],
+  ["ao1000", "Ao1000"],
+];
+
+// First candidate that is a real time; null/0 mean "not recorded" rather than 0.00.
+function pickMetric(...candidates) {
+  for (const candidate of candidates) {
+    if (candidate == null || candidate === "") continue;
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  }
+  return null;
+}
+
 function buildBucketViewSummary(
   bucketSummary,
   bucketItems = [],
@@ -413,109 +438,29 @@ function buildBucketViewSummary(
     indexRange: items.length ? `${items.length.toLocaleString()} buckets` : "Bucketed range",
     single: {
       current: null,
-      best:
-        Number.isFinite(Number(bucketSummary?.BestSingleMs))
-          ? Number(bucketSummary.BestSingleMs)
-          : Number.isFinite(Number(visibleRangeSummary?.single?.best))
-            ? Number(visibleRangeSummary.single.best)
-          : Number.isFinite(Number(overallStats?.BestSingleMs))
-            ? Number(overallStats.BestSingleMs)
-            : null,
-      worst: null,
+      best: pickMetric(
+        bucketSummary?.BestSingleMs,
+        visibleRangeSummary?.single?.best,
+        overallStats?.BestSingleMs
+      ),
+      worst: pickMetric(bucketSummary?.WorstSingleMs, visibleRangeSummary?.single?.worst),
     },
-    metrics: {
-      mo3: {
-        current: null,
-        best:
-          Number.isFinite(Number(bucketSummary?.BestMo3Ms))
-            ? Number(bucketSummary.BestMo3Ms)
-            : Number.isFinite(Number(visibleRangeSummary?.metrics?.mo3?.best))
-              ? Number(visibleRangeSummary.metrics.mo3.best)
-            : Number.isFinite(Number(overallStats?.BestMo3Ms))
-              ? Number(overallStats.BestMo3Ms)
-              : null,
-        worst: null,
-        strictBest: null,
-      },
-      ao5: {
-        current: null,
-        best:
-          Number.isFinite(Number(bucketSummary?.BestAo5Ms))
-            ? Number(bucketSummary.BestAo5Ms)
-            : Number.isFinite(Number(visibleRangeSummary?.metrics?.ao5?.best))
-              ? Number(visibleRangeSummary.metrics.ao5.best)
-            : Number.isFinite(Number(overallStats?.BestAo5Ms))
-              ? Number(overallStats.BestAo5Ms)
-              : null,
-        worst: null,
-        strictBest: null,
-      },
-      ao12: {
-        current: null,
-        best:
-          Number.isFinite(Number(bucketSummary?.BestAo12Ms))
-            ? Number(bucketSummary.BestAo12Ms)
-            : Number.isFinite(Number(visibleRangeSummary?.metrics?.ao12?.best))
-              ? Number(visibleRangeSummary.metrics.ao12.best)
-            : Number.isFinite(Number(overallStats?.BestAo12Ms))
-              ? Number(overallStats.BestAo12Ms)
-              : null,
-        worst: null,
-        strictBest: null,
-      },
-      ao25: {
-        current: null,
-        best:
-          Number.isFinite(Number(bucketSummary?.BestAo25Ms))
-            ? Number(bucketSummary.BestAo25Ms)
-            : Number.isFinite(Number(visibleRangeSummary?.metrics?.ao25?.best))
-              ? Number(visibleRangeSummary.metrics.ao25.best)
-            : Number.isFinite(Number(overallStats?.BestAo25Ms))
-              ? Number(overallStats.BestAo25Ms)
-              : null,
-        worst: null,
-        strictBest: null,
-      },
-      ao50: {
-        current: null,
-        best:
-          Number.isFinite(Number(bucketSummary?.BestAo50Ms))
-            ? Number(bucketSummary.BestAo50Ms)
-            : Number.isFinite(Number(visibleRangeSummary?.metrics?.ao50?.best))
-              ? Number(visibleRangeSummary.metrics.ao50.best)
-            : Number.isFinite(Number(overallStats?.BestAo50Ms))
-              ? Number(overallStats.BestAo50Ms)
-              : null,
-        worst: null,
-        strictBest: null,
-      },
-      ao100: {
-        current: null,
-        best:
-          Number.isFinite(Number(bucketSummary?.BestAo100Ms))
-            ? Number(bucketSummary.BestAo100Ms)
-            : Number.isFinite(Number(visibleRangeSummary?.metrics?.ao100?.best))
-              ? Number(visibleRangeSummary.metrics.ao100.best)
-            : Number.isFinite(Number(overallStats?.BestAo100Ms))
-              ? Number(overallStats.BestAo100Ms)
-              : null,
-        worst: null,
-        strictBest: null,
-      },
-      ao1000: {
-        current: null,
-        best:
-          Number.isFinite(Number(bucketSummary?.BestAo1000Ms))
-            ? Number(bucketSummary.BestAo1000Ms)
-            : Number.isFinite(Number(visibleRangeSummary?.metrics?.ao1000?.best))
-              ? Number(visibleRangeSummary.metrics.ao1000.best)
-            : Number.isFinite(Number(overallStats?.BestAo1000Ms))
-              ? Number(overallStats.BestAo1000Ms)
-              : null,
-        worst: null,
-        strictBest: null,
-      },
-    },
+    metrics: Object.fromEntries(
+      BUCKET_METRIC_FIELDS.map(([key, field]) => [
+        key,
+        {
+          current: null,
+          best: pickMetric(
+            bucketSummary?.[`Best${field}Ms`],
+            visibleRangeSummary?.metrics?.[key]?.best,
+            overallStats?.[`Best${field}Ms`]
+          ),
+          // Buckets only store worst values up to ao12; longer windows come from loaded solves.
+          worst: pickMetric(bucketSummary?.[`Worst${field}Ms`], visibleRangeSummary?.metrics?.[key]?.worst),
+          strictBest: null,
+        },
+      ])
+    ),
     mean: Number.isFinite(Number(bucketSummary?.MeanMs)) ? Number(bucketSummary.MeanMs) : null,
     median: Number.isFinite(Number(visibleRangeSummary?.median))
       ? Number(visibleRangeSummary.median)
@@ -1050,6 +995,7 @@ function SharedMetricColumn({
   worst,
   average = true,
   showHeader = true,
+  tone = null,
   scope,
   summarySource = "primary",
   onStatSelect,
@@ -1077,6 +1023,7 @@ function SharedMetricColumn({
       className={`ssSharedMetricColumn${
         isAoMetric ? " ssSharedMetricColumn--ao" : ""
       }${isSingleMetric ? " ssSharedMetricColumn--singleMetric" : ""}`}
+      style={tone ? { "--ss-best": tone.best, "--ss-worst": tone.worst } : undefined}
     >
       {showHeader ? (!single ? (
         <div className="ssMetricTileHeader ssSharedMetricHeader">
@@ -1110,6 +1057,35 @@ function SharedMetricColumn({
   );
 }
 
+function buildPlus2Row(count, best, { scope, summarySource = "primary", onStatSelect } = {}) {
+  const countPart = { key: "count", value: formatCount(count), tone: "ssMetricValue--strict" };
+  if (!(Number(count) > 0)) return { label: "+2 Count", ...countPart };
+  const canSelectBest = typeof onStatSelect === "function" && Number.isFinite(Number(best));
+  return {
+    label: "+2 Count | Best",
+    parts: [
+      countPart,
+      {
+        key: "best",
+        value: formatPlus2Time(best),
+        tone: "ssMetricValue--best",
+        onClick: canSelectBest
+          ? () =>
+              onStatSelect({
+                source: summarySource,
+                scope,
+                kind: "single",
+                metricKey: "single",
+                label: "+2 Best",
+                variant: "plus2-best",
+                value: best,
+              })
+          : null,
+      },
+    ],
+  };
+}
+
 function SharedMetaColumn({ rows = [] }) {
   return (
     <div className="ssSharedMetricColumn ssSharedMetricColumn--meta">
@@ -1117,9 +1093,22 @@ function SharedMetaColumn({ rows = [] }) {
         {rows.map((row) => (
           <div key={row.label} className="ssSharedMetaRow">
             <span className="ssSharedMetaLabel">{row.label}</span>
-            <span className={`ssSharedMetaValue ${row.tone || ""}`} style={row.style || undefined}>
-              {row.value}
-            </span>
+            {row.parts ? (
+              <span className="ssSharedMetaValue ssSharedMetaValue--parts">
+                {row.parts.map((part, index) => (
+                  <React.Fragment key={part.key || index}>
+                    {index > 0 && <span className="ssSharedMetaDivider" aria-hidden="true">|</span>}
+                    <StatValueButton onClick={part.onClick}>
+                      <span className={part.tone || ""}>{part.value}</span>
+                    </StatValueButton>
+                  </React.Fragment>
+                ))}
+              </span>
+            ) : (
+              <span className={`ssSharedMetaValue ${row.tone || ""}`} style={row.style || undefined}>
+                {row.value}
+              </span>
+            )}
           </div>
         ))}
       </div>
@@ -1138,6 +1127,7 @@ function SharedSummaryGrid({
   showMetricHeaders = null,
   summarySource = "primary",
   onStatSelect,
+  metricTones = null,
 }) {
   const visibleMetricColumns = useMemo(
     () => getVisibleSharedMetricColumns(metricValues, solveCount),
@@ -1173,6 +1163,7 @@ function SharedSummaryGrid({
             worst={values.worst}
             average={column.average}
             showHeader={resolvedShowMetricHeaders}
+            tone={metricTones?.[column.key] || null}
             scope={scope}
             summarySource={summarySource}
             onStatSelect={onStatSelect}
@@ -1352,6 +1343,8 @@ function TimeViewAllEventsSummary({
             maxLegendItems={5}
             promoteHoveredOverflowItem
             reverseLayout
+            sliceStrokeWidth={getPieSliceStrokeWidth(breakdownRows.length)}
+            showInnerOutline
           />
         </div>
       </div>
@@ -1517,31 +1510,17 @@ function useStatsSummaryData({
   return { view, overall };
 }
 
-export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
+const EMPTY_SOLVES = [];
+
+function useCurrentViewSummary({
   solves,
-  overallStats,
-  overallSolves = [],
-  bucketSummary = null,
-  bucketItems = [],
-  allEventsBreakdown,
-  mode = "session",
-  loadedSolveCount = null,
   solveIndexOffset = 0,
-  showCurrentMetrics = true,
-  viewMode = "standard",
-  summaryLayout = "row",
-  selectedDay = "",
-  selectedTagPills = [],
-  summarySource = "primary",
-  onStatSelect,
-  compareSummary = null,
-  eventBreakdownData = [],
-  loading = false,
-  overviewTone = false,
-  profileColor = "#50B6FF",
+  bucketSummary = null,
+  bucketItems = EMPTY_SOLVES,
+  overallStats = null,
+  overallSolves = EMPTY_SOLVES,
   allowOverallDerived = true,
 }) {
-  const [timeTrendMode, setTimeTrendMode] = useState("average");
   const overallLoadedSummary = useMemo(
     () =>
       buildViewSummary(overallSolves),
@@ -1585,6 +1564,111 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
     },
     [bucketItems, bucketSummary, bucketOverallMetricFallback, solves, solveIndexOffset]
   );
+  return view;
+}
+
+const SUMMARY_TONE_GRAY = { best: "#e5e7eb", worst: "#7b818c" };
+
+function getViewMetricValue(view, metricKey, variant) {
+  if (!view) return null;
+  return metricKey === "single" ? view?.single?.[variant] : view?.metrics?.[metricKey]?.[variant];
+}
+
+// Lower is better; a stat keeps its color unless the rival strictly beats it.
+function beatsRivalValue(own, rivalValue) {
+  const a = Number(own);
+  const b = Number(rivalValue);
+  if (own == null || !Number.isFinite(a)) return false;
+  if (rivalValue == null || !Number.isFinite(b)) return true;
+  return a <= b;
+}
+
+// Light shade of the scope color for good values, dark shade for bad ones.
+// With a rival summary, a metric only keeps the color when it beats the rival.
+function buildSummaryTones(toneColor, rivalView, view) {
+  const safeColor = normalizeHexColor(toneColor, "");
+  if (!safeColor) return null;
+
+  const colored = {
+    best: interpolateHexColor(safeColor, "#ffffff", 0.34),
+    worst: interpolateHexColor(safeColor, "#000000", 0.36),
+  };
+  if (!rivalView || !view) {
+    return { base: colored, metrics: null, mean: colored.best, median: colored.best };
+  }
+
+  const metrics = {};
+  for (const column of SHARED_METRIC_COLUMNS) {
+    // Best and worst are judged separately against the rival's best and worst.
+    const tone = {};
+    for (const variant of ["best", "worst"]) {
+      tone[variant] = beatsRivalValue(
+        getViewMetricValue(view, column.key, variant),
+        getViewMetricValue(rivalView, column.key, variant)
+      )
+        ? colored[variant]
+        : SUMMARY_TONE_GRAY[variant];
+    }
+    metrics[column.key] = tone;
+  }
+
+  return {
+    base: colored,
+    metrics,
+    mean: beatsRivalValue(view?.mean, rivalView?.mean) ? colored.best : SUMMARY_TONE_GRAY.best,
+    median: beatsRivalValue(view?.median, rivalView?.median) ? colored.best : SUMMARY_TONE_GRAY.best,
+  };
+}
+
+export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
+  solves,
+  overallStats,
+  overallSolves = [],
+  bucketSummary = null,
+  bucketItems = [],
+  allEventsBreakdown,
+  mode = "session",
+  loadedSolveCount = null,
+  solveIndexOffset = 0,
+  showCurrentMetrics = true,
+  viewMode = "standard",
+  summaryLayout = "row",
+  selectedDay = "",
+  selectedTagPills = [],
+  summarySource = "primary",
+  onStatSelect,
+  compareSummary = null,
+  eventBreakdownData = [],
+  loading = false,
+  overviewTone = false,
+  profileColor = "#50B6FF",
+  allowOverallDerived = true,
+  toneColor = "",
+  rival = null,
+}) {
+  const [timeTrendMode, setTimeTrendMode] = useState("average");
+  const view = useCurrentViewSummary({
+    solves,
+    solveIndexOffset,
+    bucketSummary,
+    bucketItems,
+    overallStats,
+    overallSolves,
+    allowOverallDerived,
+  });
+  const rivalView = useCurrentViewSummary({
+    solves: rival?.solves || EMPTY_SOLVES,
+    solveIndexOffset: rival?.solveIndexOffset || 0,
+    bucketSummary: rival?.bucketSummary || null,
+    bucketItems: rival?.bucketItems || EMPTY_SOLVES,
+    overallStats: rival?.overallStats || null,
+    overallSolves: rival?.overallSolves || EMPTY_SOLVES,
+    allowOverallDerived: rival?.allowOverallDerived !== false,
+  });
+  const summaryTones = useMemo(
+    () => buildSummaryTones(toneColor, rival ? rivalView : null, view),
+    [rival, rivalView, toneColor, view]
+  );
   const compareView = useMemo(
     () => buildViewSummary(compareSummary?.solves || []),
     [compareSummary?.solves]
@@ -1619,12 +1703,10 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
     () =>
       overviewTone
         ? {
-            background: `linear-gradient(135deg, ${withAlpha(resolvedProfileColor, 0.16)}, ${withAlpha(
-              resolvedProfileColor,
-              0.16
-            )})`,
-            borderColor: withAlpha(resolvedProfileColor, 0.82),
-            boxShadow: `inset 0 1px 0 ${withAlpha(resolvedProfileColor, 0.18)}`,
+            background: `var(--stats-container-force-bg, ${withAlpha(resolvedProfileColor, 0.13)})`,
+            "--ss-card-border": `var(--stats-container-force-border, ${withAlpha(resolvedProfileColor, 0.3)})`,
+            "--ss-card-border-hover": `var(--stats-container-force-border-hover, ${withAlpha(resolvedProfileColor, 0.65)})`,
+            boxShadow: `inset 0 1px 0 var(--stats-container-force-bg, ${withAlpha(resolvedProfileColor, 0.18)})`,
           }
         : undefined,
     [overviewTone, resolvedProfileColor]
@@ -1678,7 +1760,15 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
             ? "ssCard--view ssCard--viewTile"
             : "ssCard--view ssCard--viewRow"
       } ${overviewTone ? "ssCard--overviewTone" : ""} ${loading ? "is-loading" : ""}`}
-      style={overviewToneStyle}
+      style={
+        summaryTones
+          ? {
+              ...(overviewToneStyle || {}),
+              "--ss-best": summaryTones.base.best,
+              "--ss-worst": summaryTones.base.worst,
+            }
+          : overviewToneStyle
+      }
       aria-busy={loading}
     >
       {effectiveViewMode === "time" ? (
@@ -1919,7 +2009,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
                   </div>
 
                   <div className="ssMetaGrid ssMetaGrid--currentRow">
-                    <MetaStat label="+2 Best" value={formatStatTime(view?.plus2Best, { average: false })} tone="teal" />
+                    <MetaStat label="+2 Best" value={formatPlus2Time(view?.plus2Best)} tone="teal" />
                     <MetaStat label="Sum" value={formatDurationMs(view?.sum)} tone="blue" />
                   </div>
                 </div>
@@ -1977,6 +2067,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
                 scope="current"
                 summarySource={summarySource}
                 onStatSelect={onStatSelect}
+                metricTones={summaryTones?.metrics || null}
                 left={
                   <>
                     <div className="ssViewCountValue">{formatCount(view?.solveCount)}</div>
@@ -2001,19 +2092,26 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
                     label: "Mean",
                     value: formatStatTime(view?.mean),
                     tone: "ssMetricValue--current",
-                    style: currentMeanColor ? { color: currentMeanColor } : undefined,
+                    style: summaryTones
+                      ? { color: summaryTones.mean }
+                      : currentMeanColor
+                        ? { color: currentMeanColor }
+                        : undefined,
                   },
                   {
                     label: "Med",
                     value: formatStatTime(view?.median),
                     tone: "ssMetricValue--current",
-                    style: currentMedianColor ? { color: currentMedianColor } : undefined,
+                    style: summaryTones
+                      ? { color: summaryTones.median }
+                      : currentMedianColor
+                        ? { color: currentMedianColor }
+                        : undefined,
                   },
                   { label: "SD", value: formatStatTime(view?.stdDev), tone: "ssMetricValue--strict" },
                 ]}
                 extraRows={[
-                  { label: "+2 Count", value: formatCount(view?.plus2Count), tone: "ssMetricValue--strict" },
-                  { label: "+2 Best", value: formatStatTime(view?.plus2Best, { average: false }), tone: "ssMetricValue--best" },
+                  buildPlus2Row(view?.plus2Count, view?.plus2Best, { scope: "current", summarySource, onStatSelect }),
                   { label: "DNF Count", value: formatCount(view?.dnfCount), tone: "ssMetricValue--worst" },
                   { label: "Sum", value: formatDurationMs(view?.sum), tone: "ssMetricValue--current" },
                 ]}
@@ -2106,12 +2204,10 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
   const showOverallMetricHeaders = overallVisibleMetricCount !== currentVisibleMetricCount;
   const overallCardStyle = useMemo(
     () => ({
-      background: `linear-gradient(135deg, ${withAlpha(resolvedProfileColor, 0.16)}, ${withAlpha(
-        resolvedProfileColor,
-        0.16
-      )})`,
-      borderColor: withAlpha(resolvedProfileColor, 0.82),
-      boxShadow: `inset 0 1px 0 ${withAlpha(resolvedProfileColor, 0.18)}`,
+      background: `var(--stats-container-force-bg, ${withAlpha(resolvedProfileColor, 0.13)})`,
+      "--ss-card-border": `var(--stats-container-force-border, ${withAlpha(resolvedProfileColor, 0.3)})`,
+      "--ss-card-border-hover": `var(--stats-container-force-border-hover, ${withAlpha(resolvedProfileColor, 0.65)})`,
+      boxShadow: `inset 0 1px 0 var(--stats-container-force-bg, ${withAlpha(resolvedProfileColor, 0.18)})`,
     }),
     [resolvedProfileColor]
   );
@@ -2192,13 +2288,82 @@ export const StatsSummaryOverall = React.memo(function StatsSummaryOverall({
             { label: "DNF #", value: formatCount(overall.dnfCount), tone: "ssMetricValue--worst" },
           ]}
           extraRows={[
-            { label: "+2 Count", value: formatCount(overall.plus2Count), tone: "ssMetricValue--strict" },
-            { label: "+2 Best", value: formatStatTime(overall.plus2Best, { average: false }), tone: "ssMetricValue--best" },
+            buildPlus2Row(overall.plus2Count, overall.plus2Best, { scope: "overall", summarySource, onStatSelect }),
             { label: "Sum", value: formatDurationMs(overall.sum), tone: "ssMetricValue--current" },
           ]}
         />
       </div>
     </section>
+  );
+});
+
+const OVERVIEW_MINI_METRICS = [
+  { key: "single", label: "Single", average: false },
+  { key: "ao5", label: "AO5" },
+  { key: "ao12", label: "AO12" },
+  { key: "ao25", label: "AO25" },
+  { key: "ao50", label: "AO50" },
+  { key: "ao100", label: "AO100" },
+  { key: "ao1000", label: "AO1000" },
+];
+
+const OVERVIEW_MINI_NO_SOLVES = [];
+
+export const StatsSummaryOverviewMini = React.memo(function StatsSummaryOverviewMini({
+  overallSolves = [],
+  overallStats,
+  allowOverallDerived = true,
+  profileColor = "#50B6FF",
+  active = false,
+  disabled = false,
+  loading = false,
+  onClick,
+}) {
+  const { overall } = useStatsSummaryData({
+    solves: OVERVIEW_MINI_NO_SOLVES,
+    overallSolves,
+    overallStats,
+    allowOverallDerived,
+  });
+  const resolvedProfileColor = normalizeHexColor(profileColor, "#50B6FF");
+  const cardStyle = useMemo(
+    () => ({
+      background: `var(--stats-overview-mini-bg, ${withAlpha(resolvedProfileColor, active ? 0.26 : 0.13)})`,
+      "--ss-mini-border": withAlpha(resolvedProfileColor, active ? 1 : 0.3),
+      "--ss-mini-border-hover": withAlpha(resolvedProfileColor, active ? 1 : 0.65),
+      boxShadow: `inset 0 1px 0 ${withAlpha(resolvedProfileColor, 0.18)}`,
+    }),
+    [active, resolvedProfileColor]
+  );
+
+  return (
+    <button
+      type="button"
+      className={`ssOverviewMini ${active ? "is-active" : ""} ${loading ? "is-loading" : ""}`}
+      style={cardStyle}
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      aria-busy={loading}
+      title="Open overview"
+    >
+      <span className="ssOverviewMiniCell ssOverviewMiniCell--lead">
+        <span className="ssOverviewMiniLabel">Overview</span>
+        <span className="ssOverviewMiniValue">{formatCount(overall.solveCountTotal)} solves</span>
+      </span>
+      <span className="ssOverviewMiniCell">
+        <span className="ssOverviewMiniLabel">Mean</span>
+        <span className="ssOverviewMiniValue">{formatStatTime(overall.mean)}</span>
+      </span>
+      {OVERVIEW_MINI_METRICS.map((metric) => (
+        <span key={metric.key} className="ssOverviewMiniCell">
+          <span className="ssOverviewMiniLabel">{metric.label}</span>
+          <span className="ssOverviewMiniValue">
+            {formatStatTime(overall[metric.key], { average: metric.average !== false })}
+          </span>
+        </span>
+      ))}
+    </button>
   );
 });
 
@@ -2224,7 +2389,7 @@ function StatsSummary(props) {
   return (
     <div className={`statsSummaryShell ${isRowLayout ? "statsSummaryShell--stacked" : ""}`}>
       <StatsSummaryCurrent {...props} />
-      <StatsSummaryOverall {...props} />
+      {props.hideOverall ? null : <StatsSummaryOverall {...props} />}
     </div>
   );
 }

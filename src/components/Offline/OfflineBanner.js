@@ -1,14 +1,13 @@
 import React from "react";
-import { Link } from "react-router-dom";
 import "./OfflineBanner.css";
 
 /**
  * Persistent, unobtrusive status strip. Two situations show it:
  *  - we're currently offline (app still works, solves save locally)
  *  - we're back online but still have solves queued from earlier that
- *    haven't been reviewed/synced to the profile yet
+ *    haven't been reviewed/synced yet (the action opens the review popup)
  */
-export default function OfflineBanner({ isOnline, pendingCount = 0, isSignedIn }) {
+export default function OfflineBanner({ isOnline, pendingCount = 0, isSignedIn, onReview }) {
   if (isOnline && pendingCount === 0) return null;
   if (!isSignedIn) return null;
 
@@ -26,9 +25,9 @@ export default function OfflineBanner({ isOnline, pendingCount = 0, isSignedIn }
         </span>
       )}
       {isOnline && pendingCount > 0 && (
-        <Link className="offline-banner__action" to="/profile#offline-solves">
+        <button type="button" className="offline-banner__action" onClick={onReview}>
           Review offline solves →
-        </Link>
+        </button>
       )}
     </div>
   );

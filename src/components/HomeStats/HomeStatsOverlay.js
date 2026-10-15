@@ -3,7 +3,11 @@ import PropTypes from "prop-types";
 import LineChartBuilder from "../Stats/LineChartBuilder";
 import BarChart from "../Stats/BarChart";
 import PercentBar from "../Stats/PercentBar";
-import PieChartBuilder from "../Stats/PieChartBuilder";
+import PieChartBuilder, {
+  PENALTY_SLICE_COLORS,
+  getPieSliceStrokeWidth,
+} from "../Stats/PieChartBuilder";
+import { resolveTagChipTone } from "../TagBar/tagUtils";
 import { calculateAverage, formatTime } from "../TimeList/TimeUtils";
 import {
   getProfileChartPalette,
@@ -487,6 +491,22 @@ function breakdownValueForSolve(solve, breakdown) {
   return "Unknown";
 }
 
+const PIE_BREAKDOWN_TAG_FIELDS = {
+  solveSource: "SolveSource",
+  cubeModel: "CubeModel",
+  crossColor: "CrossColor",
+  timerInput: "TimerInput",
+};
+
+// A slice's own colour when it has one: the tag's set colour, or the penalty
+// colour. Empty when the slice should take the palette colour instead.
+function getPieSliceOwnColor(breakdown, label, tagColors) {
+  if (breakdown === "penalty") return PENALTY_SLICE_COLORS[label] || "";
+  const field = PIE_BREAKDOWN_TAG_FIELDS[breakdown];
+  if (!field || label === "Unknown") return "";
+  return resolveTagChipTone(field, label, tagColors, "");
+}
+
 function buildPieData(solves, breakdown) {
   const grouped = new Map();
   (Array.isArray(solves) ? solves : []).forEach((solve) => {
@@ -561,7 +581,7 @@ function slotTitle(config) {
   return "Stats";
 }
 
-function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelect }) {
+function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelect, tagColors }) {
   const slots = useMemo(() => normalizeHomeStatsSlots(settings?.homeStatsSlots), [settings?.homeStatsSlots]);
   const solveLimit = useMemo(
     () => normalizeHomeStatsSolveLimit(settings?.homeStatsSolveLimit, 50),
@@ -589,7 +609,7 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
             : config.chartType === "summary"
               ? defaultSummaryStyle
               : defaultChartStyle;
-        const slotPiePalette =
+        const basePiePalette =
           config.colorScheme === "profile" ? profileChartPalette : defaultChartPalette;
         const summaryCardStyle =
           config.chartType === "summary"
@@ -615,6 +635,15 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
             : [];
         const pieData =
           config.chartType === "pie" ? buildPieData(solves, config.pieBreakdown) : [];
+        // The Profile Color scheme is the way to opt out of per-slice colours.
+        const slotPiePalette =
+          config.colorScheme === "profile"
+            ? basePiePalette
+            : pieData.map(
+                (entry, index) =>
+                  getPieSliceOwnColor(config.pieBreakdown, entry.label, tagColors) ||
+                  basePiePalette[index % basePiePalette.length]
+              );
         const summarySolveWindow =
           config.chartType === "summary" ? getSolveWindow(solves, solveLimit) : [];
         const liveSummaryRows =
@@ -1075,6 +1104,8 @@ function HomeStatsOverlay({ solves, settings, user, overallStats, onSummarySelec
                       colorPalette={slotPiePalette}
                       showLegend={isHovered}
                       showCenterLabel={isHovered}
+                      sliceStrokeWidth={getPieSliceStrokeWidth(pieData.length)}
+                      showInnerOutline
                     />
                   </div>
                 )}
@@ -1095,6 +1126,7 @@ HomeStatsOverlay.propTypes = {
   user: PropTypes.object,
   overallStats: PropTypes.object,
   onSummarySelect: PropTypes.func,
+  tagColors: PropTypes.object,
 };
 
 HomeStatsOverlay.defaultProps = {

@@ -1,4 +1,5 @@
 import { toApiUrl } from "./api";
+import { getAuthToken } from "./auth";
 
 export function createSocialEventSource(userID, { onEvent, onOpen, onError } = {}) {
   const id = String(userID || "").trim();
@@ -6,8 +7,13 @@ export function createSocialEventSource(userID, { onEvent, onOpen, onError } = {
     return null;
   }
 
+  // EventSource cannot send headers, so the token rides in the query string.
+  const token = getAuthToken();
+  if (!token) return null;
   const source = new EventSource(
-    toApiUrl(`/api/notifications/stream/${encodeURIComponent(id)}`)
+    toApiUrl(
+      `/api/notifications/stream/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`
+    )
   );
 
   source.addEventListener("open", (event) => {

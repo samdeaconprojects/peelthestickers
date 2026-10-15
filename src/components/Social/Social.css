@@ -193,52 +193,244 @@
   hyphens: none;
 }
 
-/* Drop-down arrow shown directly beneath the selected conversation tile.
-   Matches the tag bar's home collapse toggle styling. */
-.conversationDetailsToggle {
-  align-self: flex-start;
-  position: relative;
-  left: 0;
-  margin: 6px 0 2px 18px;
+/* In-conversation header: back button, the current conversation's tile, then
+   its details laid out in the space the other tiles would occupy. */
+.headerConversationCurrent {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 0 6px 0 4px;
+}
+
+.headerConversationCurrent .conversationPreview {
+  zoom: 0.7;
+  padding: 0 0 2px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.headerConversationCurrent .profilePicturePost {
+  margin: 0;
+}
+
+/* The name is shown as the title of the details row instead. */
+.headerConversationCurrent .avatarName {
+  display: none;
+}
+
+.conversationBackButton {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 26px;
+  width: 28px;
+  height: 46px;
   padding: 0;
   border: none;
   border-radius: 999px;
   background: transparent;
   color: rgba(255, 255, 255, 0.8);
+  font-size: 30px;
+  line-height: 1;
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
-  transition: color 140ms ease, transform 140ms ease, opacity 140ms ease;
+  transition: color 140ms ease;
 }
 
-.conversationDetailsToggle.is-anchored {
-  margin-left: 0;
-  transform: translateX(-50%);
-}
-
-.conversationDetailsToggle:hover {
+.conversationBackButton:hover {
   color: rgba(255, 255, 255, 1);
 }
 
-.conversationDetailsToggle.is-open {
-  color: rgba(255, 255, 255, 1);
+.headerConversationDetails {
+  flex: 1;
+  min-width: 0;
+  min-height: 46px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  padding-left: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
-.conversationDetailsToggleArrow {
-  display: inline-block;
-  font-size: 28px;
-  line-height: 1;
-  transform: rotate(90deg);
-  transition: transform 160ms ease;
+.headerConversationDetails::-webkit-scrollbar {
+  display: none;
 }
 
-.conversationDetailsToggle.is-open .conversationDetailsToggleArrow {
-  transform: rotate(-90deg);
+.headerConversationDetails .groupThreadMeta {
+  max-width: 280px;
+  min-width: 0;
+}
+
+.headerConversationDetails .groupThreadTitle {
+  font-size: 14px;
+}
+
+.headerConversationDetails .groupThreadTitle,
+.headerConversationDetails .groupThreadMembers {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.headerConversationDetails .groupThreadTitleRow {
+  flex-wrap: nowrap;
+}
+
+.headerConversationDetails .groupThreadMembers,
+.headerConversationDetails .groupThreadRoomCode {
+  margin-top: 2px;
+  line-height: 1.25;
+}
+
+.headerConversationDetails .groupThreadBadge {
+  padding: 1px 7px;
+  font-size: 10px;
+}
+
+.headerConversationDetails .groupThreadRoomCode {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.headerConversationDetails .sharedConversationStatsToggle {
+  width: auto;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.sharedStatsSummary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgba(80, 182, 255, 0.08);
+  border: 1px solid rgba(80, 182, 255, 0.3);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+  outline: none;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.sharedStatsSummary:hover,
+.sharedStatsSummary:focus-visible {
+  background: rgba(80, 182, 255, 0.16);
+  border-color: #50b6ff;
+}
+
+.sharedStatsSummaryItem strong {
+  color: #ffe863;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.sharedStatsSummaryDivider {
+  width: 1px;
+  height: 14px;
+  background: rgba(80, 182, 255, 0.3);
+}
+
+/* Fixed so the header's horizontal scroll clipping doesn't cut it off */
+.sharedStatsPopover {
+  position: fixed;
+  z-index: 1000;
+  width: 340px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--theme-surface-strong);
+  border: 1px solid rgba(80, 182, 255, 0.36);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  white-space: normal;
+  pointer-events: none;
+}
+
+.headerConversationDetails .sharedStatsPopover .sharedConversationStatsGrid {
+  display: grid;
+}
+
+.headerConversationDetails .sharedStatsPopover .sharedConversationStatCard {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.headerConversationDetails .sharedStatsPopover .sharedConversationStatValue {
+  font-size: 18px;
+  color: #ffe863;
+}
+
+.headerConversationDetails .sharedStatsPopover .sharedConversationStatLabel {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.headerConversationDetails .sharedStatsPopover .sharedConversationHeadToHeadRow {
+  flex-direction: row;
+  gap: 12px;
+  padding: 0 2px;
+}
+
+.headerConversationDetails .sharedStatsPopover .sharedConversationEventRow {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.headerConversationDetails .sharedStatsPopover .sharedConversationEventPill {
+  display: flex;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* event name takes the slack so solves / wins line up on the right */
+.sharedStatsPopover .sharedConversationEventPill > span:nth-of-type(2) {
+  flex: 1;
+  color: white;
+  font-weight: 600;
+}
+
+.sharedStatsEventIcon {
+  position: relative;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+}
+
+.sharedStatsEventIconInner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  transform-origin: 0 0;
+  line-height: 0;
+}
+
+.headerConversationDetails .sharedStatsSummary .sharedStatsWin,
+.headerConversationDetails .sharedStatsPopover .sharedStatsWin {
+  color: #12ea68;
 }
 
 /* Make the whole Social page a flex column that fills its area */
@@ -578,15 +770,6 @@
   --as: 0.62;
   --ax: -4px;
   --ay: 0px;
-}
-
-.conversationDetailsPanel {
-  flex-shrink: 0;
-  padding: 10px 14px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
 }
 
 .groupThreadMeta {

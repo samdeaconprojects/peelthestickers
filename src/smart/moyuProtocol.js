@@ -22,8 +22,23 @@ export const MOYU_SERVICE_UUID = "0783b03e-7735-b5a0-1760-a305d2795cb0";
 export const MOYU_READ_CHAR_UUID = "0783b03e-7735-b5a0-1760-a305d2795cb1";
 export const MOYU_WRITE_CHAR_UUID = "0783b03e-7735-b5a0-1760-a305d2795cb2";
 
-// MoYu / WCU Bluetooth SIG company identifier (little-endian on the wire).
-export const MOYU_COMPANY_ID = 0x0504;
+// Company ids a MoYu cube may advertise its manufacturer data (and so its MAC)
+// under. A cube bound in the WCU app uses the high bytes of the account id
+// (0x0100..0xFF00); an unbound cube uses 0x0000. Web Bluetooth only exposes
+// manufacturer data for ids requested up front, so all of them are listed.
+// 0x0000 crashes gatt.connect() on Chromium < 130 (crbug.com/356891475).
+export function moyuCompanyIds() {
+  const ids = [];
+  for (let i = 1; i <= 255; i++) ids.push(i << 8);
+  const brands = (typeof navigator !== "undefined" && navigator.userAgentData?.brands) || [];
+  const oldChromium = brands.some(
+    (b) =>
+      (b.brand === "Google Chrome" || b.brand === "Chromium") &&
+      parseInt(b.version, 10) < 130
+  );
+  if (!oldChromium) ids.unshift(0x0000);
+  return ids;
+}
 
 const BASE_KEY = [
   21, 119, 58, 92, 103, 14, 45, 31, 23, 103, 42, 19, 155, 103, 82, 87,
@@ -169,12 +184,12 @@ export function createMoyuProtocol(macBytes) {
           opCode,
           type: "HARDWARE",
           name: name.trim(),
-          hardwareVersion: `${parseInt(bits.slice(88, 96), 2)}.${parseInt(
-            bits.slice(96, 104),
+          hardwareVersion: `${parseInt(bits.slice(72, 80), 2)}.${parseInt(
+            bits.slice(80, 88),
             2
           )}`,
-          softwareVersion: `${parseInt(bits.slice(72, 80), 2)}.${parseInt(
-            bits.slice(80, 88),
+          softwareVersion: `${parseInt(bits.slice(88, 96), 2)}.${parseInt(
+            bits.slice(96, 104),
             2
           )}`,
         };

@@ -1264,11 +1264,88 @@ function Settings({
             </div>
 
             <div className="setting-item">
-              <label>White Puzzle SVGs</label>
+              <label>Best Time Matrix Puzzle Icons</label>
+              <SettingsChoice
+                value={settings.matrixPuzzleSvgStyle || "color"}
+                onChange={(e) =>
+                  updateSettings({ matrixPuzzleSvgStyle: e.target.value })
+                }
+              >
+                <option value="color">Color</option>
+                <option value="white">White</option>
+                <option value="grayscale">Grayscale</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="setting-item">
+              <label>Stats Selector Puzzle Icon</label>
+              <SettingsChoice
+                value={settings.statsSelectorPuzzleSvgStyle || "color"}
+                onChange={(e) =>
+                  updateSettings({ statsSelectorPuzzleSvgStyle: e.target.value })
+                }
+              >
+                <option value="color">Color</option>
+                <option value="white">White</option>
+                <option value="grayscale">Grayscale</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="setting-item">
+              <label>Stats Container Color</label>
+              <SettingsChoice
+                value={settings.statsContainerColorMode || "profile"}
+                onChange={(e) =>
+                  updateSettings({ statsContainerColorMode: e.target.value })
+                }
+              >
+                <option value="profile">Profile color</option>
+                <option value="gray">Gray</option>
+                <option value="custom">Custom</option>
+              </SettingsChoice>
+            </div>
+
+            {settings.statsContainerColorMode === "custom" ? (
+              <div className="setting-item">
+                <label>Stats Container Custom Color</label>
+                <input
+                  type="color"
+                  value={settings.statsContainerCustomColor || "#2EC4B6"}
+                  onChange={(e) =>
+                    updateSettings({ statsContainerCustomColor: e.target.value })
+                  }
+                />
+              </div>
+            ) : null}
+
+            <div className="setting-item">
+              <label>Stats Card Background Fill</label>
               <input
                 type="checkbox"
-                checked={settings.whitePuzzleSVGs === true}
-                onChange={(e) => updateSettings({ whitePuzzleSVGs: e.target.checked })}
+                checked={settings.statsContainerBackground === true}
+                onChange={(e) =>
+                  updateSettings({ statsContainerBackground: e.target.checked })
+                }
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Stats Selector + Overview Background Fill</label>
+              <input
+                type="checkbox"
+                checked={settings.statsTopBarBackground === true}
+                onChange={(e) =>
+                  updateSettings({ statsTopBarBackground: e.target.checked })
+                }
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Stats Cards Grow On Hover</label>
+              <input
+                type="checkbox"
+                checked={settings.statsHoverGrow === true}
+                onChange={(e) => updateSettings({ statsHoverGrow: e.target.checked })}
               />
             </div>
 
@@ -1309,6 +1386,17 @@ function Settings({
                 <option value="continuous">True spectrum (by time)</option>
                 <option value="bucket">Bucket spectrum (5 bands)</option>
                 <option value="index">Index spectrum (evenly distributed)</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="setting-item">
+              <label>Shared Average Border</label>
+              <SettingsChoice
+                value={settings.sharedBorderStyle || "gradient"}
+                onChange={(e) => updateSettings({ sharedBorderStyle: e.target.value })}
+              >
+                <option value="gradient">Gradient (blended, default)</option>
+                <option value="hard">Hard edges (no blend)</option>
               </SettingsChoice>
             </div>
           </div>

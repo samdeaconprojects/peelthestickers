@@ -1,23 +1,18 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import "./Stats.css";
 
 const BASE_VIEWBOX_SIZE = 220;
 const CALLOUT_VIEWBOX_SIZE = 320;
-const CALLOUT_VERTICAL_THRESHOLD = 0.34;
+const CENTER_RADIUS = 42;
 const CALLOUT_SIDE_ELBOW_OFFSET = 10;
 const CALLOUT_MIN_GAP = 28;
 const CALLOUT_TOP_BOUND = 22;
 const CALLOUT_BOTTOM_BOUND = CALLOUT_VIEWBOX_SIZE - 22;
-const CALLOUT_HORIZONTAL_STUB = 18;
+const CALLOUT_CHART_CLEARANCE = 16;
 const CALLOUT_TEXT_VERTICAL_SPREAD = 54;
 const CALLOUT_TEXT_SIDE_PAD = 8;
 const CALLOUT_NAME_SIDE_OFFSET = 36;
-const CALLOUT_COMPACT_VERTICAL_DRIFT = 22;
-const CALLOUT_COMPACT_SIDE_STEP = 10;
-const CALLOUT_COMPACT_TEXT_STEP = 18;
-const CALLOUT_TOP_COMPACT_VERTICAL_DRIFT = 48;
-const CALLOUT_TOP_ZONE_Y = 86;
 const DEFAULT_BOLD_PIE_PALETTE = [
   "#50B6FF",
   "#FB596D",
@@ -27,6 +22,16 @@ const DEFAULT_BOLD_PIE_PALETTE = [
   "#8B7DFF",
 ];
 
+// Colours the app already uses for penalties; clean solves keep the palette colour.
+export const PENALTY_SLICE_COLORS = { "+2": "#FFE863", DNF: "#FB596D" };
+
+// Thinner outlines as the chart gets crowded so narrow slices stay readable.
+export function getPieSliceStrokeWidth(sliceCount) {
+  if (sliceCount <= 8) return 4;
+  if (sliceCount <= 14) return 3;
+  return 2.25;
+}
+
 function normalizeCalloutLines(entry, percent) {
   if (Array.isArray(entry?.calloutLines) && entry.calloutLines.length) {
     return entry.calloutLines.map((line) => String(line));
@@ -34,77 +39,62 @@ function normalizeCalloutLines(entry, percent) {
   return [`${entry?.value || 0} solves`, `${percent}%`];
 }
 
+// Spreads label rows apart around their preferred positions (rather than only
+// pushing later ones down), then keeps the stack inside the vertical bounds.
 function distributeCalloutPositions(callouts) {
   if (!callouts.length) return [];
 
   const sorted = [...callouts].sort((a, b) => a.textY - b.textY);
-  let cursor = CALLOUT_TOP_BOUND;
+  const ys = sorted.map((callout) => callout.textY);
 
-  const pushedDown = sorted.map((callout) => {
-    const nextY = Math.max(callout.textY, cursor);
-    cursor = nextY + CALLOUT_MIN_GAP;
-    return { ...callout, textY: nextY };
-  });
-
-  const overflow = pushedDown[pushedDown.length - 1].textY - CALLOUT_BOTTOM_BOUND;
-  if (overflow <= 0) return pushedDown;
-
-  const pulledUp = [...pushedDown];
-  pulledUp[pulledUp.length - 1] = {
-    ...pulledUp[pulledUp.length - 1],
-    textY: Math.max(CALLOUT_TOP_BOUND, pulledUp[pulledUp.length - 1].textY - overflow),
-  };
-
-  for (let index = pulledUp.length - 2; index >= 0; index -= 1) {
-    const next = pulledUp[index + 1];
-    pulledUp[index] = {
-      ...pulledUp[index],
-      textY: Math.min(
-        pulledUp[index].textY,
-        next.textY - CALLOUT_MIN_GAP
-      ),
-    };
+  for (let pass = 0; pass < 80; pass += 1) {
+    let moved = false;
+    for (let index = 0; index < ys.length - 1; index += 1) {
+      const deficit = CALLOUT_MIN_GAP - (ys[index + 1] - ys[index]);
+      if (deficit > 0.01) {
+        ys[index] -= deficit / 2;
+        ys[index + 1] += deficit / 2;
+        moved = true;
+      }
+    }
+    if (!moved) break;
   }
 
-  const underflow = CALLOUT_TOP_BOUND - pulledUp[0].textY;
-  if (underflow <= 0) return pulledUp;
+  ys[ys.length - 1] = Math.min(ys[ys.length - 1], CALLOUT_BOTTOM_BOUND);
+  for (let index = ys.length - 2; index >= 0; index -= 1) {
+    ys[index] = Math.min(ys[index], ys[index + 1] - CALLOUT_MIN_GAP);
+  }
+  ys[0] = Math.max(ys[0], CALLOUT_TOP_BOUND);
+  for (let index = 1; index < ys.length; index += 1) {
+    ys[index] = Math.max(ys[index], ys[index - 1] + CALLOUT_MIN_GAP);
+  }
 
-  return pulledUp.map((callout) => ({
-    ...callout,
-    textY: Math.min(CALLOUT_BOTTOM_BOUND, callout.textY + underflow),
-  }));
+  return sorted.map((callout, index) => ({ ...callout, textY: ys[index] }));
 }
 
+// Each label hugs the outside of the chart at its own row: the elbow sits just
+// past the circle's edge at that height, so text never lands on the slices.
 function resolveCalloutSideLayout(callouts, direction, chartCenter, chartRadius) {
+  const clearRadius = chartRadius + CALLOUT_CHART_CLEARANCE;
+
   return distributeCalloutPositions(callouts).map((callout) => {
-    const verticalDrift = Math.abs(callout.textY - callout.outerY);
-    const useCompactLayout =
-      verticalDrift <= CALLOUT_COMPACT_VERTICAL_DRIFT ||
-      (callout.nearVertical &&
-        callout.outerY <= CALLOUT_TOP_ZONE_Y &&
-        verticalDrift <= CALLOUT_TOP_COMPACT_VERTICAL_DRIFT);
+    const dy = Math.abs(callout.textY - chartCenter);
+    const halfWidth = dy < clearRadius ? Math.sqrt(clearRadius * clearRadius - dy * dy) : 0;
+    const clearX = chartCenter + direction * halfWidth;
+    const leadX = chartCenter + clearRadius * callout.cosAngle;
+    const leadY = chartCenter + clearRadius * callout.sinAngle;
     const elbowX =
       direction < 0
-        ? useCompactLayout
-          ? callout.outerX - CALLOUT_COMPACT_SIDE_STEP
-          : Math.min(callout.outerX - 10, chartCenter - (chartRadius + CALLOUT_SIDE_ELBOW_OFFSET))
-        : useCompactLayout
-          ? callout.outerX + CALLOUT_COMPACT_SIDE_STEP
-          : Math.max(callout.outerX + 10, chartCenter + chartRadius + CALLOUT_SIDE_ELBOW_OFFSET);
-    const textX =
-      direction < 0
-        ? useCompactLayout
-          ? callout.outerX - CALLOUT_COMPACT_TEXT_STEP
-          : Math.min(elbowX - CALLOUT_TEXT_SIDE_PAD, callout.outerX - CALLOUT_HORIZONTAL_STUB)
-        : useCompactLayout
-          ? callout.outerX + CALLOUT_COMPACT_TEXT_STEP
-          : Math.max(elbowX + CALLOUT_TEXT_SIDE_PAD, callout.outerX + CALLOUT_HORIZONTAL_STUB);
+        ? Math.min(clearX, leadX - CALLOUT_SIDE_ELBOW_OFFSET)
+        : Math.max(clearX, leadX + CALLOUT_SIDE_ELBOW_OFFSET);
 
     return {
       ...callout,
+      leadX,
+      leadY,
       elbowX,
       elbowY: callout.textY,
-      textX,
+      textX: elbowX + direction * CALLOUT_TEXT_SIDE_PAD,
     };
   });
 }
@@ -131,13 +121,17 @@ const PieChartBuilder = ({
   maxCallouts,
   onSliceHover,
   onSliceLeave,
+  highlightedKey,
+  sliceStrokeWidth,
+  showInnerOutline,
   centerFillColor,
 }) => {
   const total = data.reduce((sum, entry) => sum + entry.value, 0);
   const [hoveredSlice, setHoveredSlice] = useState(null);
+  const lastHoveredShapeRef = useRef(null);
   const viewboxSize = showCallouts ? CALLOUT_VIEWBOX_SIZE : BASE_VIEWBOX_SIZE;
   const chartCenter = viewboxSize / 2;
-  const chartRadius = showCallouts ? 90 : 86;
+  const chartRadius = showCallouts ? 108 : 86;
 
   const resolvedPalette =
     Array.isArray(colorPalette) && colorPalette.length > 0
@@ -152,16 +146,25 @@ const PieChartBuilder = ({
     },
     [data, sortMode]
   );
-  const safeHoveredSlice =
+  const ownHoveredSlice =
     hoveredSlice != null && hoveredSlice >= 0 && hoveredSlice < sortedData.length
       ? hoveredSlice
       : null;
 
   useEffect(() => {
-    if (hoveredSlice != null && safeHoveredSlice == null) {
+    if (hoveredSlice != null && ownHoveredSlice == null) {
       setHoveredSlice(null);
     }
-  }, [hoveredSlice, safeHoveredSlice]);
+  }, [hoveredSlice, ownHoveredSlice]);
+
+  // A slice hovered from outside the chart (e.g. a legend row elsewhere on the
+  // page) is drawn exactly like one hovered on the chart itself.
+  const highlightedSlice = useMemo(() => {
+    if (highlightedKey == null || highlightedKey === "") return null;
+    const index = sortedData.findIndex((entry) => entry.key === highlightedKey);
+    return index >= 0 ? index : null;
+  }, [highlightedKey, sortedData]);
+  const safeHoveredSlice = ownHoveredSlice ?? highlightedSlice;
 
   const legendData = useMemo(() => {
     const withIndex = sortedData.map((entry, index) => ({ entry, index }));
@@ -185,6 +188,7 @@ const PieChartBuilder = ({
   }, [maxLegendItems, promoteHoveredOverflowItem, safeHoveredSlice, sortedData]);
 
   let cumulativeValue = 0;
+  let hoveredShape = null;
 
   const slices = sortedData.map((entry, index) => {
     const startAngle = total > 0 ? (cumulativeValue / total) * 2 * Math.PI - Math.PI / 2 : -Math.PI / 2;
@@ -199,12 +203,26 @@ const PieChartBuilder = ({
     const fill = resolvedPalette[resolveSliceColorIndex(entry, index) % resolvedPalette.length];
     const isHovered = safeHoveredSlice === index;
 
-    const pathData = [
-      `M ${chartCenter} ${chartCenter}`,
-      `L ${startX} ${startY}`,
-      `A ${chartRadius} ${chartRadius} 0 ${largeArcFlag} 1 ${endX} ${endY}`,
-      "Z",
-    ].join(" ");
+    // With an inner outline the slice is a ring segment whose inner edge sits
+    // just outside the center disc, so its stroke stays visible around the hole.
+    const innerRadius = showInnerOutline && showCenterLabel ? CENTER_RADIUS + sliceStrokeWidth / 2 : 0;
+    const pathData = innerRadius
+      ? [
+          `M ${chartCenter + innerRadius * Math.cos(startAngle)} ${chartCenter + innerRadius * Math.sin(startAngle)}`,
+          `L ${startX} ${startY}`,
+          `A ${chartRadius} ${chartRadius} 0 ${largeArcFlag} 1 ${endX} ${endY}`,
+          `L ${chartCenter + innerRadius * Math.cos(endAngle)} ${chartCenter + innerRadius * Math.sin(endAngle)}`,
+          `A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${chartCenter + innerRadius * Math.cos(startAngle)} ${chartCenter + innerRadius * Math.sin(startAngle)}`,
+          "Z",
+        ].join(" ")
+      : [
+          `M ${chartCenter} ${chartCenter}`,
+          `L ${startX} ${startY}`,
+          `A ${chartRadius} ${chartRadius} 0 ${largeArcFlag} 1 ${endX} ${endY}`,
+          "Z",
+        ].join(" ");
+
+    if (isHovered) hoveredShape = { pathData, fill };
 
     const handleSelect = () => {
       if (!interactive || typeof onSliceClick !== "function") return;
@@ -235,11 +253,32 @@ const PieChartBuilder = ({
           transformOrigin: `${chartCenter}px ${chartCenter}px`,
           transition: "transform 0.2s ease-in-out, stroke-width 0.2s ease-in-out, fill 0.2s ease-in-out",
           stroke: fill,
-          strokeWidth: "5px",
+          strokeWidth: `${sliceStrokeWidth}px`,
         }}
       />
     );
   });
+
+  // SVG paints in DOM order, so later slices would cover a hovered earlier one.
+  // A non-interactive copy drawn after all slices lifts the hovered slice on top;
+  // it keeps the last shape while fading out so the un-hover still animates.
+  if (hoveredShape) lastHoveredShapeRef.current = hoveredShape;
+  const overlayShape = hoveredShape || lastHoveredShapeRef.current;
+  const hoveredOverlay = overlayShape ? (
+    <path
+      d={overlayShape.pathData}
+      fill={overlayShape.fill}
+      style={{
+        pointerEvents: "none",
+        opacity: hoveredShape ? 1 : 0,
+        transform: hoveredShape ? "scale(1.04)" : "scale(1)",
+        transformOrigin: `${chartCenter}px ${chartCenter}px`,
+        transition: "transform 0.2s ease-in-out, opacity 0.2s ease-in-out",
+        stroke: overlayShape.fill,
+        strokeWidth: `${sliceStrokeWidth}px`,
+      }}
+    />
+  ) : null;
 
   const activeSlice = safeHoveredSlice != null ? sortedData[safeHoveredSlice] : sortedData[0] || null;
   const activePercent = activeSlice && total > 0 ? Math.round((activeSlice.value / total) * 100) : 0;
@@ -289,7 +328,6 @@ const PieChartBuilder = ({
       const cosAngle = Math.cos(midAngle);
       const sinAngle = Math.sin(midAngle);
       const direction = cosAngle >= 0 ? 1 : -1;
-      const nearVertical = Math.abs(cosAngle) < CALLOUT_VERTICAL_THRESHOLD;
       const outerX = chartCenter + (chartRadius + 4) * Math.cos(midAngle);
       const outerY = chartCenter + (chartRadius + 4) * Math.sin(midAngle);
       const percent = Math.round((entry.value / total) * 100);
@@ -303,7 +341,6 @@ const PieChartBuilder = ({
         index,
         direction,
         preferredDirection: direction,
-        nearVertical,
         midAngle,
         cosAngle,
         sinAngle,
@@ -348,6 +385,7 @@ const PieChartBuilder = ({
           preserveAspectRatio="xMidYMid meet"
         >
           {slices}
+          {hoveredOverlay}
           {callouts.map((callout) => {
             const fill =
               resolvedPalette[
@@ -390,7 +428,7 @@ const PieChartBuilder = ({
               >
                 <path
                   className="pieChartCalloutLine"
-                  d={`M ${callout.outerX} ${callout.outerY} L ${callout.elbowX} ${callout.elbowY} L ${callout.textX} ${callout.textY}`}
+                  d={`M ${callout.outerX} ${callout.outerY} L ${callout.leadX} ${callout.leadY} L ${callout.elbowX} ${callout.elbowY} L ${callout.textX} ${callout.textY}`}
                 />
                 <circle
                   className="pieChartCalloutDot"
@@ -432,7 +470,7 @@ const PieChartBuilder = ({
               <circle
                 cx={chartCenter}
                 cy={chartCenter}
-                r="42"
+                r={CENTER_RADIUS}
                 fill={centerFillColor || "var(--primary-color, rgba(7, 12, 15, 0.88))"}
                 stroke="rgba(255,255,255,0.08)"
                 strokeWidth="1.5"
@@ -536,6 +574,9 @@ PieChartBuilder.propTypes = {
   maxCallouts: PropTypes.number,
   onSliceHover: PropTypes.func,
   onSliceLeave: PropTypes.func,
+  highlightedKey: PropTypes.string,
+  sliceStrokeWidth: PropTypes.number,
+  showInnerOutline: PropTypes.bool,
   centerFillColor: PropTypes.string,
 };
 
@@ -556,6 +597,9 @@ PieChartBuilder.defaultProps = {
   maxCallouts: null,
   onSliceHover: null,
   onSliceLeave: null,
+  highlightedKey: null,
+  sliceStrokeWidth: 5,
+  showInnerOutline: false,
   centerFillColor: null,
 };
 

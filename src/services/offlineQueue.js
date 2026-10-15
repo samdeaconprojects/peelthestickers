@@ -1,8 +1,8 @@
 // src/services/offlineQueue.js
 //
 // Local-only queue for solves timed while offline. These never touch the
-// real server-side session until the user explicitly syncs them from their
-// Profile - they live entirely in localStorage under a per-user key, kept
+// real server-side session until the user explicitly syncs them from the
+// offline solves popup - they live entirely in localStorage under a per-user key, kept
 // separate from the normal `sessions` state so a run of offline solves can't
 // quietly skew averages/stats for a session that hasn't actually received
 // them yet.
@@ -107,6 +107,21 @@ export function countOfflineSolves(userID) {
 export function removeOfflineSolve(userID, localId) {
   const id = String(userID || "").trim();
   const items = readAll(id).filter((s) => s.localId !== localId);
+  writeAll(id, items);
+  notify(id);
+}
+
+/** Re-targets a queued solve at a different event/session before it's synced. */
+export function updateOfflineSolve(userID, localId, patch = {}) {
+  const id = String(userID || "").trim();
+  const items = readAll(id).map((s) => {
+    if (s.localId !== localId) return s;
+    const next = { ...s };
+    if (patch.event != null) next.event = String(patch.event).toUpperCase();
+    if (patch.sessionID != null) next.sessionID = String(patch.sessionID || "main");
+    if ("sessionName" in patch) next.sessionName = patch.sessionName || null;
+    return next;
+  });
   writeAll(id, items);
   notify(id);
 }

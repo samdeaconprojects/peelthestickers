@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { formatTime } from "../TimeList/TimeUtils";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import { useSettings } from "../../contexts/SettingsContext";
@@ -61,34 +61,14 @@ function MatrixValueButton({ value = null, average = false, className = "", onCl
   );
 }
 
-function MatrixCornerControls({
-  mainOnly = false,
+function MatrixToggleButtons({
   showWorst = false,
-  showSessionToggle = true,
-  isVertical = false,
-  onToggleMainOnly = null,
+  sortByCount = false,
   onToggleWorst = null,
+  onToggleSortByCount = null,
 }) {
   return (
-    <div
-      className={`statsEventMatrixCorner statsEventMatrixMetricHead statsEventMatrixFirstCol${
-        showSessionToggle && !mainOnly ? " is-active" : ""
-      }${isVertical ? " statsEventMatrixCorner--vertical" : ""}`}
-    >
-      {showSessionToggle ? (
-        <label className="statsEventMatrixToggle">
-          <input
-            type="checkbox"
-            checked={!mainOnly}
-            onChange={(event) => onToggleMainOnly?.(!event.target.checked)}
-          />
-          <span className="statsEventMatrixToggleLabel">
-            {mainOnly ? "Main Sessions" : "All Sessions"}
-          </span>
-        </label>
-      ) : (
-        <span className="statsEventMatrixFirstColContent">Event</span>
-      )}
+    <>
       <button
         type="button"
         aria-pressed={showWorst}
@@ -97,6 +77,59 @@ function MatrixCornerControls({
       >
         {showWorst ? "Hide worst" : "Show worst"}
       </button>
+      <button
+        type="button"
+        aria-pressed={sortByCount}
+        className={`statsToggleBtn barChartToggleBtn statsEventMatrixWorstToggle ${sortByCount ? "is-active" : ""}`}
+        onClick={() => onToggleSortByCount?.()}
+      >
+        Sort by count
+      </button>
+    </>
+  );
+}
+
+function MatrixSessionToggle({ mainOnly = false, onToggleMainOnly = null }) {
+  return (
+    <label className="statsEventMatrixToggle">
+      <input
+        type="checkbox"
+        checked={!mainOnly}
+        onChange={(event) => onToggleMainOnly?.(!event.target.checked)}
+      />
+      <span className="statsEventMatrixToggleLabel">
+        {mainOnly ? "Main Sessions" : "All Sessions"}
+      </span>
+    </label>
+  );
+}
+
+function MatrixCornerControls({
+  mainOnly = false,
+  showWorst = false,
+  sortByCount = false,
+  showSessionToggle = true,
+  onToggleMainOnly = null,
+  onToggleWorst = null,
+  onToggleSortByCount = null,
+}) {
+  return (
+    <div
+      className={`statsEventMatrixCorner statsEventMatrixMetricHead statsEventMatrixFirstCol${
+        showSessionToggle && !mainOnly ? " is-active" : ""
+      }`}
+    >
+      {showSessionToggle ? (
+        <MatrixSessionToggle mainOnly={mainOnly} onToggleMainOnly={onToggleMainOnly} />
+      ) : (
+        <span className="statsEventMatrixFirstColContent">Event</span>
+      )}
+      <MatrixToggleButtons
+        showWorst={showWorst}
+        sortByCount={sortByCount}
+        onToggleWorst={onToggleWorst}
+        onToggleSortByCount={onToggleSortByCount}
+      />
     </div>
   );
 }
@@ -149,7 +182,7 @@ function MatrixCell({
 }
 
 export default function AllEventsTimeMatrix({
-  items = [],
+  items: sourceItems = [],
   loading = false,
   mainOnly = false,
   onToggleMainOnly = null,
@@ -158,8 +191,15 @@ export default function AllEventsTimeMatrix({
   showSessionToggle = true,
 }) {
   const { settings } = useSettings();
-  const useWhitePuzzleSVGs = settings?.whitePuzzleSVGs === true;
+  const puzzleSvgStyle = settings?.matrixPuzzleSvgStyle || "color";
   const [showWorst, setShowWorst] = useState(false);
+  const [sortByCount, setSortByCount] = useState(false);
+  const items = useMemo(() => {
+    if (!sortByCount) return sourceItems;
+    return [...sourceItems].sort(
+      (a, b) => Number(b?.solveCount || 0) - Number(a?.solveCount || 0)
+    );
+  }, [sourceItems, sortByCount]);
   const isVertical = orientation === "vertical";
   const matrixRowHeight = showWorst ? 62 : 52;
   const gridStyle = isVertical
@@ -177,19 +217,24 @@ export default function AllEventsTimeMatrix({
       className={`statsEventMatrix ${isVertical ? "statsEventMatrix--vertical" : ""} ${showWorst ? "statsEventMatrix--showWorst" : ""} ${loading ? "is-loading" : ""}`}
       aria-busy={loading}
     >
+      {isVertical && (
+        <div className="statsEventMatrixToolbar">
+          {showSessionToggle && (
+            <MatrixSessionToggle mainOnly={mainOnly} onToggleMainOnly={onToggleMainOnly} />
+          )}
+          <MatrixToggleButtons
+            showWorst={showWorst}
+            sortByCount={sortByCount}
+            onToggleWorst={() => setShowWorst((current) => !current)}
+            onToggleSortByCount={() => setSortByCount((current) => !current)}
+          />
+        </div>
+      )}
       <div className="statsEventMatrixScroller">
         <div className="statsEventMatrixGrid" style={gridStyle}>
           {isVertical ? (
             <>
-              <MatrixCornerControls
-                mainOnly={mainOnly}
-                showWorst={showWorst}
-                showSessionToggle={showSessionToggle}
-                isVertical
-                onToggleMainOnly={onToggleMainOnly}
-                onToggleWorst={() => setShowWorst((current) => !current)}
-              />
-              {["Single", "AO5", "AO12"].map((label) => (
+              {["Event", "Single", "AO5", "AO12"].map((label) => (
                 <div key={label} className="statsEventMatrixMetricHead statsEventMatrixMetricHead--centered">
                   <span>{label}</span>
                 </div>
@@ -209,7 +254,7 @@ export default function AllEventsTimeMatrix({
                           event={getPuzzleIconEvent(item.event)}
                           scramble={item.scramble || ""}
                           isStatsHeaderIcon
-                          forceWhite={useWhitePuzzleSVGs}
+                          colorStyle={puzzleSvgStyle}
                         />
                       </span>
                       <span className="statsEventMatrixEventLabel">{formatEventLabel(item.event)}</span>
@@ -251,9 +296,11 @@ export default function AllEventsTimeMatrix({
               <MatrixCornerControls
                 mainOnly={mainOnly}
                 showWorst={showWorst}
+                sortByCount={sortByCount}
                 showSessionToggle={showSessionToggle}
                 onToggleMainOnly={onToggleMainOnly}
                 onToggleWorst={() => setShowWorst((current) => !current)}
+                onToggleSortByCount={() => setSortByCount((current) => !current)}
               />
               {items.map((item) => (
                 <div key={`head-${item.event}`} className="statsEventMatrixEventHead">
@@ -268,7 +315,7 @@ export default function AllEventsTimeMatrix({
                         event={getPuzzleIconEvent(item.event)}
                         scramble={item.scramble || ""}
                         isStatsHeaderIcon
-                        forceWhite={useWhitePuzzleSVGs}
+                        colorStyle={puzzleSvgStyle}
                       />
                       </span>
                     <span className="statsEventMatrixEventLabel">{formatEventLabel(item.event)}</span>

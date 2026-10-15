@@ -1,5 +1,6 @@
 // src/services/api.js
 import { reportNetworkFailure, reportNetworkSuccess } from "./connectivity.js";
+import { getAuthToken, handleAuthExpired } from "./auth.js";
 
 // If REACT_APP_API_BASE is set (e.g. "https://api.ptstimer.com"), use it.
 // Otherwise, use relative URLs so CRA proxy works in dev.
@@ -92,6 +93,9 @@ async function request(method, path, body) {
     headers: { Accept: "application/json" },
   };
 
+  const token = getAuthToken();
+  if (token) options.headers.Authorization = `Bearer ${token}`;
+
   if (typeof body !== "undefined") {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body ?? {});
@@ -155,6 +159,10 @@ async function request(method, path, body) {
       const err = new Error(msg);
       err.__apiLogged = true;
       err.status = res.status;
+      err.code = data?.code || null;
+      // A stale or revoked token: drop it so the app returns to signed-out.
+      // The sign-in routes answer 401 for bad credentials and must not do that.
+      if (res.status === 401 && data?.code === "UNAUTHENTICATED") handleAuthExpired();
       if (upstreamUnreachable) err.isNetworkError = true;
       throw err;
     }

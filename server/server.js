@@ -65,6 +65,20 @@ const {
   buildSparseTagIndexPK,
 } = require("./lib/ptsCore");
 
+const {
+  validateUsername,
+  validatePassword,
+  normalizeUsername,
+  hashPassword,
+  verifyPassword,
+  signToken,
+  buildAuthMiddleware,
+  userIDParamGuard,
+  requireAdmin,
+} = require("./lib/auth");
+const ALLOW_LEGACY_CLAIM =
+  String(process.env.PTS_ALLOW_LEGACY_CLAIM || "false").toLowerCase() === "true";
+
 // True when a caught error means we never got a real response from AWS -
 // DNS failure, connection refused/reset, or a request that timed out
 // waiting on the socket - as opposed to AWS actually answering with a
@@ -1063,33 +1077,23 @@ function parseImportSessionScopeKey(value) {
   return { event: ev, sessionID: sid };
 }
 
+// Identity of an imported solve: where it lives, when it was done, and what it was. The same
+// solve imported again (same file, or a newer export containing it) maps to the same ID.
 function buildDeterministicImportedSolveID({
   userID,
-  sourceKey = "",
   event,
   sessionID,
-  solve = {},
-  importOrdinal = 0,
+  createdAt,
+  rawTimeMs,
+  scramble = "",
 }) {
   const payload = stableJsonStringify({
     userID: String(userID || "").trim(),
-    sourceKey: normalizeImportSourceKey(sourceKey),
     event: normalizeEvent(event),
     sessionID: normalizeSessionID(sessionID),
-    importOrdinal: Number.isFinite(Number(importOrdinal)) ? Number(importOrdinal) : 0,
-    createdAt: String(solve?.datetime || solve?.createdAt || solve?.CreatedAt || "").trim(),
-    rawTimeMs: Number(
-      solve?.rawTimeMs ??
-        solve?.RawTimeMs ??
-        solve?.originalTime ??
-        solve?.OriginalTime ??
-        solve?.time ??
-        solve?.Time
-    ),
-    penalty: normalizePenalty(solve?.penalty ?? solve?.Penalty ?? null),
-    scramble: String(solve?.scramble ?? solve?.Scramble ?? "").trim(),
-    note: String(solve?.note ?? solve?.Note ?? "").trim(),
-    tags: solve?.tags ?? solve?.Tags ?? {},
+    createdAt: String(createdAt || "").trim(),
+    rawTimeMs: Number(rawTimeMs),
+    scramble: String(scramble ?? "").trim(),
   });
 
   return `imp_${crypto.createHash("sha256").update(payload).digest("hex").slice(0, 24)}`;
@@ -1527,12 +1531,30 @@ async function recomputeEventDayBucket(userID, event, dayKey, { mainOnly = false
   );
 }
 
-async function recomputeAllEventsDayBucket(userID, dayKey) {
+// Runs fn over items with at most `limit` in flight, keeping result order.
+async function mapWithConcurrency(items, limit, fn) {
+  const list = Array.isArray(items) ? items : [];
+  const results = new Array(list.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, list.length)) }, async () => {
+    while (next < list.length) {
+      const index = next;
+      next += 1;
+      results[index] = await fn(list[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+const DAY_BUCKET_RECOMPUTE_CONCURRENCY = 8;
+
+async function recomputeAllEventsDayBucket(userID, dayKey, { timeZone: knownTimeZone, events: knownEvents } = {}) {
   const day = String(dayKey || "").trim();
   if (!day) return null;
 
-  const timeZone = await getUserDayBucketTimeZone(userID);
-  const events = await listUserEvents(userID);
+  const timeZone = knownTimeZone || (await getUserDayBucketTimeZone(userID));
+  const events = Array.isArray(knownEvents) ? knownEvents : await listUserEvents(userID);
   if (!events.length) {
     return deleteDayBucketItem(userID, day);
   }
@@ -1649,9 +1671,10 @@ async function clearDayBucketDirtyScopes(userID, scopes = []) {
   return batchWriteRequestsWithRetry(requests);
 }
 
-async function recomputeDirtyDayBucketScopes(userID, scopes = [], timeZone = "") {
+async function recomputeDirtyDayBucketScopes(userID, scopes = [], knownTimeZone = "") {
   const requested = Array.isArray(scopes) ? scopes : [];
   if (!userID || !requested.length) return [];
+  const timeZone = knownTimeZone || (await getUserDayBucketTimeZone(userID));
 
   const groupedEventScopes = new Map();
   const allDayKeys = new Set();
@@ -1665,70 +1688,90 @@ async function recomputeDirtyDayBucketScopes(userID, scopes = [], timeZone = "")
     const dayKey = String(scope?.dayKey || "").trim();
     if (!event || !dayKey) continue;
     groupedEventScopes.set(`${event}|${dayKey}`, { event, dayKey });
+    allDayKeys.add(dayKey);
   }
 
+  // Event buckets first; each all-events bucket is merged from them, once per day.
   if (groupedEventScopes.size) {
     await recomputeDayBucketsForScopes({
       userID,
       scopes: groupedEventScopes,
       timeZone,
+      includeAllEvents: false,
     });
   }
 
-  for (const dayKey of allDayKeys) {
-    await recomputeAllEventsDayBucket(userID, dayKey);
+  if (allDayKeys.size) {
+    const events = await listUserEvents(userID);
+    await mapWithConcurrency(Array.from(allDayKeys), DAY_BUCKET_RECOMPUTE_CONCURRENCY, (dayKey) =>
+      recomputeAllEventsDayBucket(userID, dayKey, { timeZone, events })
+    );
   }
 
   await clearDayBucketDirtyScopes(userID, requested);
   return requested;
 }
 
-async function recomputeDayBucketsForScopes({ userID, scopes = new Map(), timeZone = "" }) {
+async function recomputeDayBucketsForScopes({
+  userID,
+  scopes = new Map(),
+  timeZone = "",
+  includeAllEvents = true,
+}) {
   if (!userID || !scopes?.size) return [];
 
-  const results = [];
-  for (const scope of scopes.values()) {
+  const results = await mapWithConcurrency(Array.from(scopes.values()), DAY_BUCKET_RECOMPUTE_CONCURRENCY, async (scope) => {
     const daySolves = await getEventSolvesForLocalDay(userID, scope.event, scope.dayKey, timeZone);
     const mainDaySolves = daySolves.filter(
       (solve) => normalizeSessionID(solve?.SessionID) === "main"
     );
 
-    const eventBucket = daySolves.length
-      ? await writeDayBucketItem(
-          buildDayBucketItem({
-            userID,
-            dayKey: scope.dayKey,
-            event: scope.event,
-            timeZone,
-            solves: daySolves,
-          })
-        )
-      : await deleteDayBucketItem(userID, scope.dayKey, scope.event, false);
+    const [eventBucket, mainBucket] = await Promise.all([
+      daySolves.length
+        ? writeDayBucketItem(
+            buildDayBucketItem({
+              userID,
+              dayKey: scope.dayKey,
+              event: scope.event,
+              timeZone,
+              solves: daySolves,
+            })
+          )
+        : deleteDayBucketItem(userID, scope.dayKey, scope.event, false),
+      mainDaySolves.length
+        ? writeDayBucketItem(
+            buildDayBucketItem({
+              userID,
+              dayKey: scope.dayKey,
+              event: scope.event,
+              mainOnly: true,
+              timeZone,
+              solves: mainDaySolves,
+            })
+          )
+        : deleteDayBucketItem(userID, scope.dayKey, scope.event, true),
+    ]);
 
-    const mainBucket = mainDaySolves.length
-      ? await writeDayBucketItem(
-          buildDayBucketItem({
-            userID,
-            dayKey: scope.dayKey,
-            event: scope.event,
-            mainOnly: true,
-            timeZone,
-            solves: mainDaySolves,
-          })
-        )
-      : await deleteDayBucketItem(userID, scope.dayKey, scope.event, true);
-
-    const allEventsBucket = await recomputeAllEventsDayBucket(userID, scope.dayKey);
-    results.push({
+    return {
       dayKey: scope.dayKey,
       event: scope.event,
       eventBucket,
       mainBucket,
-      allEventsBucket,
-    });
-  }
+      allEventsBucket: null,
+    };
+  });
 
-  return results;
+  if (!includeAllEvents) return results;
+
+  // Merged from the event buckets above, so only after they are all written,
+  // and once per day however many events touched it.
+  const events = await listUserEvents(userID);
+  const dayKeys = Array.from(new Set(results.map((result) => result.dayKey)));
+  const allEventsBuckets = await mapWithConcurrency(dayKeys, DAY_BUCKET_RECOMPUTE_CONCURRENCY, (dayKey) =>
+    recomputeAllEventsDayBucket(userID, dayKey, { timeZone, events })
+  );
+  const allEventsByDay = new Map(dayKeys.map((dayKey, index) => [dayKey, allEventsBuckets[index]]));
+  return results.map((result) => ({ ...result, allEventsBucket: allEventsByDay.get(result.dayKey) || null }));
 }
 
 async function recomputeDayBucketsForSolveMutation({ userID, oldSolve = null, newSolve = null }) {
@@ -1853,17 +1896,12 @@ async function recomputeAllDayBucketsForEvent(userID, event) {
   ]);
 
   const allDaysAffected = new Set();
+  const writes = [];
 
-  for (const dayKey of groupedAll.keys()) {
+  for (const [dayKey, daySolves] of groupedAll) {
     allDaysAffected.add(dayKey);
-    await writeDayBucketItem(
-      buildDayBucketItem({
-        userID,
-        dayKey,
-        event: ev,
-        timeZone,
-        solves: groupedAll.get(dayKey),
-      })
+    writes.push(() =>
+      writeDayBucketItem(buildDayBucketItem({ userID, dayKey, event: ev, timeZone, solves: daySolves }))
     );
   }
 
@@ -1872,22 +1910,15 @@ async function recomputeAllDayBucketsForEvent(userID, event) {
     const dayKey = String(item?.BucketDay || "");
     if (!dayKey) continue;
     allDaysAffected.add(dayKey);
-    if (!groupedAll.has(dayKey)) {
-      await deleteDayBucketItem(userID, dayKey, ev);
-    }
+    if (!groupedAll.has(dayKey)) writes.push(() => deleteDayBucketItem(userID, dayKey, ev));
   }
 
-  for (const dayKey of groupedMain.keys()) {
+  for (const [dayKey, daySolves] of groupedMain) {
     allDaysAffected.add(dayKey);
-    await writeDayBucketItem(
-      buildDayBucketItem({
-        userID,
-        dayKey,
-        event: ev,
-        mainOnly: true,
-        timeZone,
-        solves: groupedMain.get(dayKey),
-      })
+    writes.push(() =>
+      writeDayBucketItem(
+        buildDayBucketItem({ userID, dayKey, event: ev, mainOnly: true, timeZone, solves: daySolves })
+      )
     );
   }
 
@@ -1895,14 +1926,15 @@ async function recomputeAllDayBucketsForEvent(userID, event) {
     const dayKey = String(item?.BucketDay || "");
     if (!dayKey) continue;
     allDaysAffected.add(dayKey);
-    if (!groupedMain.has(dayKey)) {
-      await deleteDayBucketItem(userID, dayKey, ev, true);
-    }
+    if (!groupedMain.has(dayKey)) writes.push(() => deleteDayBucketItem(userID, dayKey, ev, true));
   }
 
-  for (const dayKey of Array.from(allDaysAffected).sort()) {
-    await recomputeAllEventsDayBucket(userID, dayKey);
-  }
+  await mapWithConcurrency(writes, DAY_BUCKET_RECOMPUTE_CONCURRENCY, (write) => write());
+
+  const events = await listUserEvents(userID);
+  await mapWithConcurrency(Array.from(allDaysAffected).sort(), DAY_BUCKET_RECOMPUTE_CONCURRENCY, (dayKey) =>
+    recomputeAllEventsDayBucket(userID, dayKey, { timeZone, events })
+  );
 
   return {
     event: ev,
@@ -3997,6 +4029,8 @@ function runInBackground(label, fn) {
   });
 }
 
+const runningImportFinalizations = new Set();
+
 async function finalizeImportJob(userID, jobID) {
   const current = await getImportJobItem(userID, jobID);
   if (!current) throw new Error("Import job not found");
@@ -5341,6 +5375,175 @@ async function buildGroupPostNotificationPayload(postItem, groupID, authorID) {
   };
 }
 
+// -------------------- Auth --------------------
+// Every /api route except health and the two sign-in routes needs a bearer
+// token. The middleware also pins actor fields in the body (userID, senderID,
+// hostID, ...) to the token, and app.param pins :userID segments.
+app.use("/api", buildAuthMiddleware());
+app.param("userID", userIDParamGuard);
+
+function authItemKey(userID) {
+  return { PK: `USER#${userID}`, SK: "AUTH" };
+}
+
+async function getAuthItem(userID) {
+  const out = await ddb.send(new GetCommand({ TableName: TABLE, Key: authItemKey(userID) }));
+  return out.Item || null;
+}
+
+async function getProfileItem(userID) {
+  const out = await ddb.send(
+    new GetCommand({ TableName: TABLE, Key: { PK: `USER#${userID}`, SK: "PROFILE" } })
+  );
+  return out.Item || null;
+}
+
+function publicAuthResponse(userID, profile) {
+  return {
+    ok: true,
+    token: signToken(userID),
+    userID,
+    user: profile || null,
+    profileExists: !!profile,
+  };
+}
+
+app.post("/api/auth/signup", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const username = normalizeUsername(req.body?.username ?? req.body?.userID);
+    const password = req.body?.password;
+
+    const usernameError = validateUsername(username);
+    if (usernameError) return res.status(400).json({ error: usernameError });
+    const passwordError = validatePassword(password);
+    if (passwordError) return res.status(400).json({ error: passwordError });
+
+    const [existingAuth, profile] = await Promise.all([
+      getAuthItem(username),
+      getProfileItem(username),
+    ]);
+
+    if (existingAuth) {
+      return res.status(409).json({ error: "That username is taken", code: "USERNAME_TAKEN" });
+    }
+
+    // A profile from before passwords existed. Claiming it is only allowed
+    // when PTS_ALLOW_LEGACY_CLAIM=true (pre-launch migration window).
+    if (profile && !ALLOW_LEGACY_CLAIM) {
+      return res.status(409).json({
+        error: "That username already exists but has no password yet. Contact support to claim it.",
+        code: "LEGACY_ACCOUNT",
+      });
+    }
+
+    const ts = nowIso();
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: {
+          ...authItemKey(username),
+          ItemType: "AUTH",
+          UserID: username,
+          PasswordHash: await hashPassword(password),
+          CreatedAt: ts,
+          UpdatedAt: ts,
+          ClaimedLegacyProfile: !!profile,
+        },
+        ConditionExpression: "attribute_not_exists(PK)",
+      })
+    );
+
+    return res.json(publicAuthResponse(username, profile));
+  } catch (e) {
+    if (e?.name === "ConditionalCheckFailedException") {
+      return res.status(409).json({ error: "That username is taken", code: "USERNAME_TAKEN" });
+    }
+    console.error("POST /api/auth/signup error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/api/auth/signin", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const username = normalizeUsername(req.body?.username ?? req.body?.userID);
+    const password = req.body?.password;
+    if (!username || typeof password !== "string") {
+      return res.status(400).json({ error: "Username and password are required" });
+    }
+
+    const [authItem, profile] = await Promise.all([
+      getAuthItem(username),
+      getProfileItem(username),
+    ]);
+
+    if (!authItem) {
+      if (profile) {
+        return res.status(401).json({
+          error: ALLOW_LEGACY_CLAIM
+            ? "This account has no password yet. Use Sign up with this username to set one."
+            : "This account has no password yet. Contact support to claim it.",
+          code: "LEGACY_ACCOUNT",
+        });
+      }
+      return res.status(401).json({ error: "Invalid username or password", code: "INVALID_CREDENTIALS" });
+    }
+
+    const valid = await verifyPassword(password, authItem.PasswordHash);
+    if (!valid) {
+      return res.status(401).json({ error: "Invalid username or password", code: "INVALID_CREDENTIALS" });
+    }
+
+    return res.json(publicAuthResponse(username, profile));
+  } catch (e) {
+    console.error("POST /api/auth/signin error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.get("/api/auth/me", async (req, res) => {
+  if (!requirePkSk(res)) return;
+  try {
+    const profile = await getProfileItem(req.auth.userID);
+    return res.json({ ok: true, userID: req.auth.userID, user: profile, profileExists: !!profile });
+  } catch (e) {
+    console.error("GET /api/auth/me error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/api/auth/password", async (req, res) => {
+  if (!requirePkSk(res)) return;
+  try {
+    const userID = req.auth.userID;
+    const currentPassword = req.body?.currentPassword;
+    const newPassword = req.body?.newPassword;
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) return res.status(400).json({ error: passwordError });
+
+    const authItem = await getAuthItem(userID);
+    if (!authItem || !(await verifyPassword(currentPassword, authItem.PasswordHash))) {
+      return res.status(401).json({ error: "Current password is incorrect", code: "INVALID_CREDENTIALS" });
+    }
+
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: authItemKey(userID),
+        UpdateExpression: "SET PasswordHash = :h, UpdatedAt = :u",
+        ExpressionAttributeValues: { ":h": await hashPassword(newPassword), ":u": nowIso() },
+      })
+    );
+    return res.json({ ok: true, token: signToken(userID) });
+  } catch (e) {
+    console.error("POST /api/auth/password error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
 // -------------------- Health --------------------
 app.get("/api/health", (_, res) => res.json({ ok: true }));
 
@@ -5369,7 +5572,7 @@ app.get("/api/notifications/stream/:userID", (req, res) => {
 });
 
 // -------------------- Debug: table shape --------------------
-app.get("/api/_table", async (_, res) => {
+app.get("/api/_table", requireAdmin, async (_, res) => {
   try {
     const out = await ddb.send(new DescribeTableCommand({ TableName: TABLE }));
     const t = out.Table || {};
@@ -5463,9 +5666,18 @@ app.post("/api/user", async (req, res) => {
       UpdatedAt: ts,
     };
 
-    await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: item,
+        ConditionExpression: "attribute_not_exists(PK)",
+      })
+    );
     return res.json({ ok: true, item });
   } catch (e) {
+    if (e?.name === "ConditionalCheckFailedException") {
+      return res.status(409).json({ error: "Profile already exists", code: "PROFILE_EXISTS" });
+    }
     console.error("POST /api/user error:", e);
     return res.status(500).json({ error: "Server error" });
   }
@@ -5997,6 +6209,92 @@ app.get("/api/tagStats/:userID", async (req, res) => {
     return res.json({ ok: true, item });
   } catch (e) {
     console.error("GET /api/tagStats error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+const tagStatsListRefreshesInFlight = new Set();
+
+// Every tag's all-time totals for one event (optionally one session), so the
+// stats overview can draw the tag breakdown without loading raw solves.
+// Rebuilding an out-of-date scope rescans every solve carrying that tag, so the
+// stored records are returned as they are and the rebuilds run afterwards.
+app.get("/api/tagStatsList/:userID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const userID = String(req.params.userID || "").trim();
+  const event = normalizeEvent(req.query?.event);
+  const sessionIDRaw = String(req.query?.sessionID || "").trim();
+  const sessionID = sessionIDRaw ? normalizeSessionID(sessionIDRaw) : null;
+
+  if (!userID) return res.status(400).json({ error: "Missing userID" });
+  if (!event) return res.status(400).json({ error: "Missing event" });
+
+  // Event-level keys share their prefix with every session-level key, so the
+  // scope is confirmed on the item itself.
+  const scopeSuffix = sessionID ? `${event}#${sessionID}#` : `${event}#`;
+  const inScope = (item) =>
+    ALLOWED_TAG_KEYS.has(String(item?.TagKey || "")) &&
+    (sessionID ? String(item?.SessionID || "") === sessionID : !item?.SessionID);
+  const scopeId = (item) => `${item?.TagKey}#${item?.TagValueNorm}`;
+
+  try {
+    const [statsItems, dirtyItems] = await Promise.all([
+      queryUserItemsByPrefix(userID, `TAGSTATS#${scopeSuffix}`),
+      queryUserItemsByPrefix(userID, `TAGSTATSDIRTY#${scopeSuffix}`),
+    ]);
+
+    const byScope = new Map(statsItems.filter(inScope).map((item) => [scopeId(item), item]));
+    const refreshScopes = new Map(dirtyItems.filter(inScope).map((item) => [scopeId(item), item]));
+    for (const [id, item] of byScope) {
+      if (item?.stale === true) refreshScopes.set(id, item);
+    }
+
+    const refreshKey = `${userID}|${scopeSuffix}`;
+    if (refreshScopes.size > 0 && !tagStatsListRefreshesInFlight.has(refreshKey)) {
+      tagStatsListRefreshesInFlight.add(refreshKey);
+      runInBackground(`tagStatsList:${refreshKey}`, async () => {
+        try {
+          for (const scope of refreshScopes.values()) {
+            await recomputeTagStats(
+              ddb,
+              TABLE,
+              userID,
+              event,
+              sessionID,
+              scope.TagKey,
+              scope.TagValue
+            );
+            await clearTagStatsScopeDirty({
+              userID,
+              event,
+              sessionID,
+              tagKey: scope.TagKey,
+              tagValue: scope.TagValue,
+            });
+          }
+        } finally {
+          tagStatsListRefreshesInFlight.delete(refreshKey);
+        }
+      });
+    }
+
+    const items = Array.from(byScope.values())
+      .filter((item) => Number(item?.SolveCountTotal || 0) > 0)
+      .map((item) => ({
+        TagKey: item.TagKey,
+        TagValue: item.TagValue,
+        SolveCountTotal: Number(item.SolveCountTotal || 0),
+        SolveCountIncluded: Number(item.SolveCountIncluded || 0),
+        DNFCount: Number(item.DNFCount || 0),
+        SumFinalTimeMs: Number(item.SumFinalTimeMs || 0),
+        BestSingleMs: item.BestSingleMs ?? null,
+        WorstSingleMs: item.WorstSingleMs ?? null,
+      }));
+
+    return res.json({ ok: true, items, refreshing: refreshScopes.size });
+  } catch (e) {
+    console.error("GET /api/tagStatsList error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
   }
 });
@@ -6592,7 +6890,6 @@ app.post("/api/importJobs/:userID/:jobID/chunk", async (req, res) => {
     const userID = String(req.params.userID || "").trim();
     const jobID = String(req.params.jobID || "").trim();
     const solves = Array.isArray(req.body?.solves) ? req.body.solves : [];
-    const sourceKey = normalizeImportSourceKey(req.body?.sourceKey || "");
 
     if (!userID) return res.status(400).json({ error: "Missing userID" });
     if (!jobID) return res.status(400).json({ error: "Missing jobID" });
@@ -6609,8 +6906,8 @@ app.post("/api/importJobs/:userID/:jobID/chunk", async (req, res) => {
       return res.status(409).json({ error: `Import job is ${status.toLowerCase()}` });
     }
 
-    const requests = [];
     const solveItems = [];
+    const seenSolveKeys = new Set();
     const sessionScopeKeys = new Set(Array.isArray(job.AffectedSessions) ? job.AffectedSessions : []);
     const eventSet = new Set(Array.isArray(job.AffectedEvents) ? job.AffectedEvents : []);
     const ensuredSessions = new Set();
@@ -6659,13 +6956,14 @@ app.post("/api/importJobs/:userID/:jobID/chunk", async (req, res) => {
       }
 
       const createdAt = resolveImportedCreatedAt(rawSolve, Date.now() + validSolves);
+      const scramble = rawSolve?.scramble ?? rawSolve?.Scramble ?? "";
       const solveID = buildDeterministicImportedSolveID({
         userID,
-        sourceKey: sourceKey || job.SourceKey || job.JobID,
         event,
         sessionID,
-        solve: { ...rawSolve, datetime: createdAt },
-        importOrdinal: rawSolve?.importOrdinal ?? rawSolve?._importOrdinal ?? validSolves,
+        createdAt,
+        rawTimeMs,
+        scramble,
       });
 
       const solveItem = buildSolveItem({
@@ -6674,35 +6972,49 @@ app.post("/api/importJobs/:userID/:jobID/chunk", async (req, res) => {
         sessionID,
         rawTimeMs,
         penalty,
-        scramble: rawSolve?.scramble ?? rawSolve?.Scramble ?? "",
+        scramble,
         note: rawSolve?.note ?? rawSolve?.Note ?? "",
         tags: rawSolve?.tags ?? rawSolve?.Tags ?? {},
         createdAt,
         solveID,
       });
 
+      sessionScopeKeys.add(sessionScopeKey);
+      eventSet.add(event);
+      validSolves += 1;
+
+      // BatchWrite rejects repeated keys, and a repeat here is the same solve twice.
+      const solveKey = `${solveItem.PK}|${solveItem.SK}`;
+      if (seenSolveKeys.has(solveKey)) continue;
+      seenSolveKeys.add(solveKey);
       solveItems.push(solveItem);
-      requests.push({ PutRequest: { Item: solveItem } });
+    }
+
+    // Solves already in the table (an earlier import of the same data, or a retried chunk) are
+    // left as they are, so edits made since aren't overwritten.
+    const existingSolveItems = await batchGetItems(
+      solveItems.map((item) => ({ PK: item.PK, SK: item.SK }))
+    );
+    const existingSolveKeys = new Set(existingSolveItems.map((item) => `${item?.PK}|${item?.SK}`));
+    const newSolveItems = solveItems.filter(
+      (item) => !existingSolveKeys.has(`${item.PK}|${item.SK}`)
+    );
+    const accepted = newSolveItems.length;
+
+    // Index items go first and the solves last: a solve that exists then implies its tag and
+    // rank items were written, which is what lets a retry skip it.
+    const requests = [];
+    for (const solveItem of newSolveItems) {
       for (const tagItem of buildSolveTagItems(solveItem)) {
         requests.push({ PutRequest: { Item: tagItem } });
       }
       for (const rankItem of buildSingleRankItemsForSolve(userID, solveItem)) {
         requests.push({ PutRequest: { Item: rankItem } });
       }
-
-      sessionScopeKeys.add(sessionScopeKey);
-      eventSet.add(event);
-      validSolves += 1;
     }
-
-    const existingSolveItems = await batchGetItems(
-      solveItems.map((item) => ({ PK: item.PK, SK: item.SK }))
-    );
-    const existingSolveKeys = new Set(existingSolveItems.map((item) => `${item?.PK}|${item?.SK}`));
-    const accepted = solveItems.reduce(
-      (count, item) => count + (existingSolveKeys.has(`${item.PK}|${item.SK}`) ? 0 : 1),
-      0
-    );
+    for (const solveItem of newSolveItems) {
+      requests.push({ PutRequest: { Item: solveItem } });
+    }
 
     await reserveImportSolveAllowance(userID, accepted);
 
@@ -6779,9 +7091,22 @@ app.post("/api/importJobs/:userID/:jobID/finalize", async (req, res) => {
       await putImportJobItem(prepared);
     }
 
-    await finalizeImportJob(userID, jobID);
-    const finished = await getImportJobItem(userID, jobID);
-    return res.json({ ok: true, job: publicImportJob(finished || prepared) });
+    // Recomputing can outlast an HTTP request on large imports, so it runs in the background and
+    // the client polls the job. A FINALIZING job nobody is working on (server restart) is picked
+    // up again here.
+    const runKey = `${userID}|${jobID}`;
+    if (!runningImportFinalizations.has(runKey)) {
+      runningImportFinalizations.add(runKey);
+      runInBackground(`import-finalize:${jobID}`, async () => {
+        try {
+          await finalizeImportJob(userID, jobID);
+        } finally {
+          runningImportFinalizations.delete(runKey);
+        }
+      });
+    }
+
+    return res.status(202).json({ ok: true, job: publicImportJob(prepared) });
   } catch (e) {
     console.error("POST /api/importJobs/:userID/:jobID/finalize error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
@@ -7585,7 +7910,7 @@ app.delete("/api/solve/:userID/:solveRef", async (req, res) => {
 });
 
 // -------------------- BATCH WRITE --------------------
-app.post("/api/batchWrite", async (req, res) => {
+app.post("/api/batchWrite", requireAdmin, async (req, res) => {
   if (!requirePkSk(res)) return;
 
   try {
@@ -7762,15 +8087,17 @@ app.get("/api/dayBuckets/:userID", async (req, res) => {
     }
 
     let items = rawItems.filter((item) => hasCurrentDayBucketVersion(item) && item?.stale !== true);
+    // Also rebuilds buckets written before worst values were stored.
     const missingLargeAverageScopes = items
       .filter(
         (item) =>
           item &&
-          [25, 50, 100, 1000].some(
+          ([25, 50, 100, 1000].some(
             (size) =>
               Number(item?.SolveCountTotal || 0) >= size &&
               !Number.isFinite(Number(item?.[`BestAo${size}Ms`]))
-          )
+          ) ||
+            (Number(item?.SolveCountIncluded || 0) > 0 && item?.WorstSingleMs == null))
       )
       .map((item) => ({
         dayKey: String(item?.BucketDay || "").trim(),
@@ -7824,7 +8151,7 @@ app.post("/api/recomputeTagStats", async (req, res) => {
   }
 });
 
-app.post("/api/admin/backfill-session-stats/:userID", async (req, res) => {
+app.post("/api/admin/backfill-session-stats/:userID", requireAdmin, async (req, res) => {
   try {
     const userID = String(req.params.userID || "").trim();
     if (!userID) return res.status(400).json({ error: "Missing userID" });
@@ -8754,6 +9081,9 @@ app.post("/api/conversation", async (req, res) => {
     if (memberIDs.length < 2) {
       return res.status(400).json({ error: "conversation requires at least 2 members" });
     }
+    if (!memberIDs.includes(req.auth.userID) && !req.auth.isAdmin) {
+      return res.status(403).json({ error: "You must be a member of the conversation you create" });
+    }
 
     if (conversationType === "DM" && memberIDs.length !== 2) {
       return res.status(400).json({ error: "DM conversations require exactly 2 members" });
@@ -8917,7 +9247,7 @@ app.get("/api/messages/:conversationID", async (req, res) => {
   if (!requirePkSk(res)) return;
 
   const conversationID = String(req.params.conversationID || "").trim();
-  const viewerID = String(req.query?.userID || "").trim();
+  const viewerID = req.auth.userID;
   if (!conversationID) return res.status(400).json({ error: "Missing conversationID" });
 
   try {
@@ -8944,11 +9274,12 @@ app.get("/api/messages/:conversationID", async (req, res) => {
       members = await listConversationMembers(conversationID);
     }
 
-    if (meta && viewerID) {
-      const viewerIsMember = members.some((member) => member?.UserID === viewerID);
-      if (!viewerIsMember) {
-        return res.status(403).json({ error: "User is not a member of this conversation" });
-      }
+    if (!meta) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+    const viewerIsMember = members.some((member) => member?.UserID === viewerID);
+    if (!viewerIsMember && !req.auth.isAdmin) {
+      return res.status(403).json({ error: "User is not a member of this conversation" });
     }
 
     const out = await ddb.send(
@@ -9051,14 +9382,14 @@ app.get("/api/groupPosts/:groupID", async (req, res) => {
   if (!requirePkSk(res)) return;
 
   const groupID = normalizeGroupID(req.params.groupID || "");
-  const viewerID = String(req.query?.userID || "").trim();
+  const viewerID = req.auth.userID;
 
   if (!groupID) return res.status(400).json({ error: "Missing groupID" });
 
   try {
     const limitRaw = Number(req.query?.limit);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 50;
-    if (viewerID) {
+    if (!req.auth.isAdmin) {
       const isMember = await isUserInGroup(groupID, viewerID);
       if (!isMember) {
         return res.status(403).json({ error: "User is not a member of this group" });

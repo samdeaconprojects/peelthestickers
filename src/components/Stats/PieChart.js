@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import PieChartBuilder from "./PieChartBuilder";
+import PieChartBuilder, { getPieSliceStrokeWidth } from "./PieChartBuilder";
 import "./Stats.css";
 
 const DEFAULT_BOLD_PIE_PALETTE = [
@@ -67,6 +67,7 @@ function PieChart({ solves, data: dataProp, title, profileColor, centerFillColor
           label: String(entry?.label || "Unknown"),
           value: Number(entry?.value || 0),
           solves: Array.isArray(entry?.solves) ? entry.solves : [],
+          color: normalizeHex(entry?.color),
         }));
       return assignStableColorIndices(entries);
     }
@@ -93,10 +94,20 @@ function PieChart({ solves, data: dataProp, title, profileColor, centerFillColor
     return data.filter((entry) => !hiddenSet.has(entry.label));
   }, [data, hiddenLabels]);
 
-  const colorPalette = useMemo(() => buildPiePalette(profileColor), [profileColor]);
+  const basePalette = useMemo(() => buildPiePalette(profileColor), [profileColor]);
+  // Entries that carry their own colour keep it; the rest take the palette
+  // colour for their rank.
+  const colorPalette = useMemo(() => {
+    if (!data.some((entry) => entry.color)) return basePalette;
+    const palette = [];
+    for (const entry of data) {
+      palette[entry.colorIndex] = entry.color || basePalette[entry.colorIndex % basePalette.length];
+    }
+    return palette;
+  }, [basePalette, data]);
   const controlAccentColor = useMemo(
-    () => normalizeHex(profileColor) || colorPalette[0] || "#2EC4B6",
-    [colorPalette, profileColor]
+    () => normalizeHex(profileColor) || basePalette[0] || "#2EC4B6",
+    [basePalette, profileColor]
   );
   const canReset = hiddenLabels.length > 0;
 
@@ -159,6 +170,8 @@ function PieChart({ solves, data: dataProp, title, profileColor, centerFillColor
         colorPalette={colorPalette}
         maxLegendItems={5}
         promoteHoveredOverflowItem
+        sliceStrokeWidth={getPieSliceStrokeWidth(visibleData.length)}
+        showInnerOutline
         centerFillColor={normalizeHex(centerFillColor) || centerFillColor}
       />
     </div>

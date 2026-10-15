@@ -21,7 +21,15 @@ const PuzzleSVG = ({
   isAvatarCube,    // ✅ NEW: for Social message avatars / name tiles
   isStatsHeaderIcon,
   forceWhite = false,
+  colorStyle = "color", // "color" | "white" | "grayscale"
 }) => {
+  const resolvedColorStyle = forceWhite ? "white" : colorStyle;
+  const colorStyleClass =
+    resolvedColorStyle === "white"
+      ? " puzzle-svg-inner--white"
+      : resolvedColorStyle === "grayscale"
+        ? " puzzle-svg-inner--grayscale"
+        : "";
   const faceBasedEvents = ["222", "333", "444", "555", "666", "777", "333OH", "333BLD"];
   const isRubikEvent = faceBasedEvents.includes(event);
   const showOneHandAsset = event === "333OH";
@@ -98,7 +106,7 @@ const PuzzleSVG = ({
     "555": { x: -22, y: -3 },
     "666": { x: -22, y: -3 },
     "777": { x: -23, y: -4 },
-    "333OH": { x: 2, y: -2 },
+    "333OH": { x: -13.5, y: -5 },
     "333BLD": { x: 2, y: -2 },
     PYRAMINX: { x: 2, y: 3 },
     MEGAMINX: { x: 2, y: 1 },
@@ -115,7 +123,7 @@ const PuzzleSVG = ({
     "555": 0.4375,
     "666": 0.4025,
     "777": 0.385,
-    "333OH": 0.26,
+    "333OH": 0.32,
     "333BLD": 0.26,
     SKEWB: 1,
     SQ1: 1,
@@ -158,7 +166,7 @@ const PuzzleSVG = ({
 
         {/* ✅ wrapper nudge does NOT change RubiksCubeSVG scaling */}
         <div
-          className={`puzzle-svg-inner${forceWhite ? " puzzle-svg-inner--white" : ""}`}
+          className={`puzzle-svg-inner${colorStyleClass}`}
           style={{
             transform: `translate(${nudgeX}px, ${nudgeY}px) scale(${headerScale * oneHandScale})`,
             transformOrigin: "center",
@@ -210,7 +218,7 @@ const PuzzleSVG = ({
       )}
 
       <div
-        className={`puzzle-svg-inner${forceWhite ? " puzzle-svg-inner--white" : ""}`}
+        className={`puzzle-svg-inner${colorStyleClass}`}
         style={{ transform: `translate(${nudgeX}px, ${nudgeY}px)` }}
       >
         <SpecificPuzzle

@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useLocation } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import "./Profile.css";
 import { useDbStatus } from "../../contexts/DbStatusContext";
+import { useSettings } from "../../contexts/SettingsContext";
 import Post from "./Post";
 import PostDetail from "./PostDetail";
 import StatSharePost from "./StatSharePost";
@@ -18,20 +19,26 @@ import { calculateAverage } from "../TimeList/TimeUtils";
 import { EVENT_KEYBINDING_LABELS } from "../../utils/keybindings";
 import { getProfileChartStyle } from "../../utils/profileChartStyle";
 import { getProfileEventScramble } from "../../utils/profileEventSolves";
+import {
+  MAX_STAT_LISTS,
+  MAX_STAT_LIST_NAME_LENGTH,
+  PROFILE_MAIN_LIST_ID,
+  SAVED_STATS_LIST_ID,
+  cleanStatListName,
+  createStatList,
+  normalizeStatLists,
+  serializeStatLists,
+} from "../../utils/profileStatLists";
 import { getPosts } from "../../services/getPosts";
 import { getUser } from "../../services/getUser";
 import { updateUser } from "../../services/updateUser";
 import { updatePostComments } from "../../services/updatePostComments";
-import { getSessions, invalidateSessionsCache } from "../../services/getSessions";
+import { getSessions } from "../../services/getSessions";
 import {
   getLastNSolvesByEvent,
   getLastNSolvesBySession,
   getSolvesBySession,
-  invalidateLastNSolvesCache,
-  invalidateSolvesSessionCache,
 } from "../../services/getSolvesBySession";
-import useOnlineStatus from "../../hooks/useOnlineStatus";
-import OfflineSolvesPanel from "./OfflineSolvesPanel";
 
 const PROFILE_SOLVE_QUERY_LIMIT = 200;
 
@@ -171,6 +178,16 @@ const DEFAULT_VISIBLE_STATS = [
 ];
 
 const DEFAULT_STAT_EVENT = "333";
+
+// Event bests list (the all-events time matrix) shown on the profile Stats tab.
+function normalizeEventMatrixConfig(raw) {
+  const value = raw && typeof raw === "object" ? raw : {};
+  return {
+    show: value.show !== false,
+    orientation: value.orientation === "horizontal" ? "horizontal" : "vertical",
+  };
+}
+
 const PROFILE_TIME_MATRIX_ORDER = [
   "222",
   "333",
@@ -487,6 +504,7 @@ function getProfileStatsChromeStyle(profile) {
   return {
     "--profile-stats-card-border": withAlpha(primary, 0.82),
     "--profile-stats-card-border-soft": withAlpha(primary, 0.32),
+    "--profile-stats-card-border-hover": withAlpha(primary, 0.65),
     "--profile-stats-card-shadow": withAlpha(primary, 0.18),
     "--profile-stats-card-glow": withAlpha(accent, 0.18),
     "--profile-stats-card-bg-top": withAlpha(stops[1] || primary, 0.1),
@@ -503,21 +521,12 @@ function Profile({
   liveRoomBusy = false,
 }) {
   const { runDb } = useDbStatus();
+  const { settings } = useSettings();
   const { userID: paramID } = useParams();
-  const location = useLocation();
   const isOwn = !paramID || paramID === user?.UserID;
   const viewID = isOwn ? user?.UserID : paramID;
 
   const isFriend = user?.Friends?.includes(viewID);
-  const isOnline = useOnlineStatus();
-
-  // Arriving via the offline banner's "Review offline solves" link - scroll
-  // straight to the panel instead of leaving the user to hunt for it.
-  useEffect(() => {
-    if (location.hash !== "#offline-solves") return;
-    const el = document.getElementById("offline-solves");
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [location.hash]);
 
   const [viewedProfile, setViewedProfile] = useState(null);
   const [viewedSessions, setViewedSessions] = useState({});
@@ -531,6 +540,16 @@ function Profile({
   const [visibleStats, setVisibleStats] = useState(DEFAULT_VISIBLE_STATS);
   const [draftVisibleStats, setDraftVisibleStats] = useState(DEFAULT_VISIBLE_STATS);
   const [editingStats, setEditingStats] = useState(false);
+  const [activeGroupID, setActiveGroupID] = useState(SAVED_STATS_LIST_ID);
+  const [draftGroupName, setDraftGroupName] = useState("");
+  const [newListName, setNewListName] = useState(null);
+  const [dragKey, setDragKey] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
+  const draftKeyCounterRef = useRef(0);
+  const nextDraftKey = () => {
+    draftKeyCounterRef.current += 1;
+    return `draft-${draftKeyCounterRef.current}`;
+  };
   const pendingSolveRequestsRef = useRef(new Set());
 
   const formatPostDate = (value) => {
@@ -621,51 +640,37 @@ function Profile({
     loadSessions();
   }, [viewID]);
 
-  // After the user syncs their offline queue, the server has fresh
-  // sessions/solves for the affected events - blow away the caches and
-  // refetch so stats/charts pick them up without a full page reload.
-  const handleOfflineSynced = async (affectedEvents = []) => {
-    if (!viewID) return;
+  useEffect(() => {
+    setActiveGroupID(SAVED_STATS_LIST_ID);
+    setActiveTab(0);
+    setNewListName(null);
+  }, [viewID]);
 
-    invalidateSessionsCache(viewID);
-    affectedEvents.forEach((ev) => {
-      invalidateLastNSolvesCache(viewID, ev);
-      invalidateSolvesSessionCache(viewID, ev);
-    });
+  const eventMatrixConfig = useMemo(
+    () => normalizeEventMatrixConfig(viewedProfile?.ProfileEventMatrix),
+    [viewedProfile?.ProfileEventMatrix]
+  );
 
-    try {
-      const sessionItems = await getSessions(viewID, { force: true });
-
-      const catalog = {};
-      const statsByEvent = {};
-
-      for (const session of sessionItems) {
-        const ev = (session.Event || "UNKNOWN").toUpperCase();
-        const sid = session.SessionID || "main";
-
-        if (!catalog[ev]) catalog[ev] = [];
-        if (!statsByEvent[ev]) statsByEvent[ev] = {};
-
-        if (!catalog[ev].includes(sid)) catalog[ev].push(sid);
-        statsByEvent[ev][sid] = session.Stats || null;
-      }
-
-      setViewedSessionCatalog(catalog);
-      setViewedSessionStats(statsByEvent);
-      // Drop cached per-stat solve lists for the affected events so the
-      // solves-fetch effect below refetches them from the server.
-      setViewedSessions((prev) => {
-        const next = { ...prev };
-        Object.keys(next).forEach((cacheKey) => {
-          const ev = cacheKey.split("::")[0];
-          if (affectedEvents.includes(ev)) delete next[cacheKey];
-        });
-        return next;
-      });
-    } catch (err) {
-      console.error("Failed to refresh profile after offline sync:", err);
-    }
-  };
+  const statLists = useMemo(
+    () => normalizeStatLists(viewedProfile?.StatLists),
+    [viewedProfile?.StatLists]
+  );
+  // Visitors only see lists that have something in them.
+  const savedGroups = useMemo(
+    () => statLists.filter((list) => isOwn || list.items.length > 0),
+    [isOwn, statLists]
+  );
+  const showSavedTab = isOwn || savedGroups.length > 0;
+  const isSavedTab = activeTab === 2 && showSavedTab;
+  const mainGroup = useMemo(
+    () => ({ id: PROFILE_MAIN_LIST_ID, name: "Profile", items: visibleStats, builtIn: true }),
+    [visibleStats]
+  );
+  const activeGroup = isSavedTab
+    ? savedGroups.find((group) => group.id === activeGroupID) || savedGroups[0]
+    : mainGroup;
+  const activeItems = activeGroup.items;
+  const isMainGroup = activeGroup.id === PROFILE_MAIN_LIST_ID;
 
   useEffect(() => {
     if (!viewID) return;
@@ -678,7 +683,7 @@ function Profile({
       item.scope !== "all-events" &&
       item.event;
 
-    const requests = visibleStats
+    const requests = (editingStats ? [...activeItems, ...draftVisibleStats] : activeItems)
       .filter(needsSolves)
       .map((item) => ({
         event: String(item.event || "").toUpperCase(),
@@ -725,7 +730,7 @@ function Profile({
         }
       })();
     });
-  }, [viewID, viewedSessions, visibleStats]);
+  }, [viewID, viewedSessions, activeItems, editingStats, draftVisibleStats]);
 
   useEffect(() => {
     const loadPosts = async () => {
@@ -797,26 +802,90 @@ function Profile({
     }
   };
 
+  const persistStatLists = async (nextLists) => {
+    const serialized = serializeStatLists(nextLists);
+    await runDb("Saving stat lists", () => updateUser(user.UserID, { StatLists: serialized }));
+    setUser((prev) => ({ ...prev, StatLists: serialized }));
+  };
+
   const handleSaveStats = async () => {
+    // __k only exists to keep organizer tiles stable while dragging.
+    const nextItems = draftVisibleStats.map(({ __k, ...item }) => item);
     try {
-      await runDb("Saving profile stats", () =>
-        updateUser(user.UserID, { VisibleStats: draftVisibleStats })
-      );
-      setVisibleStats(draftVisibleStats);
-      setUser((prev) => ({ ...prev, VisibleStats: draftVisibleStats }));
+      if (isMainGroup) {
+        await runDb("Saving profile stats", () =>
+          updateUser(user.UserID, { VisibleStats: nextItems })
+        );
+        setVisibleStats(nextItems);
+        setUser((prev) => ({ ...prev, VisibleStats: nextItems }));
+      } else {
+        await persistStatLists(
+          statLists.map((list) =>
+            list.id === activeGroup.id
+              ? {
+                  ...list,
+                  name: list.builtIn ? list.name : cleanStatListName(draftGroupName) || list.name,
+                  items: nextItems,
+                }
+              : list
+          )
+        );
+      }
       setEditingStats(false);
     } catch (err) {
-      console.error("Failed to update visible stats:", err);
+      console.error("Failed to update profile stats:", err);
+    }
+  };
+
+  // Event bests list options save as soon as they change, separate from "Save layout".
+  const updateEventMatrixConfig = async (changes) => {
+    const previous = eventMatrixConfig;
+    const next = normalizeEventMatrixConfig({ ...previous, ...changes });
+    setUser((prev) => ({ ...prev, ProfileEventMatrix: next }));
+    try {
+      await runDb("Saving event bests list", () =>
+        updateUser(user.UserID, { ProfileEventMatrix: next })
+      );
+    } catch (err) {
+      console.error("Failed to update event bests list:", err);
+      setUser((prev) => ({ ...prev, ProfileEventMatrix: previous }));
+    }
+  };
+
+  const handleCreateList = async () => {
+    const name = cleanStatListName(newListName);
+    if (!name || statLists.length >= MAX_STAT_LISTS) return;
+    const list = createStatList(name);
+    try {
+      await persistStatLists([...statLists, list]);
+      setActiveGroupID(list.id);
+      setNewListName(null);
+    } catch (err) {
+      console.error("Failed to create stat list:", err);
+    }
+  };
+
+  const handleDeleteList = async () => {
+    if (isMainGroup || activeGroup.builtIn) return;
+    if (!window.confirm(`Delete the list "${activeGroup.name}" and everything saved in it?`)) return;
+    try {
+      await persistStatLists(statLists.filter((list) => list.id !== activeGroup.id));
+      setActiveGroupID(SAVED_STATS_LIST_ID);
+      setEditingStats(false);
+    } catch (err) {
+      console.error("Failed to delete stat list:", err);
     }
   };
 
   const openStatsEditor = () => {
-    setDraftVisibleStats(visibleStats);
+    setDraftVisibleStats(activeItems.map((item) => ({ ...item, __k: nextDraftKey() })));
+    setDraftGroupName(activeGroup.name);
+    setDragKey(null);
+    setDropTarget(null);
     setEditingStats(true);
   };
 
   const closeStatsEditor = () => {
-    setDraftVisibleStats(visibleStats);
     setEditingStats(false);
   };
 
@@ -869,11 +938,30 @@ function Profile({
   };
 
   const addDraftStat = (type) => {
-    setDraftVisibleStats((prev) => [...prev, createStatConfig(type, defaultStatEvent)]);
+    setDraftVisibleStats((prev) => [
+      ...prev,
+      { ...createStatConfig(type, defaultStatEvent), __k: nextDraftKey() },
+    ]);
   };
 
   const removeDraftStat = (index) => {
     setDraftVisibleStats((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const dropDraftStat = () => {
+    if (dragKey && dropTarget && dropTarget.key !== dragKey) {
+      setDraftVisibleStats((prev) => {
+        const moved = prev.find((item) => item.__k === dragKey);
+        if (!moved) return prev;
+        const rest = prev.filter((item) => item.__k !== dragKey);
+        const targetIndex = rest.findIndex((item) => item.__k === dropTarget.key);
+        if (targetIndex < 0) return prev;
+        rest.splice(targetIndex + (dropTarget.after ? 1 : 0), 0, moved);
+        return rest;
+      });
+    }
+    setDragKey(null);
+    setDropTarget(null);
   };
 
   const moveDraftStat = (index, direction) => {
@@ -960,8 +1048,176 @@ function Profile({
   if (!viewedProfile) return null;
   if (!viewedProfile.UserID) return <div>Loading profile…</div>;
   const profileStatsChromeStyle = getProfileStatsChromeStyle(viewedProfile);
+
+  const showEventMatrix = !isSavedTab && eventMatrixConfig.show;
+  const showEventMatrixRail = showEventMatrix && eventMatrixConfig.orientation === "vertical";
+  const showEventMatrixTop = showEventMatrix && eventMatrixConfig.orientation === "horizontal";
+  const eventMatrixCard = showEventMatrix ? (
+    <div className="profileStatsMatrixCard">
+      {profileTimeMatrixItems.length > 0 ? (
+        <AllEventsTimeMatrix
+          items={profileTimeMatrixItems}
+          mainOnly
+          orientation={eventMatrixConfig.orientation}
+          showSessionToggle={false}
+          onStatSelect={handleProfileMatrixStatSelect}
+        />
+      ) : (
+        <div className="profileStatsMatrixEmpty">No event stats yet.</div>
+      )}
+    </div>
+  ) : null;
+  const renderStatCard = (item, key) => {
+    const cardClassName = getProfileStatItemClass(item.chart);
+
+    if (item.chart === "solveCard") {
+      const solve = item.solve ? { ...item.solve, __readOnly: true } : null;
+      if (!solve) return null;
+
+      return (
+        <div key={key} className={cardClassName}>
+          <Post
+            user={viewedProfile}
+            name={viewedProfile.Name || viewedProfile.name}
+            date={item.createdAt || solve.datetime || solve.createdAt}
+            solveList={[solve]}
+            postColor={viewedProfile.Color || viewedProfile.color}
+            note={item.note || ""}
+            showMeta={false}
+            onClick={() => openSavedProfileCard(item)}
+          />
+        </div>
+      );
+    }
+
+    if (item.chart === "averageCard") {
+      const solves = (Array.isArray(item.solves) ? item.solves : [])
+        .map((solve) => ({ ...solve, __readOnly: true }))
+        .filter(Boolean);
+      if (!solves.length) return null;
+
+      return (
+        <div key={key} className={cardClassName}>
+          <Post
+            user={viewedProfile}
+            name={viewedProfile.Name || viewedProfile.name}
+            date={item.createdAt || solves[0]?.datetime || solves[0]?.createdAt}
+            solveList={solves}
+            postColor={viewedProfile.Color || viewedProfile.color}
+            note={item.note || ""}
+            showMeta={false}
+            onClick={() => openSavedProfileCard(item)}
+          />
+        </div>
+      );
+    }
+
+    if (item.chart === "statsSummary") {
+      const solves =
+        item.scope === "all-events"
+          ? []
+          : solvesForConfig(item);
+      const overallStats =
+        item.scope === "all-events"
+          ? null
+          : item.session === "all"
+            ? aggregateProfileStats(viewedSessionStats[item.event] || {})
+            : viewedSessionStats[item.event]?.[item.session] || null;
+
+      return (
+        <div key={key} className={cardClassName}>
+          <StatsSummary
+            solves={solves}
+            overallSolves={solves}
+            overallStats={overallStats}
+            allEventsBreakdown={item.scope === "all-events" ? allEventsBreakdown : null}
+            mode={item.scope === "all-events" ? "all-events" : item.session === "all" ? "event-overall" : "session"}
+            selectedEvent={item.event || "All Events"}
+            selectedSession={item.session || "all"}
+            loadedSolveCount={solves.length}
+            showCurrentMetrics={true}
+            viewMode={item.viewMode || "standard"}
+            selectedDay=""
+          />
+        </div>
+      );
+    }
+
+    if (item.chart === "percentBar") {
+      const solves = solvesForConfig(item);
+      return (
+        <div key={key} className={cardClassName}>
+          <PercentBar
+            solves={solves.slice(-200)}
+            legendItems={item.legendItems || []}
+            title={item.subtitle || "Solves Distribution by Time"}
+          />
+        </div>
+      );
+    }
+
+    if (item.chart === "lineChart") {
+      const solves = solvesForConfig(item);
+      return (
+        <div key={key} className={cardClassName}>
+          <LineChart
+            solves={solves}
+            title={buildLineChartTitle(item.title, item.event, item.session || "all")}
+            defaultViewMode="last100"
+            allowViewPicker={true}
+            initialShowControls={false}
+            seriesStyle={item.seriesStyle || null}
+            legendItems={item.legendItems || []}
+            viewMode={item.viewMode || "standard"}
+          />
+        </div>
+      );
+    }
+
+    if (item.chart === "pieChart") {
+      return (
+        <div key={key} className={cardClassName}>
+          <EventCountPieChart
+            sessionStats={viewedSessionStats}
+            profileColor={user?.Color || user?.color || "#2EC4B6"}
+          />
+        </div>
+      );
+    }
+
+    if (item.chart === "barChart") {
+      const solves = solvesForConfig(item);
+      return (
+        <div key={key} className={cardClassName}>
+          <BarChart
+            solves={solves.slice(-200)}
+            seriesStyle={item.seriesStyle || null}
+            legendItems={item.legendItems || []}
+          />
+        </div>
+      );
+    }
+
+    if (item.chart === "timeTable") {
+      const solves = solvesForConfig(item);
+      return (
+        <div key={key} className={cardClassName}>
+          <TimeTable
+            solves={solves.slice(-200)}
+            seriesStyle={item.seriesStyle || null}
+          />
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   return (
-    <div className="Page profilePage" style={profileStatsChromeStyle}>
+    <div
+      className={`Page profilePage ${settings?.statsHoverGrow === true ? "profilePage--hoverGrow" : ""}`}
+      style={profileStatsChromeStyle}
+    >
       <ProfileHeader
         user={viewedProfile}
         currentUser={user}
@@ -972,12 +1228,6 @@ function Profile({
         onJoinLiveRoom={!isOwn ? onJoinLiveRoom : null}
         liveRoomBusy={liveRoomBusy}
       />
-
-      {isOwn && (
-        <div id="offline-solves">
-          <OfflineSolvesPanel userID={viewID} isOnline={isOnline} onSynced={handleOfflineSynced} />
-        </div>
-      )}
 
       {!isOwn && (
         <button
@@ -991,85 +1241,141 @@ function Profile({
 
       {editingStats && (
         <div className="statsEditorOverlay" onClick={closeStatsEditor}>
-          <div className="statsEditor" onClick={(e) => e.stopPropagation()}>
+          <div className="statsEditor statsOrganizer" onClick={(e) => e.stopPropagation()}>
             <div className="statsEditorHeader">
               <div>
-                <h3>Customize stats</h3>
-                <p>Add stat cards, then reorder and tune the ones already on the page.</p>
+                <h3>{isMainGroup ? "Customize stats" : `Edit ${activeGroup.name}`}</h3>
+                <p>Drag cards to reorder. This is the layout people see on your profile.</p>
               </div>
-              <button type="button" className="statsEditorClose" onClick={closeStatsEditor}>
-                Close
-              </button>
+              <div className="statsEditorActions">
+                <button type="button" className="statsEditorSecondary" onClick={closeStatsEditor}>
+                  Cancel
+                </button>
+                <button type="button" className="statsEditorPrimary" onClick={handleSaveStats}>
+                  {isMainGroup ? "Save layout" : "Save list"}
+                </button>
+              </div>
             </div>
 
-            <div className="statsEditorToolbar">
-              <div className="statsEditorToolbarTitle">Add stat</div>
-              <div className="statsEditorLibrary">
-                {STAT_LIBRARY.map((entry) => (
-                  <button
-                    key={entry.type}
-                    type="button"
-                    className="statsLibraryCard"
-                    onClick={() => addDraftStat(entry.type)}
+            {!isMainGroup && !activeGroup.builtIn && (
+              <div className="statsEditorListName">
+                <label className="statsEditorField">
+                  <span>List name</span>
+                  <input
+                    type="text"
+                    value={draftGroupName}
+                    maxLength={MAX_STAT_LIST_NAME_LENGTH}
+                    onChange={(e) => setDraftGroupName(e.target.value)}
+                  />
+                </label>
+                <button type="button" className="statsEditorRemove" onClick={handleDeleteList}>
+                  Delete list
+                </button>
+              </div>
+            )}
+
+            {isMainGroup && (
+              <div className="statsEditorEventMatrix">
+                <span className="statsEditorEventMatrixTitle">Event bests list</span>
+                <label className="statsEditorCheck">
+                  <input
+                    type="checkbox"
+                    checked={eventMatrixConfig.show}
+                    onChange={(e) => updateEventMatrixConfig({ show: e.target.checked })}
+                  />
+                  <span>Show</span>
+                </label>
+                <div
+                  className={`statsEditorSegmented ${eventMatrixConfig.show ? "" : "is-disabled"}`}
+                  role="radiogroup"
+                  aria-label="Event bests layout"
+                >
+                  {["vertical", "horizontal"].map((orientation) => (
+                    <button
+                      key={orientation}
+                      type="button"
+                      role="radio"
+                      aria-checked={eventMatrixConfig.orientation === orientation}
+                      className={eventMatrixConfig.orientation === orientation ? "is-active" : ""}
+                      disabled={!eventMatrixConfig.show}
+                      onClick={() => updateEventMatrixConfig({ orientation })}
+                    >
+                      {orientation === "vertical" ? "Vertical" : "Horizontal"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="statsEditorLibrary">
+              {STAT_LIBRARY.map((entry) => (
+                <button
+                  key={entry.type}
+                  type="button"
+                  className="statsLibraryCard"
+                  onClick={() => addDraftStat(entry.type)}
+                >
+                  + {entry.title}
+                </button>
+              ))}
+            </div>
+
+            {draftVisibleStats.length === 0 && (
+              <div className="profileStatGroupEmpty">No cards yet. Add one above.</div>
+            )}
+
+            <div className="statsOrganizerGrid">
+              {draftVisibleStats.map((item, idx) => {
+                const isWide = item.chart === "statsSummary" || item.chart === "averageCard";
+                const isDropTarget = dropTarget?.key === item.__k && dragKey !== item.__k;
+                return (
+                  <div
+                    key={item.__k}
+                    className={[
+                      "statsOrganizerTile",
+                      isWide ? "statsOrganizerTile--wide" : "",
+                      dragKey === item.__k ? "is-dragging" : "",
+                      isDropTarget ? (dropTarget.after ? "is-dropAfter" : "is-dropBefore") : "",
+                    ].join(" ")}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", item.__k);
+                      setDragKey(item.__k);
+                    }}
+                    onDragOver={(e) => {
+                      if (!dragKey) return;
+                      e.preventDefault();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const after = e.clientX > rect.left + rect.width / 2;
+                      if (dropTarget?.key !== item.__k || dropTarget.after !== after) {
+                        setDropTarget({ key: item.__k, after });
+                      }
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      dropDraftStat();
+                    }}
+                    onDragEnd={() => {
+                      setDragKey(null);
+                      setDropTarget(null);
+                    }}
                   >
-                    + {entry.title}
-                  </button>
-                ))}
-              </div>
-            </div>
+                    <div className="statsOrganizerBar">
+                      <span className="statsOrganizerHandle" aria-hidden="true">⠿</span>
+                      <span className="statsOrganizerTitle">
+                        {idx + 1}. {getStatCardTitle(item)}
+                      </span>
 
-            <div className="statsEditorList">
-              {draftVisibleStats.map((item, idx) => (
-                <div key={`${item.chart}-${idx}`} className="statsEditorItem">
-                  <div className="statsEditorItemHeader">
-                    <div>
-                      <div className="statsEditorItemTitle">{getStatCardTitle(item)}</div>
-                      <div className="statsEditorItemMeta">Card {idx + 1}</div>
-                    </div>
-                    <div className="statsEditorItemActions">
-                      <button
-                        type="button"
-                        className="statsEditorSecondary"
-                        onClick={() => moveDraftStat(idx, -1)}
-                        disabled={idx === 0}
-                      >
-                        Up
-                      </button>
-                      <button
-                        type="button"
-                        className="statsEditorSecondary"
-                        onClick={() => moveDraftStat(idx, 1)}
-                        disabled={idx === draftVisibleStats.length - 1}
-                      >
-                        Down
-                      </button>
-                      <button
-                        type="button"
-                        className="statsEditorRemove"
-                        onClick={() => removeDraftStat(idx)}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="statsEditorControls">
-                    {isSavedProfileCard(item) ? (
-                      <div className="statsEditorField">
-                        <span>Saved item</span>
-                        <div className="statsEditorStaticValue">
-                          {isSavedSolveCard(item)
-                            ? "Saved from solve detail. You can reorder or remove it here."
-                            : "Saved from average detail. You can reorder or remove it here."}
-                        </div>
-                      </div>
-                    ) : (
-                      <label className="statsEditorField">
-                        <span>Chart type</span>
+                      {!isSavedProfileCard(item) && (
                         <select
+                          aria-label="Chart type"
                           value={item.chart}
                           onChange={(e) =>
-                            updateDraftStat(idx, () => createStatConfig(e.target.value, item.event || defaultStatEvent))
+                            updateDraftStat(idx, () => ({
+                              ...createStatConfig(e.target.value, item.event || defaultStatEvent),
+                              __k: item.__k,
+                            }))
                           }
                         >
                           <option value="lineChart">Line Chart</option>
@@ -1079,13 +1385,11 @@ function Profile({
                           <option value="barChart">Bar Chart</option>
                           <option value="timeTable">Time Table</option>
                         </select>
-                      </label>
-                    )}
+                      )}
 
-                    {!isSavedProfileCard(item) && chartNeedsSummaryEvent(item) && (
-                      <label className="statsEditorField">
-                        <span>Event</span>
+                      {!isSavedProfileCard(item) && chartNeedsSummaryEvent(item) && (
                         <select
+                          aria-label="Event"
                           value={item.scope === "all-events" ? "__all_events__" : item.event || defaultStatEvent}
                           onChange={(e) =>
                             updateDraftStat(idx, (current) => ({
@@ -1097,24 +1401,18 @@ function Profile({
                           }
                         >
                           <option value="__all_events__">All Events</option>
-                          {availableEvents.length > 0 ? (
-                            availableEvents.map((ev) => (
-                              <option key={ev} value={ev}>
-                                {ev}
-                              </option>
-                            ))
-                          ) : (
-                            <option value={defaultStatEvent}>{defaultStatEvent}</option>
-                          )}
+                          {(availableEvents.length > 0 ? availableEvents : [defaultStatEvent]).map((ev) => (
+                            <option key={ev} value={ev}>
+                              {ev}
+                            </option>
+                          ))}
                         </select>
-                      </label>
-                    )}
+                      )}
 
-                    {!isSavedProfileCard(item) && chartNeedsEventSession(item) && (
-                      <>
-                        <label className="statsEditorField">
-                          <span>Event</span>
+                      {!isSavedProfileCard(item) && chartNeedsEventSession(item) && (
+                        <>
                           <select
+                            aria-label="Event"
                             value={item.event || defaultStatEvent}
                             onChange={(e) =>
                               updateDraftStat(idx, (current) => ({
@@ -1124,21 +1422,14 @@ function Profile({
                               }))
                             }
                           >
-                            {availableEvents.length > 0 ? (
-                              availableEvents.map((ev) => (
-                                <option key={ev} value={ev}>
-                                  {ev}
-                                </option>
-                              ))
-                            ) : (
-                              <option value={defaultStatEvent}>{defaultStatEvent}</option>
-                            )}
+                            {(availableEvents.length > 0 ? availableEvents : [defaultStatEvent]).map((ev) => (
+                              <option key={ev} value={ev}>
+                                {ev}
+                              </option>
+                            ))}
                           </select>
-                        </label>
-
-                        <label className="statsEditorField">
-                          <span>Session</span>
                           <select
+                            aria-label="Session"
                             value={item.session || "all"}
                             onChange={(e) =>
                               updateDraftStat(idx, (current) => ({
@@ -1154,21 +1445,43 @@ function Profile({
                               </option>
                             ))}
                           </select>
-                        </label>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+                        </>
+                      )}
 
-            <div className="statsEditorActions">
-              <button type="button" className="statsEditorPrimary" onClick={handleSaveStats}>
-                Save layout
-              </button>
-              <button type="button" className="statsEditorSecondary" onClick={closeStatsEditor}>
-                Cancel
-              </button>
+                      <span className="statsOrganizerBarSpacer" />
+                      <button
+                        type="button"
+                        onClick={() => moveDraftStat(idx, -1)}
+                        disabled={idx === 0}
+                        aria-label="Move earlier"
+                        title="Move earlier"
+                      >
+                        ←
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveDraftStat(idx, 1)}
+                        disabled={idx === draftVisibleStats.length - 1}
+                        aria-label="Move later"
+                        title="Move later"
+                      >
+                        →
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeDraftStat(idx)}
+                        aria-label="Remove card"
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <div className="statsOrganizerPreview" aria-hidden="true">
+                      {renderStatCard(item, item.__k)}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1187,178 +1500,102 @@ function Profile({
         >
           Posts
         </button>
+        {showSavedTab && (
+          <button
+            className={`tabButton ${activeTab === 2 ? "active" : ""}`}
+            onClick={() => setActiveTab(2)}
+          >
+            Saved
+          </button>
+        )}
       </div>
 
       <div className="profileContent">
-        {activeTab === 0 && (
+        {(activeTab === 0 || isSavedTab) && (
           <div className="tabPanel">
             <div className={`profileStatsPage ${showPlayerBar ? "profileStatsPage--withPlayerBar" : "profileStatsPage--noPlayerBar"}`}>
-              <div className="profileStatsLayout">
+              <div className={`profileStatsLayout ${showEventMatrixRail ? "" : "profileStatsLayout--noRail"}`}>
                 <div className="profileStatsMain">
+                  {showEventMatrixTop && (
+                    <div className="profileStatsMatrixTop">{eventMatrixCard}</div>
+                  )}
+                  {isSavedTab && (
+                    <div className="profileStatGroups" role="tablist" aria-label="Stat lists">
+                      {savedGroups.map((group) => (
+                        <button
+                          key={group.id}
+                          type="button"
+                          role="tab"
+                          aria-selected={group.id === activeGroup.id}
+                          className={`profileStatGroupChip ${group.id === activeGroup.id ? "is-active" : ""}`}
+                          onClick={() => setActiveGroupID(group.id)}
+                        >
+                          {group.name}
+                          <span className="profileStatGroupCount">{group.items.length}</span>
+                        </button>
+                      ))}
+                      {isOwn && newListName === null && statLists.length < MAX_STAT_LISTS && (
+                        <button
+                          type="button"
+                          className="profileStatGroupChip profileStatGroupChip--add"
+                          onClick={() => setNewListName("")}
+                        >
+                          + New list
+                        </button>
+                      )}
+                      {isOwn && newListName !== null && (
+                        <form
+                          className="profileStatGroupNew"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            handleCreateList();
+                          }}
+                        >
+                          <input
+                            type="text"
+                            autoFocus
+                            value={newListName}
+                            maxLength={MAX_STAT_LIST_NAME_LENGTH}
+                            placeholder="List name"
+                            onChange={(e) => setNewListName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") setNewListName(null);
+                            }}
+                          />
+                          <button type="submit" disabled={!cleanStatListName(newListName)}>
+                            Create
+                          </button>
+                          <button type="button" onClick={() => setNewListName(null)}>
+                            Cancel
+                          </button>
+                        </form>
+                      )}
+                      {isOwn && (
+                        <button
+                          type="button"
+                          className="profileStatGroupChip profileStatGroupChip--edit"
+                          onClick={openStatsEditor}
+                        >
+                          Edit list
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {isSavedTab && activeItems.length === 0 && (
+                    <div className="profileStatGroupEmpty">
+                      {isOwn
+                        ? "Nothing saved here yet. Use Save to Profile on a solve, average, or stat card and pick this list."
+                        : "Nothing saved here yet."}
+                    </div>
+                  )}
                   <div className="profileStatsGrid">
-                    {visibleStats.map((item, idx) => {
-                      const cardClassName = getProfileStatItemClass(item.chart);
-
-                      if (item.chart === "solveCard") {
-                        const solve = item.solve ? { ...item.solve, __readOnly: true } : null;
-                        if (!solve) return null;
-
-                        return (
-                          <div key={idx} className={cardClassName}>
-                            <Post
-                              user={viewedProfile}
-                              name={viewedProfile.Name || viewedProfile.name}
-                              date={item.createdAt || solve.datetime || solve.createdAt}
-                              solveList={[solve]}
-                              postColor={viewedProfile.Color || viewedProfile.color}
-                              note={item.note || ""}
-                              showMeta={false}
-                              onClick={() => openSavedProfileCard(item)}
-                            />
-                          </div>
-                        );
-                      }
-
-                      if (item.chart === "averageCard") {
-                        const solves = (Array.isArray(item.solves) ? item.solves : [])
-                          .map((solve) => ({ ...solve, __readOnly: true }))
-                          .filter(Boolean);
-                        if (!solves.length) return null;
-
-                        return (
-                          <div key={idx} className={cardClassName}>
-                            <Post
-                              user={viewedProfile}
-                              name={viewedProfile.Name || viewedProfile.name}
-                              date={item.createdAt || solves[0]?.datetime || solves[0]?.createdAt}
-                              solveList={solves}
-                              postColor={viewedProfile.Color || viewedProfile.color}
-                              note={item.note || ""}
-                              showMeta={false}
-                              onClick={() => openSavedProfileCard(item)}
-                            />
-                          </div>
-                        );
-                      }
-
-                      if (item.chart === "statsSummary") {
-                        const solves =
-                          item.scope === "all-events"
-                            ? []
-                            : solvesForConfig(item);
-                        const overallStats =
-                          item.scope === "all-events"
-                            ? null
-                            : item.session === "all"
-                              ? aggregateProfileStats(viewedSessionStats[item.event] || {})
-                              : viewedSessionStats[item.event]?.[item.session] || null;
-
-                        return (
-                          <div key={idx} className={cardClassName}>
-                            <StatsSummary
-                              solves={solves}
-                              overallSolves={solves}
-                              overallStats={overallStats}
-                              allEventsBreakdown={item.scope === "all-events" ? allEventsBreakdown : null}
-                              mode={item.scope === "all-events" ? "all-events" : item.session === "all" ? "event-overall" : "session"}
-                              selectedEvent={item.event || "All Events"}
-                              selectedSession={item.session || "all"}
-                              loadedSolveCount={solves.length}
-                              showCurrentMetrics={true}
-                              viewMode={item.viewMode || "standard"}
-                              selectedDay=""
-                            />
-                          </div>
-                        );
-                      }
-
-                      if (item.chart === "percentBar") {
-                        const solves = solvesForConfig(item);
-                        return (
-                          <div key={idx} className={cardClassName}>
-                            <PercentBar
-                              solves={solves.slice(-200)}
-                              legendItems={item.legendItems || []}
-                              title={item.subtitle || "Solves Distribution by Time"}
-                            />
-                          </div>
-                        );
-                      }
-
-                      if (item.chart === "lineChart") {
-                        const solves = solvesForConfig(item);
-                        return (
-                          <div key={idx} className={cardClassName}>
-                            <LineChart
-                              solves={solves}
-                              title={buildLineChartTitle(item.title, item.event, item.session || "all")}
-                              defaultViewMode="last100"
-                              allowViewPicker={true}
-                              initialShowControls={false}
-                              seriesStyle={item.seriesStyle || null}
-                              legendItems={item.legendItems || []}
-                              viewMode={item.viewMode || "standard"}
-                            />
-                          </div>
-                        );
-                      }
-
-                      if (item.chart === "pieChart") {
-                        return (
-                          <div key={idx} className={cardClassName}>
-                            <EventCountPieChart
-                              sessionStats={viewedSessionStats}
-                              profileColor={user?.Color || user?.color || "#2EC4B6"}
-                            />
-                          </div>
-                        );
-                      }
-
-                      if (item.chart === "barChart") {
-                        const solves = solvesForConfig(item);
-                        return (
-                          <div key={idx} className={cardClassName}>
-                            <BarChart
-                              solves={solves.slice(-200)}
-                              seriesStyle={item.seriesStyle || null}
-                              legendItems={item.legendItems || []}
-                            />
-                          </div>
-                        );
-                      }
-
-                      if (item.chart === "timeTable") {
-                        const solves = solvesForConfig(item);
-                        return (
-                          <div key={idx} className={cardClassName}>
-                            <TimeTable
-                              solves={solves.slice(-200)}
-                              seriesStyle={item.seriesStyle || null}
-                            />
-                          </div>
-                        );
-                      }
-
-                      return null;
-                    })}
+                    {activeItems.map((item, idx) => renderStatCard(item, idx))}
                   </div>
                 </div>
 
-                <aside className="profileStatsRail">
-                  <div className="profileStatsMatrixCard">
-                    {profileTimeMatrixItems.length > 0 ? (
-                      <AllEventsTimeMatrix
-                        items={profileTimeMatrixItems}
-                        mainOnly
-                        orientation="vertical"
-                        showSessionToggle={false}
-                        onStatSelect={handleProfileMatrixStatSelect}
-                      />
-                    ) : (
-                      <div className="profileStatsMatrixEmpty">No event stats yet.</div>
-                    )}
-                  </div>
-                </aside>
+                {showEventMatrixRail && (
+                  <aside className="profileStatsRail">{eventMatrixCard}</aside>
+                )}
               </div>
             </div>
           </div>
