@@ -76,6 +76,16 @@ const {
   userIDParamGuard,
   requireAdmin,
 } = require("./lib/auth");
+const {
+  cleanIDList,
+  getFollowing,
+  getFollowers,
+  getFollowRequests,
+  normalizePrivacy,
+  PRIVACY_VERSION,
+  buildViewerAccess,
+  sanitizeProfileForViewer,
+} = require("./lib/visibility");
 const ALLOW_LEGACY_CLAIM =
   String(process.env.PTS_ALLOW_LEGACY_CLAIM || "false").toLowerCase() === "true";
 
@@ -2200,12 +2210,30 @@ function buildWcaCompetitionDateMap(payload) {
       parseWcaDateCandidate(current?.competitionDate) ||
       parseWcaDateCandidate(current?.competition?.date);
 
-    if (competitionID && (start || end || single)) {
+    // A result row's own `name` is the competitor, so only trust a name that
+    // sits on the competition object itself.
+    const isCompetitionObject =
+      !!competitionID &&
+      typeof current?.id === "string" &&
+      current.id.trim() === competitionID &&
+      !current?.competition_id &&
+      !current?.competitionId;
+    const nested = current?.competition && typeof current.competition === "object" ? current.competition : null;
+    const name = String((isCompetitionObject ? current?.name : nested?.name) || "").trim();
+    const city = String((isCompetitionObject ? current?.city : nested?.city) || "").trim();
+    const country = String(
+      (isCompetitionObject ? current?.country_iso2 || current?.country_iso : nested?.country_iso2) || ""
+    ).trim();
+
+    if (competitionID && (start || end || single || name)) {
       const prior = out.get(competitionID) || {};
       out.set(competitionID, {
         start: prior.start || start || single || null,
         end: prior.end || end || single || start || null,
         single: prior.single || single || start || end || null,
+        name: prior.name || name || null,
+        city: prior.city || city || null,
+        country: prior.country || country || null,
       });
     }
 
@@ -2235,7 +2263,8 @@ async function hydrateWcaCompetitionDateMap(payload) {
     }
 
     const competitionID = getWcaCompetitionID(current);
-    if (competitionID && !out.has(competitionID)) {
+    const known = competitionID ? out.get(competitionID) : null;
+    if (competitionID && (!known || !known.name || !(known.start || known.single))) {
       missingCompetitionIDs.add(competitionID);
     }
 
@@ -2248,9 +2277,17 @@ async function hydrateWcaCompetitionDateMap(payload) {
     const payload = await fetchWcaCompetitionPayload(competitionID);
     if (!payload) continue;
 
-    const fetchedDates = buildWcaCompetitionDateMap(payload).get(competitionID);
-    if (fetchedDates) {
-      out.set(competitionID, fetchedDates);
+    const fetched = buildWcaCompetitionDateMap(payload).get(competitionID);
+    if (fetched) {
+      const prior = out.get(competitionID) || {};
+      out.set(competitionID, {
+        start: prior.start || fetched.start || null,
+        end: prior.end || fetched.end || null,
+        single: prior.single || fetched.single || null,
+        name: prior.name || fetched.name || null,
+        city: prior.city || fetched.city || null,
+        country: prior.country || fetched.country || null,
+      });
     }
   }
 
@@ -2306,10 +2343,85 @@ function getWcaResultDate(entry, competitionDateMap = null) {
   return null;
 }
 
+function getWcaRoundTypeID(entry) {
+  const round = entry?.round_type_id || entry?.roundTypeId || entry?.round?.id || entry?.round || "";
+  return typeof round === "string" || typeof round === "number" ? String(round).trim() : "";
+}
+
 function getWcaCompetitionLabel(entry) {
   const competition = getWcaCompetitionID(entry);
-  const round = entry?.round_type_id || entry?.roundTypeId || entry?.round?.id || entry?.round || "";
+  const round = getWcaRoundTypeID(entry);
   return [competition, round].filter(Boolean).join(" · ");
+}
+
+function parseWcaImportNote(note) {
+  const match = String(note || "").match(/^WCA import · ([^·]+?)(?: · ([^·]+))?$/);
+  if (!match) return null;
+  return { Competition: match[1].trim(), CompetitionRound: match[2] ? match[2].trim() : null };
+}
+
+function toUtcDayKey(date) {
+  return date instanceof Date && Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : null;
+}
+
+// One WCACOMP# item per competition the user has imported: the display name
+// and dates the competition page and calendar need, plus each round's official
+// result (placement and average aren't derivable from the solves alone).
+function buildWcaCompetitionItems(userID, rows, competitionInfoMap) {
+  const byCompetition = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const competitionID = String(row?.competitionID || "").trim();
+    const event = String(row?.eventCode || "").trim();
+    if (!competitionID || !WCA_SUPPORTED_IMPORT_EVENTS.has(event)) continue;
+
+    const info = competitionInfoMap instanceof Map ? competitionInfoMap.get(competitionID) || {} : {};
+    let comp = byCompetition.get(competitionID);
+    if (!comp) {
+      const startDay = toUtcDayKey(info.start || info.single) || toUtcDayKey(row.happenedAt);
+      comp = {
+        PK: `USER#${userID}`,
+        SK: `WCACOMP#${competitionID}`,
+        ItemType: "WCACOMPETITION",
+        CompetitionID: competitionID,
+        Name: info.name || competitionID,
+        City: info.city || null,
+        Country: info.country || null,
+        StartDay: startDay,
+        EndDay: toUtcDayKey(info.end || info.single) || startDay,
+        Rounds: [],
+        SolveCount: 0,
+      };
+      byCompetition.set(competitionID, comp);
+    }
+
+    const attempts = (Array.isArray(row.attemptValues) ? row.attemptValues : []).filter(
+      (value) => parseWcaAttemptValue(value) !== null
+    );
+    comp.Rounds.push({
+      Event: event,
+      RoundTypeID: row.roundTypeID || "",
+      Pos: row.pos,
+      // WCA stores centiseconds; -1 is DNF, -2 DNS, 0 none.
+      BestMs: row.best > 0 ? row.best * 10 : null,
+      AverageMs: row.average > 0 ? row.average * 10 : null,
+      BestIsDNF: row.best < 0,
+      AverageIsDNF: row.average < 0,
+      FormatID: row.formatID,
+      SingleRecord: row.singleRecord,
+      AverageRecord: row.averageRecord,
+      SolveCount: attempts.length,
+      Day: toUtcDayKey(row.happenedAt),
+    });
+    comp.SolveCount += attempts.length;
+  }
+
+  const updatedAt = nowIso();
+  return Array.from(byCompetition.values()).map((comp) => ({
+    ...comp,
+    Events: Array.from(new Set(comp.Rounds.map((round) => round.Event))),
+    UpdatedAt: updatedAt,
+  }));
 }
 
 function extractWcaResultEntries(payload, competitionDateMap = null) {
@@ -2351,6 +2463,14 @@ function extractWcaResultEntries(payload, competitionDateMap = null) {
           attemptValues,
           happenedAt,
           noteLabel: getWcaCompetitionLabel(current),
+          competitionID: getWcaCompetitionID(current),
+          roundTypeID: getWcaRoundTypeID(current),
+          pos: Number.isFinite(Number(current?.pos)) ? Number(current.pos) : null,
+          best: Number.isFinite(Number(current?.best)) ? Number(current.best) : null,
+          average: Number.isFinite(Number(current?.average)) ? Number(current.average) : null,
+          formatID: String(current?.format_id || current?.formatId || "").trim() || null,
+          singleRecord: String(current?.regional_single_record || "").trim() || null,
+          averageRecord: String(current?.regional_average_record || "").trim() || null,
         });
       }
     }
@@ -2401,7 +2521,12 @@ function buildWcaImportSolves(rows, settings = {}) {
         : timestampSeed;
 
     const notePrefix = row?.noteLabel ? `WCA import · ${row.noteLabel}` : "WCA import";
-    const tags = solveSource ? { SolveSource: solveSource } : {};
+    const tags = {
+      ...(solveSource ? { SolveSource: solveSource } : {}),
+      ...(row?.competitionID
+        ? { Competition: row.competitionID, CompetitionRound: row.roundTypeID || null }
+        : {}),
+    };
 
     const attempts = Array.isArray(row?.attemptValues) ? row.attemptValues : [];
     for (let i = 0; i < attempts.length; i++) {
@@ -5305,9 +5430,14 @@ async function getUserProfile(userID) {
   return out.Item || null;
 }
 
-async function listUserFriendIDs(userID) {
+// Followers allowed to see this user's posts, for live post notifications.
+async function listPostAudienceIDs(userID) {
   const profile = await getUserProfile(userID);
-  return Array.isArray(profile?.Friends) ? profile.Friends.map((id) => String(id || "").trim()).filter(Boolean) : [];
+  if (!profile) return [];
+  return getFollowers(profile).filter(
+    (followerID) =>
+      buildViewerAccess(followerID, profile, { Friends: [userID] }).canView.posts === true
+  );
 }
 
 function normalizeNotificationAuthor(profile, fallbackUserID = "") {
@@ -5381,6 +5511,85 @@ async function buildGroupPostNotificationPayload(postItem, groupID, authorID) {
 // hostID, ...) to the token, and app.param pins :userID segments.
 app.use("/api", buildAuthMiddleware());
 app.param("userID", userIDParamGuard);
+
+// -------------------- Visibility --------------------
+// GET routes that read another user's data, keyed by the privacy section that
+// gates them. The owner's :userID is the path segment right after the prefix.
+// Profile stat cards read sessions and recent solves; everything else on the
+// stats page needs fullStats.
+const SECTION_GET_PREFIXES = [
+  ["/api/sessions/", "profileStats"],
+  ["/api/sessionStats/", "profileStats"],
+  ["/api/eventStats/", "profileStats"],
+  ["/api/solvesLastN/", "profileStats"],
+  ["/api/tagStats/", "fullStats"],
+  ["/api/tagStatsList/", "fullStats"],
+  ["/api/tagValues/", "fullStats"],
+  ["/api/dayBuckets/", "fullStats"],
+  ["/api/wca/competitions/", "fullStats"],
+  ["/api/solves/", "fullStats"],
+  ["/api/solveWindow/", "fullStats"],
+  ["/api/solvesByTag/", "fullStats"],
+  ["/api/posts/", "posts"],
+];
+
+// Most recent solves a profileStats-only viewer may read per request; the
+// profile page asks for 200.
+const PROFILE_SOLVES_LIMIT = 200;
+
+async function getViewerAccess(req, ownerID, ownerProfile = null) {
+  const viewerID = String(req.auth?.userID || "").trim();
+  const isAdminViewer = !!req.auth?.isAdmin;
+  const owner = ownerProfile || (await getUserProfile(ownerID));
+  if (!owner) return null;
+  const viewerProfile =
+    viewerID && viewerID !== ownerID && !isAdminViewer ? await getUserProfile(viewerID) : null;
+  return { owner, viewerProfile, access: buildViewerAccess(viewerID, owner, viewerProfile, { isAdmin: isAdminViewer }) };
+}
+
+// Map of section -> allowed for this viewer, or null when everything is.
+async function getViewerCanView(req, ownerID) {
+  const viewerID = String(req.auth?.userID || "").trim();
+  if (req.auth?.isAdmin || (viewerID && viewerID === ownerID)) return null;
+  const resolved = await getViewerAccess(req, ownerID);
+  // A missing profile has nothing to protect; let the route answer as before.
+  if (!resolved) return null;
+  return resolved.access.canView;
+}
+
+async function canViewSection(req, ownerID, section) {
+  const canView = await getViewerCanView(req, ownerID);
+  return canView === null || canView[section] === true;
+}
+
+app.use("/api", async (req, res, next) => {
+  if (req.method !== "GET") return next();
+  const url = `/api${req.path}`;
+  const match = SECTION_GET_PREFIXES.find(([prefix]) => url.startsWith(prefix));
+  if (!match) return next();
+
+  const [prefix, section] = match;
+  const ownerID = decodeURIComponent(url.slice(prefix.length).split("/")[0] || "").trim();
+  if (!ownerID) return next();
+
+  try {
+    const canView = await getViewerCanView(req, ownerID);
+    if (canView === null) return next();
+    // Full stats covers everything the profile cards read.
+    if (section === "profileStats" && canView.fullStats === true) return next();
+    if (canView[section] === true) {
+      if (prefix === "/api/solvesLastN/") {
+        const n = Number(req.query?.n || 100);
+        req.query.n = String(Math.max(1, Math.min(PROFILE_SOLVES_LIMIT, n || 100)));
+      }
+      return next();
+    }
+    return res.status(403).json({ error: "This is private", code: "PRIVATE", section });
+  } catch (e) {
+    console.error("Visibility check error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
 
 function authItemKey(userID) {
   return { PK: `USER#${userID}`, SK: "AUTH" };
@@ -5606,7 +5815,14 @@ app.get("/api/user/:userID", async (req, res) => {
       })
     );
     if (!out.Item) return res.status(404).json({ user: null });
-    return res.json({ user: out.Item });
+
+    const viewerID = String(req.auth?.userID || "").trim();
+    const isAdminViewer = !!req.auth?.isAdmin;
+    const viewerProfile =
+      viewerID && viewerID !== userID && !isAdminViewer ? await getUserProfile(viewerID) : null;
+    return res.json({
+      user: sanitizeProfileForViewer(out.Item, viewerID, viewerProfile, { isAdmin: isAdminViewer }),
+    });
   } catch (e) {
     console.error("GET /api/user error:", e);
     return res.status(500).json({ error: "Server error" });
@@ -5647,6 +5863,10 @@ app.post("/api/user", async (req, res) => {
       Name: name ?? "",
       Username: username ?? id,
       Friends: [],
+      Followers: [],
+      FollowRequests: [],
+      PrivateAccount: false,
+      Privacy: normalizePrivacy(null),
       Posts: [],
       Color: color ?? "#2EC4B6",
       ProfileEvent: profileEvent ?? "333",
@@ -5700,6 +5920,19 @@ app.put("/api/user/:userID", async (req, res) => {
     const values = {};
     const merged = { ...updates, UpdatedAt: nowIso() };
 
+    // Follow lists change only through the follow routes, which keep both
+    // sides in sync and respect private accounts.
+    for (const field of FOLLOW_LIST_FIELDS) delete merged[field];
+    delete merged.FollowingCount;
+    delete merged.FollowerCount;
+    delete merged.Viewer;
+
+    // Saving marks the map as the user's own choice (see PRIVACY_VERSION).
+    if ("Privacy" in merged) {
+      merged.Privacy = normalizePrivacy({ ...(merged.Privacy || {}), Version: PRIVACY_VERSION });
+    }
+    if ("PrivateAccount" in merged) merged.PrivateAccount = merged.PrivateAccount === true;
+
     if (merged.TagOptions && !merged.TagConfig) {
       merged.TagConfig = buildDefaultTagConfig(merged.TagOptions);
     }
@@ -5724,6 +5957,11 @@ app.put("/api/user/:userID", async (req, res) => {
       })
     );
 
+    // Turning a private account public approves everyone who was waiting.
+    if (merged.PrivateAccount === false) {
+      await acceptAllFollowRequests(userID);
+    }
+
     const out = await ddb.send(
       new GetCommand({
         TableName: TABLE,
@@ -5738,7 +5976,193 @@ app.put("/api/user/:userID", async (req, res) => {
   }
 });
 
-// -------------------- SESSIONS --------------------
+// -------------------- FOLLOWS --------------------
+// Friends = who the user follows, Followers = who follows them,
+// FollowRequests = pending followers of a private account. A mutual follow is
+// a friend. See server/lib/visibility.js.
+const FOLLOW_LIST_FIELDS = ["Friends", "Followers", "FollowRequests"];
+
+async function setProfileFields(userID, fields) {
+  const names = {};
+  const values = { ":u": nowIso() };
+  const expr = ["#UpdatedAt = :u"];
+  names["#UpdatedAt"] = "UpdatedAt";
+  for (const [k, v] of Object.entries(fields)) {
+    names[`#${k}`] = k;
+    values[`:${k}`] = v;
+    expr.push(`#${k} = :${k}`);
+  }
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { PK: `USER#${userID}`, SK: "PROFILE" },
+      UpdateExpression: `SET ${expr.join(", ")}`,
+      ConditionExpression: "attribute_exists(PK)",
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+    })
+  );
+}
+
+function withID(list, id) {
+  return list.includes(id) ? list : [...list, id];
+}
+
+function withoutID(list, id) {
+  return list.filter((x) => x !== id);
+}
+
+// follower starts following owner (both profiles already loaded).
+async function linkFollow(followerID, followerProfile, ownerID, ownerProfile) {
+  await setProfileFields(followerID, { Friends: withID(getFollowing(followerProfile), ownerID) });
+  await setProfileFields(ownerID, {
+    Followers: withID(getFollowers(ownerProfile), followerID),
+    FollowRequests: withoutID(getFollowRequests(ownerProfile), followerID),
+  });
+}
+
+async function acceptAllFollowRequests(ownerID) {
+  const owner = await getUserProfile(ownerID);
+  const pending = getFollowRequests(owner);
+  if (!pending.length) return;
+
+  let followers = getFollowers(owner);
+  for (const requesterID of pending) {
+    const requester = await getUserProfile(requesterID);
+    if (!requester) continue;
+    await setProfileFields(requesterID, { Friends: withID(getFollowing(requester), ownerID) });
+    followers = withID(followers, requesterID);
+  }
+  await setProfileFields(ownerID, { Followers: followers, FollowRequests: [] });
+}
+
+function followStateFor(viewerID, ownerProfile, viewerProfile) {
+  const access = buildViewerAccess(viewerID, ownerProfile, viewerProfile);
+  if (access.relationship === "friend") return "friends";
+  if (access.relationship === "follower") return "following";
+  if (access.followRequested) return "requested";
+  return "none";
+}
+
+// Follow, or request to follow a private account.
+app.post("/api/follow/:targetID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+  const viewerID = String(req.auth?.userID || "").trim();
+  const targetID = String(req.params.targetID || "").trim();
+  if (!targetID) return res.status(400).json({ error: "Missing targetID" });
+  if (targetID === viewerID) return res.status(400).json({ error: "You can't follow yourself" });
+
+  try {
+    const [viewer, target] = await Promise.all([getUserProfile(viewerID), getUserProfile(targetID)]);
+    if (!viewer || !target) return res.status(404).json({ error: "User not found" });
+
+    if (!getFollowing(viewer).includes(targetID)) {
+      if (target.PrivateAccount === true) {
+        await setProfileFields(targetID, {
+          FollowRequests: withID(getFollowRequests(target), viewerID),
+        });
+      } else {
+        await linkFollow(viewerID, viewer, targetID, target);
+      }
+    }
+
+    const [nextViewer, nextTarget] = await Promise.all([getUserProfile(viewerID), getUserProfile(targetID)]);
+    return res.json({
+      ok: true,
+      state: followStateFor(viewerID, nextTarget, nextViewer),
+      user: nextViewer,
+    });
+  } catch (e) {
+    console.error("POST /api/follow error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Unfollow, or cancel a pending request. Also drops the viewer's stats grant
+// to the target, matching what unfriending did before follows existed.
+app.delete("/api/follow/:targetID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+  const viewerID = String(req.auth?.userID || "").trim();
+  const targetID = String(req.params.targetID || "").trim();
+  if (!targetID) return res.status(400).json({ error: "Missing targetID" });
+
+  try {
+    const [viewer, target] = await Promise.all([getUserProfile(viewerID), getUserProfile(targetID)]);
+    if (!viewer) return res.status(404).json({ error: "User not found" });
+
+    await setProfileFields(viewerID, {
+      Friends: withoutID(getFollowing(viewer), targetID),
+      StatsAllowedFriends: withoutID(cleanIDList(viewer.StatsAllowedFriends), targetID),
+    });
+    if (target) {
+      await setProfileFields(targetID, {
+        Followers: withoutID(getFollowers(target), viewerID),
+        FollowRequests: withoutID(getFollowRequests(target), viewerID),
+      });
+    }
+
+    const nextViewer = await getUserProfile(viewerID);
+    return res.json({ ok: true, state: "none", user: nextViewer });
+  } catch (e) {
+    console.error("DELETE /api/follow error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Owner approves or declines a pending follow request.
+app.post("/api/followRequests/:userID/:requesterID/:decision", async (req, res) => {
+  if (!requirePkSk(res)) return;
+  const ownerID = String(req.params.userID || "").trim();
+  const requesterID = String(req.params.requesterID || "").trim();
+  const decision = String(req.params.decision || "").trim();
+  if (!["accept", "decline"].includes(decision)) {
+    return res.status(400).json({ error: "Decision must be accept or decline" });
+  }
+
+  try {
+    const owner = await getUserProfile(ownerID);
+    if (!owner) return res.status(404).json({ error: "User not found" });
+    if (!getFollowRequests(owner).includes(requesterID)) {
+      return res.status(404).json({ error: "No pending request from that user" });
+    }
+
+    const requester = decision === "accept" ? await getUserProfile(requesterID) : null;
+    if (requester) {
+      await linkFollow(requesterID, requester, ownerID, owner);
+    } else {
+      await setProfileFields(ownerID, {
+        FollowRequests: withoutID(getFollowRequests(owner), requesterID),
+      });
+    }
+
+    return res.json({ ok: true, user: await getUserProfile(ownerID) });
+  } catch (e) {
+    console.error("POST /api/followRequests error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Owner removes someone from their followers.
+app.delete("/api/followers/:userID/:followerID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+  const ownerID = String(req.params.userID || "").trim();
+  const followerID = String(req.params.followerID || "").trim();
+
+  try {
+    const [owner, follower] = await Promise.all([getUserProfile(ownerID), getUserProfile(followerID)]);
+    if (!owner) return res.status(404).json({ error: "User not found" });
+
+    await setProfileFields(ownerID, { Followers: withoutID(getFollowers(owner), followerID) });
+    if (follower) {
+      await setProfileFields(followerID, { Friends: withoutID(getFollowing(follower), ownerID) });
+    }
+    return res.json({ ok: true, user: await getUserProfile(ownerID) });
+  } catch (e) {
+    console.error("DELETE /api/followers error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
 // -------------------- SESSIONS --------------------
 app.get("/api/sessions/:userID", async (req, res) => {
   if (!requirePkSk(res)) return;
@@ -7262,6 +7686,7 @@ app.post("/api/wca/import", async (req, res) => {
     const requests = [];
     let importedSolveCount = 0;
     let importedEventCount = 0;
+    let linkedSolveCount = 0;
 
     for (const group of groups) {
       const event = normalizeEvent(group.event);
@@ -7277,8 +7702,34 @@ app.post("/api/wca/import", async (req, res) => {
       );
 
       const existingSolves = await getAllSolvesForSession(userID, event, sessionID);
-      const existingSignatures = new Set(existingSolves.map((item) => buildWcaSolveSignature(item)));
+      const existingBySignature = new Map(
+        existingSolves.map((item) => [buildWcaSolveSignature(item), item])
+      );
       let groupAddedCount = 0;
+
+      // Solves imported before competitions were tracked: link them from their
+      // "WCA import · <competition> · <round>" note. Matching by note rather
+      // than signature also catches solves whose dates were repaired since.
+      for (const already of existingSolves) {
+        if (already.Tag_Competition || already.Tags?.Competition) continue;
+        const link = parseWcaImportNote(already.Note);
+        if (!link) continue;
+        const healed = buildSolveItem({
+          userID,
+          event: already.Event,
+          sessionID: already.SessionID,
+          rawTimeMs: getRawTimeMs(already),
+          penalty: already.Penalty,
+          scramble: already.Scramble ?? "",
+          note: already.Note ?? "",
+          tags: { ...(already.Tags || {}), ...link },
+          createdAt: already.CreatedAt,
+          solveID: already.SolveID,
+          existing: already,
+        });
+        requests.push(...buildReplaceSolveAndTagRequests(already, healed));
+        linkedSolveCount += 1;
+      }
 
       for (let i = 0; i < solves.length; i++) {
         const s = solves[i] || {};
@@ -7289,7 +7740,7 @@ app.post("/api/wca/import", async (req, res) => {
           penalty: s.penalty,
           note: s.note,
         });
-        if (existingSignatures.has(signature)) continue;
+        if (existingBySignature.has(signature)) continue;
 
         const solveItem = buildSolveItem({
           userID,
@@ -7310,7 +7761,7 @@ app.post("/api/wca/import", async (req, res) => {
         for (const rankItem of buildSingleRankItemsForSolve(userID, solveItem)) {
           requests.push({ PutRequest: { Item: rankItem } });
         }
-        existingSignatures.add(signature);
+        existingBySignature.set(signature, solveItem);
         importedSolveCount += 1;
         groupAddedCount += 1;
       }
@@ -7318,7 +7769,12 @@ app.post("/api/wca/import", async (req, res) => {
       if (groupAddedCount > 0) importedEventCount += 1;
     }
 
-    if (requests.length) {
+    const competitionItems = buildWcaCompetitionItems(userID, rows, competitionDateMap);
+    for (const item of competitionItems) {
+      requests.push({ PutRequest: { Item: item } });
+    }
+
+    if (importedSolveCount > 0 || linkedSolveCount > 0) {
       await reserveImportSolveAllowance(userID, importedSolveCount, userItem);
 
       try {
@@ -7340,6 +7796,9 @@ app.post("/api/wca/import", async (req, res) => {
         await recomputeEventStats(ddb, TABLE, userID, event);
         await recomputeAllDayBucketsForEvent(userID, event);
       }
+    } else if (requests.length) {
+      // Nothing new to import, but keep competition names/results current.
+      await batchWriteRequestsWithRetry(requests);
     }
 
     const mergedSettings = {
@@ -7377,12 +7836,87 @@ app.post("/api/wca/import", async (req, res) => {
       ok: true,
       importedSolveCount,
       importedEventCount,
+      linkedSolveCount,
+      competitionCount: competitionItems.length,
       skippedEvents,
       user: updatedUser.Item || null,
     });
   } catch (e) {
     console.error("POST /api/wca/import error:", e);
     return res.status(Number(e?.statusCode) || 500).json({ error: e?.message || "Server error" });
+  }
+});
+
+async function queryAllPages(params) {
+  const items = [];
+  let ExclusiveStartKey;
+  do {
+    const out = await ddb.send(new QueryCommand({ ...params, ExclusiveStartKey }));
+    items.push(...(out?.Items || []));
+    ExclusiveStartKey = out?.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  return items;
+}
+
+app.get("/api/wca/competitions/:userID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const userID = String(req.params.userID || "").trim();
+    if (!userID) return res.status(400).json({ error: "Missing userID" });
+
+    const items = await queryAllPages({
+      TableName: TABLE,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :prefix)",
+      ExpressionAttributeValues: { ":pk": `USER#${userID}`, ":prefix": "WCACOMP#" },
+    });
+
+    items.sort((a, b) => String(b?.StartDay || "").localeCompare(String(a?.StartDay || "")));
+    return res.json({ items });
+  } catch (e) {
+    console.error("GET /api/wca/competitions error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+app.get("/api/wca/competitions/:userID/:competitionID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const userID = String(req.params.userID || "").trim();
+    const competitionID = String(req.params.competitionID || "").trim();
+    if (!userID || !competitionID) {
+      return res.status(400).json({ error: "Missing userID or competitionID" });
+    }
+
+    const out = await ddb.send(
+      new GetCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${userID}`, SK: `WCACOMP#${competitionID}` },
+      })
+    );
+    const competition = out.Item || null;
+    if (!competition) return res.status(404).json({ error: "Competition not found" });
+
+    const tagItems = await queryAllPages({
+      TableName: TABLE,
+      IndexName: "GSI3",
+      KeyConditionExpression: "GSI3PK = :pk",
+      ExpressionAttributeValues: {
+        ":pk": `TAG#${userID}#Competition#${normalizeTagIndexValue(competitionID)}`,
+      },
+    });
+    const solves = await batchGetItems(
+      tagItems
+        .map((item) => ({ PK: item?.SolvePK, SK: item?.SolveSK }))
+        .filter((key) => key.PK && key.SK)
+    );
+    solves.sort((a, b) => String(a?.CreatedAt || "").localeCompare(String(b?.CreatedAt || "")));
+
+    return res.json({ competition, solves });
+  } catch (e) {
+    console.error("GET /api/wca/competitions/:competitionID error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
   }
 });
 
@@ -7562,6 +8096,8 @@ app.post("/api/solves/bulk-tags", async (req, res) => {
 
     const writeRequests = [];
     const tagScopeMutations = new Map();
+    const dayBucketDirtyScopes = new Map();
+    const dayBucketTimeZone = await getUserDayBucketTimeZone(userID);
     const updatedItems = [];
 
     for (const update of normalizedUpdates) {
@@ -7600,12 +8136,23 @@ app.post("/api/solves/bulk-tags", async (req, res) => {
       writeRequests.push(...buildReplaceSolveAndTagRequests(existing, rebuilt));
       addTagScopeMutation(tagScopeMutations, existing, "remove");
       addTagScopeMutation(tagScopeMutations, rebuilt, "add");
+      const dirtyScopes = buildDirtyDayBucketScopesFromSolveMutation({
+        oldSolve: existing,
+        newSolve: rebuilt,
+        timeZone: dayBucketTimeZone,
+      });
+      for (const [key, scope] of dirtyScopes) dayBucketDirtyScopes.set(key, scope);
       updatedItems.push(rebuilt);
     }
 
     const wrote = await batchWriteRequestsWithRetry(writeRequests);
 
-    queueTagStatsInvalidationInBackground(`bulk-tags:${userID}`, userID, tagScopeMutations);
+    // Mark before responding so the client's refetch of tag stats and day
+    // buckets (which carry per-tag summaries) recomputes them.
+    await Promise.all([
+      markTagStatsScopesDirty(userID, tagScopeMutations),
+      markDayBucketScopesDirty(userID, dayBucketDirtyScopes),
+    ]);
 
     return res.json({
       ok: true,
@@ -7752,6 +8299,10 @@ app.put("/api/solve/:userID/:solveRef", async (req, res) => {
           `edit-tags:${userID}:${rebuilt.Event}`,
           userID,
           buildTagScopeMutationsForSolveMutation(existing, rebuilt)
+        );
+        // Day buckets carry per-tag summaries, so a tag change stales them too.
+        await withDbPhase("solve:edit:day-buckets", () =>
+          markDayBucketsDirtyForSolveMutation({ userID, oldSolve: existing, newSolve: rebuilt })
         );
       }
 
@@ -8219,7 +8770,7 @@ app.post("/api/post", async (req, res) => {
 
     await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
     const [friendIDs, payload] = await Promise.all([
-      listUserFriendIDs(userID),
+      listPostAudienceIDs(userID),
       buildUserPostNotificationPayload(item, userID),
     ]);
     publishNotificationToUsers([userID, ...friendIDs], payload);
@@ -8272,7 +8823,7 @@ app.delete("/api/post/:userID/:timestamp", async (req, res) => {
         Key: { PK: `USER#${userID}`, SK: `POST#${timestamp}` },
       })
     );
-    const friendIDs = await listUserFriendIDs(userID);
+    const friendIDs = await listPostAudienceIDs(userID);
     publishNotificationToUsers([userID, ...friendIDs], {
       type: "post.deleted",
       scope: "USER",
@@ -8298,6 +8849,10 @@ app.put("/api/postComments/:userID/:timestamp", async (req, res) => {
   }
 
   try {
+    if (!(await canViewSection(req, userID, "posts"))) {
+      return res.status(403).json({ error: "This is private", code: "PRIVATE", section: "posts" });
+    }
+
     await ddb.send(
       new UpdateCommand({
         TableName: TABLE,
@@ -8310,7 +8865,7 @@ app.put("/api/postComments/:userID/:timestamp", async (req, res) => {
       })
     );
 
-    const friendIDs = await listUserFriendIDs(userID);
+    const friendIDs = await listPostAudienceIDs(userID);
     publishNotificationToUsers([userID, ...friendIDs], {
       type: "post.comments.updated",
       scope: "USER",
@@ -8802,6 +9357,9 @@ app.get("/api/room/byHost/:hostID", async (req, res) => {
   try {
     const hostID = String(req.params.hostID || "").trim();
     if (!hostID) return res.status(400).json({ error: "Missing hostID" });
+    if (!(await canViewSection(req, hostID, "liveRoom"))) {
+      return res.json({ ok: true, item: null });
+    }
 
     const meta = await getRoomMeta(hostID);
     if (!meta || meta.Active !== true) {
@@ -8904,6 +9462,10 @@ app.post("/api/room/:roomID/join", async (req, res) => {
     const meta = await getRoomMeta(roomID);
     if (!meta || meta.Active !== true) {
       return res.status(404).json({ error: "Room not active" });
+    }
+    // Rooms are keyed by host, so roomID is the host's userID.
+    if (!(await canViewSection(req, roomID, "liveRoom"))) {
+      return res.status(403).json({ error: "This live room is private", code: "PRIVATE", section: "liveRoom" });
     }
 
     const ts = nowIso();
@@ -9518,6 +10080,13 @@ app.delete("/api/groupPost/:groupID/:timestamp/:userID", async (req, res) => {
     console.error("DELETE /api/groupPost error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
   }
+});
+
+// Express 4 doesn't catch async handler rejections, and Node treats an
+// unhandled rejection as fatal — one bad request used to take the whole API
+// down silently. Log it and keep serving.
+process.on("unhandledRejection", (reason) => {
+  console.error(`[${new Date().toISOString()}] Unhandled rejection:`, reason);
 });
 
 app.listen(port, () => {

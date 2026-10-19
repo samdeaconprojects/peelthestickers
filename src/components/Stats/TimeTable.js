@@ -8,6 +8,27 @@ import useSolveSelection from "../../hooks/useSolveSelection";
 import useBulkSolveActions from "../../hooks/useBulkSolveActions";
 import BulkSolveControls from "../SolveBulk/BulkSolveControls";
 import { normalizeEventCode } from "../SolveBulk/solveBulkUtils";
+import { useSettings } from "../../contexts/SettingsContext";
+import {
+  SHARED_TAG_FIELDS,
+  getAlgorithmTagDisplayValue,
+  getSolveTagValue,
+  getTagChipStyle,
+} from "../TagBar/tagUtils";
+import "../TagBar/TagBar.css";
+
+// Mirrors the home tag bar: these always show when set; the automatic fields
+// (timer input / solve source) only show if the home bar has them switched on.
+const ALWAYS_SHOWN_TAG_FIELDS = new Set(["CubeModel", "CrossColor", "Method"]);
+const AUTOMATIC_TAG_FIELDS = new Set(["TimerInput", "SolveSource"]);
+
+function getHomeTagVisibility(settings, eventKey, sessionID) {
+  const byEvent = settings?.homeTagVisibilityBySession;
+  if (!byEvent || typeof byEvent !== "object") return {};
+  const eventVisibility = byEvent[String(eventKey || "").trim().toUpperCase()] || {};
+  const sessionVisibility = eventVisibility[String(sessionID || "main").trim() || "main"];
+  return sessionVisibility && typeof sessionVisibility === "object" ? sessionVisibility : {};
+}
 
 // Scope-down sizes; only the ones smaller than what is loaded are offered.
 const TABLE_LIMITS = ["12", "25", "50", "100", "250", "500", "1000", "all"];
@@ -237,6 +258,11 @@ const TimeTable = ({
   containerClassName = "",
   renderSolveFooter = null,
   solveIndexOffset = null,
+  tagConfig,
+  cubeModelOptions = [],
+  discoveredTagOptions = {},
+  tagColors = {},
+  onTagColorsChange = null,
 }) => {
   const [selectedSolve, setSelectedSolve] = useState(null);
   const resolvedProfileColor = user?.Color || user?.color || "#2EC4B6";
@@ -285,6 +311,29 @@ const TimeTable = ({
   }, [solves, effectiveTableLimit]);
 
   const showAverages = showSolveAverages && sortBy !== "time";
+
+  const { settings } = useSettings();
+  const homeTagVisibility = useMemo(
+    () => getHomeTagVisibility(settings, eventKey || currentEvent, currentSession),
+    [settings, eventKey, currentEvent, currentSession]
+  );
+  const getSolveRowTags = (solve) =>
+    SHARED_TAG_FIELDS.map((field) => {
+      const value = getSolveTagValue(solve, field);
+      if (!value) return null;
+      const explicit = homeTagVisibility[field];
+      if (ALWAYS_SHOWN_TAG_FIELDS.has(field)) {
+        if (explicit === false) return null;
+      } else if (AUTOMATIC_TAG_FIELDS.has(field)) {
+        if (explicit !== true) return null;
+      } else if (explicit === false) {
+        return null;
+      }
+      const display = field.startsWith("Alg_")
+        ? getAlgorithmTagDisplayValue(field, value) || value
+        : value;
+      return { field, value, display };
+    }).filter(Boolean);
   const totalDisplayed = Array.isArray(limitedSolves) ? limitedSolves.length : 0;
 
   const timeRange = useMemo(() => {
@@ -600,11 +649,20 @@ const TimeTable = ({
           bulkShareNote={bulkActions.bulkShareNote}
           setBulkShareNote={bulkActions.setBulkShareNote}
           getSessionsForEvent={bulkActions.getSessionsForEvent}
+          bulkMoveEventOptions={bulkActions.bulkMoveEventOptions}
+          bulkStatus={bulkActions.bulkStatus}
+          dismissBulkStatus={bulkActions.dismissBulkStatus}
           applyBulkTags={bulkActions.applyBulkTags}
           applyBulkMove={bulkActions.applyBulkMove}
           applyBulkDelete={bulkActions.applyBulkDelete}
           applyBulkShare={bulkActions.applyBulkShare}
           enableShare={true}
+          tagConfig={tagConfig}
+          cubeModelOptions={cubeModelOptions}
+          discoveredTagOptions={discoveredTagOptions}
+          tagColors={tagColors}
+          onTagColorsChange={onTagColorsChange}
+          profileColor={resolvedProfileColor}
         />
       )}
 
@@ -720,12 +778,14 @@ const TimeTable = ({
                   boxShadow: "0 0 0 3px rgba(46,196,182,0.18)",
                 }
               : null;
+            const rowTags = typeof renderSolveFooter === "function" ? [] : getSolveRowTags(solve);
             return (
               <button
                 type="button"
                 key={`${solve?.datetime || "no-date"}-${solve?.fullIndex ?? index}-${index}`}
                 className="time-items-row"
                 style={selectStyleInline || undefined}
+                data-bulk-select-item="true"
                 onClick={(e) => onSolveClick(e, solve, index)}
                 onMouseDown={(e) => {
                   if (e.shiftKey || e.ctrlKey || e.metaKey || selection.selectionCount > 0) {
@@ -733,7 +793,7 @@ const TimeTable = ({
                   }
                 }}
               >
-                {isAverageDetailEmbedded ? (
+                {isAverageDetailEmbedded && showAverages ? (
                   <div className="time-items-left-rail">
                     <div className="time-items-rank time-items-rank--detail">
                       <span className="time-items-rank-value">{solve.__displayNumber}</span>
@@ -794,11 +854,25 @@ const TimeTable = ({
                         </div>
 
                         {((!isAverageDetailEmbedded && showAverages) ||
-                          typeof renderSolveFooter === "function") && (
+                          typeof renderSolveFooter === "function" ||
+                          rowTags.length > 0) && (
                           <div className="time-items-side">
                             {typeof renderSolveFooter === "function" ? (
                               <div className="time-items-footer">
                                 {renderSolveFooter(solve, { displayMode: "table", index })}
+                              </div>
+                            ) : rowTags.length > 0 ? (
+                              <div className="time-items-tags" aria-label="Tags for this solve">
+                                {rowTags.map((tag) => (
+                                  <span
+                                    key={tag.field}
+                                    className="tagHomeChip is-set time-items-tag-chip"
+                                    style={getTagChipStyle(tag.field, tag.value, tagColors, resolvedProfileColor)}
+                                    title={tag.value}
+                                  >
+                                    <span className="tagHomeChipValue">{tag.display}</span>
+                                  </span>
+                                ))}
                               </div>
                             ) : null}
 
@@ -893,6 +967,7 @@ const TimeTable = ({
                           useRowBorder && isRowWorst ? "dashed-border-max" : ""
                         }`.trim()}
                         style={cellStyle}
+                        data-bulk-select-item="true"
                         onClick={(e) => onSolveClick(e, solve, solve.__flatIndex)}
                         onMouseDown={(e) => {
                           if (e.shiftKey || e.ctrlKey || e.metaKey || selection.selectionCount > 0) {
@@ -1026,6 +1101,11 @@ TimeTable.propTypes = {
   highlightTrimmedSolves: PropTypes.bool,
   showSolveAverages: PropTypes.bool,
   containerClassName: PropTypes.string,
+  tagConfig: PropTypes.object,
+  cubeModelOptions: PropTypes.array,
+  discoveredTagOptions: PropTypes.object,
+  tagColors: PropTypes.object,
+  onTagColorsChange: PropTypes.func,
   renderSolveFooter: PropTypes.func,
   solveIndexOffset: PropTypes.number,
 };

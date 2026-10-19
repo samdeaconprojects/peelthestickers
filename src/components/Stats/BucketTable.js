@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import { formatTime } from "../TimeList/TimeUtils";
 import "./TimeTable.css";
@@ -150,7 +150,7 @@ function stdDevMs(item) {
   return variance > 0 ? Math.sqrt(variance) : null;
 }
 
-function BucketDayTooltip({ item, anchor }) {
+function BucketDayTooltip({ item, anchor, allEvents = false, competitions = [] }) {
   const ref = useRef(null);
   const [pos, setPos] = useState({ left: -9999, top: -9999 });
 
@@ -168,14 +168,22 @@ function BucketDayTooltip({ item, anchor }) {
 
   const total = Number(item?.SolveCountTotal);
   const included = Number(item?.SolveCountIncluded);
-  const sd = stdDevMs(item);
-  const timeRows = TOOLTIP_TIME_FIELDS.filter(([, field]) => Number(item?.[field]) > 0);
+  // Times pooled across different puzzles don't mean anything, so an
+  // all-events day only shows its counts.
+  const sd = allEvents ? null : stdDevMs(item);
+  const timeRows = allEvents ? [] : TOOLTIP_TIME_FIELDS.filter(([, field]) => Number(item?.[field]) > 0);
 
   return (
     <div ref={ref} className="bucket-calendar-tooltip" style={{ left: pos.left, top: pos.top }} role="tooltip">
       <div className="bucket-calendar-tooltip-title">{formatBucketDay(item.BucketDay)}</div>
+      {competitions.map((comp) => (
+        <div key={comp.CompetitionID} className="bucket-calendar-tooltip-competition">
+          <span className="bucket-competition-badge">WCA</span>
+          {comp.Name || comp.CompetitionID}
+        </div>
+      ))}
       <div className="bucket-calendar-tooltip-headline">
-        <span>{statCount(total)}</span> solves
+        <span>{statCount(total)}</span> solves{allEvents ? " · all events" : ""}
         {Number.isFinite(included) && included !== total && (
           <em> ({statCount(included)} counted)</em>
         )}
@@ -198,7 +206,9 @@ function BucketDayTooltip({ item, anchor }) {
         <span>+2</span>
         <strong>{statCount(item.Plus2Count ?? 0)}</strong>
       </div>
-      <div className="bucket-calendar-tooltip-hint">Click to open this day</div>
+      <div className="bucket-calendar-tooltip-hint">
+        {competitions.length ? "Click for the competition or this day" : "Click to open this day"}
+      </div>
     </div>
   );
 }
@@ -206,10 +216,200 @@ function BucketDayTooltip({ item, anchor }) {
 BucketDayTooltip.propTypes = {
   item: PropTypes.object.isRequired,
   anchor: PropTypes.object,
+  allEvents: PropTypes.bool,
+  competitions: PropTypes.arrayOf(PropTypes.object),
 };
 
-function BucketCalendar({ rows, metric, strengthStyle, profileColor, selectedDay, onBucketSelect }) {
+const MAX_COMPETITION_SPAN_DAYS = 14;
+
+// dayKey -> competitions held that day. A competition covers StartDay..EndDay.
+function buildCompetitionsByDay(competitions) {
+  const byDay = new Map();
+  for (const comp of Array.isArray(competitions) ? competitions : []) {
+    const start = String(comp?.StartDay || "").trim();
+    const end = String(comp?.EndDay || start).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) continue;
+    const cursor = new Date(`${start}T12:00:00`);
+    for (let i = 0; i < MAX_COMPETITION_SPAN_DAYS; i += 1) {
+      const key = dayKeyOf(cursor);
+      if (key > end) break;
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key).push(comp);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  }
+  return byDay;
+}
+
+function formatCompetitionDates(comp) {
+  const start = String(comp?.StartDay || "");
+  const end = String(comp?.EndDay || start);
+  if (!start) return "";
+  if (start === end) return formatBucketDay(start);
+  return `${formatBucketDay(start)} – ${formatBucketDay(end)}`;
+}
+
+// Day buckets carry per-tag totals, so a competition day can say how many of
+// its solves came from the competition and how many were ordinary sessions.
+function competitionSolveCount(item) {
+  const summaries = Array.isArray(item?.TagSummaries) ? item.TagSummaries : null;
+  if (!summaries) return null;
+  return summaries
+    .filter((entry) => entry?.TagKey === "Competition")
+    .reduce((sum, entry) => sum + (Number(entry?.SolveCountTotal) || 0), 0);
+}
+
+function CompetitionDayCard({ dayKey, item, competitions, anchor, onOpenCompetition, onOpenDay, onClose }) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState({ left: -9999, top: -9999 });
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !anchor) return;
+    const box = el.getBoundingClientRect();
+    const margin = 8;
+    let left = anchor.left + anchor.width / 2 - box.width / 2;
+    left = Math.max(margin, Math.min(left, window.innerWidth - box.width - margin));
+    let top = anchor.bottom + margin;
+    if (top + box.height > window.innerHeight - margin) top = anchor.top - box.height - margin;
+    setPos({ left, top: Math.max(margin, top) });
+  }, [anchor]);
+
+  useEffect(() => {
+    const onPointerDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    const onScroll = () => onClose();
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [onClose]);
+
+  useEffect(() => {
+    ref.current?.querySelector("button")?.focus();
+  }, []);
+
+  const total = Number(item?.SolveCountTotal) || 0;
+  const fromCompetition = competitionSolveCount(item);
+  const others = fromCompetition == null ? null : Math.max(0, total - fromCompetition);
+
+  return (
+    <div
+      ref={ref}
+      className="bucket-competition-card"
+      style={{ left: pos.left, top: pos.top }}
+      role="dialog"
+      aria-label={`${formatBucketDay(dayKey)} options`}
+    >
+      <div className="bucket-competition-card-day">{formatBucketDay(dayKey)}</div>
+      {competitions.map((comp) => (
+        <button
+          key={comp.CompetitionID}
+          type="button"
+          className="bucket-competition-card-comp"
+          onClick={() => onOpenCompetition(comp.CompetitionID)}
+        >
+          <span className="bucket-competition-badge">WCA</span>
+          <span className="bucket-competition-card-comp-text">
+            <strong>{comp.Name || comp.CompetitionID}</strong>
+            <span>
+              {[comp.City, formatCompetitionDates(comp)].filter(Boolean).join(" · ")}
+            </span>
+          </span>
+          <span className="bucket-competition-card-cta">All results ›</span>
+        </button>
+      ))}
+      {item ? (
+        <button type="button" className="bucket-competition-card-day-btn" onClick={() => onOpenDay(dayKey)}>
+          <strong>All solves this day</strong>
+          <span>
+            {statCount(total)} solves
+            {others != null && fromCompetition > 0
+              ? ` · ${statCount(fromCompetition)} competition, ${statCount(others)} other`
+              : ""}
+          </span>
+        </button>
+      ) : (
+        <div className="bucket-competition-card-note">No solves in this view on this day.</div>
+      )}
+    </div>
+  );
+}
+
+CompetitionDayCard.propTypes = {
+  dayKey: PropTypes.string.isRequired,
+  item: PropTypes.object,
+  competitions: PropTypes.arrayOf(PropTypes.object).isRequired,
+  anchor: PropTypes.object,
+  onOpenCompetition: PropTypes.func.isRequired,
+  onOpenDay: PropTypes.func.isRequired,
+  onClose: PropTypes.func.isRequired,
+};
+
+// Squares grow to fill the width when only a few months are shown (a 2-week
+// range gets big squares with day numbers); long ranges stay at the compact
+// minimum so a full year still fits in a couple of rows.
+const CAL_MIN_CELL = 16;
+const CAL_MAX_CELL = 52;
+const CAL_MONTH_GAP = 12;
+const CAL_MONTH_CHROME = 22; // month card padding + border
+
+function calendarGapFor(cell) {
+  return Math.max(3, Math.round(cell * 0.15));
+}
+
+function calendarMonthWidth(cell) {
+  return cell * 7 + calendarGapFor(cell) * 6 + CAL_MONTH_CHROME;
+}
+
+function calendarSizing(width, monthCount) {
+  if (!(width > 0) || !(monthCount > 0)) {
+    return { cell: CAL_MIN_CELL, gap: calendarGapFor(CAL_MIN_CELL), showDayNumbers: false };
+  }
+  const maxPerRow = Math.max(
+    1,
+    Math.floor((width + CAL_MONTH_GAP) / (calendarMonthWidth(CAL_MIN_CELL) + CAL_MONTH_GAP))
+  );
+  const perRow = Math.min(monthCount, maxPerRow);
+  const monthWidth = (width - (perRow - 1) * CAL_MONTH_GAP) / perRow;
+  let cell = CAL_MAX_CELL;
+  while (cell > CAL_MIN_CELL && calendarMonthWidth(cell) > monthWidth) cell -= 1;
+  return { cell, gap: calendarGapFor(cell), showDayNumbers: cell >= 30 };
+}
+
+function BucketCalendar({
+  rows,
+  metric,
+  strengthStyle,
+  profileColor,
+  allEvents = false,
+  selectedDay,
+  competitionsByDay,
+  onDayClick,
+}) {
   const [hover, setHover] = useState(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const resizeObserverRef = useRef(null);
+  // Callback ref: the calendar node only mounts once there is data, so watch
+  // it whenever it (re)appears rather than once on first render.
+  const containerRef = useCallback((node) => {
+    resizeObserverRef.current?.disconnect();
+    resizeObserverRef.current = null;
+    if (!node) return;
+    setContainerWidth(node.clientWidth);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => setContainerWidth(entry.contentRect.width));
+    observer.observe(node);
+    resizeObserverRef.current = observer;
+  }, []);
 
   const { months, scale } = useMemo(() => {
     const byDay = new Map();
@@ -261,12 +461,18 @@ function BucketCalendar({ rows, metric, strengthStyle, profileColor, selectedDay
     return { months: out, scale: true };
   }, [rows]);
 
+  const sizing = calendarSizing(containerWidth, months.length);
+
   if (!scale) {
     return <div className="bucket-items-empty">No bucket data available for this range.</div>;
   }
 
   return (
-    <div className="bucket-calendar">
+    <div
+      ref={containerRef}
+      className={`bucket-calendar${sizing.showDayNumbers ? " show-day-numbers" : ""}`}
+      style={{ "--cal-cell": `${sizing.cell}px`, "--cal-gap": `${sizing.gap}px` }}
+    >
       <div className="bucket-calendar-months">
         {months.map((month) => (
           <div key={month.key} className="bucket-calendar-month">
@@ -279,28 +485,34 @@ function BucketCalendar({ rows, metric, strengthStyle, profileColor, selectedDay
                 if (!cell) return <div key={`pad-${i}`} className="bucket-calendar-pad" />;
                 const cellVars = cell.item ? cellStyle(metric, cell.countPct, cell.meanPct, profileColor, strengthStyle) : null;
                 const isSelected = !!selectedDay && cell.key === selectedDay;
+                const dayCompetitions = competitionsByDay?.get(cell.key) || null;
+                const competitionLabel = dayCompetitions
+                  ? `, WCA: ${dayCompetitions.map((comp) => comp.Name || comp.CompetitionID).join(", ")}`
+                  : "";
                 return (
                   <button
                     type="button"
                     key={cell.key}
-                    className={`bucket-calendar-cell${cell.item ? " has-data" : ""}${isSelected ? " is-selected" : ""}`}
+                    className={`bucket-calendar-cell${cell.item ? " has-data" : ""}${dayCompetitions ? " has-competition" : ""}${isSelected ? " is-selected" : ""}`}
                     style={cellVars || undefined}
-                    aria-label={formatBucketDay(cell.key)}
+                    aria-label={`${formatBucketDay(cell.key)}${competitionLabel}`}
                     aria-pressed={isSelected}
-                    disabled={!cell.item}
+                    disabled={!cell.item && !dayCompetitions}
                     onMouseEnter={(e) => {
-                      if (cell.item) setHover({ item: cell.item, anchor: e.currentTarget.getBoundingClientRect() });
+                      if (cell.item) setHover({ item: cell.item, competitions: dayCompetitions || [], anchor: e.currentTarget.getBoundingClientRect() });
                     }}
                     onMouseLeave={() => setHover(null)}
                     onFocus={(e) => {
-                      if (cell.item) setHover({ item: cell.item, anchor: e.currentTarget.getBoundingClientRect() });
+                      if (cell.item) setHover({ item: cell.item, competitions: dayCompetitions || [], anchor: e.currentTarget.getBoundingClientRect() });
                     }}
                     onBlur={() => setHover(null)}
-                    onClick={() => {
+                    onClick={(e) => {
                       setHover(null);
-                      if (typeof onBucketSelect === "function") onBucketSelect(cell.key);
+                      onDayClick(cell.key, cell.item, e.currentTarget.getBoundingClientRect());
                     }}
-                  />
+                  >
+                    {sizing.showDayNumbers ? <span className="bucket-calendar-day-number">{cell.day}</span> : null}
+                  </button>
                 );
               })}
             </div>
@@ -308,7 +520,14 @@ function BucketCalendar({ rows, metric, strengthStyle, profileColor, selectedDay
         ))}
       </div>
 
-      {hover && <BucketDayTooltip item={hover.item} anchor={hover.anchor} />}
+      {hover && (
+        <BucketDayTooltip
+          item={hover.item}
+          anchor={hover.anchor}
+          allEvents={allEvents}
+          competitions={hover.competitions}
+        />
+      )}
 
       <div className="bucket-calendar-legend">
         {metric === "both" ? (
@@ -341,11 +560,20 @@ BucketCalendar.propTypes = {
   metric: PropTypes.oneOf(["count", "mean", "both"]).isRequired,
   strengthStyle: PropTypes.oneOf(["fill", "fade"]).isRequired,
   profileColor: PropTypes.string.isRequired,
+  allEvents: PropTypes.bool,
   selectedDay: PropTypes.string,
-  onBucketSelect: PropTypes.func,
+  competitionsByDay: PropTypes.instanceOf(Map),
+  onDayClick: PropTypes.func.isRequired,
 };
 
-function BucketTable({ bucketItems = [], profileColor = "#2EC4B6", selectedDay = "", onBucketSelect = null }) {
+function BucketTable({
+  bucketItems = [],
+  profileColor = "#2EC4B6",
+  selectedDay = "",
+  onBucketSelect = null,
+  competitions = [],
+  onCompetitionOpen = null,
+}) {
   const [limit, setLimit] = useState("all");
   const [view, setViewState] = useState(() => readStored(VIEW_STORAGE_KEY, ["list", "calendar"], "calendar"));
   const [metric, setMetricState] = useState(() =>
@@ -377,6 +605,32 @@ function BucketTable({ bucketItems = [], profileColor = "#2EC4B6", selectedDay =
     return items.slice(0, n);
   }, [bucketItems, limit]);
 
+  // All-events day buckets pool every puzzle together, so only the total
+  // solve count is meaningful: shade by count and hide the mean-based modes.
+  const isAllEventsScope =
+    rows.length > 0 && rows.every((item) => item.Scope === "ALL" || !item.Event);
+  const calendarMetric = isAllEventsScope ? "count" : metric;
+
+  const competitionsByDay = useMemo(
+    () => (typeof onCompetitionOpen === "function" ? buildCompetitionsByDay(competitions) : new Map()),
+    [competitions, onCompetitionOpen]
+  );
+  // A competition day can also hold ordinary solves, so clicking it asks
+  // which one to open instead of guessing.
+  const [dayCard, setDayCard] = useState(null);
+  const closeDayCard = useCallback(() => setDayCard(null), []);
+  const handleDayClick = useCallback(
+    (dayKey, item, anchor) => {
+      const dayCompetitions = competitionsByDay.get(dayKey);
+      if (dayCompetitions?.length) {
+        setDayCard({ dayKey, item, competitions: dayCompetitions, anchor });
+        return;
+      }
+      if (item && typeof onBucketSelect === "function") onBucketSelect(dayKey);
+    },
+    [competitionsByDay, onBucketSelect]
+  );
+
   return (
     <div className="time-table-container bucket-table-container">
       <div className="time-table-toolbar bucket-table-toolbar">
@@ -400,7 +654,7 @@ function BucketTable({ bucketItems = [], profileColor = "#2EC4B6", selectedDay =
               </button>
             ))}
           </div>
-          {view === "calendar" && (
+          {view === "calendar" && !isAllEventsScope && (
             <div className="bucket-table-segment" role="group" aria-label="Calendar shading">
               {[["count", "Count"], ["mean", "Mean"], ["both", "Both"]].map(([value, label]) => (
                 <button
@@ -453,17 +707,20 @@ function BucketTable({ bucketItems = [], profileColor = "#2EC4B6", selectedDay =
       {view === "calendar" ? (
         <BucketCalendar
           rows={rows}
-          metric={metric}
+          metric={calendarMetric}
+          allEvents={isAllEventsScope}
           strengthStyle={strengthStyle}
           profileColor={profileColor || "#2EC4B6"}
           selectedDay={selectedDay}
-          onBucketSelect={onBucketSelect}
+          competitionsByDay={competitionsByDay}
+          onDayClick={handleDayClick}
         />
       ) : (
       <div className="time-items-view bucket-items-view">
         {rows.map((item) => {
           const dayKey = String(item?.BucketDay || "").trim();
           const isSelected = !!selectedDay && dayKey === selectedDay;
+          const dayCompetitions = competitionsByDay.get(dayKey);
 
           return (
             <button
@@ -471,8 +728,8 @@ function BucketTable({ bucketItems = [], profileColor = "#2EC4B6", selectedDay =
               key={`${item.Event || "ALL"}-${item.SessionID || "ALL"}-${item.BucketDay}`}
               className="time-items-row bucket-items-row"
               aria-pressed={isSelected}
-              onClick={() => {
-                if (typeof onBucketSelect === "function" && dayKey) onBucketSelect(dayKey);
+              onClick={(e) => {
+                if (dayKey) handleDayClick(dayKey, item, e.currentTarget.getBoundingClientRect());
               }}
               style={isSelected ? {
                 outline: "2px solid rgba(46,196,182,0.95)",
@@ -482,6 +739,12 @@ function BucketTable({ bucketItems = [], profileColor = "#2EC4B6", selectedDay =
             >
               <div className="time-items-rank bucket-items-rank">
                 {formatBucketDay(item.BucketDay)}
+                {dayCompetitions?.map((comp) => (
+                  <span key={comp.CompetitionID} className="bucket-items-competition">
+                    <span className="bucket-competition-badge">WCA</span>
+                    {comp.Name || comp.CompetitionID}
+                  </span>
+                ))}
               </div>
 
               <div className="time-items-main bucket-items-main">
@@ -534,6 +797,24 @@ function BucketTable({ bucketItems = [], profileColor = "#2EC4B6", selectedDay =
         )}
       </div>
       )}
+
+      {dayCard && (
+        <CompetitionDayCard
+          dayKey={dayCard.dayKey}
+          item={dayCard.item}
+          competitions={dayCard.competitions}
+          anchor={dayCard.anchor}
+          onClose={closeDayCard}
+          onOpenCompetition={(competitionID) => {
+            setDayCard(null);
+            onCompetitionOpen(competitionID);
+          }}
+          onOpenDay={(dayKey) => {
+            setDayCard(null);
+            if (typeof onBucketSelect === "function") onBucketSelect(dayKey);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -543,6 +824,8 @@ BucketTable.propTypes = {
   profileColor: PropTypes.string,
   selectedDay: PropTypes.string,
   onBucketSelect: PropTypes.func,
+  competitions: PropTypes.arrayOf(PropTypes.object),
+  onCompetitionOpen: PropTypes.func,
 };
 
 export default React.memo(BucketTable);

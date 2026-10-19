@@ -20,6 +20,11 @@
   border-bottom: 1px solid rgba(46, 196, 182, 0.32);
 }
 
+.offline-banner--viewing {
+  background-color: rgba(80, 182, 255, 0.14);
+  border-bottom: 1px solid rgba(80, 182, 255, 0.32);
+}
+
 .offline-banner__dot {
   width: 8px;
   height: 8px;
@@ -27,15 +32,30 @@
   flex-shrink: 0;
 }
 
-.offline-banner--offline .offline-banner__dot {
+.offline-banner--offline .offline-banner--viewing {
+  background-color: rgba(80, 182, 255, 0.14);
+  border-bottom: 1px solid rgba(80, 182, 255, 0.32);
+}
+
+.offline-banner__dot {
   background-color: #FB596D;
   box-shadow: 0 0 6px rgba(251, 89, 109, 0.8);
 }
 
-.offline-banner--pending .offline-banner__dot {
+.offline-banner--pending .offline-banner--viewing {
+  background-color: rgba(80, 182, 255, 0.14);
+  border-bottom: 1px solid rgba(80, 182, 255, 0.32);
+}
+
+.offline-banner__dot {
   background-color: #2EC4B6;
   box-shadow: 0 0 6px rgba(46, 196, 182, 0.8);
   animation: offline-banner-pulse 1.6s ease-in-out infinite;
+}
+
+.offline-banner--viewing .offline-banner__dot {
+  background-color: #50B6FF;
+  box-shadow: 0 0 6px rgba(80, 182, 255, 0.8);
 }
 
 @keyframes offline-banner-pulse {

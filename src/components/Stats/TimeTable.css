@@ -147,13 +147,16 @@
   display: flex;
   align-items: stretch;
   gap: 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   padding: 26px 18px;
   min-height: 86px;
   box-sizing: border-box;
   color: white;
+  /* App.css dims every <button> to 50%; rows are buttons but should read at full strength */
+  opacity: 1;
+  height: auto;
   text-align: left;
   cursor: pointer;
   transition: background-color 0.18s ease, border-color 0.18s ease, transform 0.12s ease;
@@ -179,8 +182,8 @@
 }
 
 .time-items-row:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
 .time-items-row:active {
@@ -195,7 +198,7 @@
   justify-content: center;
   font-size: 0.98rem;
   font-weight: 700;
-  opacity: 0.8;
+  opacity: 0.95;
 }
 
 .bucket-items-rank {
@@ -354,7 +357,7 @@
 
 .time-items-date {
   font-size: 0.86rem;
-  opacity: 0.72;
+  opacity: 0.88;
   line-height: 1.2;
 }
 
@@ -403,7 +406,7 @@
 
 .time-items-average-label {
   font-size: 0.74rem;
-  opacity: 0.68;
+  opacity: 0.82;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -417,6 +420,31 @@
   display: flex;
   justify-content: flex-end;
   width: 100%;
+}
+
+.time-items-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 320px;
+}
+
+.time-items-tag-chip.tagHomeChip {
+  width: auto;
+  min-width: 0;
+  max-width: 160px;
+  min-height: 0;
+  padding: 3px 8px;
+  border-radius: 8px;
+  opacity: 1;
+  cursor: inherit;
+  box-shadow: none;
+}
+
+.time-items-tag-chip.tagHomeChip:hover {
+  transform: none;
+  box-shadow: none;
 }
 
 .time-items-average-value {
@@ -783,6 +811,11 @@
   gap: 12px;
 }
 
+.bucket-calendar.show-day-numbers .bucket-calendar-month-label {
+  font-size: 0.86rem;
+  margin-bottom: 10px;
+}
+
 .bucket-calendar-month {
   flex: 0 0 auto;
   background: rgba(255, 255, 255, 0.03);
@@ -802,25 +835,26 @@
 
 .bucket-calendar-grid {
   display: grid;
-  grid-template-columns: repeat(7, 16px);
-  grid-auto-rows: 16px;
-  gap: 3px;
+  grid-template-columns: repeat(7, var(--cal-cell, 16px));
+  grid-auto-rows: var(--cal-cell, 16px);
+  gap: var(--cal-gap, 3px);
 }
 
 .bucket-calendar-weekday {
-  font-size: 0.58rem;
-  line-height: 16px;
+  font-size: clamp(0.58rem, calc(var(--cal-cell, 16px) * 0.3), 0.85rem);
+  line-height: var(--cal-cell, 16px);
   font-weight: 700;
   text-align: center;
   opacity: 0.45;
 }
 
 .bucket-calendar-cell {
-  width: 16px;
-  height: 16px;
+  width: var(--cal-cell, 16px);
+  height: var(--cal-cell, 16px);
   padding: 0;
   border: 0;
-  border-radius: 3px;
+  border-radius: max(3px, calc(var(--cal-cell, 16px) * 0.16));
+  position: relative;
   background: rgba(255, 255, 255, 0.05);
   cursor: default;
 }
@@ -947,4 +981,167 @@
   width: 12px;
   height: 12px;
   border-radius: 3px;
+}
+
+.bucket-calendar-day-number {
+  position: absolute;
+  top: 3px;
+  left: 5px;
+  font-size: calc(var(--cal-cell, 16px) * 0.26);
+  font-weight: 800;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.9);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+  pointer-events: none;
+}
+
+.bucket-calendar-cell:not(.has-data) .bucket-calendar-day-number {
+  color: rgba(255, 255, 255, 0.28);
+  text-shadow: none;
+}
+
+/* ---- WCA competition days ---- */
+.bucket-competition-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 196, 0, 0.18);
+  color: #ffc400;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.bucket-calendar-cell.has-competition::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: max(5px, calc(var(--cal-cell, 16px) * 0.32));
+  height: max(5px, calc(var(--cal-cell, 16px) * 0.32));
+  border-radius: 50%;
+  background: #ffc400;
+  box-shadow: 0 0 0 1.5px rgba(14, 18, 26, 0.95);
+  pointer-events: none;
+}
+
+.bucket-calendar-cell.has-competition {
+  cursor: pointer;
+}
+
+.bucket-calendar-tooltip-competition {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 4px;
+  font-weight: 700;
+}
+
+.bucket-items-competition {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.bucket-competition-card {
+  position: fixed;
+  z-index: 10001;
+  width: min(320px, calc(100vw - 16px));
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(14, 18, 26, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  color: white;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bucket-competition-card-day {
+  font-size: 0.74rem;
+  font-weight: 800;
+  opacity: 0.6;
+  padding: 0 4px 2px;
+}
+
+.bucket-competition-card-comp,
+.bucket-competition-card-day-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.bucket-competition-card-comp {
+  border-color: rgba(255, 196, 0, 0.35);
+  background: rgba(255, 196, 0, 0.08);
+}
+
+.bucket-competition-card-comp:hover,
+.bucket-competition-card-comp:focus-visible {
+  background: rgba(255, 196, 0, 0.16);
+}
+
+.bucket-competition-card-day-btn:hover,
+.bucket-competition-card-day-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.bucket-competition-card-comp-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.bucket-competition-card-comp-text strong {
+  font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bucket-competition-card-comp-text span,
+.bucket-competition-card-day-btn span {
+  font-size: 0.72rem;
+  opacity: 0.65;
+}
+
+.bucket-competition-card-cta {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #ffc400;
+  white-space: nowrap;
+}
+
+.bucket-competition-card-day-btn {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.bucket-competition-card-day-btn strong {
+  font-size: 0.84rem;
+}
+
+.bucket-competition-card-note {
+  font-size: 0.72rem;
+  opacity: 0.55;
+  padding: 2px 4px;
 }

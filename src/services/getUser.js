@@ -28,7 +28,7 @@ function normalizeHexColor(value, fallback = "#2EC4B6") {
   return fallback;
 }
 
-function normalizeUserRecord(user) {
+export function normalizeUserRecord(user) {
   if (!user || typeof user !== "object") return user;
 
   const derivedUserID = firstNonEmpty(

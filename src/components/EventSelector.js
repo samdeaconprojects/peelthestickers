@@ -758,7 +758,11 @@ const EventSelector = forwardRef(function EventSelector(
   const sessionLabel =
     activeSharedLabel ||
     normalSessionsForEvent.find((s) => s.id === activeSession)?.name ||
-    (String(activeSession || "main") === "main" ? "Main" : activeSession);
+    (String(activeSession || "main") === "main"
+      ? "Main"
+      : /^(SHARED#|shared_)/.test(String(activeSession))
+      ? "Shared"
+      : activeSession);
 
   // -----------------------------
   // Create session / relay session

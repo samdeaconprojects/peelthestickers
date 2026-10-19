@@ -70,10 +70,10 @@ function PlayerBar({
     ? Number(sharedAverageMeta.currentIndex)
     : 0;
   const currentSharedRow = sharedRows[currentSharedIndex] || null;
-  const sharedRoundLabel = `Round ${Math.min(
+  const sharedRoundLabel = `${Math.min(
     currentSharedIndex + 1,
     sharedAverageMeta?.count || 1
-  )} / ${sharedAverageMeta?.count || 1}`;
+  )}/${sharedAverageMeta?.count || 1}`;
   return (
     <div
       className="player-bar"
@@ -106,6 +106,44 @@ function PlayerBar({
             onSessionChange={onSessionChange}
             onSelectSessionObj={onSelectSessionObj}
           />
+          {sharedAverageMeta?.active ? (
+            <div
+              className="playerbar-shared-chip"
+              title={
+                sharedAverageMeta?.theirLabel
+                  ? `Shared ${String(sharedAverageMeta?.modeLabel || "average").toLowerCase()} vs ${sharedAverageMeta.theirLabel}`
+                  : "Shared average"
+              }
+            >
+              <span className="playerbar-shared-chip__dot" aria-hidden="true" />
+              <span className="playerbar-shared-chip__label">
+                {sharedAverageMeta?.theirLabel || "Shared"}
+              </span>
+              <span className="playerbar-shared-chip__meta">{sharedRoundLabel}</span>
+              {typeof onRefreshSharedAverage === "function" && (
+                <button
+                  type="button"
+                  className="playerbar-shared-chip__button"
+                  onClick={() => onRefreshSharedAverage()}
+                  aria-label="Refresh shared average"
+                  title="Refresh"
+                >
+                  ↻
+                </button>
+              )}
+              {typeof onLeaveSharedSession === "function" && (
+                <button
+                  type="button"
+                  className="playerbar-shared-chip__button"
+                  onClick={() => onLeaveSharedSession()}
+                  aria-label="Exit shared average"
+                  title="Exit"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          ) : null}
         </div>
         <div className="playerbar-timer">
           <Timer
@@ -149,35 +187,6 @@ function PlayerBar({
               >
                 {hostedRoomMeta.isHost ? "Stop" : "Leave"}
               </button>
-            </div>
-          ) : null}
-          {sharedAverageMeta?.active ? (
-            <div className="playerbar-shared-pill">
-              <span className="playerbar-shared-pill__label">Shared average</span>
-              {sharedAverageMeta?.theirLabel ? (
-                <span className="playerbar-shared-pill__meta">
-                  vs {sharedAverageMeta.theirLabel}
-                </span>
-              ) : null}
-              <span className="playerbar-shared-pill__meta">{sharedRoundLabel}</span>
-              {typeof onRefreshSharedAverage === "function" && (
-                <button
-                  type="button"
-                  className="playerbar-shared-pill__button"
-                  onClick={() => onRefreshSharedAverage()}
-                >
-                  Refresh
-                </button>
-              )}
-              {typeof onLeaveSharedSession === "function" && (
-                <button
-                  type="button"
-                  className="playerbar-shared-pill__button"
-                  onClick={() => onLeaveSharedSession()}
-                >
-                  Exit
-                </button>
-              )}
             </div>
           ) : null}
           <TimeList

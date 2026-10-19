@@ -32,7 +32,10 @@ import { createSocialEventSource } from "../../services/socialEvents";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import { currentEventToString, generateScramble } from "../scrambleUtils";
 import SharedAverageModal from "./SharedAverageModal";
-import SharedAverageMessage from "./SharedAverageMessage";
+import SharedAverageMessage, {
+  SHARED_JOIN_PREFIX,
+  parseSharedJoinPayload,
+} from "./SharedAverageMessage";
 import CreateGroupModal from "./CreateGroupModal";
 import JoinRoomModal from "./JoinRoomModal";
 
@@ -597,6 +600,35 @@ function Social({
     });
   };
   const closeSharedStatsPopover = () => setSharedStatsPopoverPos(null);
+
+  const [membersPopoverPos, setMembersPopoverPos] = useState(null);
+  const toggleMembersPopover = (e) => {
+    if (membersPopoverPos) {
+      setMembersPopoverPos(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMembersPopoverPos({
+      top: rect.bottom + 8,
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 288)),
+    });
+  };
+  useEffect(() => {
+    if (!membersPopoverPos) return undefined;
+    const handlePointerDown = (event) => {
+      if (event.target.closest?.(".groupMembersPopover, .groupThreadMembersButton")) return;
+      setMembersPopoverPos(null);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") setMembersPopoverPos(null);
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [membersPopoverPos]);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -1928,6 +1960,41 @@ function Social({
       );
     } catch (err) {
       console.error("Failed to create shared session", err);
+      return;
+    }
+
+    // Group shared averages are opt-in: drop a hidden join marker the first
+    // time this member starts it so they get a column for everyone else.
+    const isGroup = String(baseConversation?.type || "").toUpperCase() === "GROUP";
+    const conversationID = baseConversation?.conversationID;
+    if (!isGroup || !conversationID || tournament || sourceMessage?.tournament) return;
+    const alreadyIn =
+      String(creatorID || "") === String(user.UserID) ||
+      currentMessages.some((m) => {
+        const join = parseSharedJoinPayload(m?.text);
+        if (join) return join.sharedID === sharedID && join.userID === user.UserID;
+        const update = parseSharedUpdatePayload(m?.text);
+        return update?.sharedID === sharedID && update?.senderID === user.UserID;
+      });
+    if (alreadyIn) return;
+
+    const joinText = `${SHARED_JOIN_PREFIX}${sharedID}|${user.UserID}`;
+    try {
+      const saved = await sendMessage(conversationID, user.UserID, joinText);
+      const joinMessage = {
+        sender: saved?.SenderID || user.UserID,
+        text: saved?.Text || joinText,
+        timestamp: saved?.CreatedAt || new Date().toISOString(),
+      };
+      const latest = selectedConversationRef.current;
+      if (latest?.conversationID === conversationID) {
+        upsertConversation({
+          ...latest,
+          messages: mergeMessagesByKey(latest.messages || [], [joinMessage]),
+        });
+      }
+    } catch (err) {
+      console.error("Failed to join shared average:", err);
     }
   };
 
@@ -2696,11 +2763,72 @@ function Social({
                           <span className="groupThreadBadge">Room</span>
                         ) : null}
                       </div>
-                      <div className="groupThreadMembers">
-                        {selectedConversationMembers.length
-                          ? selectedConversationMembers.map((member) => member.name).join(", ")
-                          : "No other members"}
-                      </div>
+                      {selectedConversationMembers.length ? (
+                        <button
+                          type="button"
+                          className="groupThreadMembers groupThreadMembersButton"
+                          onClick={toggleMembersPopover}
+                          aria-expanded={Boolean(membersPopoverPos)}
+                          aria-haspopup="dialog"
+                          title="View all members"
+                        >
+                          {selectedConversationMembers.map((member) => member.name).join(", ")}
+                        </button>
+                      ) : (
+                        <div className="groupThreadMembers">No other members</div>
+                      )}
+                      {membersPopoverPos && (
+                        <div
+                          className="groupMembersPopover"
+                          role="dialog"
+                          aria-label="Group members"
+                          style={{ top: membersPopoverPos.top, left: membersPopoverPos.left }}
+                        >
+                          <div className="groupMembersPopoverHeader">
+                            Members · {(selectedConversation.memberProfiles || []).length}
+                          </div>
+                          <ul className="groupMembersPopoverList">
+                            {(selectedConversation.memberProfiles || []).map((member) => (
+                              <li key={member.id}>
+                                <button
+                                  type="button"
+                                  className="groupMembersPopoverItem"
+                                  onClick={() => {
+                                    setMembersPopoverPos(null);
+                                    navigate(`/profile/${member.id}`);
+                                  }}
+                                >
+                                  <span
+                                    className="groupAvatarMini groupMembersPopoverAvatar"
+                                    style={{ borderColor: member.color || "#cccccc" }}
+                                  >
+                                    <span
+                                      className={`groupAvatarMiniCube postNameCube postNameCube--${(
+                                        member.profileEvent || "333"
+                                      ).toLowerCase()}`}
+                                    >
+                                      <PuzzleSVG
+                                        event={member.profileEvent || "333"}
+                                        scramble={member.profileScramble || ""}
+                                        isMusicPlayer={false}
+                                        isTimerCube={false}
+                                        isNameTagCube={true}
+                                      />
+                                    </span>
+                                  </span>
+                                  <span className="groupMembersPopoverName">
+                                    {member.name}
+                                    {member.isYou ? " (you)" : ""}
+                                  </span>
+                                  {member.username && member.username !== member.name ? (
+                                    <span className="groupMembersPopoverUsername">@{member.username}</span>
+                                  ) : null}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                       {selectedConversation?.isJoinable && selectedConversation?.roomCode ? (
                         <div className="groupThreadRoomCode">
                           Room code: <span>{selectedConversation.roomCode}</span>
@@ -3233,6 +3361,7 @@ function Social({
 
                       if (msg.text?.startsWith("[sharedUpdate]")) return null;
                       if (msg.text?.startsWith("[sharedExtend]")) return null;
+                      if (msg.text?.startsWith(SHARED_JOIN_PREFIX)) return null;
 
                       const isOwn = msg.sender === user.UserID;
 

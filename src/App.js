@@ -14,6 +14,7 @@ import HomeTimerSide from "./components/HomeTimerSide/HomeTimerSide";
 import AverageDetailModal from "./components/Detail/AverageDetailModal";
 import Profile from "./components/Profile/Profile";
 import Stats from "./components/Stats/Stats";
+import CompetitionPage from "./components/Competition/CompetitionPage";
 import Social from "./components/Social/Social";
 import SharedAverageMessage from "./components/Social/SharedAverageMessage";
 import Settings from "./components/Settings/Settings";
@@ -1212,8 +1213,23 @@ function shouldCompleteSharedSessionNow(session, nextIndex, currentUserID) {
     return !ps || !Number.isFinite(Number(ps.nextIndex));
   }
 
+  // Plain / group averages: done only once every round has my time, so starting
+  // mid-way (or skipping ahead) never ends the run with rounds still open.
+  return findSharedNextUnsolvedIndex(session, currentUserID, 0) === -1;
+}
+
+// First round (searching forward from `fromIndex`, then wrapping) that has no
+// time from `userID`; -1 when every round is done.
+function findSharedNextUnsolvedIndex(session, userID, fromIndex = 0) {
   const total = getSharedSolveCount(session);
-  return nextIndex >= total;
+  if (!total || !userID) return -1;
+  const start = Math.min(Math.max(Number(fromIndex) || 0, 0), total);
+  for (let step = 0; step < total; step += 1) {
+    const i = (start + step) % total;
+    const mine = session?.roundResults?.[i]?.[userID];
+    if (!Number.isFinite(Number(mine?.time))) return i;
+  }
+  return -1;
 }
 
 function assignExplicitSolveIndices(solves, totalCount) {
@@ -1342,6 +1358,25 @@ function mergeSolveIntoListByIdentity(items, incomingSolve, preferIncoming = tru
   });
 
   return didMerge ? merged : [...merged, nextSolve];
+}
+
+function isPendingSolveRef(solveRef) {
+  return String(solveRef || "").startsWith("PENDING#");
+}
+
+function withPenaltyFields(solve, penalty, rawTimeMs) {
+  const raw = Number.isFinite(Number(rawTimeMs))
+    ? Number(rawTimeMs)
+    : Number(solve?.rawTimeMs ?? solve?.finalTimeMs ?? solve?.time);
+  const finalTime = penalty === "+2" ? raw + 2000 : raw;
+  return {
+    ...solve,
+    penalty: penalty || null,
+    time: penalty === "DNF" ? Number.MAX_SAFE_INTEGER : finalTime,
+    rawTimeMs: raw,
+    finalTimeMs: penalty === "DNF" ? null : finalTime,
+    isDNF: penalty === "DNF",
+  };
 }
 
 function hasPersistedSolveRef(solve) {
@@ -1581,6 +1616,14 @@ function App() {
   const [sessions, setSessions] = useState(INITIAL_SESSIONS);
   const currentSessionLoadTokenRef = useRef(0);
   const deletedSolveRefsRef = useRef(new Set());
+  // Penalties/deletes made on a solve whose create request is still in flight
+  // (solveRef PENDING#...). The server doesn't know that ref yet, so the edit is
+  // held here and replayed against the saved solve once the create resolves.
+  const pendingSolveEditsRef = useRef(new Map());
+  // PENDING# ref -> saved SOLVE# ref, for UI that still holds the old ref.
+  const resolvedPendingRefsRef = useRef(new Map());
+  // Pending solves that were deleted while saving and then deleted server-side.
+  const deletedPendingSolveRefsRef = useRef(new Set());
   const currentSessionSolveCountTotalRef = useRef(null);
   const [showPlayerBar, setShowPlayerBar] = useState(true);
   const [navPrefs, setNavPrefs] = useState(DEFAULT_NAV_PREFS);
@@ -2552,11 +2595,6 @@ function App() {
     location.pathname,
   ]);
 
-  useEffect(() => {
-    if (!sharedSession?.sharedID) return;
-    setSharedIndex(0);
-  }, [sharedSession?.sharedID]);
-
   const adjustSessionSolveCount = useCallback((eventCode, sessionID, delta, fallbackBase = 0) => {
     const ev = String(eventCode || "").toUpperCase();
     const sid = String(sessionID || "main");
@@ -3361,7 +3399,8 @@ function App() {
     }
 
     if (sharedSession) {
-      setSharedIndex((i) => Math.min(i + 1, sharedSession.scrambles.length - 1));
+      const total = getSharedSolveCount(sharedSession);
+      setSharedIndex((i) => Math.min(i + 1, Math.max(total - 1, 0)));
     } else {
       await skipToNextScramble();
     }
@@ -3970,20 +4009,60 @@ function App() {
       adjustSessionSolveCount(ev, currentSession, 1, sessions[ev]?.length || 0);
     };
 
+    const takePendingSolveEdits = (pendingRef) => {
+      const edits = pendingSolveEditsRef.current.get(pendingRef) || null;
+      pendingSolveEditsRef.current.delete(pendingRef);
+      return edits;
+    };
+
     const replacePendingSolve = (ev, pendingSolve, savedSolve) => {
+      const pendingRef = pendingSolve?.solveRef;
+      const savedRef = savedSolve?.solveRef || null;
+      const edits = takePendingSolveEdits(pendingRef);
+      if (pendingRef && savedRef) resolvedPendingRefsRef.current.set(pendingRef, savedRef);
+
+      // Deleted while it was saving: keep it out of the list and delete the
+      // copy the server just created.
+      if (edits?.deleted) {
+        if (savedRef) {
+          deletedSolveRefsRef.current.add(savedRef);
+          deletedPendingSolveRefsRef.current.add(pendingRef);
+          deleteSolve(user.UserID, savedRef, {
+            event: ev,
+            sessionID: String(savedSolve?.sessionID || pendingSolve?.sessionID || "main"),
+          })
+            .then(() => setStatsMutationTick((t) => t + 1))
+            .catch((err) => console.error("Failed to delete solve removed while saving:", err));
+        }
+        return;
+      }
+
+      const hasPenaltyEdit = !!edits && "penalty" in edits;
+      const penaltyPatch = (solve) =>
+        hasPenaltyEdit ? withPenaltyFields(solve, edits.penalty, solve?.rawTimeMs) : solve;
+      const savedWithEdits = savedSolve ? penaltyPatch(savedSolve) : savedSolve;
+
       setSessions((prev) => ({
         ...prev,
         [ev]: mergeSolveIntoListByIdentity(
           (prev?.[ev] || []).map((solve) =>
-            solve?.solveRef === pendingSolve?.solveRef ? { ...solve, ...pendingSolve } : solve
+            solve?.solveRef === pendingRef ? penaltyPatch({ ...solve, ...pendingSolve }) : solve
           ),
-          savedSolve,
+          savedWithEdits,
           true
         ),
       }));
+
+      const savedPenalty =
+        String(savedSolve?.penalty ?? "").trim().toUpperCase() || null;
+      if (hasPenaltyEdit && savedRef && savedPenalty !== (edits.penalty || null)) {
+        persistSolvePenalty(ev, savedRef, savedWithEdits.rawTimeMs, edits.penalty || null);
+      }
     };
 
     const removePendingSolve = (ev, pendingRef) => {
+      const edits = takePendingSolveEdits(pendingRef);
+      if (edits?.deleted) return; // already removed (and counted) by deleteTime
       setSessions((prev) => ({
         ...prev,
         [ev]: (prev[ev] || []).filter((s) => s.solveRef !== pendingRef),
@@ -4017,6 +4096,11 @@ function App() {
     // back to its normal success flash instead of the red error flash
     // `runDb` already queued, since the solve itself is safe.
     const queueSolveOffline = (ev, sessionID, pendingSolve, saveArgs) => {
+      const edits = takePendingSolveEdits(pendingSolve?.solveRef);
+      if (edits?.deleted) return;
+      const queuedPenalty =
+        edits && "penalty" in edits ? edits.penalty || null : saveArgs.penalty ?? null;
+
       let localId = null;
       try {
         const queued = addOfflineSolve(user.UserID, {
@@ -4024,7 +4108,7 @@ function App() {
           sessionID,
           sessionName: activeSessionObj?.SessionName || null,
           rawTimeMs: saveArgs.rawTimeMs,
-          penalty: saveArgs.penalty ?? null,
+          penalty: queuedPenalty,
           scramble: saveArgs.scramble ?? "",
           note: saveArgs.note ?? "",
           createdAt: saveArgs.createdAt,
@@ -4391,34 +4475,54 @@ function App() {
 
     if (isSignedIn && user) {
       if (activeSharedID && solveIndexForBroadcast !== null) {
+        const myResult = {
+          time: newTime,
+          event: activeSolveEvent,
+          updatedAt: timestamp,
+        };
+        const withMyResult = (roundResults) => ({
+          ...(roundResults || {}),
+          [solveIndexForBroadcast]: {
+            ...((roundResults || {})[solveIndexForBroadcast] || {}),
+            [user.UserID]: myResult,
+          },
+        });
+
+        nextSharedSessionState = {
+          ...sharedSession,
+          roundResults: withMyResult(sharedSession?.roundResults),
+        };
+
+        const isPlainAverage =
+          sharedMode !== "casual" &&
+          sharedMode !== "hosted" &&
+          !getSharedTournament(sharedSession) &&
+          !(
+            sharedMode === "head_to_head" &&
+            !sharedSession?.participantPlans &&
+            !!sharedSession?.opponentID
+          );
+        if (isPlainAverage) {
+          // Move to the next round I still owe, not just index + 1.
+          const nextOpen = findSharedNextUnsolvedIndex(
+            nextSharedSessionState,
+            user.UserID,
+            solveIndexForBroadcast + 1
+          );
+          if (nextOpen !== -1) nextSharedIndex = nextOpen;
+        }
+
+        shouldCompleteSharedSession = shouldCompleteSharedSessionNow(
+          nextSharedSessionState,
+          nextSharedIndex,
+          user.UserID
+        );
+
         setSharedSession((prev) => {
           if (!prev || prev.sharedID !== activeSharedID) return prev;
-
-          const nextRoundResults = {
-            ...(prev.roundResults || {}),
-            [solveIndexForBroadcast]: {
-              ...((prev.roundResults || {})[solveIndexForBroadcast] || {}),
-              [user.UserID]: {
-                time: newTime,
-                event: activeSolveEvent,
-                updatedAt: timestamp,
-              },
-            },
-          };
-
-          nextSharedSessionState = {
-            ...prev,
-            roundResults: nextRoundResults,
-          };
-          shouldCompleteSharedSession = shouldCompleteSharedSessionNow(
-            nextSharedSessionState,
-            nextSharedIndex,
-            user.UserID
-          );
-
           return {
             ...prev,
-            roundResults: nextRoundResults,
+            roundResults: withMyResult(prev.roundResults),
           };
         });
       }
@@ -4608,8 +4712,44 @@ function App() {
     }
   };
 
+  const persistSolvePenalty = useCallback(
+    async (ev, solveRef, rawTimeMs, penalty) => {
+      if (!isSignedIn || !user?.UserID) return;
+      try {
+        const res = await runDb(
+          "Updating solve",
+          () => updateSolvePenalty(user.UserID, solveRef, rawTimeMs, penalty),
+          { showStatus: false }
+        );
+
+        const savedSolve = res?.item ? normalizeSolve(res.item) : null;
+        if (savedSolve?.solveRef) {
+          setSessions((prev) => ({
+            ...prev,
+            [ev]: (prev[ev] || []).map((solve) =>
+              solve.solveRef === solveRef
+                ? {
+                    ...savedSolve,
+                    ...(Number.isFinite(Number(solve?.fullIndex))
+                      ? { fullIndex: Number(solve.fullIndex) }
+                      : {}),
+                  }
+                : solve
+            ),
+          }));
+        }
+        setStatsMutationTick((t) => t + 1);
+      } catch (err) {
+        console.error("Failed to update DynamoDB penalty:", err);
+      }
+    },
+    [isSignedIn, user?.UserID, runDb]
+  );
+
   const applyPenalty = useCallback(
-    async (solveRef, penalty, updatedTime) => {
+    async (solveRefParam, penalty, updatedTime) => {
+      const solveRef = resolvedPendingRefsRef.current.get(solveRefParam) || solveRefParam;
+
       if (practiceMode) {
         setPracticeSolves((prev) =>
           (prev || []).map((solve) => {
@@ -4630,8 +4770,7 @@ function App() {
         return;
       }
 
-      const updatedSessions = { ...sessions };
-      const eventSolves = updatedSessions[eventKey] || [];
+      const eventSolves = sessions[eventKey] || [];
 
       const targetSolve = eventSolves.find((solve) => solve.solveRef === solveRef);
       if (!targetSolve) return;
@@ -4664,46 +4803,37 @@ function App() {
         return;
       }
 
-      const updatedSolves = eventSolves.map((solve) => {
-        if (solve.solveRef === solveRef) {
-          return {
-            ...solve,
-            penalty,
-            time: penalty === "DNF" ? Number.MAX_SAFE_INTEGER : updatedTime,
-            rawTimeMs,
-            finalTimeMs: penalty === "DNF" ? null : updatedTime,
-            isDNF: penalty === "DNF",
-          };
-        }
-        return solve;
-      });
+      // Functional update so we never overwrite the list with a stale snapshot
+      // (that's what made in-flight saves/deletes flicker back).
+      setSessions((prev) => ({
+        ...prev,
+        [eventKey]: (prev[eventKey] || []).map((solve) =>
+          solve.solveRef === solveRef
+            ? {
+                ...solve,
+                penalty,
+                time: penalty === "DNF" ? Number.MAX_SAFE_INTEGER : updatedTime,
+                rawTimeMs,
+                finalTimeMs: penalty === "DNF" ? null : updatedTime,
+                isDNF: penalty === "DNF",
+              }
+            : solve
+        ),
+      }));
 
-      updatedSessions[eventKey] = updatedSolves;
-      setSessions(updatedSessions);
-
-      if (isSignedIn && user?.UserID) {
-        try {
-          const res = await runDb(
-            "Updating solve",
-            () => updateSolvePenalty(user.UserID, solveRef, rawTimeMs, penalty),
-            { showStatus: false }
-          );
-
-          const savedSolve = normalizeSolve(res?.item);
-
-          setSessions((prev) => ({
-            ...prev,
-            [eventKey]: (prev[eventKey] || []).map((solve) =>
-              solve.solveRef === solveRef ? savedSolve : solve
-            ),
-          }));
-          setStatsMutationTick((t) => t + 1);
-        } catch (err) {
-          console.error("Failed to update DynamoDB penalty:", err);
-        }
+      // Still being created - the server can't find this ref yet. Replayed
+      // against the saved solve in addSolve's replacePendingSolve.
+      if (isPendingSolveRef(solveRef)) {
+        pendingSolveEditsRef.current.set(solveRef, {
+          ...(pendingSolveEditsRef.current.get(solveRef) || {}),
+          penalty: penalty || null,
+        });
+        return;
       }
+
+      await persistSolvePenalty(eventKey, solveRef, rawTimeMs, penalty);
     },
-    [practiceMode, sessions, eventKey, isSignedIn, user?.UserID, runDb]
+    [practiceMode, sessions, eventKey, persistSolvePenalty]
   );
 
   const switchToEvent = useCallback(
@@ -4797,8 +4927,10 @@ function App() {
     let targetSolve = null;
     const eventSolves = Array.isArray(sessions?.[ev]) ? sessions[ev] : [];
 
+    const resolveRef = (ref) => resolvedPendingRefsRef.current.get(ref) || ref;
+
     if (typeof solveOrIndex === "string") {
-      solveRefToDelete = solveOrIndex;
+      solveRefToDelete = resolveRef(solveOrIndex);
       solveIndex = eventSolves.findIndex((solve) => solve?.solveRef === solveRefToDelete);
       targetSolve = solveIndex >= 0 ? eventSolves[solveIndex] : null;
     } else if (typeof solveOrIndex === "number") {
@@ -4807,7 +4939,7 @@ function App() {
       solveIndex = solveOrIndex;
       targetSolve = s || null;
     } else if (solveOrIndex && typeof solveOrIndex === "object") {
-      solveRefToDelete = solveOrIndex.solveRef || null;
+      solveRefToDelete = resolveRef(solveOrIndex.solveRef || null);
       solveIndex = eventSolves.findIndex((solve) => solve?.solveRef === solveRefToDelete);
       targetSolve = solveIndex >= 0 ? eventSolves[solveIndex] : solveOrIndex;
     }
@@ -4851,6 +4983,16 @@ function App() {
       -1,
       eventSolves.length || 0
     );
+
+    // Still being created - nothing to delete server-side yet. addSolve's
+    // replacePendingSolve deletes the saved copy once the create resolves.
+    if (isPendingSolveRef(solveRefToDelete)) {
+      pendingSolveEditsRef.current.set(solveRefToDelete, {
+        ...(pendingSolveEditsRef.current.get(solveRefToDelete) || {}),
+        deleted: true,
+      });
+      return;
+    }
 
     if (isSignedIn && user) {
       try {
@@ -5524,11 +5666,9 @@ function App() {
     const loadSharedStats = async () => {
       try {
         const profile = await getUser(statsSharedUserID);
-        const allowedFriends = Array.isArray(profile?.StatsAllowedFriends)
-          ? profile.StatsAllowedFriends
-          : [];
 
-        if (!allowedFriends.includes(user.UserID)) {
+        // The server decides (privacy settings + share list).
+        if (profile?.Viewer?.canView?.fullStats !== true) {
           if (!cancelled) {
             setSharedStatsUser(profile || null);
             setSharedStatsSessions({});
@@ -6057,11 +6197,28 @@ function App() {
 
     if (!ev || !deletedSolve) return;
 
-    if (typeof deletedSolve?.solveRef === "string" && deletedSolve.solveRef.trim()) {
-      deletedSolveRefsRef.current.delete(deletedSolve.solveRef.trim());
+    const deletedRef =
+      typeof deletedSolve?.solveRef === "string" ? deletedSolve.solveRef.trim() : "";
+    if (deletedRef) {
+      deletedSolveRefsRef.current.delete(deletedRef);
     }
 
-    if (pending.persisted) {
+    // Deleted while its create was in flight: if the create hasn't resolved,
+    // just cancel the queued delete; if it has, the server copy is gone and
+    // has to be re-created like any persisted solve.
+    let persisted = pending.persisted;
+    if (isPendingSolveRef(deletedRef)) {
+      const edits = pendingSolveEditsRef.current.get(deletedRef);
+      if (edits) {
+        const { deleted, ...rest } = edits;
+        pendingSolveEditsRef.current.set(deletedRef, rest);
+      } else if (deletedPendingSolveRefsRef.current.has(deletedRef)) {
+        deletedPendingSolveRefsRef.current.delete(deletedRef);
+        persisted = true;
+      }
+    }
+
+    if (persisted) {
       if (!user?.UserID) {
         alert("Sign back in to undo that deleted solve.");
         return;
@@ -6465,7 +6622,7 @@ function App() {
 
       return {
         index,
-        scramble: sharedSession?.scrambles?.[index] || "",
+        scramble: perspective.yourScrambles?.[index] || sharedSession?.scrambles?.[index] || "",
         event: yourEvents?.[index] || yourFallbackEvent || currentEvent,
         yourTime: Number.isFinite(Number(rowResults?.[currentUserID]?.time))
           ? Number(rowResults[currentUserID].time)
@@ -7187,6 +7344,26 @@ function App() {
             setShowOfflineSolvesModal(true);
           }}
         />
+        {location.pathname === "/stats" &&
+        isViewingSharedStats &&
+        isSignedIn &&
+        !sharedStatsLoading &&
+        !sharedStatsDeniedReason &&
+        sharedStatsUser ? (
+          <div className="offline-banner offline-banner--viewing">
+            <span className="offline-banner__dot" aria-hidden="true" />
+            <span className="offline-banner__text">
+              Viewing {sharedStatsUser.Name || sharedStatsUser.UserID}'s shared stats — editing is disabled.
+            </span>
+            <button
+              type="button"
+              className="offline-banner__action"
+              onClick={() => navigate(`/profile/${statsSharedUserID}`)}
+            >
+              Back to profile →
+            </button>
+          </div>
+        ) : null}
         <div
           className={`navAndPage ${
             isHomePage || !showPlayerBar ? "fullHeight" : "reducedHeight"
@@ -7927,6 +8104,17 @@ function App() {
                           }
                     }
                   />
+                )
+              }
+            />
+
+            <Route
+              path="/competition/:competitionID"
+              element={
+                isSignedIn ? (
+                  <CompetitionPage user={user} accentColor={user?.Color || user?.color || "#2EC4B6"} />
+                ) : (
+                  renderSignedOutScreen("Competition")
                 )
               }
             />

@@ -1190,3 +1190,98 @@
   border: 1px solid #ccc;
   z-index: 2;
 }
+
+.groupThreadMembersButton {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: #c8c8c8;
+  cursor: pointer;
+}
+
+.groupThreadMembersButton:hover,
+.groupThreadMembersButton:focus-visible,
+.groupThreadMembersButton[aria-expanded="true"] {
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.groupMembersPopover {
+  position: fixed;
+  z-index: 1000;
+  width: 280px;
+  max-width: calc(100vw - 16px);
+  max-height: min(420px, 60vh);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--theme-surface-strong);
+  border: 1px solid rgba(80, 182, 255, 0.36);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  white-space: normal;
+}
+
+.groupMembersPopoverHeader {
+  padding: 2px 6px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.groupMembersPopoverList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+}
+
+.groupMembersPopoverItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: #fff;
+  cursor: pointer;
+}
+
+.groupMembersPopoverItem:hover,
+.groupMembersPopoverItem:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.groupMembersPopoverAvatar {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+.groupMembersPopoverName {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupMembersPopoverUsername {
+  margin-left: auto;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  white-space: nowrap;
+}

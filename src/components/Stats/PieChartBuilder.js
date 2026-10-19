@@ -36,7 +36,8 @@ function normalizeCalloutLines(entry, percent) {
   if (Array.isArray(entry?.calloutLines) && entry.calloutLines.length) {
     return entry.calloutLines.map((line) => String(line));
   }
-  return [`${entry?.value || 0} solves`, `${percent}%`];
+  const count = entry?.value || 0;
+  return [`${count} ${count === 1 ? "solve" : "solves"}`, `${percent}%`];
 }
 
 // Spreads label rows apart around their preferred positions (rather than only

@@ -16,6 +16,7 @@ import PieChart from "./PieChart";
 import { PENALTY_SLICE_COLORS } from "./PieChartBuilder";
 import TagBreakdownPie from "./TagBreakdownPie";
 import StatFocusModal from "./StatFocusModal";
+import { computeSolveIndexOffset } from "./solveIndexOffset";
 import AllEventsTimeMatrix from "./AllEventsTimeMatrix";
 import Detail from "../Detail/Detail";
 import AverageDetailModal from "../Detail/AverageDetailModal";
@@ -30,6 +31,7 @@ import { getSolvesByTag } from "../../services/getSolvesByTag";
 import { getSessionStats } from "../../services/getSessionStats";
 import { getEventStats } from "../../services/getEventStats";
 import { getDayBuckets } from "../../services/getDayBuckets";
+import { getWcaCompetitions } from "../../services/getWcaCompetitions";
 import { getTagStatsList } from "../../services/getTagStatsList";
 import { recomputeSessionStats } from "../../services/recomputeSessionStats";
 import { recomputeEventStats } from "../../services/recomputeEventStats";
@@ -58,6 +60,7 @@ import {
   getTagColorMapForEvent,
   getTagCatalogOptionsForEvent,
   getSharedTagLabels,
+  getSolveTagValue,
   getVisibleSharedTagFields,
   hasActiveTagSelection,
   makeEmptyTagSelection,
@@ -1488,10 +1491,11 @@ function shiftLocalDayKey(dayKey, offsetDays) {
 // The stats date range lives in the URL (?from=&to=&raw=1) so browser back /
 // forward step between views. All Time is stored as from=all with no end, so
 // a bookmark always runs through today.
-const STATS_RANGE_PARAMS = ["from", "to", "raw"];
+const STATS_RANGE_PARAMS = ["view", "from", "to", "raw"];
 
-function buildStatsRangeParams(start, end, raw) {
+function buildStatsRangeParams(start, end, raw, viewMode = "standard") {
   const params = new URLSearchParams();
+  if (viewMode === "time") params.set("view", "time");
   if (start === ALL_TIME_START_DAY) {
     params.set("from", "all");
     return params;
@@ -1504,13 +1508,14 @@ function buildStatsRangeParams(start, end, raw) {
 
 function parseStatsRangeSearch(search) {
   const params = new URLSearchParams(search || "");
+  const view = params.get("view") === "time" ? "time" : "standard";
   const from = params.get("from") || "";
-  if (from === "all") return { start: ALL_TIME_START_DAY, end: getTodayLocalDayKey(), raw: false };
+  if (from === "all") return { view, start: ALL_TIME_START_DAY, end: getTodayLocalDayKey(), raw: false };
   const isDayKey = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value);
   const start = isDayKey(from) ? from : "";
   const to = params.get("to") || "";
   const end = isDayKey(to) ? to : "";
-  return { start, end, raw: params.get("raw") === "1" && !!start && !!end };
+  return { view, start, end, raw: view === "standard" && params.get("raw") === "1" && !!start && !!end };
 }
 
 function withStatsRangeParams(search, rangeParams) {
@@ -1578,6 +1583,22 @@ function getMonthRangeFromDayKey(dayKey) {
   };
 }
 
+// Runs a sessions-map update (the shape bulk actions and Detail hand to
+// setSessions) over a flat solve list, so lists cached outside the sessions map
+// pick up the same edits, moves and deletes.
+function replaySessionsUpdate(list, update, fallbackEvent = "") {
+  const solves = Array.isArray(list) ? list : [];
+  if (typeof update !== "function" || !solves.length) return list;
+  const fallback = String(fallbackEvent || "").toUpperCase();
+  const byEvent = {};
+  for (const solve of solves) {
+    const ev = String(solve?.event || solve?.Event || fallback).toUpperCase();
+    (byEvent[ev] ||= []).push(solve);
+  }
+  const next = update(byEvent) || {};
+  return Object.keys(byEvent).flatMap((ev) => (Array.isArray(next[ev]) ? next[ev] : byEvent[ev]));
+}
+
 function filterSolvesByDateRange(input, startDay, endDay) {
   const items = Array.isArray(input) ? input : [];
   if (!startDay && !endDay) return items;
@@ -1634,8 +1655,6 @@ function Stats({
   const location = useLocation();
   const navigate = useNavigate();
   const isStatsRoute = location.pathname === "/stats";
-  const viewerDisplayName = viewerUser?.Name || viewerUser?.UserID || "you";
-  const statsOwnerDisplayName = user?.Name || user?.UserID || "this user";
   const DEFAULT_IN_VIEW = 100;
   const DEFAULT_PAGE_FETCH = 500;
 
@@ -1709,6 +1728,27 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const [loadingDateScopedSolves, setLoadingDateScopedSolves] = useState(false);
   const [dayBucketRangeData, setDayBucketRangeData] = useState({ items: [], aggregateSummary: null, scope: "" });
   const [dayBucketRangeKey, setDayBucketRangeKey] = useState("");
+  // Bumped after bulk solve edits so bucket and tag totals refetch in place.
+  const [aggregateRefreshNonce, setAggregateRefreshNonce] = useState(0);
+  const dayBucketLoadedNonceRef = useRef(0);
+  // setSessions for edits made on this page: the solve lists the page loaded
+  // itself (date ranges, tag scopes, time view) get the same update, and the
+  // bucket/tag totals refetch.
+  const statsSetSessions = useCallback(
+    (update) => {
+      setSessions(update);
+      if (typeof update !== "function") return;
+      const replay = (list) => replaySessionsUpdate(list, update, statsEvent);
+      setDateScopedSessionSolves(replay);
+      setTagScopeSolves(replay);
+      setTimeScopeSolves(replay);
+      setOverallScopeSolves(replay);
+      setCompareSessionSolves(replay);
+      setCompareTagScopeSolves(replay);
+      setAggregateRefreshNonce((n) => n + 1);
+    },
+    [setSessions, statsEvent]
+  );
   const [dayBucketRangeFailedKey, setDayBucketRangeFailedKey] = useState("");
   const [compareDayBucketRangeData, setCompareDayBucketRangeData] = useState({
     items: [],
@@ -2902,10 +2942,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       return;
     }
 
-    if (dayBucketRangeKey === dayBucketRangeRequestKey) return;
+    const isRefresh = dayBucketRangeKey === dayBucketRangeRequestKey;
+    if (isRefresh && dayBucketLoadedNonceRef.current === aggregateRefreshNonce) return;
 
     let cancelled = false;
-    setLoadingDayBuckets(true);
+    // A refresh keeps showing the current buckets until the new ones land.
+    if (!isRefresh) setLoadingDayBuckets(true);
 
     (async () => {
       try {
@@ -2924,9 +2966,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         });
         setDayBucketRangeKey(dayBucketRangeRequestKey);
         setDayBucketRangeFailedKey("");
+        dayBucketLoadedNonceRef.current = aggregateRefreshNonce;
       } catch (error) {
         if (cancelled) return;
         console.error("Failed to load day buckets:", error);
+        dayBucketLoadedNonceRef.current = aggregateRefreshNonce;
+        if (isRefresh) return;
         setDayBucketRangeData({ items: [], aggregateSummary: null, scope: "" });
         setDayBucketRangeKey("");
         setDayBucketRangeFailedKey(dayBucketRangeRequestKey);
@@ -2939,6 +2984,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       cancelled = true;
     };
   }, [
+    aggregateRefreshNonce,
     bucketScopeQuery.event,
     bucketScopeQuery.mainOnly,
     bucketScopeQuery.scopeLabel,
@@ -4003,11 +4049,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     statsViewMode === "standard" &&
     dateFilterStart === ALL_TIME_START_DAY &&
     !!dateFilterEnd;
-  const bucketSourceLabel = useMemo(() => {
-    if (!useBucketBackedRange) return "";
-    if (statsViewMode === "time") return "Aggregated days";
-    return "Bucketed range";
-  }, [statsViewMode, useBucketBackedRange]);
   const canonicalOverallStats = useMemo(() => {
     if (hasActiveTagFilter) return null;
     if (isAllEventsMode) {
@@ -4088,28 +4129,32 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       : statsViewMode === "time"
         ? summaryCurrentSolves.length
         : activeStandardSolves.length;
-  // activeStandardSolves only holds the most recent loaded solves, so their
-  // fullIndex starts at 0. Offset by the older unloaded solves so summary
-  // ranges show real solve numbers. Only trusted when the cached total matches
-  // the loaded scope (standard view, no date/tag filter). Tag-filtered solves
-  // can predate the loaded window, so their numbers are hidden (null).
-  const summarySolveIndexOffset = useMemo(() => {
-    if (hasActiveTagFilter) return null;
-    if (statsViewMode !== "standard" || useBucketBackedRange) return 0;
-    if (hasActiveDateFilter) return rawRangeViewActive && rawRangeIndexOffset != null ? rawRangeIndexOffset : 0;
-    const total = Number(effectiveOverallStats?.SolveCountTotal);
-    if (!Number.isFinite(total)) return 0;
-    return Math.max(0, total - activeStandardSolves.length);
-  }, [
-    activeStandardSolves.length,
-    effectiveOverallStats?.SolveCountTotal,
-    hasActiveDateFilter,
-    hasActiveTagFilter,
-    rawRangeIndexOffset,
-    rawRangeViewActive,
-    statsViewMode,
-    useBucketBackedRange,
-  ]);
+  // Real solve numbers for loaded solves; null hides ranges (see solveIndexOffset.js).
+  const summarySolveIndexOffset = useMemo(
+    () =>
+      computeSolveIndexOffset({
+        hasActiveTagFilter,
+        statsViewMode,
+        useBucketBackedRange,
+        hasActiveDateFilter,
+        rawRangeViewActive,
+        rawRangeIndexOffset,
+        overallStats: effectiveOverallStats,
+        loadedCount: activeStandardSolves.length,
+        isAllLoaded,
+      }),
+    [
+      activeStandardSolves.length,
+      effectiveOverallStats,
+      hasActiveDateFilter,
+      hasActiveTagFilter,
+      isAllLoaded,
+      rawRangeIndexOffset,
+      rawRangeViewActive,
+      statsViewMode,
+      useBucketBackedRange,
+    ]
+  );
 
   // Real solve numbers for the time table. Only the primary standard view has
   // fullIndex values that line up with the cached total; everywhere else the
@@ -4125,6 +4170,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     () => formatChartTitleDate(dateFilterStart, dateFilterEnd),
     [dateFilterEnd, dateFilterStart]
   );
+  const lineChartSolveIndexOffset =
+    !compareEnabled && !useBucketBackedRange && statsViewMode === "standard" && summarySolveIndexOffset > 0
+      ? summarySolveIndexOffset
+      : 0;
   const lineChartTitleIndexRange = useMemo(() => {
     if (compareEnabled || useBucketBackedRange || statsViewMode !== "standard") return "";
     if (summarySolveIndexOffset === null || !timeViewLineSolves.length) return "";
@@ -4415,6 +4464,45 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   }, [dateFilterEnd]);
 
   // eslint-disable-next-line no-use-before-define
+  const [wcaCompetitions, setWcaCompetitions] = useState([]);
+  useEffect(() => {
+    const userID = String(user?.UserID || "").trim();
+    setWcaCompetitions([]);
+    if (!userID) return undefined;
+    let cancelled = false;
+    getWcaCompetitions(userID)
+      .then((items) => {
+        if (!cancelled) setWcaCompetitions(items);
+      })
+      .catch((err) => console.warn("Failed to load WCA competitions:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.UserID]);
+
+  const handleCompetitionOpen = useCallback(
+    (competitionID) => {
+      const userID = String(user?.UserID || "").trim();
+      if (!competitionID || !userID) return;
+      navigate(
+        `/competition/${encodeURIComponent(competitionID)}?user=${encodeURIComponent(userID)}`
+      );
+    },
+    [navigate, user?.UserID]
+  );
+
+  // Competitions held on the single day being viewed. The day can also hold
+  // ordinary practice solves, so the banner says how many came from the comp.
+  const viewedDayCompetitions = useMemo(() => {
+    const day = dateFilterStart && dateFilterStart === dateFilterEnd ? dateFilterStart : "";
+    if (!day || !wcaCompetitions.length) return [];
+    return wcaCompetitions.filter((comp) => {
+      const start = String(comp?.StartDay || "");
+      const end = String(comp?.EndDay || start);
+      return start && start <= day && day <= end;
+    });
+  }, [dateFilterEnd, dateFilterStart, wcaCompetitions]);
+
   const handleBucketDaySelect = useCallback(async (dayKey) => {
     const nextDay = String(dayKey || "").trim();
     if (!nextDay) return;
@@ -4449,7 +4537,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const statsRangeKey = buildStatsRangeParams(
     dateFilterStart,
     dateFilterEnd,
-    rawRangeViewActive
+    rawRangeViewActive,
+    statsViewMode
   ).toString();
   // staleKey: the range state held when a URL restore was applied. Until state
   // moves off it, the writer below must not push that stale range back into
@@ -4465,22 +4554,29 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       sync.initialized = true;
       if (!hasUrlRange) return;
     }
-    const urlKey = buildStatsRangeParams(parsed.start, parsed.end, parsed.raw).toString();
+    const urlKey = buildStatsRangeParams(parsed.start, parsed.end, parsed.raw, parsed.view).toString();
     if (urlKey === statsRangeKey) return;
 
-    // Never let a URL silently start a raw scan of a wide range: outside the
-    // day-bucket scope only short windows are restored.
+    // Never let a URL silently start a raw scan of a wide range: only short
+    // windows are restored unless the standard view is backed by day buckets.
+    // (The all-events time view raw-loads any dated range, so it only gets
+    // short windows.)
     const span = getInclusiveDaySpan(parsed.start, parsed.end);
-    const bucketScopeOk = canUseDayBucketScope({
-      userID: user?.UserID,
-      hasActiveTagFilter,
-      statsViewMode,
-      hasActiveDateFilter: hasUrlRange,
-      isAllEventsMode,
-      isAllSessionsMode,
-      sessionId,
-    });
-    if (hasUrlRange && !bucketScopeOk && !(span > 0 && span <= MAX_RAW_INDEX_RANGE_DAYS)) {
+    const isShortRange = span > 0 && span <= MAX_RAW_INDEX_RANGE_DAYS;
+    const targetSession =
+      parsed.view === "time" ? ALL_SESSIONS : standardSelection.session || currentSession || "main";
+    const bucketScopeOk =
+      parsed.view === "standard" &&
+      canUseDayBucketScope({
+        userID: user?.UserID,
+        hasActiveTagFilter,
+        statsViewMode: parsed.view,
+        hasActiveDateFilter: hasUrlRange,
+        isAllEventsMode: false,
+        isAllSessionsMode: targetSession === ALL_SESSIONS,
+        sessionId: targetSession,
+      });
+    if (hasUrlRange && !bucketScopeOk && !isShortRange) {
       navigate(
         { search: withStatsRangeParams(location.search, new URLSearchParams(statsRangeKey)) },
         { replace: true }
@@ -4489,6 +4585,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     }
 
     sync.staleKey = statsRangeKey;
+    if (parsed.view !== statsViewMode) {
+      setStatsViewMode(parsed.view);
+      setSessionMenuOpen(false);
+      if (parsed.view === "time") setTimeSelection({ event: ALL_EVENTS, session: ALL_SESSIONS });
+    }
     if (parsed.raw) fitRawRangeToViewRef.current = true;
     setDateFilterStart(parsed.start);
     setDateFilterEnd(parsed.end);
@@ -4508,7 +4609,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       sync.staleKey = null;
     }
     const parsed = parseStatsRangeSearch(location.search);
-    const urlKey = buildStatsRangeParams(parsed.start, parsed.end, parsed.raw).toString();
+    const urlKey = buildStatsRangeParams(parsed.start, parsed.end, parsed.raw, parsed.view).toString();
     if (urlKey === statsRangeKey) return;
     navigate(
       { search: withStatsRangeParams(location.search, new URLSearchParams(statsRangeKey)) },
@@ -4761,16 +4862,27 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     });
   }, []);
 
+  // Switching between the event view and the all-events time view keeps the
+  // date range when it is cheap to carry over: a day / short window (a few
+  // hundred solves) either way, or a longer range going back to a Main
+  // session, which day buckets cover. Anything else resets to the view's
+  // default rather than raw-loading a wide range.
   const handleSetViewMode = useCallback(async (nextMode) => {
     if (nextMode === statsViewMode) return;
 
+    const span = getInclusiveDaySpan(dateFilterStart, dateFilterEnd);
+    const isShortRange = span > 0 && span <= MAX_RAW_INDEX_RANGE_DAYS;
+
     setStatsViewMode(nextMode);
     setSessionMenuOpen(false);
+    setCurrentPage(0);
 
     if (nextMode === "time") {
       setPreferRawDateRangeView(false);
-      setDateFilterStart("");
-      setDateFilterEnd("");
+      if (!isShortRange) {
+        setDateFilterStart("");
+        setDateFilterEnd("");
+      }
       setTimeSelection({
         event: ALL_EVENTS,
         session: ALL_SESSIONS,
@@ -4778,15 +4890,31 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       return;
     }
 
-    setPreferRawDateRangeView(false);
-    setDateFilterStart("");
-    setDateFilterEnd("");
-    setSelectedTimeDay("");
-    setStandardSelection((prev) => ({
-      event: prev?.event || currentEvent || "333",
-      session: prev?.session || currentSession || "main",
-    }));
-  }, [currentEvent, currentSession, statsViewMode]);
+    const nextEvent = standardSelection?.event || currentEvent || "333";
+    const nextSession = standardSelection?.session || currentSession || "main";
+    const keepRange = isShortRange || (hasActiveDateFilter && nextSession === "main");
+    if (keepRange && isShortRange) {
+      fitRawRangeToViewRef.current = true;
+      setPreferRawDateRangeView(true);
+    } else {
+      setPreferRawDateRangeView(false);
+    }
+    if (!keepRange) {
+      setDateFilterStart("");
+      setDateFilterEnd("");
+      setSelectedTimeDay("");
+    }
+    setStandardSelection({ event: nextEvent, session: nextSession });
+  }, [
+    currentEvent,
+    currentSession,
+    dateFilterEnd,
+    dateFilterStart,
+    hasActiveDateFilter,
+    standardSelection?.event,
+    standardSelection?.session,
+    statsViewMode,
+  ]);
 
 
   const handleDeleteSolve = useCallback(
@@ -6134,6 +6262,31 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     () => getTagColorMapForEvent(tagColorCatalog, statsEvent === ALL_EVENTS ? "" : statsEvent),
     [statsEvent, tagColorCatalog]
   );
+  const handleStatsTagColorsChange = useMemo(
+    () =>
+      typeof onTagColorsChange === "function" && statsEvent && statsEvent !== ALL_EVENTS
+        ? (next) => onTagColorsChange(String(statsEvent).toUpperCase(), next)
+        : null,
+    [onTagColorsChange, statsEvent]
+  );
+  // Tag pickers for the bulk tag editor in the solve tables.
+  const bulkTagEditorProps = useMemo(
+    () => ({
+      tagConfig: safeTagConfig,
+      cubeModelOptions,
+      discoveredTagOptions: mergeTagOptionMaps(discoveredTagOptions, compareDiscoveredTagOptions),
+      tagColors: tagBreakdownTagColors,
+      onTagColorsChange: handleStatsTagColorsChange,
+    }),
+    [
+      compareDiscoveredTagOptions,
+      cubeModelOptions,
+      discoveredTagOptions,
+      handleStatsTagColorsChange,
+      safeTagConfig,
+      tagBreakdownTagColors,
+    ]
+  );
   // The all-time overview is bucket-backed and loads no raw solves, so the tag
   // breakdown is drawn from the per-tag stats records for the same scope.
   const tagBreakdownAggregateKey =
@@ -6168,7 +6321,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tagBreakdownAggregateKey]);
+  }, [tagBreakdownAggregateKey, aggregateRefreshNonce]);
   // Any other bucket-backed range carries its own per-tag totals in the day buckets.
   const bucketTagSummaries =
     useBucketBackedRange && Array.isArray(activeBucketSummary?.TagSummaries)
@@ -6889,6 +7042,123 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     [readOnly, user?.UserID]
   );
 
+  // Solve list for one tag-breakdown slice. Raw buckets carry their solves; a
+  // bucket-backed (aggregate) slice is loaded from the tag index and clipped to
+  // the visible date range. The list is a snapshot kept in step with bulk edits,
+  // and solves retagged out of the slice drop off it.
+  const [tagBucketList, setTagBucketList] = useState(null);
+  const tagBucketRequestRef = useRef(0);
+
+  const openTagBucketSolves = useCallback(
+    async (bucket, fieldMeta) => {
+      const field = String(fieldMeta?.field || "").trim();
+      if (!bucket || !field) return;
+      const base = {
+        field,
+        fieldLabel: fieldMeta?.label || field,
+        key: bucket.key,
+        label: bucket.label,
+        expectedCount: bucket.value,
+      };
+      const requestId = ++tagBucketRequestRef.current;
+
+      if (Array.isArray(bucket.solves) && bucket.solves.length) {
+        setTagBucketList({ ...base, solves: bucket.solves, loading: false, error: "" });
+        return;
+      }
+      if (!user?.UserID || bucket.key === "Unknown") return;
+
+      setTagBucketList({ ...base, solves: [], loading: true, error: "" });
+      try {
+        const items = [];
+        let cursor = null;
+        do {
+          const out = await getSolvesByTag(user.UserID, {
+            tagKey: field,
+            tagValue: bucket.key,
+            event: isAllEventsMode ? "" : String(statsEvent || "").toUpperCase(),
+            sessionID: isAllEventsMode || isAllSessionsMode ? "" : String(sessionId || "main"),
+            limit: 500,
+            hydrate: true,
+            cursor,
+            force: true,
+          });
+          if (Array.isArray(out?.items)) items.push(...out.items);
+          cursor = out?.lastKey || null;
+        } while (cursor);
+        if (tagBucketRequestRef.current !== requestId) return;
+
+        const normalized = filterSolvesByDateRange(
+          items.map(normalizeSolve).filter(Boolean),
+          dateFilterStart,
+          dateFilterEnd
+        )
+          .filter((solve) => !hasActiveTagFilter || solveMatchesTagSelection(solve, tagFilterSelection))
+          .sort((a, b) => new Date(a?.datetime || 0).getTime() - new Date(b?.datetime || 0).getTime());
+        setTagBucketList((current) =>
+          current ? { ...current, solves: normalized, loading: false } : current
+        );
+      } catch (error) {
+        if (tagBucketRequestRef.current !== requestId) return;
+        console.error("Failed to load tag bucket solves:", error);
+        setTagBucketList((current) =>
+          current ? { ...current, loading: false, error: "Couldn't load these solves." } : current
+        );
+      }
+    },
+    [
+      dateFilterEnd,
+      dateFilterStart,
+      hasActiveTagFilter,
+      isAllEventsMode,
+      isAllSessionsMode,
+      normalizeSolve,
+      sessionId,
+      statsEvent,
+      tagFilterSelection,
+      user?.UserID,
+    ]
+  );
+
+  const closeTagBucketSolves = useCallback(() => {
+    tagBucketRequestRef.current += 1;
+    setTagBucketList(null);
+  }, []);
+
+  const tagBucketVisibleSolves = useMemo(() => {
+    if (!tagBucketList) return [];
+    return tagBucketList.solves.filter(
+      (solve) => (getSolveTagValue(solve, tagBucketList.field) || "Unknown") === tagBucketList.key
+    );
+  }, [tagBucketList]);
+
+  // Bulk actions update the app's sessions map; replay the same update on the
+  // snapshot so edits, moves and deletes show up in the open list.
+  const tagBucketSetSessions = useCallback(
+    (update) => {
+      statsSetSessions(update);
+      setTagBucketList((current) =>
+        current && typeof update === "function"
+          ? { ...current, solves: replaySessionsUpdate(current.solves, update, statsEvent) }
+          : current
+      );
+    },
+    [statsSetSessions, statsEvent]
+  );
+
+  const tagBucketDeleteSolve = useCallback(
+    async (solveRef) => {
+      await handleDeleteSolve(solveRef);
+      const ref = String(typeof solveRef === "string" ? solveRef : solveRef?.solveRef || "");
+      setTagBucketList((current) =>
+        current
+          ? { ...current, solves: current.solves.filter((solve) => String(solve?.solveRef || "") !== ref) }
+          : current
+      );
+    },
+    [handleDeleteSolve]
+  );
+
   const handleEventMatrixStatSelect = useCallback(
     async (selection) => {
       if (!selection || !user?.UserID) return;
@@ -7436,9 +7706,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             title={buildStatCardTitle(eventSelectLabel, selectedSessionDisplay)}
             titleDate={lineChartTitleDate}
             titleIndexRange={lineChartTitleIndexRange}
+            solveIndexOffset={lineChartSolveIndexOffset}
             deleteTime={handleDeleteSolve}
             addPost={addPost}
-            setSessions={setSessions}
+            setSessions={statsSetSessions}
             sessionsList={sessionsList}
             currentEvent={statsEvent}
             currentSession={sessionId}
@@ -7539,6 +7810,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   : (dateFilterStart === dateFilterEnd ? dateFilterStart : "")
               }
               onBucketSelect={handleBucketDaySelect}
+              competitions={wcaCompetitions}
+              onCompetitionOpen={handleCompetitionOpen}
             />
           );
         }
@@ -7549,7 +7822,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             seriesStyle={compareEnabled && tableCompareView === "compare" ? compareStyle : primaryCompareStyle}
             deleteTime={handleDeleteSolve}
             addPost={addPost}
-            setSessions={setSessions}
+            setSessions={statsSetSessions}
             sessionsList={sessionsList}
             currentEvent={compareEnabled && tableCompareView === "compare" ? compareEvent : statsEvent}
             currentSession={compareEnabled && tableCompareView === "compare" ? compareSessionId : sessionId}
@@ -7564,6 +7837,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     },
     [
       addPost,
+      wcaCompetitions,
+      handleCompetitionOpen,
       activeBucketItems,
       activeBucketSummary,
       activeCompareBucketItems,
@@ -7572,6 +7847,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       allLoadedFilteredRawSolves,
       barChartSolves,
       tableSolveIndexOffset,
+      lineChartSolveIndexOffset,
+      lineChartTitleIndexRange,
       chartVisibleSolves,
       compareEnabled,
       compareVisiblePageFilteredRawSolves,
@@ -7613,7 +7890,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       selectedTimeDay,
       sessionId,
       sessionsList,
-      setSessions,
+      statsSetSessions,
       loadedSolveCountForSummary,
       summarySolveIndexOffset,
       canonicalOverallStats,
@@ -8460,9 +8737,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     loading = false,
     scopeModalKey,
     leadContent = null,
-    sourceSummary = "",
     showViewModeChip = false,
-    backChip = null,
   }) => {
     const { label: eventLabel, puzzleEvent } = getEventDisplayMeta(eventValue);
     const hasActiveTags = Object.values(sanitizeTagSelection(tagSelection)).some((value) =>
@@ -8520,7 +8795,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   event={puzzleEvent}
                   scramble=""
                   isStatsHeaderIcon
-                  colorStyle={settings?.statsSelectorPuzzleSvgStyle || "color"}
+                  colorStyle={settings?.statsSelectorPuzzleSvgStyle || "grayscale"}
                 />
               </span>
             </button>
@@ -8598,62 +8873,61 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             </button>
           )}
 
-          {backChip ? (
-            <button
-              type="button"
-              className="statsScopeSummaryChip statsScopeSummaryChip--back"
-              onClick={(e) => {
-                e.stopPropagation();
-                backChip.onClick();
-              }}
-              title={backChip.title}
-            >
-              <span className="statsScopeSummaryChipValue">← {backChip.label}</span>
-            </button>
+        </div>
+
+        {/* Range pill: Solves/Time switch on the left, the range itself in the
+            middle, and (time view, single event) a hop to all events on the right. */}
+        <div className={`statsScopeRange ${rangePreview ? "is-preview" : ""}`}>
+          {showViewModeChip ? (
+            <div className="statsScopeRangeMode" role="group" aria-label="Stats view">
+              {STATS_VIEW_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`statsScopeRangeModeBtn ${statsViewMode === option.value ? "is-active" : ""}`}
+                  aria-pressed={statsViewMode === option.value}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleSetViewMode(option.value);
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           ) : null}
 
-          {sourceSummary ? (
-            <div
-              className="statsScopeSummaryChip statsScopeSummaryChip--source"
-              aria-label={`Data source: ${sourceSummary}`}
+          <button
+            type="button"
+            className={`statsScopeSummaryChip statsScopeSummaryChip--date ${rangePreview ? "is-preview" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              openScopeModal(scopeModalKey, "date");
+            }}
+          >
+            <span className="statsScopeDatePrimary">{rangeSummary?.primary}</span>
+            {rangeSummary?.secondary ? (
+              <span className="statsScopeDateSecondary">{rangeSummary.secondary}</span>
+            ) : null}
+          </button>
+
+          {showViewModeChip && statsViewMode === "time" && eventValue !== ALL_EVENTS ? (
+            <button
+              type="button"
+              className="statsScopeRangeAllBtn"
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleEventChange({ target: { value: ALL_EVENTS } });
+              }}
+              aria-label="All events for this range"
+              title="All events for this range"
             >
-              <span className="statsScopeSummaryChipLabel">Source</span>
-              <span className="statsScopeSummaryChipValue">{sourceSummary}</span>
-            </div>
+              All
+            </button>
           ) : null}
         </div>
 
-        <button
-          type="button"
-          className={`statsScopeSummaryChip statsScopeSummaryChip--date ${rangePreview ? "is-preview" : ""}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            openScopeModal(scopeModalKey, "date");
-          }}
-        >
-          <span className="statsScopeDatePrimary">{rangeSummary?.primary}</span>
-          {rangeSummary?.secondary ? (
-            <span className="statsScopeDateSecondary">{rangeSummary.secondary}</span>
-          ) : null}
-        </button>
-
         <div className="statsScopeRowActions">
-          {showViewModeChip ? (
-            <button
-              type="button"
-              className="statsScopeSummaryChip statsScopeSummaryChip--view"
-              onClick={(e) => {
-                e.stopPropagation();
-                openScopeModal(scopeModalKey, "view");
-              }}
-              aria-label="Change stats view"
-              title="Change stats view"
-            >
-              <span className="statsScopeSummaryChipValue">
-                {statsViewMode === "time" ? "Time" : "Solves"}
-              </span>
-            </button>
-          ) : null}
           {renderViewportControls(scopeModalKey)}
         </div>
       </div>
@@ -8686,6 +8960,50 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     page: linkStatsControls ? currentPage : compareCurrentPage,
     showAll: linkStatsControls ? showAllActive : compareShowAllActive,
   });
+
+  // One-click hop between this event's view and the all-events time view;
+  // handleSetViewMode keeps the current day / short range across the switch.
+  const standardScopeLabel = (() => {
+    const event = standardSelection?.event || currentEvent || "333";
+    const session = standardSelection?.session || currentSession || "main";
+    const found = (sessionsList || []).find(
+      (item) =>
+        String(item?.Event || "").toUpperCase() === String(event).toUpperCase() &&
+        String(item?.SessionID || "main") === String(session)
+    );
+    const sessionLabel =
+      session === ALL_SESSIONS
+        ? "All Sessions"
+        : normalizeSessionLabel(session, found?.SessionName || found?.Name || session);
+    return `${getEventDisplayMeta(event).label} ${sessionLabel}`;
+  })();
+  const primaryViewSwitchChip =
+    statsViewMode === "time"
+      ? {
+          label: `← ${standardScopeLabel}`,
+          title: `Back to ${standardScopeLabel} for this date range`,
+          onClick: () => void handleSetViewMode("standard"),
+        }
+      : {
+          label: "All events →",
+          title: "See every event for this date range",
+          onClick: () => void handleSetViewMode("time"),
+        };
+
+  const primaryBackChip =
+    rawRangeViewActive && statsViewMode === "standard"
+      ? {
+          label: canStepBackInStatsHistory ? "Back" : "All time",
+          title: canStepBackInStatsHistory ? "Back to the previous stats view" : "Show all-time day summaries",
+          onClick: handleStatsRangeBack,
+        }
+      : null;
+  // Small nav row above the selector (setting: statsNavButtonsEnabled).
+  const statsNavChips = [
+    primaryBackChip ? { ...primaryBackChip, key: "back", label: `← ${primaryBackChip.label}` } : null,
+    compareEnabled || readOnly ? null : { ...primaryViewSwitchChip, key: "view" },
+  ].filter(Boolean);
+  const showStatsNavRow = settings?.statsNavButtonsEnabled === true && statsNavChips.length > 0;
 
   const useSharedCompareRail = compareEnabled && statsViewMode === "standard";
   // Clicking an overview card that is already on the all-time range drops back to recent solves.
@@ -8748,10 +9066,19 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         ...statsContainerVars,
       }}
     >
-      {readOnly ? (
-        <div className="statsSharedBanner">
-          Viewing {statsOwnerDisplayName}'s shared stats. Editing is disabled for this view.
-          {viewerUser?.UserID ? ` Shared with ${viewerDisplayName}.` : ""}
+      {showStatsNavRow ? (
+        <div className="statsNavRow">
+          {statsNavChips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              className="statsNavChip"
+              onClick={chip.onClick}
+              title={chip.title}
+            >
+              {chip.label}
+            </button>
+          ))}
         </div>
       ) : null}
       <div
@@ -8783,19 +9110,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                 tagSelection: tagFilterSelection,
                 tagPills: selectedTagPills,
                 dateSummary: primaryDateSummary,
-                sourceSummary: !compareEnabled && useBucketBackedRange ? bucketSourceLabel : "",
                 scopeModalKey: "primary",
                 showViewModeChip: !compareEnabled,
-                backChip:
-                  rawRangeViewActive && statsViewMode === "standard"
-                    ? {
-                        label: canStepBackInStatsHistory ? "Back" : "All time",
-                        title: canStepBackInStatsHistory
-                          ? "Back to the previous stats view"
-                          : "Show all-time day summaries",
-                        onClick: handleStatsRangeBack,
-                      }
-                    : null,
               })}
 
               {compareEnabled &&
@@ -8982,6 +9298,38 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       })}
 
       <div className="stats-page">
+        {viewedDayCompetitions.map((comp) => {
+          const compSolveCount = chartVisibleSolves.filter(
+            (solve) => (solve?.tags?.Competition || solve?.Tags?.Competition) === comp.CompetitionID
+          ).length;
+          const otherCount = chartVisibleSolves.length - compSolveCount;
+          return (
+            <button
+              key={comp.CompetitionID}
+              type="button"
+              className="statsCompetitionBanner"
+              onClick={() => handleCompetitionOpen(comp.CompetitionID)}
+            >
+              <span className="statsCompetitionBanner-badge">WCA</span>
+              <span className="statsCompetitionBanner-text">
+                <strong>{comp.Name || comp.CompetitionID}</strong>
+                <span>
+                  {[
+                    comp.City,
+                    compSolveCount
+                      ? `${compSolveCount} competition solve${compSolveCount === 1 ? "" : "s"} here${
+                          otherCount > 0 ? ` · ${otherCount} other` : ""
+                        }`
+                      : "Competition day",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </span>
+              <span className="statsCompetitionBanner-cta">All competition results ›</span>
+            </button>
+          );
+        })}
         <div
           className={`stats-grid stats-grid--figma ${statsViewMode === "time" ? "stats-grid--time" : ""} ${
             showAllEventsTimeMatrixCard ? "" : "stats-grid--noEventMatrix"
@@ -9398,9 +9746,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   title={buildStatCardTitle(eventSelectLabel, selectedSessionDisplay)}
                   titleDate={lineChartTitleDate}
                   titleIndexRange={lineChartTitleIndexRange}
+                  solveIndexOffset={lineChartSolveIndexOffset}
                   deleteTime={handleDeleteSolve}
                   addPost={addPost}
-                  setSessions={setSessions}
+                  setSessions={statsSetSessions}
                   sessionsList={sessionsList}
                   currentEvent={statsEvent}
                   currentSession={sessionId}
@@ -9495,6 +9844,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     aggregateItems={tagBreakdownAggregateItems}
                     aggregateSummary={tagBreakdownAggregateItems ? activeBucketSummary : null}
                     profileColor={user?.Color || user?.color || "#2EC4B6"}
+                    onBucketSolvesOpen={openTagBucketSolves}
                   />
                 </div>
               )}
@@ -9538,6 +9888,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         : (dateFilterStart === dateFilterEnd ? dateFilterStart : "")
                     }
                     onBucketSelect={handleBucketDaySelect}
+                    competitions={wcaCompetitions}
+                    onCompetitionOpen={handleCompetitionOpen}
                   />
                 ) : (
                   <TimeTable
@@ -9552,13 +9904,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     seriesStyle={compareEnabled && tableCompareView === "compare" ? compareStyle : primaryCompareStyle}
                     deleteTime={handleDeleteSolve}
                     addPost={addPost}
-                    setSessions={setSessions}
+                    setSessions={statsSetSessions}
                     sessionsList={sessionsList}
                     currentEvent={compareEnabled && tableCompareView === "compare" ? compareEvent : statsEvent}
                     currentSession={compareEnabled && tableCompareView === "compare" ? compareSessionId : sessionId}
                     eventKey={compareEnabled && tableCompareView === "compare" ? compareEvent : statsEvent}
                     practiceMode={false}
                     solveIndexOffset={compareEnabled && tableCompareView === "compare" ? null : tableSolveIndexOffset}
+                    {...bulkTagEditorProps}
                   />
                 )}
               </div>
@@ -9583,11 +9936,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           onClose={() => setSelectedSolve(null)}
           deleteTime={() => {
             const solveRef = selectedSolve?.solveRef || null;
-            if (solveRef) handleDeleteSolve(solveRef);
+            if (solveRef) (tagBucketList ? tagBucketDeleteSolve : handleDeleteSolve)(solveRef);
           }}
           addPost={addPost}
           saveToProfile={saveToProfile}
-          setSessions={setSessions}
+          setSessions={tagBucketList ? tagBucketSetSessions : statsSetSessions}
           sessionsList={sessionsList}
           tagConfig={safeTagConfig}
           cubeModelOptions={cubeModelOptions}
@@ -9610,6 +9963,48 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         onClose={() => setSelectedAverageDetail(null)}
         onSolveOpen={openSolveDetail}
       />
+
+      <StatFocusModal
+        isOpen={!!tagBucketList}
+        title={tagBucketList ? `${tagBucketList.fieldLabel}: ${tagBucketList.label}` : ""}
+        subtitle={
+          tagBucketList
+            ? tagBucketList.loading
+              ? `Loading ${tagBucketList.expectedCount} solves…`
+              : `${tagBucketVisibleSolves.length} ${tagBucketVisibleSolves.length === 1 ? "solve" : "solves"}${
+                  readOnly ? "" : " · select solves to retag, move or delete them"
+                }`
+            : ""
+        }
+        modalClassName="statFocusModal--tagBucket"
+        bodyClassName="statFocusBody--tagBucket"
+        onClose={closeTagBucketSolves}
+      >
+        {tagBucketList?.error ? (
+          <div className="statsSummaryEmpty">{tagBucketList.error}</div>
+        ) : tagBucketList?.loading ? (
+          <div className="statsSummaryEmpty">Loading solves…</div>
+        ) : tagBucketList && !tagBucketVisibleSolves.length ? (
+          <div className="statsSummaryEmpty">No solves left in this slice.</div>
+        ) : tagBucketList ? (
+          <TimeTable
+            user={user}
+            solves={tagBucketVisibleSolves}
+            seriesStyle={primaryCompareStyle}
+            deleteTime={tagBucketDeleteSolve}
+            addPost={addPost}
+            setSessions={tagBucketSetSessions}
+            sessionsList={sessionsList}
+            currentEvent={statsEvent}
+            currentSession={sessionId}
+            eventKey={statsEvent}
+            practiceMode={false}
+            showBulkControls={!readOnly}
+            onSolveOpen={openSolveDetail}
+            {...bulkTagEditorProps}
+          />
+        ) : null}
+      </StatFocusModal>
 
       <StatFocusModal
         isOpen={!!expensiveStatsPrompt}

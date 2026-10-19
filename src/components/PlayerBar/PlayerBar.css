@@ -67,6 +67,69 @@
   max-width: 210px;
 }
 
+/* shared-average indicator: sits inline after the event/session label so it
+   never covers the scramble */
+.playerbar-eventline {
+  gap: 8px;
+}
+
+.playerbar-shared-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 220px;
+  height: 22px;
+  padding: 0 4px 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(46, 196, 182, 0.45);
+  background: rgba(46, 196, 182, 0.12);
+  color: white;
+  white-space: nowrap;
+}
+
+.playerbar-shared-chip__dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2ec4b6;
+}
+
+.playerbar-shared-chip__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.playerbar-shared-chip__meta {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.playerbar-shared-chip__button {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  font-size: 10px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.playerbar-shared-chip__button:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
 .playerbar-timer {
   display: flex;
   justify-content: center;
@@ -223,47 +286,6 @@
   border-radius: 999px;
   border: none;
   background: rgba(255,255,255,0.14);
-  color: white;
-  font-size: 10px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-/* shared-average indicator: same footprint as the room pill, teal accent */
-.playerbar-shared-pill {
-  position: absolute;
-  top: -8px;
-  left: 50%;
-  transform: translate(-50%, -100%);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(46, 196, 182, 0.4);
-  background: rgba(46, 196, 182, 0.12);
-  color: white;
-  white-space: nowrap;
-  z-index: 16;
-}
-
-.playerbar-shared-pill__label {
-  font-size: 10px;
-  font-weight: 900;
-}
-
-.playerbar-shared-pill__meta {
-  font-size: 10px;
-  font-weight: 700;
-  opacity: 0.72;
-}
-
-.playerbar-shared-pill__button {
-  min-height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: none;
-  background: rgba(255, 255, 255, 0.14);
   color: white;
   font-size: 10px;
   font-weight: 800;

@@ -32,6 +32,7 @@ import {
 import { getPosts } from "../../services/getPosts";
 import { getUser } from "../../services/getUser";
 import { updateUser } from "../../services/updateUser";
+import { followUser, unfollowUser } from "../../services/follow";
 import { updatePostComments } from "../../services/updatePostComments";
 import { getSessions } from "../../services/getSessions";
 import {
@@ -512,6 +513,25 @@ function getProfileStatsChromeStyle(profile) {
   };
 }
 
+// Shown in place of a section the viewer isn't allowed to see.
+function ProfilePrivateNotice({ what, viewedID, followState, privateAccount }) {
+  const notFollowing = followState === "none" || followState === "follow-back";
+  let hint = `@${viewedID} keeps their ${what} private.`;
+  if (privateAccount && notFollowing) {
+    hint = `@${viewedID} has a private account. Follow them to request access.`;
+  } else if (followState === "requested") {
+    hint = `Your follow request to @${viewedID} is waiting for approval.`;
+  } else if (notFollowing) {
+    hint = `@${viewedID} only shows their ${what} to some people. Following them may unlock it.`;
+  }
+  return (
+    <div className="profilePrivateNotice">
+      <div className="profilePrivateNotice__title">These {what} are private</div>
+      <div className="profilePrivateNotice__hint">{hint}</div>
+    </div>
+  );
+}
+
 function Profile({
   user,
   setUser,
@@ -526,9 +546,22 @@ function Profile({
   const isOwn = !paramID || paramID === user?.UserID;
   const viewID = isOwn ? user?.UserID : paramID;
 
-  const isFriend = user?.Friends?.includes(viewID);
-
   const [viewedProfile, setViewedProfile] = useState(null);
+  const [followBusy, setFollowBusy] = useState(false);
+
+  // What the server says this viewer may see; the owner sees everything.
+  const viewerAccess = isOwn ? null : viewedProfile?.Viewer || null;
+  const canViewSection = (section) => isOwn || viewerAccess?.canView?.[section] === true;
+  // Reloads gated data when a follow changes what the viewer may see.
+  const accessKey = isOwn ? "self" : JSON.stringify(viewerAccess?.canView || null);
+
+  const isFollowing = !!user?.Friends?.includes(viewID);
+  const followState = (() => {
+    if (isOwn) return null;
+    if (isFollowing) return viewerAccess?.relationship === "friend" ? "friends" : "following";
+    if (viewerAccess?.followRequested) return "requested";
+    return viewerAccess?.followsYou ? "follow-back" : "none";
+  })();
   const [viewedSessions, setViewedSessions] = useState({});
   const [viewedSessionCatalog, setViewedSessionCatalog] = useState({});
   const [viewedSessionStats, setViewedSessionStats] = useState({});
@@ -542,6 +575,7 @@ function Profile({
   const [editingStats, setEditingStats] = useState(false);
   const [activeGroupID, setActiveGroupID] = useState(SAVED_STATS_LIST_ID);
   const [draftGroupName, setDraftGroupName] = useState("");
+  const [draftGroupVisible, setDraftGroupVisible] = useState(false);
   const [newListName, setNewListName] = useState(null);
   const [dragKey, setDragKey] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
@@ -593,6 +627,11 @@ function Profile({
         try {
           const prof = await getUser(viewID);
           setViewedProfile({ ...prof, UserID: viewID });
+          if (prof?.Viewer?.canView?.profileStats !== true) {
+            setViewedSessionCatalog({});
+            setViewedSessionStats({});
+          }
+          if (prof?.Viewer?.canView?.posts !== true) setPosts([]);
           const nextVisibleStats =
             Array.isArray(prof?.VisibleStats) && prof.VisibleStats.length > 0
               ? prof.VisibleStats
@@ -610,6 +649,8 @@ function Profile({
   useEffect(() => {
     const loadSessions = async () => {
       if (!viewID) return;
+      if (!isOwn && !viewedProfile) return;
+      if (!canViewSection("profileStats")) return;
 
       try {
         const sessionItems = await getSessions(viewID);
@@ -638,7 +679,13 @@ function Profile({
     };
 
     loadSessions();
-  }, [viewID]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewID, accessKey, !!viewedProfile]);
+
+  // Solves fetched under an older access level may be empty; refetch.
+  useEffect(() => {
+    setViewedSessions({});
+  }, [viewID, accessKey]);
 
   useEffect(() => {
     setActiveGroupID(SAVED_STATS_LIST_ID);
@@ -655,9 +702,9 @@ function Profile({
     () => normalizeStatLists(viewedProfile?.StatLists),
     [viewedProfile?.StatLists]
   );
-  // Visitors only see lists that have something in them.
+  // Visitors only see lists the owner made visible that have something in them.
   const savedGroups = useMemo(
-    () => statLists.filter((list) => isOwn || list.items.length > 0),
+    () => statLists.filter((list) => isOwn || (list.visible && list.items.length > 0)),
     [isOwn, statLists]
   );
   const showSavedTab = isOwn || savedGroups.length > 0;
@@ -674,6 +721,7 @@ function Profile({
 
   useEffect(() => {
     if (!viewID) return;
+    if (!canViewSection("profileStats")) return;
 
     const needsSolves = (item) =>
       item &&
@@ -730,7 +778,8 @@ function Profile({
         }
       })();
     });
-  }, [viewID, viewedSessions, activeItems, editingStats, draftVisibleStats]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewID, viewedSessions, activeItems, editingStats, draftVisibleStats, accessKey]);
 
   useEffect(() => {
     const loadPosts = async () => {
@@ -741,8 +790,9 @@ function Profile({
         console.error("Failed to fetch posts:", err);
       }
     };
-    if (viewID) loadPosts();
-  }, [viewID]);
+    if (viewID && canViewSection("posts")) loadPosts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewID, accessKey]);
 
   const handleDeletePost = async (ts) => {
     try {
@@ -788,17 +838,55 @@ function Profile({
     }
   };
 
-  const handleAddFriend = async () => {
-    if (!user || isOwn) return;
-    const current = user.Friends || [];
-    if (!current.includes(viewID)) {
-      const updatedList = [...current, viewID];
-      try {
-        await runDb("Adding friend", () => updateUser(user.UserID, { Friends: updatedList }));
-        setUser((prev) => ({ ...prev, Friends: updatedList }));
-      } catch (err) {
-        console.error("Failed to add friend:", err);
-      }
+  const applyFollowResult = (updated) => {
+    if (!updated) return;
+    setUser((prev) => ({
+      ...prev,
+      Friends: updated.Friends || [],
+      StatsAllowedFriends: updated.StatsAllowedFriends || [],
+    }));
+  };
+
+  // Refetch the viewed profile so Viewer access (and so gated data) updates.
+  const refreshViewedProfile = async () => {
+    try {
+      const prof = await getUser(viewID);
+      setViewedProfile({ ...prof, UserID: viewID });
+    } catch (err) {
+      console.error("Error reloading profile:", err);
+    }
+  };
+
+  const handleFollow = async () => {
+    if (!user || isOwn || followBusy) return;
+    setFollowBusy(true);
+    try {
+      const { user: updated } = await runDb("Following", () => followUser(viewID));
+      applyFollowResult(updated);
+      await refreshViewedProfile();
+    } catch (err) {
+      console.error("Failed to follow:", err);
+    } finally {
+      setFollowBusy(false);
+    }
+  };
+
+  const handleUnfollow = async () => {
+    if (!user || isOwn || followBusy) return;
+    const prompt =
+      followState === "requested"
+        ? `Cancel your follow request to @${viewID}?`
+        : `Unfollow @${viewID}?`;
+    if (!window.confirm(prompt)) return;
+    setFollowBusy(true);
+    try {
+      const { user: updated } = await runDb("Unfollowing", () => unfollowUser(viewID));
+      applyFollowResult(updated);
+      await refreshViewedProfile();
+    } catch (err) {
+      console.error("Failed to unfollow:", err);
+    } finally {
+      setFollowBusy(false);
     }
   };
 
@@ -826,6 +914,7 @@ function Profile({
                   ...list,
                   name: list.builtIn ? list.name : cleanStatListName(draftGroupName) || list.name,
                   items: nextItems,
+                  visible: draftGroupVisible,
                 }
               : list
           )
@@ -880,6 +969,7 @@ function Profile({
   const openStatsEditor = () => {
     setDraftVisibleStats(activeItems.map((item) => ({ ...item, __k: nextDraftKey() })));
     setDraftGroupName(activeGroup.name);
+    setDraftGroupVisible(activeGroup.visible === true);
     setDragKey(null);
     setDropTarget(null);
     setEditingStats(true);
@@ -1227,17 +1317,12 @@ function Profile({
         onEditStats={openStatsEditor}
         onJoinLiveRoom={!isOwn ? onJoinLiveRoom : null}
         liveRoomBusy={liveRoomBusy}
+        followState={followState}
+        followBusy={followBusy}
+        onFollow={!isOwn ? handleFollow : null}
+        onUnfollow={!isOwn ? handleUnfollow : null}
+        canViewFullStats={!isOwn && viewerAccess?.canView?.fullStats === true}
       />
-
-      {!isOwn && (
-        <button
-          className="addFriendButton"
-          onClick={handleAddFriend}
-          disabled={isFriend}
-        >
-          {isFriend ? "Friend" : "Add Friend"}
-        </button>
-      )}
 
       {editingStats && (
         <div className="statsEditorOverlay" onClick={closeStatsEditor}>
@@ -1245,7 +1330,11 @@ function Profile({
             <div className="statsEditorHeader">
               <div>
                 <h3>{isMainGroup ? "Customize stats" : `Edit ${activeGroup.name}`}</h3>
-                <p>Drag cards to reorder. This is the layout people see on your profile.</p>
+                <p>
+                  {isMainGroup || draftGroupVisible
+                    ? "Drag cards to reorder. This is the layout people see on your profile."
+                    : "Drag cards to reorder. Only you can see this list."}
+                </p>
               </div>
               <div className="statsEditorActions">
                 <button type="button" className="statsEditorSecondary" onClick={closeStatsEditor}>
@@ -1256,6 +1345,17 @@ function Profile({
                 </button>
               </div>
             </div>
+
+            {!isMainGroup && (
+              <label className="statsEditorVisibility">
+                <input
+                  type="checkbox"
+                  checked={draftGroupVisible}
+                  onChange={(e) => setDraftGroupVisible(e.target.checked)}
+                />
+                <span>Show this list on my profile</span>
+              </label>
+            )}
 
             {!isMainGroup && !activeGroup.builtIn && (
               <div className="statsEditorListName">
@@ -1531,6 +1631,11 @@ function Profile({
                           onClick={() => setActiveGroupID(group.id)}
                         >
                           {group.name}
+                          {isOwn && !group.visible && (
+                            <span className="profileStatGroupHidden" title="Only you can see this list">
+                              Hidden
+                            </span>
+                          )}
                           <span className="profileStatGroupCount">{group.items.length}</span>
                         </button>
                       ))}
@@ -1588,9 +1693,18 @@ function Profile({
                         : "Nothing saved here yet."}
                     </div>
                   )}
-                  <div className="profileStatsGrid">
-                    {activeItems.map((item, idx) => renderStatCard(item, idx))}
-                  </div>
+                  {canViewSection("profileStats") ? (
+                    <div className="profileStatsGrid">
+                      {activeItems.map((item, idx) => renderStatCard(item, idx))}
+                    </div>
+                  ) : (
+                    <ProfilePrivateNotice
+                      what="stats"
+                      viewedID={viewID}
+                      followState={followState}
+                      privateAccount={viewedProfile?.PrivateAccount === true}
+                    />
+                  )}
                 </div>
 
                 {showEventMatrixRail && (
@@ -1603,7 +1717,14 @@ function Profile({
 
         {activeTab === 1 && (
           <div className="tabPanel postsPanel">
-            {recentPosts.length > 0 ? (
+            {!canViewSection("posts") ? (
+              <ProfilePrivateNotice
+                what="posts"
+                viewedID={viewID}
+                followState={followState}
+                privateAccount={viewedProfile?.PrivateAccount === true}
+              />
+            ) : recentPosts.length > 0 ? (
               recentPosts.map((post, idx) => (
                 (() => {
                   const statShare = post.StatShare || post.statShare || null;

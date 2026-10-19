@@ -2014,7 +2014,25 @@ function sanitizeTags(input = {}) {
     Custom3: cleanTagValue(input?.Custom3),
     Custom4: cleanTagValue(input?.Custom4),
     Custom5: cleanTagValue(input?.Custom5),
+    // System tags written by the WCA import. Not shown in the tag bar; they
+    // group a competition's solves across events (see /api/wca/competitions).
+    Competition: cleanTagValue(input?.Competition),
+    CompetitionRound: cleanTagValue(input?.CompetitionRound),
     LegacyCustom: legacyCustom,
+  };
+}
+
+// Tag editors only send the user-facing tag fields, so an edit would
+// otherwise silently drop an imported solve's competition link.
+function withPreservedCompetitionTags(canonicalTags, existing) {
+  const prior = existing?.Tags && typeof existing.Tags === "object" ? existing.Tags : {};
+  return {
+    ...canonicalTags,
+    Competition:
+      canonicalTags.Competition || cleanTagValue(existing?.Tag_Competition || prior.Competition),
+    CompetitionRound:
+      canonicalTags.CompetitionRound ||
+      cleanTagValue(existing?.Tag_CompetitionRound || prior.CompetitionRound),
   };
 }
 
@@ -2043,7 +2061,7 @@ function buildSolveItem({
   const finalTimeMs = computeFinalTimeMs(raw, p);
   const ts = String(createdAt || existing?.CreatedAt || nowIso());
   const sid2 = String(solveID || existing?.SolveID || createSolveID());
-  const canonicalTags = sanitizeTags(tags);
+  const canonicalTags = withPreservedCompetitionTags(sanitizeTags(tags), existing);
 
   return {
     ...(existing || {}),
@@ -2087,6 +2105,12 @@ function buildSolveItem({
     Tag_Custom3: canonicalTags.Custom3,
     Tag_Custom4: canonicalTags.Custom4,
     Tag_Custom5: canonicalTags.Custom5,
+    ...(canonicalTags.Competition
+      ? {
+          Tag_Competition: canonicalTags.Competition,
+          Tag_CompetitionRound: canonicalTags.CompetitionRound,
+        }
+      : {}),
 
     Tags: {
       CubeModel: canonicalTags.CubeModel,
@@ -2103,6 +2127,12 @@ function buildSolveItem({
       Custom3: canonicalTags.Custom3,
       Custom4: canonicalTags.Custom4,
       Custom5: canonicalTags.Custom5,
+      ...(canonicalTags.Competition
+        ? {
+            Competition: canonicalTags.Competition,
+            CompetitionRound: canonicalTags.CompetitionRound,
+          }
+        : {}),
       ...(Object.keys(canonicalTags.LegacyCustom || {}).length
         ? { LegacyCustom: canonicalTags.LegacyCustom }
         : {}),
@@ -2232,6 +2262,9 @@ function getSolveTagPairsFromItem(solveItem) {
       Array.isArray(nestedTags?.Custom) ? nestedTags.Custom[4] : null
     )
   );
+  // CompetitionRound stays on the solve only: an index of "every final ever"
+  // isn't useful, and the competition page reads it off the hydrated solves.
+  add("Competition", firstNonEmpty(solveItem?.Tag_Competition, nestedTags?.Competition));
 
   return pairs;
 }

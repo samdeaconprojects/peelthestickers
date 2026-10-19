@@ -1658,7 +1658,7 @@ export const StatsSummaryCurrent = React.memo(function StatsSummaryCurrent({
   });
   const rivalView = useCurrentViewSummary({
     solves: rival?.solves || EMPTY_SOLVES,
-    solveIndexOffset: rival?.solveIndexOffset || 0,
+    solveIndexOffset: rival ? rival.solveIndexOffset ?? 0 : 0,
     bucketSummary: rival?.bucketSummary || null,
     bucketItems: rival?.bucketItems || EMPTY_SOLVES,
     overallStats: rival?.overallStats || null,
@@ -2329,8 +2329,13 @@ export const StatsSummaryOverviewMini = React.memo(function StatsSummaryOverview
   const cardStyle = useMemo(
     () => ({
       background: `var(--stats-overview-mini-bg, ${withAlpha(resolvedProfileColor, active ? 0.26 : 0.13)})`,
-      "--ss-mini-border": withAlpha(resolvedProfileColor, active ? 1 : 0.3),
-      "--ss-mini-border-hover": withAlpha(resolvedProfileColor, active ? 1 : 0.65),
+      // Match the stat cards' border (container color mode) unless active.
+      "--ss-mini-border": active
+        ? withAlpha(resolvedProfileColor, 1)
+        : `var(--stats-container-force-border, ${withAlpha(resolvedProfileColor, 0.3)})`,
+      "--ss-mini-border-hover": active
+        ? withAlpha(resolvedProfileColor, 1)
+        : `var(--stats-container-force-border-hover, ${withAlpha(resolvedProfileColor, 0.65)})`,
       boxShadow: `inset 0 1px 0 ${withAlpha(resolvedProfileColor, 0.18)}`,
     }),
     [active, resolvedProfileColor]

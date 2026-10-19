@@ -1,7 +1,16 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { moveSolvesToSession } from "../services/moveSolvesToSession";
 import { bulkUpdateSolveTags } from "../services/bulkUpdateSolveTags";
 import { normalizeEventCode } from "../components/SolveBulk/solveBulkUtils";
+import { currentEventToString } from "../components/scrambleUtils";
+import { DEFAULT_EVENTS } from "../defaultEvents";
+
+const BULK_STATUS_MS = 3500;
+const BULK_UNDO_STATUS_MS = 7000;
+
+function pluralSolves(n) {
+  return `${n} solve${n === 1 ? "" : "s"}`;
+}
 
 function safeMergeCanonicalTags(existingTags, patch, mode = "merge") {
   const base =
@@ -83,6 +92,38 @@ export default function useBulkSolveActions({
     String(currentSession || "main")
   );
 
+  // Short-lived confirmation shown after a bulk action: { text, kind: "info" | "success" | "error" }.
+  const [bulkStatus, setBulkStatus] = useState(null);
+  const bulkStatusTimeoutRef = useRef(null);
+
+  const dismissBulkStatus = useCallback(() => {
+    if (bulkStatusTimeoutRef.current) clearTimeout(bulkStatusTimeoutRef.current);
+    bulkStatusTimeoutRef.current = null;
+    setBulkStatus(null);
+  }, []);
+
+  const showBulkStatus = useCallback(
+    (text, kind = "success", { sticky = false, onUndo = null } = {}) => {
+      if (bulkStatusTimeoutRef.current) clearTimeout(bulkStatusTimeoutRef.current);
+      bulkStatusTimeoutRef.current = null;
+      setBulkStatus({ text, kind, onUndo: typeof onUndo === "function" ? onUndo : null });
+      if (!sticky) {
+        bulkStatusTimeoutRef.current = setTimeout(() => {
+          bulkStatusTimeoutRef.current = null;
+          setBulkStatus(null);
+        }, onUndo ? BULK_UNDO_STATUS_MS : BULK_STATUS_MS);
+      }
+    },
+    []
+  );
+
+  useEffect(
+    () => () => {
+      if (bulkStatusTimeoutRef.current) clearTimeout(bulkStatusTimeoutRef.current);
+    },
+    []
+  );
+
   const selectionCount = selectedIndices.size;
 
   const selectedSolvesByIndex = useMemo(() => {
@@ -101,6 +142,32 @@ export default function useBulkSolveActions({
       return (sessionsList || []).filter((s) => normalizeEventCode(s.Event) === E);
     },
     [sessionsList]
+  );
+
+  const bulkMoveEventOptions = useMemo(() => {
+    const ids = [];
+    const seen = new Set();
+    const add = (ev) => {
+      const id = normalizeEventCode(ev);
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      ids.push(id);
+    };
+    DEFAULT_EVENTS.forEach(add);
+    (sessionsList || []).forEach((s) => add(s?.Event));
+    add(currentEvent);
+    add(bulkMoveEvent);
+    return ids.map((id) => ({ id, name: currentEventToString(id) || id }));
+  }, [sessionsList, currentEvent, bulkMoveEvent]);
+
+  const describeMoveTarget = useCallback(
+    (ev, sessionID) => {
+      const eventName = currentEventToString(ev) || ev;
+      const session = getSessionsForEvent(ev).find((s) => String(s.SessionID) === sessionID);
+      const sessionName = session?.SessionName || (sessionID === "main" ? "Main" : sessionID);
+      return `${eventName} · ${sessionName}`;
+    },
+    [getSessionsForEvent]
   );
 
   const sourceListKey = useMemo(
@@ -134,6 +201,43 @@ export default function useBulkSolveActions({
     setShowBulkMove(false);
   }, [selectionCount]);
 
+  const undoBulkTags = useCallback(
+    async ({ originalTagsByRef, practice }) => {
+      const restoreLocal = () =>
+        setSessions?.((prev) => {
+          const next = { ...(prev || {}) };
+          const arr = Array.isArray(next[sourceListKey]) ? [...next[sourceListKey]] : [];
+          next[sourceListKey] = arr.map((entry) =>
+            originalTagsByRef.has(String(entry?.solveRef))
+              ? { ...entry, tags: originalTagsByRef.get(String(entry.solveRef)) }
+              : entry
+          );
+          return next;
+        });
+
+      if (practice) {
+        restoreLocal();
+        showBulkStatus("Tag edit undone");
+        return;
+      }
+
+      if (!user?.UserID) return;
+      showBulkStatus("Undoing tag edit…", "info", { sticky: true });
+      try {
+        await bulkUpdateSolveTags(
+          user.UserID,
+          Array.from(originalTagsByRef, ([solveRef, tags]) => ({ solveRef, tags }))
+        );
+        restoreLocal();
+        showBulkStatus("Tag edit undone");
+      } catch (err) {
+        console.error("Bulk tag undo failed:", err);
+        showBulkStatus("Couldn't undo the tag edit.", "error");
+      }
+    },
+    [setSessions, sourceListKey, user, showBulkStatus]
+  );
+
   const applyBulkTags = useCallback(async () => {
     const patch = {};
 
@@ -159,6 +263,12 @@ export default function useBulkSolveActions({
       return;
     }
 
+    // Snapshot the tags as they were so the toast can put them back.
+    const originalTagsByRef = new Map(
+      targets.map((s) => [String(s.solveRef), s.tags && typeof s.tags === "object" ? { ...s.tags } : {}])
+    );
+    const undoTagLabel = `Updated tags on ${pluralSolves(targets.length)}`;
+
     if (practiceMode) {
       const solveRefSet = new Set(targets.map((s) => s.solveRef));
 
@@ -180,6 +290,9 @@ export default function useBulkSolveActions({
 
       setShowBulkTags(false);
       clearSelection();
+      showBulkStatus(undoTagLabel, "success", {
+        onUndo: () => undoBulkTags({ originalTagsByRef, practice: true }),
+      });
       return;
     }
 
@@ -234,8 +347,12 @@ export default function useBulkSolveActions({
 
         return next;
       });
+      showBulkStatus(undoTagLabel, "success", {
+        onUndo: () => undoBulkTags({ originalTagsByRef, practice: false }),
+      });
     } catch (err) {
       console.error("Bulk tag update failed:", err);
+      showBulkStatus("Tag update failed. Nothing was changed.", "error");
     }
 
     setShowBulkTags(false);
@@ -257,7 +374,72 @@ export default function useBulkSolveActions({
     sourceListKey,
     user,
     clearSelection,
+    showBulkStatus,
+    undoBulkTags,
   ]);
+
+  // Put moved solves back in their original event/session. `originals` are the solve objects
+  // as they were before the move, `movedToEvent` is the list they were moved into.
+  const undoBulkMove = useCallback(
+    async ({ originals, movedToEvent, practice }) => {
+      const refSet = new Set(originals.map((s) => s.solveRef));
+
+      const restoreLocal = () =>
+        setSessions?.((prev) => {
+          const next = { ...(prev || {}) };
+          const targetArr = Array.isArray(next[movedToEvent]) ? next[movedToEvent] : [];
+          next[movedToEvent] = targetArr.filter((s) => !refSet.has(s?.solveRef));
+
+          const byEvent = new Map();
+          for (const solve of originals) {
+            const key = normalizeEventCode(solve.event || sourceListKey);
+            if (!byEvent.has(key)) byEvent.set(key, []);
+            byEvent.get(key).push(solve);
+          }
+          byEvent.forEach((items, key) => {
+            const arr = (Array.isArray(next[key]) ? next[key] : []).filter(
+              (s) => !refSet.has(s?.solveRef)
+            );
+            next[key] = sortSolvesByCreatedAt([...arr, ...items]);
+          });
+          return next;
+        });
+
+      if (practice) {
+        restoreLocal();
+        showBulkStatus("Move undone");
+        return;
+      }
+
+      if (!user?.UserID) return;
+      showBulkStatus("Undoing move…", "info", { sticky: true });
+
+      const groups = new Map();
+      for (const solve of originals) {
+        const ev = normalizeEventCode(solve.event || sourceListKey);
+        const sid = String(solve.sessionID || currentSession || "main");
+        const key = `${ev}|${sid}`;
+        if (!groups.has(key)) groups.set(key, { ev, sid, solves: [] });
+        groups.get(key).solves.push(solve);
+      }
+
+      try {
+        for (const { ev, sid, solves: groupSolves } of groups.values()) {
+          await moveSolvesToSession(user.UserID, groupSolves, {
+            event: movedToEvent,
+            toEvent: ev,
+            toSessionID: sid,
+          });
+        }
+        restoreLocal();
+        showBulkStatus("Move undone");
+      } catch (err) {
+        console.error("Bulk move undo failed:", err);
+        showBulkStatus("Couldn't undo the move. Refresh to see where your solves are.", "error");
+      }
+    },
+    [setSessions, sourceListKey, user, currentSession, showBulkStatus]
+  );
 
   const applyBulkMove = useCallback(async () => {
     const targetEvent = normalizeEventCode(bulkMoveEvent);
@@ -306,6 +488,14 @@ export default function useBulkSolveActions({
 
       setShowBulkMove(false);
       clearSelection();
+      showBulkStatus(
+        `Moved ${pluralSolves(movingSolves.length)} to ${describeMoveTarget(targetEvent, targetSession)}`,
+        "success",
+        {
+          onUndo: () =>
+            undoBulkMove({ originals: movingSolves, movedToEvent: targetEvent, practice: true }),
+        }
+      );
       return;
     }
 
@@ -362,12 +552,20 @@ export default function useBulkSolveActions({
 
       setShowBulkMove(false);
       clearSelection();
+      const targetLabel = describeMoveTarget(targetEvent, targetSession);
+      showBulkStatus(`Moving ${pluralSolves(movingSolves.length)} to ${targetLabel}…`, "info", {
+        sticky: true,
+      });
 
       await moveSolvesToSession(user.UserID, movingSolves, {
         event: sourceListKey,
         fromSessionID: currentSession,
         toEvent: targetEvent,
         toSessionID: targetSession,
+      });
+      showBulkStatus(`Moved ${pluralSolves(movingSolves.length)} to ${targetLabel}`, "success", {
+        onUndo: () =>
+          undoBulkMove({ originals: movingSolves, movedToEvent: targetEvent, practice: false }),
       });
     } catch (err) {
       console.error("Bulk move failed:", err);
@@ -379,7 +577,7 @@ export default function useBulkSolveActions({
           return next;
         });
       }
-      alert("Bulk move failed. Your solves were restored.");
+      showBulkStatus("Move failed. Your solves were restored.", "error");
     }
   }, [
     bulkMoveEvent,
@@ -392,6 +590,9 @@ export default function useBulkSolveActions({
     currentSession,
     setShowBulkMove,
     clearSelection,
+    showBulkStatus,
+    describeMoveTarget,
+    undoBulkMove,
   ]);
 
   const applyBulkDelete = useCallback(async () => {
@@ -515,6 +716,9 @@ export default function useBulkSolveActions({
     setBulkShareNote,
 
     getSessionsForEvent,
+    bulkMoveEventOptions,
+    bulkStatus,
+    dismissBulkStatus,
     openBulkTags,
     openBulkMove,
     openBulkShare,

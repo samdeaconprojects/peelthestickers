@@ -1060,6 +1060,7 @@ function TimeList({
       <button
         type="button"
         className="vertical-nav-btn"
+        data-bulk-keep-selection="true"
         onClick={() => setVerticalPage(page + (towardOlder ? 1 : -1))}
         disabled={towardOlder ? page >= maxVerticalPage : page === 0}
         title={`${towardOlder ? "Older" : "Newer"} (${pageSize})`}
@@ -1238,6 +1239,9 @@ function TimeList({
         bulkShareNote={bulkActions.bulkShareNote}
         setBulkShareNote={bulkActions.setBulkShareNote}
         getSessionsForEvent={bulkActions.getSessionsForEvent}
+        bulkMoveEventOptions={bulkActions.bulkMoveEventOptions}
+        bulkStatus={bulkActions.bulkStatus}
+        dismissBulkStatus={bulkActions.dismissBulkStatus}
         tagConfig={tagConfig}
         cubeModelOptions={cubeModelOptions}
         discoveredTagOptions={discoveredTagOptions}
@@ -1270,6 +1274,7 @@ function TimeList({
             <button
               type="button"
               className="horizontal-nav-btn"
+              data-bulk-keep-selection="true"
               onClick={pageOlder}
               disabled={!canPageOlder}
               title={`Older (${horizontalCount})`}
@@ -1495,6 +1500,7 @@ function TimeList({
             <button
               type="button"
               className="horizontal-nav-btn"
+              data-bulk-keep-selection="true"
               onClick={pageNewer}
               disabled={!canPageNewer}
               title={`Newer (${horizontalCount})`}
@@ -1659,7 +1665,7 @@ function TimeList({
       ))}
 
       {!isHorizontal && !isVertical && solvesSafe.length > 0 && (
-        <div className="pagination-buttons">
+        <div className="pagination-buttons" data-bulk-keep-selection="true">
           <button onClick={goToPreviousPage} disabled={validCurrentPage === 0}>
             <NavigationArrow direction={inPlayerBar ? "left" : "up"} style={navigationArrowStyle} />
           </button>

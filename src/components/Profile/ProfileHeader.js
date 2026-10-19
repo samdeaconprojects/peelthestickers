@@ -2,9 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "./Profile.css";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
-import NameTag from "./NameTag";
-import { getUser } from "../../services/getUser";
-import { updateUser } from "../../services/updateUser";
+import FollowListPanel from "./FollowListPanel";
 import { getProfileEventScramble } from "../../utils/profileEventSolves";
 import { getRoomByHost } from "../../services/liveRoom";
 import { EVENT_KEYBINDING_LABELS } from "../../utils/keybindings";
@@ -66,6 +64,37 @@ function formatTotalDuration(ms) {
   return `${seconds}s`;
 }
 
+const FOLLOW_LABELS = {
+  none: { idle: "Follow" },
+  "follow-back": { idle: "Follow Back" },
+  requested: { idle: "Requested", hover: "Cancel Request?" },
+  following: { idle: "Following", hover: "Unfollow?" },
+  friends: { idle: "Friends", hover: "Unfollow?" },
+};
+
+function FollowButton({ state, busy, color, onFollow, onUnfollow }) {
+  const labels = FOLLOW_LABELS[state] || FOLLOW_LABELS.none;
+  const active = !!labels.hover;
+  return (
+    <button
+      type="button"
+      className={`profileHeaderButton${active ? " profileHeaderButton--friend" : " profileHeaderButton--follow"}`}
+      onClick={active ? onUnfollow : onFollow}
+      disabled={busy || (active && typeof onUnfollow !== "function")}
+      style={{ borderColor: color || "#2EC4B6", ...(active ? null : { background: color || "#2EC4B6" }) }}
+    >
+      {active ? (
+        <>
+          <span className="profileHeaderButton__idle">{labels.idle}</span>
+          <span className="profileHeaderButton__hover">{labels.hover}</span>
+        </>
+      ) : (
+        labels.idle
+      )}
+    </button>
+  );
+}
+
 export default function ProfileHeader({
   user,
   currentUser = null,
@@ -75,6 +104,11 @@ export default function ProfileHeader({
   onEditStats,
   onJoinLiveRoom,
   liveRoomBusy = false,
+  followState = null,
+  followBusy = false,
+  onFollow,
+  onUnfollow,
+  canViewFullStats = false,
 }) {
   const {
     Name,
@@ -85,66 +119,12 @@ export default function ProfileHeader({
     ProfileEvent,
     ProfileScramble,
     Friends = [],
+    Followers = [],
   } = user;
 
   const [liveRoom, setLiveRoom] = useState(null);
   const [openWidget, setOpenWidget] = useState(null);
-  const [friendProfiles, setFriendProfiles] = useState([]);
-  const [isLoadingFriends, setIsLoadingFriends] = useState(false);
-  const [friendActionBusy, setFriendActionBusy] = useState({});
   const navigate = useNavigate();
-  const currentUserID = String(currentUser?.UserID || "").trim();
-  const canManageFriends = isOwn && currentUserID && currentUserID === String(user?.UserID || "").trim();
-  const allowedFriendSet = useMemo(
-    () => new Set(Array.isArray(currentUser?.StatsAllowedFriends) ? currentUser.StatsAllowedFriends : []),
-    [currentUser?.StatsAllowedFriends]
-  );
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    if (openWidget !== "friends" || !Friends.length) {
-      if (!Friends.length) {
-        setFriendProfiles([]);
-        setIsLoadingFriends(false);
-      }
-      return () => {
-        isCancelled = true;
-      };
-    }
-
-    setIsLoadingFriends(true);
-
-    const loadFriendProfiles = async () => {
-      const profiles = await Promise.all(
-        Friends.map(async (friendID) => {
-          try {
-            return await getUser(friendID);
-          } catch (error) {
-            console.warn("Failed to load friend profile", friendID, error);
-            return {
-              UserID: friendID,
-              userID: friendID,
-              Name: friendID,
-              name: friendID,
-            };
-          }
-        })
-      );
-
-      if (!isCancelled) {
-        setFriendProfiles(profiles);
-        setIsLoadingFriends(false);
-      }
-    };
-
-    loadFriendProfiles();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [Friends, openWidget]);
-
   useEffect(() => {
     if (!UserID || isOwn) {
       setLiveRoom(null);
@@ -206,80 +186,8 @@ export default function ProfileHeader({
     [ProfileEvent, ProfileScramble, user]
   );
 
-  const setFriendBusy = (friendID, key, value) => {
-    setFriendActionBusy((prev) => ({
-      ...prev,
-      [friendID]: {
-        ...(prev?.[friendID] || {}),
-        [key]: value,
-      },
-    }));
-  };
-
-  const handleToggleFriendStatsAccess = async (friendID, shouldAllow) => {
-    if (!canManageFriends || !currentUserID || typeof setCurrentUser !== "function") return;
-
-    setFriendBusy(friendID, "share", true);
-    try {
-      const currentAllowed = Array.isArray(currentUser?.StatsAllowedFriends)
-        ? currentUser.StatsAllowedFriends
-        : [];
-      const nextAllowed = shouldAllow
-        ? Array.from(new Set([...currentAllowed, friendID]))
-        : currentAllowed.filter((id) => id !== friendID);
-
-      await updateUser(currentUserID, { StatsAllowedFriends: nextAllowed });
-      setCurrentUser((prev) => ({
-        ...(prev || {}),
-        StatsAllowedFriends: nextAllowed,
-      }));
-    } catch (error) {
-      console.error("Failed to update friend stats access", friendID, error);
-    } finally {
-      setFriendBusy(friendID, "share", false);
-    }
-  };
-
-  const handleViewFriendStats = (friendID) => {
-    navigate(`/stats?user=${encodeURIComponent(friendID)}`);
-    setOpenWidget(null);
-  };
-
-  const handleRemoveFriend = async (friendID) => {
-    if (!canManageFriends || !currentUserID || typeof setCurrentUser !== "function") return;
-
-    const confirmed = window.confirm(`Remove @${friendID} from your friends list?`);
-    if (!confirmed) return;
-
-    setFriendBusy(friendID, "remove", true);
-    try {
-      const nextFriends = (Array.isArray(currentUser?.Friends) ? currentUser.Friends : []).filter(
-        (id) => id !== friendID
-      );
-      const nextAllowed = (Array.isArray(currentUser?.StatsAllowedFriends)
-        ? currentUser.StatsAllowedFriends
-        : []
-      ).filter((id) => id !== friendID);
-
-      await updateUser(currentUserID, {
-        Friends: nextFriends,
-        StatsAllowedFriends: nextAllowed,
-      });
-
-      setCurrentUser((prev) => ({
-        ...(prev || {}),
-        Friends: nextFriends,
-        StatsAllowedFriends: nextAllowed,
-      }));
-      setFriendProfiles((prev) =>
-        prev.filter((friend) => String(friend?.UserID || friend?.userID || "") !== friendID)
-      );
-    } catch (error) {
-      console.error("Failed to remove friend", friendID, error);
-    } finally {
-      setFriendBusy(friendID, "remove", false);
-    }
-  };
+  const followerCount = isOwn ? Followers.length : user?.FollowerCount ?? Followers.length;
+  const followingCount = isOwn ? Friends.length : user?.FollowingCount ?? Friends.length;
 
   const widgets = [
     {
@@ -336,66 +244,17 @@ export default function ProfileHeader({
     {
       key: "friends",
       color: "#3A86FF",
-      title: "Friends",
-      value: Friends.length,
-      detail: Friends.length ? (
-        <div className="friendsList">
-          {isLoadingFriends && !friendProfiles.length ? (
-            <div className="friendsListStatus">Loading friends...</div>
-          ) : (
-            friendProfiles.map((friend) => (
-              <div
-                key={friend?.UserID || friend?.userID}
-                className={`friendListRow ${canManageFriends ? "friendListRow--managed" : ""}`}
-              >
-                <NameTag user={friend} size="xs" />
-                {canManageFriends ? (
-                  <div className="friendListActions">
-                    <label className="friendStatsSwitch">
-                      <input
-                        type="checkbox"
-                        checked={allowedFriendSet.has(String(friend?.UserID || friend?.userID || ""))}
-                        disabled={!!friendActionBusy?.[friend?.UserID || friend?.userID]?.share}
-                        onChange={(event) =>
-                          handleToggleFriendStatsAccess(
-                            String(friend?.UserID || friend?.userID || ""),
-                            event.target.checked
-                          )
-                        }
-                      />
-                      <span className="friendStatsSwitchLabel">Share</span>
-                    </label>
-                    <button
-                      type="button"
-                      className="friendStatsButton"
-                      disabled={
-                        !Array.isArray(friend?.StatsAllowedFriends) ||
-                        !friend.StatsAllowedFriends.includes(currentUserID)
-                      }
-                      onClick={() =>
-                        handleViewFriendStats(String(friend?.UserID || friend?.userID || ""))
-                      }
-                    >
-                      Stats
-                    </button>
-                    <button
-                      type="button"
-                      className="friendRemoveButton"
-                      disabled={!!friendActionBusy?.[friend?.UserID || friend?.userID]?.remove}
-                      onClick={() =>
-                        handleRemoveFriend(String(friend?.UserID || friend?.userID || ""))
-                      }
-                    >
-                      x
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ))
-          )}
-        </div>
-      ) : (
-        <div>No friends yet.</div>
+      title: "Followers",
+      sub: `${followingCount} following`,
+      value: followerCount,
+      detail: (
+        <FollowListPanel
+          profile={user}
+          isOwn={isOwn}
+          currentUser={currentUser}
+          setCurrentUser={setCurrentUser}
+          onNavigate={() => setOpenWidget(null)}
+        />
       ),
     },
     {
@@ -461,6 +320,27 @@ export default function ProfileHeader({
                 >
                   Customize Stats
                 </button>
+              </div>
+            )}
+            {!isOwn && followState && typeof onFollow === "function" && (
+              <div className="profileHeaderActions">
+                <FollowButton
+                  state={followState}
+                  busy={followBusy}
+                  color={Color}
+                  onFollow={onFollow}
+                  onUnfollow={onUnfollow}
+                />
+                {canViewFullStats && (
+                  <button
+                    type="button"
+                    className="profileHeaderButton"
+                    onClick={() => navigate(`/stats?user=${encodeURIComponent(UserID)}`)}
+                    style={{ borderColor: Color || "#2EC4B6" }}
+                  >
+                    View Full Stats
+                  </button>
+                )}
               </div>
             )}
           </div>

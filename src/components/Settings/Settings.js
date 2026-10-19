@@ -240,10 +240,55 @@ const SETTINGS_SECTIONS = [
   { id: "overlays", tab: "Overlays" },
   { id: "keys", tab: "Keys" },
   { id: "profile", tab: "Profile" },
+  { id: "privacy", tab: "Privacy", requiresUser: true },
   { id: "wca", tab: "WCA" },
   { id: "tags", tab: "Tags" },
   { id: "stats", tab: "Stats", requiresUser: true },
 ];
+
+// Mirrors server/lib/visibility.js PRIVACY_SECTIONS; the server re-validates.
+const PRIVACY_ROWS = [
+  {
+    key: "profileStats",
+    label: "Profile stats",
+    hint: "The stat cards you chose for your profile page.",
+    defaultAudience: "public",
+  },
+  { key: "posts", label: "Posts", hint: "Your posts and solve shares.", defaultAudience: "public" },
+  {
+    key: "fullStats",
+    label: "Full stats",
+    hint: "Your whole stats page, as you see it. People on your share list always can.",
+    defaultAudience: "private",
+    privateLabel: "Shared only",
+  },
+  {
+    key: "friendsList",
+    label: "Followers & following",
+    hint: "Who follows you and who you follow.",
+    defaultAudience: "public",
+  },
+  {
+    key: "liveRoom",
+    label: "Live room",
+    hint: "Seeing and joining your live room.",
+    defaultAudience: "followers",
+  },
+];
+
+const PRIVACY_VERSION = 2;
+
+function normalizePrivacyForUi(privacy) {
+  const useSaved = privacy && typeof privacy === "object" && privacy.Version === PRIVACY_VERSION;
+  const out = { Version: PRIVACY_VERSION };
+  for (const row of PRIVACY_ROWS) {
+    const saved = useSaved ? String(privacy[row.key] || "") : "";
+    out[row.key] = ["public", "followers", "friends", "private"].includes(saved)
+      ? saved
+      : row.defaultAudience;
+  }
+  return out;
+}
 
 function normalizeCrossColorLabel(label) {
   const value = String(label || "").trim();
@@ -574,7 +619,10 @@ function Settings({
     DateFounded: "",
     CubeCollection: [],
     WCAID: "",
+    PrivateAccount: false,
+    Privacy: normalizePrivacyForUi(null),
   });
+  const [statsShareCount, setStatsShareCount] = useState(0);
 
   const [tagConfig, setTagConfig] = useState(DEFAULT_TAG_CONFIG);
   const [tagColorCatalog, setTagColorCatalog] = useState({ Global: {}, ByEvent: {} });
@@ -638,8 +686,13 @@ function Settings({
           DateFounded: user?.DateFounded || "",
           CubeCollection: Array.isArray(user?.CubeCollection) ? user.CubeCollection : [],
           WCAID: user?.WCAID || "",
+          PrivateAccount: user?.PrivateAccount === true,
+          Privacy: normalizePrivacyForUi(user?.Privacy),
         });
 
+        setStatsShareCount(
+          Array.isArray(user?.StatsAllowedFriends) ? user.StatsAllowedFriends.length : 0
+        );
         setTagConfig(mergeCubeModelCatalogIntoTagConfig(user?.TagConfig, user?.TagCatalog));
         setTagColorCatalog(normalizeTagColorCatalog(user?.TagColorCatalog));
       } catch (err) {
@@ -673,6 +726,18 @@ function Settings({
 
   const handleProfileChange = (key, value) => {
     setProfileData((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handlePrivacyChange = (key, audience) => {
+    setProfileData((prev) => ({ ...prev, Privacy: { ...prev.Privacy, [key]: audience } }));
+  };
+
+  const setAllPrivacy = (audience) => {
+    setProfileData((prev) => {
+      const next = { ...prev.Privacy };
+      for (const row of PRIVACY_ROWS) next[row.key] = audience;
+      return { ...prev, Privacy: next };
+    });
   };
 
   const handleCommaListChange = (key, value) => {
@@ -835,6 +900,8 @@ function Settings({
       DateFounded: fresh?.DateFounded || "",
       CubeCollection: Array.isArray(fresh?.CubeCollection) ? fresh.CubeCollection : [],
       WCAID: fresh?.WCAID || "",
+      PrivateAccount: fresh?.PrivateAccount === true,
+      Privacy: normalizePrivacyForUi(fresh?.Privacy),
     });
 
     if (fresh?.Settings && typeof fresh.Settings === "object") {
@@ -1048,8 +1115,14 @@ function Settings({
         ? ` Skipped: ${result.skippedEvents.join(", ")}.`
         : "";
 
+      const competitionCount = Number(result?.competitionCount || 0);
+      const linkedCount = Number(result?.linkedSolveCount || 0);
+      const competitionText = competitionCount
+        ? ` ${competitionCount} competitions${linkedCount ? ` (linked ${linkedCount} earlier solves)` : ""}.`
+        : "";
+
       setWcaSyncSummary(
-        `Imported ${importedCount} solves across ${importedEventCount} events.${skippedText}`
+        `Imported ${importedCount} solves across ${importedEventCount} events.${competitionText}${skippedText}`
       );
       setStatusMessage("✅ WCA import finished.");
       setTimeout(() => setStatusMessage(""), 2200);
@@ -1280,7 +1353,7 @@ function Settings({
             <div className="setting-item">
               <label>Stats Selector Puzzle Icon</label>
               <SettingsChoice
-                value={settings.statsSelectorPuzzleSvgStyle || "color"}
+                value={settings.statsSelectorPuzzleSvgStyle || "grayscale"}
                 onChange={(e) =>
                   updateSettings({ statsSelectorPuzzleSvgStyle: e.target.value })
                 }
@@ -1346,6 +1419,15 @@ function Settings({
                 type="checkbox"
                 checked={settings.statsHoverGrow === true}
                 onChange={(e) => updateSettings({ statsHoverGrow: e.target.checked })}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Stats Back / View Buttons</label>
+              <input
+                type="checkbox"
+                checked={settings.statsNavButtonsEnabled === true}
+                onChange={(e) => updateSettings({ statsNavButtonsEnabled: e.target.checked })}
               />
             </div>
 
@@ -2237,6 +2319,83 @@ function Settings({
             </div>
           </div>
         </section>
+
+        {userID && (
+          <section className="settingsSection" id="settings-section-privacy" data-settings-section="privacy" ref={registerSection("privacy")}>
+            <h2>Privacy</h2>
+            <div className="settings-container">
+              <div className="settingsHintText">
+                Choose who can see each part of your profile. Friends are people you follow who
+                follow you back.
+              </div>
+
+              <div className="setting-item settingsActionsRow">
+                <label>Quick set:</label>
+                <div className="settingsActionGroup">
+                  <button
+                    type="button"
+                    className="settingsActionButton settingsActionButtonSecondary"
+                    onClick={() => setAllPrivacy("public")}
+                  >
+                    Show everything
+                  </button>
+                  <button
+                    type="button"
+                    className="settingsActionButton settingsActionButtonSecondary"
+                    onClick={() => setAllPrivacy("private")}
+                  >
+                    Hide everything
+                  </button>
+                  <button
+                    type="button"
+                    className="settingsActionButton settingsActionButtonSecondary"
+                    onClick={() =>
+                      setProfileData((prev) => ({ ...prev, Privacy: normalizePrivacyForUi(null) }))
+                    }
+                  >
+                    Defaults
+                  </button>
+                </div>
+              </div>
+
+              {PRIVACY_ROWS.map((row) => (
+                <React.Fragment key={row.key}>
+                  <div className="setting-item">
+                    <label>{row.label}:</label>
+                    <SettingsChoice
+                      value={profileData.Privacy?.[row.key] || row.defaultAudience}
+                      onChange={(e) => handlePrivacyChange(row.key, e.target.value)}
+                    >
+                      <option value="public">Everyone</option>
+                      <option value="followers">Followers</option>
+                      <option value="friends">Friends</option>
+                      <option value="private">{row.privateLabel || "Only me"}</option>
+                    </SettingsChoice>
+                  </div>
+                  <div className="settingsHintText settingsHintText--tight">
+                    {row.hint}
+                    {row.key === "fullStats"
+                      ? ` You share with ${statsShareCount} ${statsShareCount === 1 ? "person" : "people"}; manage the list with Share in your profile's Following tab.`
+                      : ""}
+                  </div>
+                </React.Fragment>
+              ))}
+
+              <div className="setting-item">
+                <label>Private account</label>
+                <input
+                  type="checkbox"
+                  checked={profileData.PrivateAccount === true}
+                  onChange={(e) => handleProfileChange("PrivateAccount", e.target.checked)}
+                />
+              </div>
+              <div className="settingsHintText settingsHintText--tight">
+                New followers need your approval, and people who don't follow you only see your
+                name and picture. Turning this off approves everyone waiting.
+              </div>
+            </div>
+          </section>
+        )}
 
         <section className="settingsSection" id="settings-section-wca" data-settings-section="wca" ref={registerSection("wca")}>
           <h2>WCA Import</h2>

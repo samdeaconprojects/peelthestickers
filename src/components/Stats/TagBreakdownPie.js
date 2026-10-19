@@ -21,6 +21,10 @@ const CORE_FIELDS = new Set([
   "SolveSource",
 ]);
 
+function formatSolveCount(count) {
+  return `${count} ${count === 1 ? "solve" : "solves"}`;
+}
+
 function getSolveTimeMs(solve) {
   const candidate = Number(
     solve?.finalTimeMs ??
@@ -80,14 +84,14 @@ function getPrimaryMetricMeta(sortMode, bucket, percent) {
     return {
       label: sortMode === "best" ? "Best" : "Worst",
       value: formatBucketExtreme(bucket, sortMode === "best" ? bucket.bestMs : bucket.worstMs),
-      subvalue: `${bucket.value} solves`,
+      subvalue: formatSolveCount(bucket.value),
     };
   }
 
   return {
     label: "Average",
     value: formatBucketAverage(bucket.averageMs),
-    subvalue: `${bucket.value} solves`,
+    subvalue: formatSolveCount(bucket.value),
   };
 }
 
@@ -348,6 +352,7 @@ function TagBreakdownPie({
   aggregateSummary = null,
   tagColors,
   profileColor = "#2EC4B6",
+  onBucketSolvesOpen,
 }) {
   const { settings } = useSettings();
   const timeColorMode = settings?.timeColorMode || "binary";
@@ -368,7 +373,10 @@ function TagBreakdownPie({
     [aggregateItems, safeSolves.length]
   );
 
-  // Tabs are ordered by how many buckets (slices) each field splits the solves into.
+  const [hideUnknown, setHideUnknown] = useState(true);
+
+  // Tabs are ordered by how many buckets (slices) each field splits the solves
+  // into; the Unknown bucket only counts while it is shown.
   const availableFields = useMemo(() => {
     const fields = fieldMeta.filter((meta) => {
       const field = String(meta?.field || "").trim();
@@ -391,22 +399,22 @@ function TagBreakdownPie({
       .map((meta) => {
         if (aggregateByField) {
           const fieldItems = aggregateByField.get(meta.field) || [];
-          const hasUnknown = getAggregateUnknownCount(fieldItems, aggregateSummary) > 0;
+          const hasUnknown = !hideUnknown && getAggregateUnknownCount(fieldItems, aggregateSummary) > 0;
           return { ...meta, bucketCount: fieldItems.length + (hasUnknown ? 1 : 0) };
         }
         const values = new Set();
         for (const solve of safeSolves) {
-          values.add(getSolveTagValue(solve, meta.field) || "Unknown");
+          const value = getSolveTagValue(solve, meta.field);
+          if (value || !hideUnknown) values.add(value || "Unknown");
         }
         return { ...meta, bucketCount: values.size };
       })
       .sort((a, b) => b.bucketCount - a.bucketCount);
-  }, [aggregateByField, aggregateSummary, eventAlgorithmFields, fieldMeta, safeSolves]);
+  }, [aggregateByField, aggregateSummary, eventAlgorithmFields, fieldMeta, hideUnknown, safeSolves]);
 
   const [activeField, setActiveField] = useState(() => availableFields[0]?.field || "CubeModel");
   const [activeBucketKey, setActiveBucketKey] = useState("");
   const [hoveredBucketKey, setHoveredBucketKey] = useState("");
-  const [hideUnknown, setHideUnknown] = useState(false);
   const [sortMode, setSortMode] = useState("average");
   const [sortDirection, setSortDirection] = useState("asc");
   const [hiddenBucketKeys, setHiddenBucketKeys] = useState([]);
@@ -418,16 +426,17 @@ function TagBreakdownPie({
     }
   }, [activeField, availableFields]);
 
-  // When the page is filtered to a tag (e.g. one cube model), that field is a
-  // single slice, so default to the next most partitioned field until the user
-  // picks one themselves.
+  // Until the user picks a tab, follow the most partitioned field as solves
+  // load (the first render has no solves, so every field ties). When the page
+  // is filtered to a tag (e.g. one cube model), that field is a single slice,
+  // so skip it for the next most partitioned field.
   const filteredFieldsKey = (Array.isArray(filteredFields) ? filteredFields : []).join("|");
   const [userPickedField, setUserPickedField] = useState(false);
   useEffect(() => {
     setUserPickedField(false);
   }, [filteredFieldsKey]);
   const suggestedField = useMemo(() => {
-    if (!filteredFieldsKey) return "";
+    if (!filteredFieldsKey) return availableFields[0]?.field || "";
     return pickMostPartitionedField(availableFields, safeSolves, new Set(filteredFieldsKey.split("|")));
   }, [availableFields, filteredFieldsKey, safeSolves]);
   useEffect(() => {
@@ -540,7 +549,7 @@ function TagBreakdownPie({
         value: bucket.value,
         colorIndex: bucket.colorIndex,
         solves: bucket.solves,
-        calloutLines: [bucket.label, `Avg ${formatBucketAverage(bucket.averageMs)}`, `${bucket.value} solves`],
+        calloutLines: [bucket.label, `Avg ${formatBucketAverage(bucket.averageMs)}`, formatSolveCount(bucket.value)],
         alwaysShowCallout: topAverageBucketKeys.has(bucket.key),
       })),
     [orderedBuckets, topAverageBucketKeys]
@@ -565,6 +574,15 @@ function TagBreakdownPie({
     bucket.key === "Unknown"
       ? "rgba(255,255,255,0.42)"
       : resolveTagChipTone(activeFieldMeta?.field, bucket.key, tagColors, profileColor);
+
+  // Aggregate buckets load their solves through the tag index, which has no
+  // entry for untagged (Unknown) solves.
+  const canOpenBucketSolves = (bucket) =>
+    typeof onBucketSolvesOpen === "function" &&
+    !!bucket &&
+    bucket.value > 0 &&
+    (bucket.solves?.length > 0 || (!!aggregateByField && bucket.key !== "Unknown"));
+  const openBucketSolves = (bucket) => onBucketSolvesOpen(bucket, activeFieldMeta);
 
   const unknownToggleButton = (
     <button
@@ -637,7 +655,11 @@ function TagBreakdownPie({
                 sortMode="none"
                 sliceStrokeWidth={getPieSliceStrokeWidth(orderedBuckets.length)}
                 showInnerOutline
-                onSliceClick={(_, entry) => handleBucketHide(entry)}
+                onSliceClick={(_, entry) => {
+                  const bucket = orderedBuckets.find((item) => item.key === entry?.key);
+                  if (canOpenBucketSolves(bucket)) openBucketSolves(bucket);
+                  else handleBucketHide(entry);
+                }}
                 onSliceHover={(entry) => {
                   const bucketKey = entry?.key || "";
                   setHoveredBucketKey(bucketKey);
@@ -678,7 +700,7 @@ function TagBreakdownPie({
                         <span className="statsScopeTagPillText">{activeBucket.label}</span>
                       </div>
                       <div className="tagBreakdownFocusMeta">
-                        {activeBucket.value} solves · {activeBucketPercent}% of visible slice
+                        {formatSolveCount(activeBucket.value)} · {activeBucketPercent}% of visible slice
                       </div>
                     </div>
                     {activePrimaryMetric ? (
@@ -714,6 +736,27 @@ function TagBreakdownPie({
                     <span className="tagBreakdownFocusStatLabel">DNFs</span>
                     <strong className="tagBreakdownFocusStatValue">{activeBucket.dnfCount}</strong>
                   </div>
+                </div>
+
+                <div className="tagBreakdownFocusActions">
+                  {canOpenBucketSolves(activeBucket) ? (
+                    <button
+                      type="button"
+                      className="tagBreakdownToolButton"
+                      onClick={() => openBucketSolves(activeBucket)}
+                    >
+                      View {formatSolveCount(activeBucket.value)}
+                    </button>
+                  ) : null}
+                  {orderedBuckets.length > 1 ? (
+                    <button
+                      type="button"
+                      className="tagBreakdownToolButton"
+                      onClick={() => handleBucketHide(activeBucket)}
+                    >
+                      Hide slice
+                    </button>
+                  ) : null}
                 </div>
 
                 {recentBucketSolves.length ? (
@@ -818,7 +861,7 @@ function TagBreakdownPie({
                           Worst {formatBucketExtreme(bucket, bucket.worstMs)}
                         </span>
                         <span className="tagBreakdownLegendStats">
-                          {bucket.value} solves · {percent}% · {bucket.dnfCount} DNFs
+                          {formatSolveCount(bucket.value)} · {percent}% · {bucket.dnfCount} {bucket.dnfCount === 1 ? "DNF" : "DNFs"}
                         </span>
                       </span>
                       <span className="tagBreakdownLegendMetric">

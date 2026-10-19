@@ -46,6 +46,9 @@ function BulkSolveControls({
   setBulkShareNote,
 
   getSessionsForEvent,
+  bulkMoveEventOptions = [],
+  bulkStatus = null,
+  dismissBulkStatus = null,
 
   tagConfig,
   cubeModelOptions = [],
@@ -200,6 +203,8 @@ function BulkSolveControls({
       if (bulkUiRef.current?.contains(target)) return;
       if (bulkModalRef.current?.contains(target)) return;
       if (target instanceof Element && target.closest("[data-bulk-select-item=\"true\"]")) return;
+      // Paging through the list shouldn't drop a selection that spans pages.
+      if (target instanceof Element && target.closest("[data-bulk-keep-selection=\"true\"]")) return;
 
       clearBulkTagDraft();
       setShowBulkTags(false);
@@ -363,12 +368,24 @@ function BulkSolveControls({
                 <div style={{ fontSize: "12px", opacity: 0.85, marginBottom: "6px" }}>
                   Event
                 </div>
-                <input
-                  style={inputStyle}
+                <select
+                  style={selectStyle}
                   value={bulkMoveEvent}
-                  onChange={(e) => setBulkMoveEvent(e.target.value)}
-                  placeholder="333"
-                />
+                  onChange={(e) => {
+                    const nextEvent = e.target.value;
+                    setBulkMoveEvent(nextEvent);
+                    // Keep the session valid for the newly picked event.
+                    const sessions = getSessionsForEvent(nextEvent);
+                    const keep = sessions.some((s) => String(s.SessionID) === String(bulkMoveSession));
+                    if (!keep) setBulkMoveSession(String(sessions[0]?.SessionID || "main"));
+                  }}
+                >
+                  {bulkMoveEventOptions.map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -443,6 +460,38 @@ function BulkSolveControls({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {bulkStatus && (
+        <div
+          className="deleteUndoToast"
+          role="status"
+          aria-live="polite"
+          style={
+            bulkStatus.kind === "error"
+              ? { borderColor: "rgba(255,80,80,0.55)" }
+              : bulkStatus.kind === "success"
+              ? { borderColor: "rgba(46,196,182,0.55)" }
+              : undefined
+          }
+        >
+          <div className="deleteUndoToastText">{bulkStatus.text}</div>
+          {bulkStatus.onUndo && (
+            <button type="button" className="deleteUndoToastAction" onClick={bulkStatus.onUndo}>
+              Undo
+            </button>
+          )}
+          {dismissBulkStatus && (
+            <button
+              type="button"
+              className="deleteUndoToastDismiss"
+              onClick={dismissBulkStatus}
+              aria-label="Dismiss message"
+            >
+              x
+            </button>
+          )}
         </div>
       )}
     </>

@@ -1,6 +1,7 @@
 // Profile stat lists: named groups of saved stat cards stored on the user
 // profile as `StatLists`. The main profile layout stays in `VisibleStats`;
 // "Saved Stats" is a built-in list that always exists.
+// A list is only shown to other people when its owner turns on `visible`.
 
 export const PROFILE_MAIN_LIST_ID = "profile";
 export const SAVED_STATS_LIST_ID = "saved";
@@ -18,6 +19,7 @@ export function createStatList(name) {
     id: `list-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     name: cleanStatListName(name) || "Untitled list",
     items: [],
+    visible: false,
     createdAt: new Date().toISOString(),
   };
 }
@@ -27,6 +29,7 @@ export function normalizeStatLists(raw) {
   const source = Array.isArray(raw) ? raw : [];
   const seen = new Set([SAVED_STATS_LIST_ID, PROFILE_MAIN_LIST_ID]);
   let savedItems = [];
+  let savedVisible = false;
   const custom = [];
 
   source.forEach((list) => {
@@ -38,6 +41,7 @@ export function normalizeStatLists(raw) {
 
     if (id === SAVED_STATS_LIST_ID) {
       savedItems = items;
+      savedVisible = list.visible === true;
       return;
     }
     if (!id || seen.has(id)) return;
@@ -46,22 +50,30 @@ export function normalizeStatLists(raw) {
       id,
       name: cleanStatListName(list.name) || "Untitled list",
       items,
+      visible: list.visible === true,
       createdAt: list.createdAt || null,
     });
   });
 
   return [
-    { id: SAVED_STATS_LIST_ID, name: SAVED_STATS_LIST_NAME, items: savedItems, builtIn: true },
+    {
+      id: SAVED_STATS_LIST_ID,
+      name: SAVED_STATS_LIST_NAME,
+      items: savedItems,
+      visible: savedVisible,
+      builtIn: true,
+    },
     ...custom,
   ];
 }
 
 // Strip view-only flags before persisting.
 export function serializeStatLists(lists) {
-  return normalizeStatLists(lists).map(({ id, name, items, createdAt }) => ({
+  return normalizeStatLists(lists).map(({ id, name, items, visible, createdAt }) => ({
     id,
     name,
     items,
+    visible,
     ...(createdAt ? { createdAt } : {}),
   }));
 }

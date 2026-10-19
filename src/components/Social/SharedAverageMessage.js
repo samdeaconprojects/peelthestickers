@@ -182,6 +182,15 @@ function parseSharedExtendPayload(text) {
   }
 }
 
+export const SHARED_JOIN_PREFIX = "[sharedJoin]";
+
+export function parseSharedJoinPayload(text) {
+  if (!String(text || "").startsWith(SHARED_JOIN_PREFIX)) return null;
+  const [sharedID, userID] = String(text).slice(SHARED_JOIN_PREFIX.length).split("|");
+  if (!sharedID || !userID) return null;
+  return { sharedID, userID };
+}
+
 function chunkArray(items, size) {
   const safeSize = Math.max(1, Number(size) || 1);
   const chunks = [];
@@ -520,6 +529,24 @@ function SharedAverageMessage({
       .filter(Boolean);
   }, [messages, parsed]);
 
+  // Group shared averages are opt-in: only the creator and members who have
+  // started it (join marker or a posted time) get a column. Tournaments keep
+  // their own fixed player list.
+  const joinedIDs = useMemo(() => {
+    if (!parsed || !isGroupConversation || parsed.tournament) return null;
+    const ids = new Set();
+    if (parsed.creatorID) ids.add(String(parsed.creatorID));
+    (updates || []).forEach((entry) => entry?.userID && ids.add(String(entry.userID)));
+    (messages || []).forEach((m) => {
+      const join = parseSharedJoinPayload(m?.text);
+      if (join && join.sharedID === parsed.sharedID) ids.add(String(join.userID));
+    });
+    if (user?.UserID && String(activeSharedID || "") === String(parsed.sharedID || "")) {
+      ids.add(String(user.UserID));
+    }
+    return ids;
+  }, [parsed, isGroupConversation, updates, messages, user?.UserID, activeSharedID]);
+
   const sharedMemberProfiles = useMemo(() => {
     const byID = new Map();
 
@@ -565,7 +592,9 @@ function SharedAverageMessage({
       });
     }
 
-    return Array.from(byID.values()).sort((a, b) => {
+    return Array.from(byID.values())
+      .filter((member) => !joinedIDs || joinedIDs.has(member.id))
+      .sort((a, b) => {
       if (a.isYou && !b.isYou) return -1;
       if (!a.isYou && b.isYou) return 1;
       return String(a.name || a.id).localeCompare(String(b.name || b.id));
@@ -573,6 +602,7 @@ function SharedAverageMessage({
   }, [
     memberProfiles,
     updates,
+    joinedIDs,
     user?.UserID,
     user?.ProfileEvent,
     user?.profileEvent,
@@ -1278,7 +1308,10 @@ function SharedAverageMessage({
     },
   ];
   const isActiveSession = String(activeSharedID || "") === String(parsed.sharedID || "");
-  const nextSolveIndex = activeIndex === -1 ? Math.max(parsed.count - 1, 0) : activeIndex;
+  // "Go To Next" means the next round *I* still owe, not the first round someone
+  // hasn't finished (which can be one I already solved).
+  const myNextIndex = computed.yourCurrentIndex;
+  const nextSolveIndex = myNextIndex === -1 ? Math.max(parsed.count - 1, 0) : myNextIndex;
   const openSharedSession = (options = {}) =>
     onLoadSession?.(
       sessionData && String(sessionData?.sharedID || "") === String(parsed.sharedID || "")

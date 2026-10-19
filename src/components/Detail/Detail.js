@@ -744,193 +744,110 @@ function Detail({
     );
   };
 
-  const renderSolveCard = (item, index) => {
+  const renderSolveBody = (item, index = null) => {
     const readOnly = isReadOnlySolve(item);
     const canDelete = canDeleteSolve(item);
     const penalty = getSolvePenalty(item);
+    const noteValue = (isArray ? notes[index] : notes) ?? "";
+    const dateLabel = formatDateTime(getSolveCreatedAt(item));
+    const showPenalties = !readOnly && typeof applyPenalty === "function";
 
     return (
-      <div key={index} className="detailSolveCard">
-        <div className="detailTopRow">
+      <div className="detailLayout">
+        <div className="detailSide">
           <div className="detailTimeWrap">
-            <div className="detailTime">
+            <div className={`detailTime ${penalty === "DNF" ? "is-dnf" : ""}`}>
               {formatTime(getSolveFinalTimeMs(item), false, item.penalty)}
             </div>
             <div className="detailMetaLine">{getSolveSubline(item)}</div>
+            {dateLabel ? <div className="detailDateRow">{dateLabel}</div> : null}
           </div>
+
+          <div className="detailCube">
+            <PuzzleSVG event={getSolveEvent(item)} scramble={getSolveScramble(item)} />
+          </div>
+        </div>
+
+        <div className="detailMain">
           <div
             className="detailScramble"
             style={{ fontSize: getScrambleFontSize(getSolveEvent(item)) }}
           >
             {getSolveScramble(item)}
           </div>
-        </div>
 
-        <div className="detailDateRow">{formatDateTime(getSolveCreatedAt(item))}</div>
-
-        <div className="detailBottomRow">
-          <div className="detailCube">
-            <PuzzleSVG
-              event={getSolveEvent(item)}
-              scramble={getSolveScramble(item)}
-            />
-          </div>
-
-          <div className="detailInfoSection">
-            <textarea
-              className="detailNotes"
-              value={notes[index]}
-              placeholder="Add a note"
-              onChange={(e) => {
+          <textarea
+            className="detailNotes"
+            value={noteValue}
+            placeholder="Add a note"
+            onChange={(e) => {
+              if (isArray) {
                 const updatedNotes = [...notes];
                 updatedNotes[index] = e.target.value;
                 setNotes(updatedNotes);
-              }}
-              onBlur={() => handleNoteBlur(index)}
-              disabled={readOnly}
-            />
-
-            {renderTagsEditor(item, index)}
-          </div>
-
-          {showActions ? (
-            <div className="detailActions">
-              {!readOnly && typeof applyPenalty === "function" && (
-                <div className="penalty-buttons">
-                  <button
-                    type="button"
-                    className={penalty === "+2" ? "is-active" : ""}
-                    onClick={() => handlePenaltyChange("+2", index)}
-                  >
-                    +2
-                  </button>
-                  <button
-                    type="button"
-                    className={penalty === "DNF" ? "is-active" : ""}
-                    onClick={() => handlePenaltyChange("DNF", index)}
-                  >
-                    DNF
-                  </button>
-                </div>
-              )}
-
-              <div className="detailPrimaryActions">
-                <button className="share-button" onClick={() => handleShare(index)}>
-                  Share
-                </button>
-                {typeof saveToProfile === "function" ? (
-                  <button
-                    className="share-button"
-                    onClick={() => handleSaveToProfile(index)}
-                    disabled={actionBusy === "profile"}
-                  >
-                    {actionBusy === "profile" ? "Adding..." : "Add to Profile"}
-                  </button>
-                ) : null}
-
-                {canDelete && typeof deleteTime === "function" && (
-                  <button className="delete-button" onClick={() => handleDelete(index)}>
-                    Delete
-                  </button>
-                )}
-              </div>
-              {actionMessage ? <div className="detailTagsError">{actionMessage}</div> : null}
-            </div>
-          ) : null}
-        </div>
-      </div>
-    );
-  };
-
-  const singleReadOnly = !isArray && isReadOnlySolve(solve);
-  const singleCanDelete = !isArray && canDeleteSolve(solve);
-  const singlePenalty = !isArray ? getSolvePenalty(solve) : null;
-
-  const detailBody = !isArray ? (
-    <div className="detailFlexCol">
-      <div className="detailTopRow">
-        <div className="detailTimeWrap">
-          <div className="detailTime">
-            {formatTime(getSolveFinalTimeMs(solve), false, solve.penalty)}
-          </div>
-          <div className="detailMetaLine">{getSolveSubline(solve)}</div>
-        </div>
-        <div
-          className="detailScramble"
-          style={{ fontSize: getScrambleFontSize(getSolveEvent(solve)) }}
-        >
-          {getSolveScramble(solve)}
-        </div>
-      </div>
-
-      <div className="detailDateRow">{formatDateTime(getSolveCreatedAt(solve))}</div>
-
-      <div className="detailBottomRow">
-        <div className="detailCube">
-          <PuzzleSVG
-            event={getSolveEvent(solve)}
-            scramble={getSolveScramble(solve)}
-          />
-        </div>
-
-        <div className="detailInfoSection">
-          <textarea
-            className="detailNotes"
-            value={notes}
-            placeholder="Add a note"
-            onChange={(e) => setNotes(e.target.value)}
-            onBlur={() => handleNoteBlur()}
-            disabled={singleReadOnly}
+              } else {
+                setNotes(e.target.value);
+              }
+            }}
+            onBlur={() => handleNoteBlur(index)}
+            disabled={readOnly}
           />
 
-          {renderTagsEditor(solve, null)}
+          {renderTagsEditor(item, index)}
         </div>
 
         {showActions ? (
           <div className="detailActions">
-            {!singleReadOnly && typeof applyPenalty === "function" && (
+            {showPenalties ? (
               <div className="penalty-buttons">
                 <button
                   type="button"
-                  className={singlePenalty === "+2" ? "is-active" : ""}
-                  onClick={() => handlePenaltyChange("+2")}
+                  className={penalty === "+2" ? "is-active" : ""}
+                  onClick={() => handlePenaltyChange("+2", index)}
                 >
                   +2
                 </button>
                 <button
                   type="button"
-                  className={singlePenalty === "DNF" ? "is-active" : ""}
-                  onClick={() => handlePenaltyChange("DNF")}
+                  className={penalty === "DNF" ? "is-active" : ""}
+                  onClick={() => handlePenaltyChange("DNF", index)}
                 >
                   DNF
                 </button>
               </div>
+            ) : (
+              <span />
             )}
 
             <div className="detailPrimaryActions">
-              <button className="share-button" onClick={() => handleShare()}>
+              {actionMessage ? <div className="detailActionMessage">{actionMessage}</div> : null}
+              <button className="share-button" onClick={() => handleShare(index)}>
                 Share
               </button>
               {typeof saveToProfile === "function" ? (
                 <button
                   className="share-button"
-                  onClick={() => handleSaveToProfile()}
+                  onClick={() => handleSaveToProfile(index)}
                   disabled={actionBusy === "profile"}
                 >
                   {actionBusy === "profile" ? "Adding..." : "Add to Profile"}
                 </button>
               ) : null}
-
-              {singleCanDelete && typeof deleteTime === "function" && (
-                <button className="delete-button" onClick={() => handleDelete()}>
+              {canDelete && typeof deleteTime === "function" && (
+                <button className="delete-button" onClick={() => handleDelete(index)}>
                   Delete
                 </button>
               )}
             </div>
-            {actionMessage ? <div className="detailTagsError">{actionMessage}</div> : null}
           </div>
         ) : null}
       </div>
+    );
+  };
+
+  const detailBody = !isArray ? (
+    <div className="detailFlexCol">
+      {renderSolveBody(solve, null)}
 
       {showNavButtons && (
         <div className="detailNavButtons">
@@ -941,7 +858,11 @@ function Detail({
     </div>
   ) : (
     <div className="detailFlexCol detailScrollList">
-      {solve.map((s, i) => renderSolveCard(s, i))}
+      {solve.map((s, i) => (
+        <div key={i} className="detailSolveCard">
+          {renderSolveBody(s, i)}
+        </div>
+      ))}
     </div>
   );
 

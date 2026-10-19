@@ -1840,12 +1840,14 @@
   max-width: 100%;
   margin: 0;
   padding: 7px 10px;
-  border: 1px solid var(--ss-mini-border, rgba(255, 255, 255, 0.14));
+  border: 2px solid var(--ss-mini-border, rgba(255, 255, 255, 0.14));
   border-radius: 14px;
   color: #f3f4f6;
   font: inherit;
   text-align: left;
   cursor: pointer;
+  /* override the global 50% button opacity so it matches the stat cards */
+  opacity: 1;
   transition: transform 0.16s ease, filter 0.16s ease, opacity 0.16s ease, border-color 0.16s ease;
 }
 
@@ -1860,7 +1862,6 @@
 
 .ssOverviewMini:disabled {
   cursor: default;
-  opacity: 0.7;
 }
 
 .ssOverviewMini.is-loading {
@@ -1884,7 +1885,7 @@
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: rgba(243, 244, 246, 0.6);
+  color: rgba(243, 244, 246, 0.66);
   white-space: nowrap;
 }
 

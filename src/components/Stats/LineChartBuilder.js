@@ -635,6 +635,7 @@ const LineChartBuilder = ({
             pointerEvents: "none",
             zIndex: 9999,
             fontSize: 12,
+            whiteSpace: "pre-line",
           }}
         >
           {tooltip.time}

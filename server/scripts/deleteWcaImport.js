@@ -203,6 +203,9 @@ async function main() {
     }
   }
 
+  console.log("Deleting WCA competition records...");
+  await deleteRanksByPrefix(userID, "WCACOMP#");
+
   for (const event of touchedEvents) {
     console.log(`Rebuilding ranks and event stats for ${event}...`);
     await rebuildSingleRanksForEvent(userID, event);

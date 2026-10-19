@@ -130,6 +130,7 @@ function groupByDate(solves, mode) {
         bucketKey: key,
         bucketLabel: formatBucketLabel(mode, key),
         time: avgMs,
+        solveCount: valid.length,
         solve: lastSolve,
         fullIndex: lastSolve?.fullIndex ?? null,
       };
@@ -194,6 +195,7 @@ function groupBucketItems(bucketItems, mode) {
         bucketKey: item.bucketKey,
         bucketLabel: item.bucketLabel,
         time: item.SumFinalTimeMs / item.SolveCountIncluded,
+        solveCount: item.SolveCountIncluded,
         timestamp: item.timestamp,
         solve: null,
         fullIndex: null,
@@ -354,6 +356,34 @@ function formatPointTime(baseTimeMs, solve, groupMode) {
   return `${timeText} • ${dateText}`;
 }
 
+// Bucket dots average many solves, so the tooltip names the period (the day a
+// click opens, for day buckets) and labels the time as an average.
+function formatBucketTooltip(item, mode) {
+  const key = String(item?.bucketKey || "");
+  const count = Number(item?.solveCount);
+  const countText = Number.isFinite(count) && count > 0
+    ? ` · ${count} solve${count === 1 ? "" : "s"}`
+    : "";
+  let periodText = item?.bucketLabel || key;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(key)) {
+    const date = parseBucketDayKey(key);
+    if (date) {
+      periodText = date.toLocaleDateString([], {
+        weekday: "short",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    }
+  } else if (mode === "week") {
+    periodText = `Week ${key.split("-W")[1] || key} · ${key.split("-W")[0]}`;
+  } else if (mode === "month" && /^\d{4}-\d{2}$/.test(key)) {
+    const [y, m] = key.split("-").map(Number);
+    periodText = new Date(y, m - 1, 1).toLocaleDateString([], { year: "numeric", month: "long" });
+  }
+  return `${periodText}\nAvg ${formatTime(item.time)}${countText}`;
+}
+
 function getTightAutoScale(values) {
   const safeValues = (Array.isArray(values) ? values : []).filter(
     (value) => typeof value === "number" && isFinite(value)
@@ -406,7 +436,8 @@ function buildProcessedChartData(
   useHeatmap = true,
   xScaleMode = "ordinal",
   bucketItems = [],
-  ordinalIndexMode = "timeline"
+  ordinalIndexMode = "timeline",
+  indexOffset = 0
 ) {
   const hasBucketItems = Array.isArray(bucketItems) && bucketItems.length > 0;
   const baseValid = hasBucketItems
@@ -465,7 +496,11 @@ function buildProcessedChartData(
       Number.isFinite(Number(item?.fullIndex))
         ? Number(item.fullIndex)
         : index;
-    const fallbackLabel = item.isBucket ? item.bucketLabel : `${ordinalSolveIndex + 1}`;
+    // fullIndex only counts the loaded window; indexOffset adds the older
+    // unloaded solves so the axis shows real solve numbers.
+    const labelIndex =
+      ordinalIndexMode === "timeline" ? ordinalSolveIndex + indexOffset : ordinalSolveIndex;
+    const fallbackLabel = item.isBucket ? item.bucketLabel : `${labelIndex + 1}`;
     const label =
       xScaleMode === "datetime"
         ? formatXAxisLabel(groupMode, timestamp, fallbackLabel)
@@ -484,7 +519,9 @@ function buildProcessedChartData(
             : index,
       y: baseTimeMs / 1000,
       color: getColor(baseTimeMs),
-      time: formatPointTime(baseTimeMs, solveForDetail, groupMode),
+      time: item.isBucket
+        ? formatBucketTooltip(item, hasBucketItems && groupMode === "solve" ? "day" : groupMode)
+        : formatPointTime(baseTimeMs, solveForDetail, groupMode),
       solve: solveForDetail,
       fullIndex: item.fullIndex,
       isDNF: item.isBucket ? false : item.penalty === "DNF",
@@ -513,6 +550,7 @@ function LineChart({
   title,
   titleDate = "",
   titleIndexRange = "",
+  solveIndexOffset = 0,
   deleteTime,
   addPost,
   applyPenalty,
@@ -636,7 +674,8 @@ function LineChart({
       shouldUseHeatmap,
       xScaleMode,
       bucketItems,
-      hasComparison ? "sample" : "timeline"
+      hasComparison ? "sample" : "timeline",
+      Number.isFinite(solveIndexOffset) && solveIndexOffset > 0 ? solveIndexOffset : 0
     );
     const data = primary.data;
     const extraSeries = [];
@@ -686,7 +725,7 @@ function LineChart({
       extraSeries,
       compareData,
     };
-  }, [bucketItems, comparisonSeries, groupMode, hasBucketItems, hasComparison, seriesStyle, showAo5, showAo12, solves, xScaleMode]);
+  }, [bucketItems, comparisonSeries, groupMode, hasBucketItems, hasComparison, seriesStyle, showAo5, showAo12, solveIndexOffset, solves, xScaleMode]);
 
   const solveLevel = groupMode === "solve" && !hasBucketItems;
   // Tag/filtered views pull a sparse subset of the full timeline, so their
@@ -981,6 +1020,9 @@ function LineChart({
           bulkShareNote={bulkActions.bulkShareNote}
           setBulkShareNote={bulkActions.setBulkShareNote}
           getSessionsForEvent={bulkActions.getSessionsForEvent}
+          bulkMoveEventOptions={bulkActions.bulkMoveEventOptions}
+          bulkStatus={bulkActions.bulkStatus}
+          dismissBulkStatus={bulkActions.dismissBulkStatus}
           applyBulkTags={bulkActions.applyBulkTags}
           applyBulkMove={bulkActions.applyBulkMove}
           applyBulkDelete={bulkActions.applyBulkDelete}

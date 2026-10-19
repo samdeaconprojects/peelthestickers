@@ -500,7 +500,7 @@ function AverageDetailModal({
             initialTableLimit="all"
             preserveInputOrder={true}
             highlightTrimmedSolves={trimmedSideByRow.size > 0}
-            showSolveAverages={displayMode === "table"}
+            showSolveAverages={false}
             containerClassName="averageDetailEmbeddedTable"
             renderSolveFooter={renderSolveAlgorithmTags}
           />

@@ -22,7 +22,8 @@
     "backfillBestCandidates": "node scripts/backfillBestCandidates.js",
     "repairOutliers": "node scripts/repairSessionOutliers.js",
     "migrateUser": "node scripts/migrateUserToProd.js",
-    "countItemTypes": "node scripts/countItemsByType.js"
+    "countItemTypes": "node scripts/countItemsByType.js",
+    "backfillFollowers": "node scripts/backfillFollowers.js"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.600.0",

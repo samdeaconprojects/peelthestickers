@@ -195,7 +195,7 @@ export const defaultSettings = {
   homeAveragesOrder: "single-last",
   verticalTimeListOrder: "newest-first",
   matrixPuzzleSvgStyle: "color",
-  statsSelectorPuzzleSvgStyle: "color",
+  statsSelectorPuzzleSvgStyle: "grayscale",
 
   eventKeyBindings: defaultEventBindings,
   pageKeyBindings: defaultPageBindings,
@@ -239,6 +239,7 @@ export const defaultSettings = {
   statsContainerBackground: false,
   statsTopBarBackground: false,
   statsHoverGrow: false,
+  statsNavButtonsEnabled: false,
 
   // random-state = cubing.js default
   // legacy = old generateScramble behavior
@@ -341,6 +342,7 @@ function mergeSettings(input) {
     statsContainerBackground: safe.statsContainerBackground === true,
     statsTopBarBackground: safe.statsTopBarBackground === true,
     statsHoverGrow: safe.statsHoverGrow === true,
+    statsNavButtonsEnabled: safe.statsNavButtonsEnabled === true,
     playerBarTagFields,
     homeLeftOfTimer: normalizeHomeLeftOfTimer(safe.homeLeftOfTimer),
     homeAveragesOrder: normalizeHomeAveragesOrder(safe.homeAveragesOrder),
@@ -350,7 +352,7 @@ function mergeSettings(input) {
       safe.matrixPuzzleSvgStyle,
       safe.whitePuzzleSVGs === true ? "white" : "color"
     ),
-    statsSelectorPuzzleSvgStyle: normalizePuzzleSvgStyle(safe.statsSelectorPuzzleSvgStyle),
+    statsSelectorPuzzleSvgStyle: normalizePuzzleSvgStyle(safe.statsSelectorPuzzleSvgStyle, "grayscale"),
     tagDefaultsByEvent: normalizeTagDefaultsByEvent(safe.tagDefaultsByEvent),
     tagDefaultsBySession: normalizeTagDefaultsBySession(safe.tagDefaultsBySession),
     homeTagVisibilityBySession: normalizeHomeTagVisibilityBySession(
