@@ -6,6 +6,7 @@ import FollowListPanel from "./FollowListPanel";
 import { getProfileEventScramble } from "../../utils/profileEventSolves";
 import { getRoomByHost } from "../../services/liveRoom";
 import { EVENT_KEYBINDING_LABELS } from "../../utils/keybindings";
+import editPencilIcon from "../../assets/editpencil.svg";
 
 function getEventLabel(event) {
   if (!event) return null;
@@ -320,11 +321,13 @@ export default function ProfileHeader({
               <div className="profileHeaderActions">
                 <button
                   type="button"
-                  className="profileHeaderButton"
+                  className="profileEditStatsButton"
                   onClick={onEditStats}
                   style={{ borderColor: Color || "#2EC4B6" }}
+                  title="Customize stats"
+                  aria-label="Customize stats"
                 >
-                  Customize Stats
+                  <img src={editPencilIcon} alt="" className="profileEditStatsButton__icon" />
                 </button>
               </div>
             )}
