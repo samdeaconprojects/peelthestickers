@@ -35,3 +35,7 @@ server/api.log
 
 # Cross-account table copy checkpoints
 server/scripts/.copy-checkpoint-*.json
+
+# Deploy config and prod secrets
+deploy/deploy.conf
+deploy/.env.production

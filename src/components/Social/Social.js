@@ -15,7 +15,7 @@ import StatSharePost from "../Profile/StatSharePost";
 import NameTag from "../Profile/NameTag";
 import { getUser } from "../../services/getUser";
 import { getFeed, getProfiles } from "../../services/getProfiles";
-import { updatePostComments } from "../../services/updatePostComments";
+import { addPostComment, addGroupPostComment } from "../../services/addPostComment";
 import { getMessagesPage } from "../../services/getMessages";
 import { sendMessage } from "../../services/sendMessage";
 import { getConversations } from "../../services/getConversations";
@@ -24,7 +24,6 @@ import { createConversation } from "../../services/createConversation";
 import { getGroups } from "../../services/getGroups";
 import { joinGroup } from "../../services/joinGroup";
 import { getGroupPosts } from "../../services/getGroupPosts";
-import { updateGroupPostComments } from "../../services/updateGroupPostComments";
 import { deleteGroupPost } from "../../services/deleteGroupPost";
 import { createGroup } from "../../services/createGroup";
 import { createSession } from "../../services/createSession";
@@ -1624,23 +1623,21 @@ function Social({
     setSelectedPost(updated);
 
     try {
-      if (selectedPost.PostOwnerType === "GROUP" || selectedPost.isGroupPost) {
-        await runDb("Updating comments", () =>
-          updateGroupPostComments(
-            selectedPost.groupID,
-            ts,
-            user?.UserID,
-            updatedComments
-          )
-        );
-      } else {
-        const ownerID = selectedPost.PK?.split("#")[1];
-        await runDb("Updating comments", () =>
-          updatePostComments(ownerID, ts, updatedComments)
-        );
+      const isGroup = selectedPost.PostOwnerType === "GROUP" || selectedPost.isGroupPost;
+      const result = await runDb("Adding comment", () =>
+        isGroup
+          ? addGroupPostComment(selectedPost.groupID, ts, comment)
+          : addPostComment(selectedPost.PK?.split("#")[1], ts, comment)
+      );
+      if (Array.isArray(result?.comments)) {
+        const saved = { ...updated, Comments: result.comments };
+        setFeed((f) => f.map((p) => (p === updated ? saved : p)));
+        setSelectedPost((current) => (current === updated ? saved : current));
       }
     } catch (err) {
       console.error("Failed to save comment:", err);
+      setFeed((f) => f.map((p) => (p === updated ? selectedPost : p)));
+      setSelectedPost((current) => (current === updated ? selectedPost : current));
     }
   };
 

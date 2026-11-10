@@ -1,0 +1,26 @@
+[Unit]
+Description=PeelTheStickers API (server/server.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pts
+Group=pts
+WorkingDirectory=/opt/pts/server
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=1536
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=3
+# Thousands of open live-room / notification streams need file handles.
+LimitNOFILE=65536
+
+# Hardening: the API only needs to read its own code and .env.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/opt/pts
+
+[Install]
+WantedBy=multi-user.target

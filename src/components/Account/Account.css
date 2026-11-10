@@ -1,0 +1,144 @@
+.email-banner__dismiss {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.8;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.email-banner__dismiss:hover {
+  opacity: 1;
+}
+
+.accountPage__ok {
+  color: #7fe3d8;
+}
+
+.accountPage__error {
+  color: #ff8a98;
+}
+
+.accountPage__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 380px;
+}
+
+.accountPage__input,
+.accountEmail__input {
+  height: 44px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: var(--theme-surface-strong, #13212a);
+  color: white;
+  font-size: 15px;
+  outline: none;
+}
+
+.accountPage__input:focus,
+.accountEmail__input:focus {
+  border-color: #2EC4B6;
+}
+
+.accountPage__button {
+  align-self: flex-start;
+  background: #2EC4B6;
+  color: #0e171d;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.accountPage__button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.accountEmail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.accountEmail__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.accountEmail__label {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 4px;
+}
+
+.accountEmail__value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 15px;
+  word-break: break-all;
+}
+
+.accountEmail__muted {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.accountEmail__badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.accountEmail__badge.is-ok {
+  background: rgba(46, 196, 182, 0.18);
+  color: #7fe3d8;
+}
+
+.accountEmail__badge.is-pending {
+  background: rgba(255, 190, 80, 0.16);
+  color: #ffcf7a;
+}
+
+.accountEmail__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.accountEmail__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 420px;
+}
+
+.accountEmail__error {
+  color: #ff8a98;
+  font-size: 13px;
+}
+
+.accountEmail__message {
+  color: #7fe3d8;
+  font-size: 13px;
+}
+
+.accountEmail__help {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}

@@ -1,0 +1,52 @@
+# deploy/Caddyfile — setup-server.sh replaces __DOMAIN__ and installs this as
+# /etc/caddy/Caddyfile. Caddy gets and renews the HTTPS certificates itself.
+#
+# One origin serves both the site and the API, so the browser never makes a
+# cross-origin call (the server has no CORS setup, and the notification stream
+# uses a relative /api URL).
+#
+# No access log on purpose: the notification stream carries the auth token in
+# its query string.
+
+__DOMAIN__ {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Nobody can frame the site (clickjacking), load plugins, or rewrite
+		# relative URLs. Kept loose on scripts/styles so the React build and
+		# the 3D cube viewer keep working.
+		X-Frame-Options "DENY"
+		Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+		# Smart cubes need Bluetooth; nothing uses the camera, mic or location.
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		-Server
+	}
+
+	handle /api/* {
+		# The API gzips its own JSON. flush_interval -1 streams server-sent
+		# events (live rooms, notifications) straight through.
+		reverse_proxy 127.0.0.1:5050 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		root * /opt/pts/web
+		encode zstd gzip
+
+		@static path /static/*
+		header @static Cache-Control "public, max-age=31536000, immutable"
+		@app not path /static/*
+		header @app Cache-Control "no-cache"
+
+		# React Router: unknown paths load the app, which routes client-side.
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+www.__DOMAIN__ {
+	redir https://__DOMAIN__{uri} permanent
+}

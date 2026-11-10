@@ -48,6 +48,14 @@ test("username and password validation", () => {
   assert.ok(validatePassword("short"));
 });
 
+test("reserved usernames are refused in any casing or punctuation", () => {
+  for (const name of ["pts", "PTS", "Admin", "peel_the_stickers", "Peel.The-Stickers", "support"]) {
+    assert.equal(validateUsername(name), "That username is reserved", name);
+  }
+  assert.equal(validateUsername("ptsfan"), null);
+  assert.equal(validateUsername("samdeacon"), null);
+});
+
 test("password hash round trip", async () => {
   const hash = await hashPassword("correct horse");
   assert.notEqual(hash, "correct horse");

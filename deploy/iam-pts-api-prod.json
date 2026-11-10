@@ -1,0 +1,34 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PTSProdTableOnly",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DescribeTable",
+        "dynamodb:GetItem",
+        "dynamodb:BatchGetItem",
+        "dynamodb:Query",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:BatchWriteItem"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:752948842090:table/PTSProd",
+        "arn:aws:dynamodb:us-east-1:752948842090:table/PTSProd/index/*"
+      ]
+    },
+    {
+      "Sid": "SendAccountEmailsFromNoreplyOnly",
+      "Effect": "Allow",
+      "Action": "ses:SendEmail",
+      "Resource": "arn:aws:ses:us-east-1:752948842090:identity/*",
+      "Condition": {
+        "StringEquals": {
+          "ses:FromAddress": "noreply@peelthestickers.com"
+        }
+      }
+    }
+  ]
+}

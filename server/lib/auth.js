@@ -14,6 +14,25 @@ const USERNAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{2,31}$/;
 const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_LENGTH = 200;
 
+// Names nobody can sign up with, so no one can pose as the site or its staff.
+// Matched case-insensitively and ignoring dots, dashes and underscores.
+const RESERVED_USERNAMES = new Set(
+  [
+    "pts", "ptstimer", "peelthestickers", "peel", "stickers",
+    "admin", "administrator", "root", "system", "sysadmin", "superuser",
+    "support", "help", "helpdesk", "contact", "info", "team", "staff",
+    "official", "mod", "moderator", "moderators", "owner", "security",
+    "abuse", "privacy", "legal", "terms", "billing", "noreply", "postmaster",
+    "webmaster", "api", "www", "mail", "app", "status", "null", "undefined",
+    "anonymous", "everyone", "wca", "worldcubeassociation",
+  ].map((name) => name.replace(/[._-]/g, ""))
+);
+
+function isReservedUsername(username) {
+  const key = String(username || "").toLowerCase().replace(/[._-]/g, "");
+  return RESERVED_USERNAMES.has(key);
+}
+
 let secret = String(process.env.PTS_JWT_SECRET || "").trim();
 if (!secret) {
   if (process.env.NODE_ENV === "production") {
@@ -42,6 +61,7 @@ function validateUsername(username) {
   if (!USERNAME_RE.test(id)) {
     return "Username must be 3-32 characters: letters, numbers, dot, dash or underscore";
   }
+  if (isReservedUsername(id)) return "That username is reserved";
   return null;
 }
 
@@ -98,7 +118,14 @@ function extractToken(req, { allowQuery = false } = {}) {
 }
 
 // Paths that never need a token.
-const PUBLIC_PATHS = new Set(["/health", "/auth/signup", "/auth/signin"]);
+const PUBLIC_PATHS = new Set([
+  "/health",
+  "/auth/signup",
+  "/auth/signin",
+  "/auth/verify-email",
+  "/auth/forgot-password",
+  "/auth/reset-password",
+]);
 
 // EventSource cannot send headers, so the notification stream reads the token
 // from the query string instead.
@@ -185,6 +212,7 @@ function requireAdmin(req, res, next) {
 
 module.exports = {
   validateUsername,
+  isReservedUsername,
   validatePassword,
   normalizeUsername,
   hashPassword,

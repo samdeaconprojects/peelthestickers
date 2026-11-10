@@ -156,7 +156,7 @@ export default function OfflineSolvesModal({
   const removeEntries = (entries) => {
     if (!entries.length) return;
     const label =
-      entries.length === 1 ? "this offline solve" : `these ${entries.length} offline solves`;
+      entries.length === 1 ? "this solve" : `these ${entries.length} solves`;
     if (!window.confirm(`Remove ${label}? This can't be undone.`)) return;
     entries.forEach((entry) => {
       onSolveRemoved?.(entry);
@@ -256,10 +256,11 @@ export default function OfflineSolvesModal({
       <div className="offline-modal__content">
         <div className="offline-modal__header">
           <div>
-            <h3 className="offline-modal__title">Offline solves</h3>
+            <h3 className="offline-modal__title">Solves to add</h3>
             <p className="offline-modal__subtitle">
-              {count} solve{count === 1 ? "" : "s"} timed while offline, not yet saved. Click a
-              time for details, or change where a group goes before adding it.
+              {count} solve{count === 1 ? "" : "s"} timed on this device (offline or before you
+              signed in) and not on your profile yet. Click a time for details, or change where a
+              group goes before adding it.
             </p>
           </div>
           <button

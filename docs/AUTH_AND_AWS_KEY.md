@@ -58,7 +58,9 @@ New environment variables for `server/.env`:
 
 Routes:
 
-- `POST /api/auth/signup` `{username, password}` → `{token, user, profileExists}`. The client then creates the profile with `POST /api/user` when `profileExists` is false.
+- `POST /api/auth/signup` `{username, email, password, acceptTerms: true}` → `{token, user, profileExists}`. `acceptTerms` must be `true` (13+ and agrees to /terms and /privacy); the AUTH item records `TermsVersion` and `TermsAcceptedAt`. Reserved names (pts, admin, support, …) are refused. The email is stored only on the AUTH item (never PROFILE), kept unique by an `EMAIL#<address>` item, and a confirmation link is emailed.
+- `POST /api/auth/signin` accepts a username or an email in `username`.
+- Email links (`server/lib/mailer.js`): `POST /api/auth/verify-email {token}`, `POST /api/auth/resend-verification` (signed in), `POST /api/auth/forgot-password {identifier}` (always answers OK; only confirmed emails get a link), `POST /api/auth/reset-password {token, newPassword}`, `POST /api/auth/email {email, currentPassword}` (signed in). Tokens are single-use `EMAILTOKEN#<sha256>` items: confirm links last 24h, reset links 1h. Without `PTS_EMAIL_FROM` the server prints emails to its log instead of sending (local dev); production requires it plus `PTS_APP_URL`. The client then creates the profile with `POST /api/user` when `profileExists` is false.
 - `POST /api/auth/signin` `{username, password}` → `{token, user}`.
 - `GET /api/auth/me` → the token's profile (used to restore a session on reload).
 - `POST /api/auth/password` `{currentPassword, newPassword}`.

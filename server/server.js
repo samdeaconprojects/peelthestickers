@@ -132,6 +132,12 @@ const { MAX_GROUP_MEMBERS, MAX_ROOM_MEMBERS, hasPlaceFor } = require("./lib/memb
 const { createProfileCache, profileIDsFromWrite } = require("./lib/profileCache");
 const { buildFeed, toProfileCard } = require("./lib/feed");
 const { createRateLimiter, rateLimitMiddleware } = require("./lib/rateLimit");
+const {
+  normalizeEmail,
+  validateEmail,
+  sendVerificationEmail,
+  sendPasswordResetEmail,
+} = require("./lib/mailer");
 const ALLOW_LEGACY_CLAIM =
   String(process.env.PTS_ALLOW_LEGACY_CLAIM || "false").toLowerCase() === "true";
 
@@ -5654,13 +5660,22 @@ app.use(
     (req) => (req.method === "POST" ? `authip:${req.ip}` : "")
   )
 );
+// Routes that send email or redeem email links: per IP, kept low because each
+// one can send an email or try a token.
+app.use(
+  ["/api/auth/forgot-password", "/api/auth/reset-password", "/api/auth/verify-email"],
+  rateLimitMiddleware(
+    createRateLimiter({ windowMs: 15 * 60000, max: envLimit("PTS_RATE_LIMIT_EMAIL_IP_PER_15MIN", 20) }),
+    (req) => (req.method === "POST" ? `emailip:${req.ip}` : "")
+  )
+);
 app.use(
   "/api/auth/signin",
   rateLimitMiddleware(
     createRateLimiter({ windowMs: 5 * 60000, max: envLimit("PTS_RATE_LIMIT_SIGNIN_PER_5MIN", 10) }),
     (req) =>
       req.method === "POST"
-        ? `signin:${String(req.body?.username || "").trim().toLowerCase()}`
+        ? `signin:${String(req.body?.username ?? req.body?.identifier ?? "").trim().toLowerCase()}`
         : ""
   )
 );
@@ -5756,6 +5771,10 @@ app.use("/api", async (req, res, next) => {
   }
 });
 
+// Date of the Terms/Privacy text in src/components/Legal. Bump it when they
+// change so we know which version each account agreed to.
+const TERMS_VERSION = "2026-11-10";
+
 function authItemKey(userID) {
   return { PK: `USER#${userID}`, SK: "AUTH" };
 }
@@ -5782,17 +5801,148 @@ function publicAuthResponse(userID, profile) {
   };
 }
 
+// Email lives only on the AUTH item (never on PROFILE, which other users can
+// read). EMAIL#<address> -> UserID keeps addresses unique and lets people sign
+// in with their email. One-time links are EMAILTOKEN#<sha256> items.
+const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
+const emailSendLimiter = createRateLimiter({ windowMs: 15 * 60000, max: 3 });
+
+function emailIndexKey(email) {
+  return { PK: `EMAIL#${email}`, SK: "EMAIL" };
+}
+
+async function getUserIDForEmail(email) {
+  const out = await ddb.send(new GetCommand({ TableName: TABLE, Key: emailIndexKey(email) }));
+  return out.Item?.UserID || null;
+}
+
+// Claims an address for a user. Returns false if another account has it.
+async function claimEmail(email, userID) {
+  try {
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: { ...emailIndexKey(email), ItemType: "EMAIL_INDEX", UserID: userID, CreatedAt: nowIso() },
+        ConditionExpression: "attribute_not_exists(PK) OR UserID = :u",
+        ExpressionAttributeValues: { ":u": userID },
+      })
+    );
+    return true;
+  } catch (e) {
+    if (e?.name === "ConditionalCheckFailedException") return false;
+    throw e;
+  }
+}
+
+async function releaseEmail(email, userID) {
+  if (!email) return;
+  await ddb
+    .send(
+      new DeleteCommand({
+        TableName: TABLE,
+        Key: emailIndexKey(email),
+        ConditionExpression: "UserID = :u",
+        ExpressionAttributeValues: { ":u": userID },
+      })
+    )
+    .catch((e) => {
+      if (e?.name !== "ConditionalCheckFailedException") throw e;
+    });
+}
+
+function hashEmailToken(token) {
+  return crypto.createHash("sha256").update(String(token)).digest("hex");
+}
+
+async function createEmailToken({ purpose, userID, email, ttlMs }) {
+  const token = crypto.randomBytes(32).toString("base64url");
+  const expiresAt = Date.now() + ttlMs;
+  await ddb.send(
+    new PutCommand({
+      TableName: TABLE,
+      Item: {
+        PK: `EMAILTOKEN#${hashEmailToken(token)}`,
+        SK: "TOKEN",
+        ItemType: "EMAIL_TOKEN",
+        Purpose: purpose,
+        UserID: userID,
+        Email: email,
+        ExpiresAt: expiresAt,
+        // Lets DynamoDB TTL clean these up if it's turned on for the table.
+        ExpiresAtEpoch: Math.ceil(expiresAt / 1000),
+        CreatedAt: nowIso(),
+      },
+    })
+  );
+  return token;
+}
+
+// Single use: the delete is the redeem, so a link can't be used twice.
+async function redeemEmailToken(token, purpose) {
+  const raw = String(token || "").trim();
+  if (!raw || raw.length > 200) return null;
+  try {
+    const out = await ddb.send(
+      new DeleteCommand({
+        TableName: TABLE,
+        Key: { PK: `EMAILTOKEN#${hashEmailToken(raw)}`, SK: "TOKEN" },
+        ConditionExpression: "attribute_exists(PK) AND Purpose = :p",
+        ExpressionAttributeValues: { ":p": purpose },
+        ReturnValues: "ALL_OLD",
+      })
+    );
+    const item = out.Attributes;
+    if (!item || Number(item.ExpiresAt) < Date.now()) return null;
+    return item;
+  } catch (e) {
+    if (e?.name === "ConditionalCheckFailedException") return null;
+    throw e;
+  }
+}
+
+// Never fails the request that triggered it: the account change is already
+// saved, and the user can ask for another email.
+async function sendVerificationFor(userID, email) {
+  try {
+    const token = await createEmailToken({ purpose: "verify", userID, email, ttlMs: EMAIL_VERIFY_TTL_MS });
+    await sendVerificationEmail({ to: email, username: userID, token });
+    return true;
+  } catch (e) {
+    console.error("Verification email failed:", e?.name || e, e?.message || "");
+    return false;
+  }
+}
+
+function accountEmailFields(authItem) {
+  return {
+    email: authItem?.Email || null,
+    emailVerified: !!authItem?.EmailVerified,
+  };
+}
+
 app.post("/api/auth/signup", async (req, res) => {
   if (!requirePkSk(res)) return;
 
+  let claimedEmail = "";
+  let username = "";
   try {
-    const username = normalizeUsername(req.body?.username ?? req.body?.userID);
+    username = normalizeUsername(req.body?.username ?? req.body?.userID);
     const password = req.body?.password;
+    const email = normalizeEmail(req.body?.email);
 
     const usernameError = validateUsername(username);
     if (usernameError) return res.status(400).json({ error: usernameError });
+    const emailError = validateEmail(email);
+    if (emailError) return res.status(400).json({ error: emailError, code: "INVALID_EMAIL" });
     const passwordError = validatePassword(password);
     if (passwordError) return res.status(400).json({ error: passwordError });
+    if (req.body?.acceptTerms !== true) {
+      return res.status(400).json({
+        error: "You must be 13 or older and agree to the Terms and Privacy Policy",
+        code: "TERMS_REQUIRED",
+      });
+    }
 
     const [existingAuth, profile] = await Promise.all([
       getAuthItem(username),
@@ -5812,6 +5962,14 @@ app.post("/api/auth/signup", async (req, res) => {
       });
     }
 
+    if (!(await claimEmail(email, username))) {
+      return res.status(409).json({
+        error: "That email is already used by another account. Try signing in or resetting your password.",
+        code: "EMAIL_TAKEN",
+      });
+    }
+    claimedEmail = email;
+
     const ts = nowIso();
     await ddb.send(
       new PutCommand({
@@ -5821,16 +5979,23 @@ app.post("/api/auth/signup", async (req, res) => {
           ItemType: "AUTH",
           UserID: username,
           PasswordHash: await hashPassword(password),
+          Email: email,
+          EmailVerified: false,
           CreatedAt: ts,
           UpdatedAt: ts,
           ClaimedLegacyProfile: !!profile,
+          TermsVersion: TERMS_VERSION,
+          TermsAcceptedAt: ts,
         },
         ConditionExpression: "attribute_not_exists(PK)",
       })
     );
+    claimedEmail = "";
 
-    return res.json(publicAuthResponse(username, profile));
+    await sendVerificationFor(username, email);
+    return res.json({ ...publicAuthResponse(username, profile), email, emailVerified: false });
   } catch (e) {
+    if (claimedEmail) await releaseEmail(claimedEmail, username).catch(() => {});
     if (e?.name === "ConditionalCheckFailedException") {
       return res.status(409).json({ error: "That username is taken", code: "USERNAME_TAKEN" });
     }
@@ -5843,10 +6008,17 @@ app.post("/api/auth/signin", async (req, res) => {
   if (!requirePkSk(res)) return;
 
   try {
-    const username = normalizeUsername(req.body?.username ?? req.body?.userID);
+    const identifier = String(req.body?.username ?? req.body?.identifier ?? req.body?.userID ?? "").trim();
     const password = req.body?.password;
-    if (!username || typeof password !== "string") {
-      return res.status(400).json({ error: "Username and password are required" });
+    if (!identifier || typeof password !== "string") {
+      return res.status(400).json({ error: "Username or email and password are required" });
+    }
+
+    const username = identifier.includes("@")
+      ? await getUserIDForEmail(normalizeEmail(identifier))
+      : normalizeUsername(identifier);
+    if (!username) {
+      return res.status(401).json({ error: "Invalid username, email or password", code: "INVALID_CREDENTIALS" });
     }
 
     const [authItem, profile] = await Promise.all([
@@ -5863,17 +6035,178 @@ app.post("/api/auth/signin", async (req, res) => {
           code: "LEGACY_ACCOUNT",
         });
       }
-      return res.status(401).json({ error: "Invalid username or password", code: "INVALID_CREDENTIALS" });
+      return res.status(401).json({ error: "Invalid username, email or password", code: "INVALID_CREDENTIALS" });
     }
 
     const valid = await verifyPassword(password, authItem.PasswordHash);
     if (!valid) {
-      return res.status(401).json({ error: "Invalid username or password", code: "INVALID_CREDENTIALS" });
+      return res.status(401).json({ error: "Invalid username, email or password", code: "INVALID_CREDENTIALS" });
     }
 
-    return res.json(publicAuthResponse(username, profile));
+    return res.json({ ...publicAuthResponse(username, profile), ...accountEmailFields(authItem) });
   } catch (e) {
     console.error("POST /api/auth/signin error:", e);
+    return sendServerError(res, e);
+  }
+});
+
+app.post("/api/auth/verify-email", async (req, res) => {
+  if (!requirePkSk(res)) return;
+  try {
+    const item = await redeemEmailToken(req.body?.token, "verify");
+    if (!item) {
+      return res.status(400).json({ error: "This link is invalid or has expired.", code: "BAD_TOKEN" });
+    }
+    try {
+      await ddb.send(
+        new UpdateCommand({
+          TableName: TABLE,
+          Key: authItemKey(item.UserID),
+          UpdateExpression: "SET EmailVerified = :t, EmailVerifiedAt = :ts, UpdatedAt = :ts",
+          // Only if the account still uses the address the link was sent to.
+          ConditionExpression: "attribute_exists(PK) AND Email = :e",
+          ExpressionAttributeValues: { ":t": true, ":ts": nowIso(), ":e": item.Email },
+        })
+      );
+    } catch (e) {
+      if (e?.name === "ConditionalCheckFailedException") {
+        return res.status(400).json({ error: "This link is for an email your account no longer uses.", code: "BAD_TOKEN" });
+      }
+      throw e;
+    }
+    return res.json({ ok: true, email: item.Email, emailVerified: true });
+  } catch (e) {
+    console.error("POST /api/auth/verify-email error:", e);
+    return sendServerError(res, e);
+  }
+});
+
+app.post("/api/auth/resend-verification", async (req, res) => {
+  if (!requirePkSk(res)) return;
+  try {
+    const userID = req.auth.userID;
+    const authItem = await getAuthItem(userID);
+    if (!authItem?.Email) return res.status(400).json({ error: "Add an email first.", code: "NO_EMAIL" });
+    if (authItem.EmailVerified) return res.json({ ok: true, ...accountEmailFields(authItem) });
+    if (!emailSendLimiter.hit(`verify:${userID}`).allowed) {
+      return res.status(429).json({ error: "We just sent one. Check your inbox (and spam), or try again in a few minutes.", code: "RATE_LIMITED" });
+    }
+    const sent = await sendVerificationFor(userID, authItem.Email);
+    if (!sent) return res.status(502).json({ error: "Couldn't send the email right now. Try again later." });
+    return res.json({ ok: true, ...accountEmailFields(authItem) });
+  } catch (e) {
+    console.error("POST /api/auth/resend-verification error:", e);
+    return sendServerError(res, e);
+  }
+});
+
+// Always answers the same way, so it can't be used to find out who has an
+// account. Only verified addresses get reset links: a typo'd, never-confirmed
+// address could belong to a stranger.
+app.post("/api/auth/forgot-password", async (req, res) => {
+  if (!requirePkSk(res)) return;
+  const done = () =>
+    res.json({ ok: true, message: "If that account has a confirmed email, we've sent a reset link to it." });
+  try {
+    const identifier = String(req.body?.identifier ?? req.body?.email ?? req.body?.username ?? "").trim();
+    if (!identifier || identifier.length > 254) return done();
+    if (!emailSendLimiter.hit(`reset:${identifier.toLowerCase()}`).allowed) return done();
+
+    const userID = identifier.includes("@")
+      ? await getUserIDForEmail(normalizeEmail(identifier))
+      : normalizeUsername(identifier);
+    if (!userID) return done();
+    const authItem = await getAuthItem(userID);
+    if (!authItem?.Email || !authItem.EmailVerified) return done();
+
+    const token = await createEmailToken({
+      purpose: "reset",
+      userID,
+      email: authItem.Email,
+      ttlMs: PASSWORD_RESET_TTL_MS,
+    });
+    await sendPasswordResetEmail({ to: authItem.Email, username: userID, token }).catch((e) =>
+      console.error("Password reset email failed:", e?.name || e, e?.message || "")
+    );
+    return done();
+  } catch (e) {
+    console.error("POST /api/auth/forgot-password error:", e);
+    return done();
+  }
+});
+
+app.post("/api/auth/reset-password", async (req, res) => {
+  if (!requirePkSk(res)) return;
+  try {
+    const newPassword = req.body?.newPassword;
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) return res.status(400).json({ error: passwordError });
+
+    const item = await redeemEmailToken(req.body?.token, "reset");
+    if (!item) {
+      return res.status(400).json({ error: "This reset link is invalid or has expired. Ask for a new one.", code: "BAD_TOKEN" });
+    }
+    const ts = nowIso();
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: authItemKey(item.UserID),
+        UpdateExpression: "SET PasswordHash = :h, PasswordChangedAt = :ts, UpdatedAt = :ts",
+        ConditionExpression: "attribute_exists(PK)",
+        ExpressionAttributeValues: { ":h": await hashPassword(newPassword), ":ts": ts },
+      })
+    );
+    return res.json({ ok: true, username: item.UserID });
+  } catch (e) {
+    if (e?.name === "ConditionalCheckFailedException") {
+      return res.status(400).json({ error: "This reset link is invalid or has expired.", code: "BAD_TOKEN" });
+    }
+    console.error("POST /api/auth/reset-password error:", e);
+    return sendServerError(res, e);
+  }
+});
+
+// Add or change the account email. Needs the current password, and the new
+// address starts unconfirmed.
+app.post("/api/auth/email", async (req, res) => {
+  if (!requirePkSk(res)) return;
+  const userID = req.auth.userID;
+  let claimed = "";
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const emailError = validateEmail(email);
+    if (emailError) return res.status(400).json({ error: emailError, code: "INVALID_EMAIL" });
+
+    const authItem = await getAuthItem(userID);
+    if (!authItem || !(await verifyPassword(req.body?.currentPassword, authItem.PasswordHash))) {
+      return res.status(401).json({ error: "Current password is incorrect", code: "INVALID_CREDENTIALS" });
+    }
+    if (authItem.Email === email) {
+      return res.json({ ok: true, ...accountEmailFields(authItem) });
+    }
+    if (!emailSendLimiter.hit(`email:${userID}`).allowed) {
+      return res.status(429).json({ error: "Too many email changes. Try again in a few minutes.", code: "RATE_LIMITED" });
+    }
+    if (!(await claimEmail(email, userID))) {
+      return res.status(409).json({ error: "That email is already used by another account.", code: "EMAIL_TAKEN" });
+    }
+    claimed = email;
+
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: authItemKey(userID),
+        UpdateExpression: "SET Email = :e, EmailVerified = :f, UpdatedAt = :u REMOVE EmailVerifiedAt",
+        ExpressionAttributeValues: { ":e": email, ":f": false, ":u": nowIso() },
+      })
+    );
+    claimed = "";
+    await releaseEmail(authItem.Email, userID);
+    await sendVerificationFor(userID, email);
+    return res.json({ ok: true, email, emailVerified: false });
+  } catch (e) {
+    if (claimed) await releaseEmail(claimed, userID).catch(() => {});
+    console.error("POST /api/auth/email error:", e);
     return sendServerError(res, e);
   }
 });
@@ -5881,8 +6214,17 @@ app.post("/api/auth/signin", async (req, res) => {
 app.get("/api/auth/me", async (req, res) => {
   if (!requirePkSk(res)) return;
   try {
-    const profile = await getProfileItem(req.auth.userID);
-    return res.json({ ok: true, userID: req.auth.userID, user: profile, profileExists: !!profile });
+    const [profile, authItem] = await Promise.all([
+      getProfileItem(req.auth.userID),
+      getAuthItem(req.auth.userID),
+    ]);
+    return res.json({
+      ok: true,
+      userID: req.auth.userID,
+      user: profile,
+      profileExists: !!profile,
+      ...accountEmailFields(authItem),
+    });
   } catch (e) {
     console.error("GET /api/auth/me error:", e);
     return sendServerError(res, e);
@@ -9233,7 +9575,7 @@ app.post("/api/post", async (req, res) => {
       Event: req.body?.event ?? "",
       SolveList: req.body?.solveList ?? [],
       StatShare: req.body?.statShare ?? null,
-      Comments: req.body?.comments ?? [],
+      Comments: [],
       CreatedAt: timestamp,
       UpdatedAt: timestamp,
     };
@@ -9410,33 +9752,82 @@ app.delete("/api/post/:userID/:timestamp", async (req, res) => {
   }
 });
 
-app.put("/api/postComments/:userID/:timestamp", async (req, res) => {
+// Comments are added one at a time. The server builds the comment from the
+// signed-in user's profile, so nobody can post as someone else or rewrite the
+// rest of the thread.
+const COMMENT_MAX_LENGTH = 1000;
+const COMMENTS_PER_POST_MAX = 500;
+
+async function buildServerComment(req) {
+  const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+  if (!text) return { error: "Comment is empty" };
+  if (text.length > COMMENT_MAX_LENGTH) {
+    return { error: `Comments can be at most ${COMMENT_MAX_LENGTH} characters` };
+  }
+  const authorID = req.auth.userID;
+  const profile = (await getCachedUserProfile(authorID)) || {};
+  return {
+    comment: {
+      text,
+      author: profile.Username || profile.Name || authorID,
+      userID: authorID,
+      color: profile.Color || "#FFFFFF",
+      profileEvent: profile.ProfileEvent || "333",
+      profileScramble: profile.ProfileScramble || "",
+      createdAt: nowIso(),
+    },
+  };
+}
+
+// Appends to an existing post only; never creates one.
+async function appendCommentToPost(key, comment) {
+  try {
+    const out = await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: key,
+        UpdateExpression:
+          "SET Comments = list_append(if_not_exists(Comments, :empty), :c), UpdatedAt = :u",
+        ConditionExpression:
+          "attribute_exists(PK) AND (attribute_not_exists(Comments) OR size(Comments) < :max)",
+        ExpressionAttributeValues: {
+          ":empty": [],
+          ":c": [comment],
+          ":u": nowIso(),
+          ":max": COMMENTS_PER_POST_MAX,
+        },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return { comments: out.Attributes?.Comments || [comment] };
+  } catch (e) {
+    if (e?.name === "ConditionalCheckFailedException") return { comments: null };
+    throw e;
+  }
+}
+
+app.post("/api/postComments/:userID/:timestamp", async (req, res) => {
   if (!requirePkSk(res)) return;
 
   const userID = String(req.params.userID || "").trim();
   const timestamp = String(req.params.timestamp || "").trim();
-  const comments = req.body?.comments;
-
-  if (!Array.isArray(comments)) {
-    return res.status(400).json({ error: "comments must be an array" });
-  }
+  if (!timestamp) return res.status(400).json({ error: "Missing timestamp" });
 
   try {
+    const built = await buildServerComment(req);
+    if (built.error) return res.status(400).json({ error: built.error });
+
     if (!(await canViewSection(req, userID, "posts"))) {
       return res.status(403).json({ error: "This is private", code: "PRIVATE", section: "posts" });
     }
 
-    await ddb.send(
-      new UpdateCommand({
-        TableName: TABLE,
-        Key: { PK: `USER#${userID}`, SK: `POST#${timestamp}` },
-        UpdateExpression: "SET Comments = :c, UpdatedAt = :u",
-        ExpressionAttributeValues: {
-          ":c": comments,
-          ":u": nowIso(),
-        },
-      })
+    const { comments } = await appendCommentToPost(
+      { PK: `USER#${userID}`, SK: `POST#${timestamp}` },
+      built.comment
     );
+    if (!comments) {
+      return res.status(404).json({ error: "Post not found or comment limit reached" });
+    }
 
     const friendIDs = await listPostAudienceIDs(userID);
     publishNotificationToUsers([userID, ...friendIDs], {
@@ -9448,9 +9839,9 @@ app.put("/api/postComments/:userID/:timestamp", async (req, res) => {
       updatedAt: nowIso(),
     });
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, comment: built.comment, comments });
   } catch (e) {
-    console.error("PUT /api/postComments error:", e);
+    console.error("POST /api/postComments error:", e);
     return res.status(500).json({ error: "Server error" });
   }
 });
@@ -10649,7 +11040,7 @@ app.post("/api/groupPost", async (req, res) => {
       Event: req.body?.event ?? "",
       SolveList: req.body?.solveList ?? [],
       StatShare: req.body?.statShare ?? null,
-      Comments: req.body?.comments ?? [],
+      Comments: [],
       CreatedAt: timestamp,
       UpdatedAt: timestamp,
     };
@@ -10706,38 +11097,30 @@ app.get("/api/groupPosts/:groupID", async (req, res) => {
   }
 });
 
-app.put("/api/groupPostComments/:groupID/:timestamp", async (req, res) => {
+app.post("/api/groupPostComments/:groupID/:timestamp", async (req, res) => {
   if (!requirePkSk(res)) return;
 
   const groupID = normalizeGroupID(req.params.groupID || "");
   const timestamp = String(req.params.timestamp || "").trim();
-  const userID = String(req.body?.userID || "").trim();
-  const comments = req.body?.comments;
-
   if (!groupID) return res.status(400).json({ error: "Missing groupID" });
   if (!timestamp) return res.status(400).json({ error: "Missing timestamp" });
-  if (!userID) return res.status(400).json({ error: "Missing userID" });
-  if (!Array.isArray(comments)) {
-    return res.status(400).json({ error: "comments must be an array" });
-  }
 
   try {
-    const isMember = await isUserInGroup(groupID, userID);
-    if (!isMember) {
+    const built = await buildServerComment(req);
+    if (built.error) return res.status(400).json({ error: built.error });
+
+    const isMember = await isUserInGroup(groupID, req.auth.userID);
+    if (!isMember && !req.auth.isAdmin) {
       return res.status(403).json({ error: "User is not a member of this group" });
     }
 
-    await ddb.send(
-      new UpdateCommand({
-        TableName: TABLE,
-        Key: { PK: `GROUP#${groupID}`, SK: `POST#${timestamp}` },
-        UpdateExpression: "SET Comments = :c, UpdatedAt = :u",
-        ExpressionAttributeValues: {
-          ":c": comments,
-          ":u": nowIso(),
-        },
-      })
+    const { comments } = await appendCommentToPost(
+      { PK: `GROUP#${groupID}`, SK: `POST#${timestamp}` },
+      built.comment
     );
+    if (!comments) {
+      return res.status(404).json({ error: "Post not found or comment limit reached" });
+    }
 
     const members = await listGroupMembers(groupID);
     publishNotificationToUsers(
@@ -10752,10 +11135,10 @@ app.put("/api/groupPostComments/:groupID/:timestamp", async (req, res) => {
       }
     );
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, comment: built.comment, comments });
   } catch (e) {
-    console.error("PUT /api/groupPostComments error:", e);
-    return res.status(500).json({ error: e?.message || "Server error" });
+    console.error("POST /api/groupPostComments error:", e);
+    return res.status(500).json({ error: "Server error" });
   }
 });
 

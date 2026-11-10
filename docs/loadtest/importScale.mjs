@@ -60,7 +60,7 @@ const pct = (arr, q) => {
   return Math.round(s[Math.min(s.length - 1, Math.floor(q * s.length))] || 0);
 };
 
-let r = await api(null, "POST", "/api/auth/signup", { username: USER, password: PW });
+let r = await api(null, "POST", "/api/auth/signup", { username: USER, email: `${USER}@loadtest.invalid`, password: PW, acceptTerms: true });
 if (r.status === 409) r = await api(null, "POST", "/api/auth/signin", { username: USER, password: PW });
 const token = r.json?.token;
 if (!token) throw new Error(`auth failed: ${JSON.stringify(r.json)}`);

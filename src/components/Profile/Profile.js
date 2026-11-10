@@ -40,7 +40,7 @@ import { getPosts } from "../../services/getPosts";
 import { getUser } from "../../services/getUser";
 import { updateUser } from "../../services/updateUser";
 import { followUser, unfollowUser } from "../../services/follow";
-import { updatePostComments } from "../../services/updatePostComments";
+import { addPostComment } from "../../services/addPostComment";
 import { getSessions } from "../../services/getSessions";
 import {
   getLastNSolvesByEvent,
@@ -886,13 +886,17 @@ function Profile({
     setPosts((pl) => pl.map((p) => (p === selectedPost ? updated : p)));
     setSelectedPost(updated);
 
-    const ownerID = viewID;
     try {
-      await runDb("Updating comments", () =>
-        updatePostComments(ownerID, ts, updatedComments)
-      );
+      const result = await runDb("Adding comment", () => addPostComment(viewID, ts, comment));
+      if (Array.isArray(result?.comments)) {
+        const saved = { ...updated, Comments: result.comments };
+        setPosts((pl) => pl.map((p) => (p === updated ? saved : p)));
+        setSelectedPost((current) => (current === updated ? saved : current));
+      }
     } catch (err) {
       console.error("Failed to save comment:", err);
+      setPosts((pl) => pl.map((p) => (p === updated ? selectedPost : p)));
+      setSelectedPost((current) => (current === updated ? selectedPost : current));
     }
   };
 

@@ -201,8 +201,42 @@
     width: 50%;
   }
   
-  .signInButton:hover {
+  .signInButton:hover:not(:disabled) {
     background-color: #2EC4B6;
+  }
+
+  .signInTerms {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 10px;
+    width: 90%;
+    margin: 6px auto 4px;
+    font-size: 14px;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.82);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .signInTerms input {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin: 1px 0 0;
+    accent-color: #2EC4B6;
+    cursor: pointer;
+  }
+
+  .signInTerms a,
+  .signInLegalLinks a {
+    color: #2EC4B6;
+  }
+
+  .signInLegalLinks {
+    margin: 14px 0 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
   }
 
   @media (max-width: 640px) {
@@ -248,4 +282,26 @@
     100% {
       transform: translateX(6px);
     }
+  }
+
+  .signInHelp,
+  .signInNotice {
+    width: 90%;
+    margin: 4px auto 8px;
+    font-size: 14px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.78);
+  }
+
+  .signInNotice {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(46, 196, 182, 0.12);
+    border: 1px solid rgba(46, 196, 182, 0.35);
+  }
+
+  .signInForgot {
+    margin-bottom: 0;
+    font-size: 13px;
+    opacity: 0.75;
   }

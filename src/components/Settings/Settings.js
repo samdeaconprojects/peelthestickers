@@ -38,6 +38,7 @@ import {
   formatShortcutForDisplay,
   getPrimaryModifierLabel,
 } from "../../utils/keybindings";
+import AccountEmailSettings from "../Account/AccountEmailSettings";
 
 // Derived from the live trim rule rather than hardcoded, so the table shown to users can
 // never drift from what calculateAverage actually does. Mo3 is a straight mean.
@@ -239,6 +240,7 @@ const SETTINGS_SECTIONS = [
   { id: "averages", tab: "Averages" },
   { id: "overlays", tab: "Overlays" },
   { id: "keys", tab: "Keys" },
+  { id: "account", tab: "Account", requiresUser: true },
   { id: "profile", tab: "Profile" },
   { id: "privacy", tab: "Privacy", requiresUser: true },
   { id: "wca", tab: "WCA" },
@@ -594,6 +596,9 @@ function Settings({
   onStatsExport,
   onSessionsRefresh,
   onOpenTutorial,
+  accountEmail = null,
+  onAccountEmailChanged,
+  initialSection = "",
 }) {
   const { settings, updateSettings, setAllSettings } = useSettings();
   const { runDb } = useDbStatus();
@@ -1233,13 +1238,21 @@ function Settings({
     if (current) setActiveSectionId(current);
   };
 
-  const scrollToSection = (id) => {
+  const scrollToSection = (id, behavior = "smooth") => {
     const container = scrollContainerRef.current;
     const el = sectionRefs.current[id];
     if (!container || !el) return;
     setActiveSectionId(id);
-    container.scrollTo({ top: Math.max(0, el.offsetTop - getTabsOffset() + 1), behavior: "smooth" });
+    container.scrollTo({ top: Math.max(0, el.offsetTop - getTabsOffset() + 1), behavior });
   };
+
+  // Opened from somewhere that wants a particular section (e.g. "Add email").
+  useEffect(() => {
+    if (!initialSection) return;
+    const id = setTimeout(() => scrollToSection(initialSection, "auto"), 0);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSection]);
 
   return (
     <div
@@ -2288,6 +2301,15 @@ function Settings({
           </div>
         </section>
 
+        {userID ? (
+          <section className="settingsSection" id="settings-section-account" data-settings-section="account" ref={registerSection("account")}>
+            <h2>Account</h2>
+            <div className="settings-container">
+              <AccountEmailSettings accountEmail={accountEmail} onChanged={onAccountEmailChanged} />
+            </div>
+          </section>
+        ) : null}
+
         <section className="settingsSection" id="settings-section-profile" data-settings-section="profile" ref={registerSection("profile")}>
           <h2>Profile Settings</h2>
           <div className="settings-container">
@@ -2737,6 +2759,13 @@ function Settings({
             </button>
           )}
         </div>
+        <p className="settingsLegalLinks">
+          <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+          <span aria-hidden="true"> · </span>
+          <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>
+          <span aria-hidden="true"> · </span>
+          <a href="mailto:ptstimer@gmail.com">Contact / delete account</a>
+        </p>
       </div>
 
       {showUnsavedPrompt && (

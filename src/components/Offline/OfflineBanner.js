@@ -21,12 +21,12 @@ export default function OfflineBanner({ isOnline, pendingCount = 0, isSignedIn, 
         </span>
       ) : (
         <span className="offline-banner__text">
-          {pendingCount} offline solve{pendingCount === 1 ? "" : "s"} ready to add to your profile.
+          {pendingCount} solve{pendingCount === 1 ? "" : "s"} from this device ready to add to your profile.
         </span>
       )}
       {isOnline && pendingCount > 0 && (
         <button type="button" className="offline-banner__action" onClick={onReview}>
-          Review offline solves →
+          Review solves →
         </button>
       )}
     </div>

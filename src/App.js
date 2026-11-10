@@ -30,6 +30,9 @@ import EventSelector from "./components/EventSelector";
 import Scramble from "./components/Scramble/Scramble";
 import PuzzleSVG from "./components/PuzzleSVGs/PuzzleSVG";
 import SignInPopup from "./components/SignInPopup/SignInPopup";
+import { PrivacyPage, TermsPage } from "./components/Legal/Legal";
+import EmailBanner from "./components/Account/EmailBanner";
+import { VerifyEmailPage, ResetPasswordPage } from "./components/Account/EmailActionPages";
 import {
   ProfileSetupModal,
   TutorialModal,
@@ -77,7 +80,6 @@ import { updateSolve } from "./services/updateSolve";
 import { getPosts } from "./services/getPosts";
 import { createPost } from "./services/createPost";
 import { deletePost as deletePostFromDB } from "./services/deletePost";
-import { updatePostComments } from "./services/updatePostComments";
 import { createSession } from "./services/createSession";
 import { createUser } from "./services/createUser";
 import { getMessages } from "./services/getMessages";
@@ -269,6 +271,48 @@ function writePracticeState(state) {
   } catch {
     // storage full or blocked: practice still works, it just won't survive a reload
   }
+}
+
+// Solves timed while signed out live only on this device. They're kept here
+// so they survive a reload, and on sign-in they move into that account's
+// offline queue, where the offline solves popup lets the user add them.
+const GUEST_SOLVES_KEY = "pts:guestSolves";
+
+function isGuestSolve(solve) {
+  return String(solve?.solveRef || "").startsWith("LOCAL#");
+}
+
+function readGuestSolves() {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(GUEST_SOLVES_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter(isGuestSolve) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeGuestSolves(solves) {
+  if (typeof window === "undefined") return;
+  try {
+    if (solves.length) window.localStorage.setItem(GUEST_SOLVES_KEY, JSON.stringify(solves));
+    else window.localStorage.removeItem(GUEST_SOLVES_KEY);
+  } catch {
+    // storage full or blocked: timing still works, it just won't survive a reload
+  }
+}
+
+// The signed-out starting state: empty events plus any solves kept on this device.
+function sessionsWithGuestSolves() {
+  const next = Object.fromEntries(
+    Object.entries(INITIAL_SESSIONS).map(([event, solves]) => [event, [...solves]])
+  );
+  for (const solve of readGuestSolves()) {
+    const event = String(solve?.event || "").toUpperCase();
+    if (!event) continue;
+    next[event] = [...(next[event] || []), solve];
+  }
+  return next;
 }
 
 function writeNavPrefs(userID, prefs = {}) {
@@ -1651,7 +1695,7 @@ function App() {
   const [sharedStatsDeniedReason, setSharedStatsDeniedReason] = useState("");
 
   const [scrambles, setScrambles] = useState({});
-  const [sessions, setSessions] = useState(INITIAL_SESSIONS);
+  const [sessions, setSessions] = useState(sessionsWithGuestSolves);
   const currentSessionLoadTokenRef = useRef(0);
   const deletedSolveRefsRef = useRef(new Set());
   // Penalties/deletes made on a solve whose create request is still in flight
@@ -1664,6 +1708,20 @@ function App() {
   const deletedPendingSolveRefsRef = useRef(new Set());
   const currentSessionSolveCountTotalRef = useRef(null);
   const [showPlayerBar, setShowPlayerBar] = useState(true);
+  // The Terms, Privacy and email-link pages open with the player bar lowered, without
+  // touching the saved preference; the toggle can still raise it there.
+  const isLegalPage = [
+    "/privacy",
+    "/terms",
+    "/verify-email",
+    "/reset-password",
+  ].includes(location.pathname);
+  const [legalPlayerBarOpen, setLegalPlayerBarOpen] = useState(false);
+  useEffect(() => {
+    if (!isLegalPage) setLegalPlayerBarOpen(false);
+  }, [isLegalPage]);
+  const playerBarVisible = isLegalPage ? legalPlayerBarOpen : showPlayerBar;
+  const setPlayerBarVisible = isLegalPage ? setLegalPlayerBarOpen : setShowPlayerBar;
   const [navPrefs, setNavPrefs] = useState(DEFAULT_NAV_PREFS);
   const [showDetail, setShowDetail] = useState(false);
   const [user, setUser] = useState(null);
@@ -1707,6 +1765,88 @@ function App() {
   const [showTutorialModal, setShowTutorialModal] = useState(false);
   const [showManualSolveModal, setShowManualSolveModal] = useState(false);
   const [showOfflineSolvesModal, setShowOfflineSolvesModal] = useState(false);
+  const [guestSolvesToReview, setGuestSolvesToReview] = useState(false);
+
+  // Signed out: keep this device's solves (including deletes and penalties)
+  // in storage so a reload doesn't lose them.
+  useEffect(() => {
+    if (isSignedIn) return;
+    writeGuestSolves(Object.values(sessions || {}).flat().filter(isGuestSolve));
+  }, [sessions, isSignedIn]);
+
+  // Signed in: hand any solves from before sign-in to this account's offline
+  // queue and take them out of the live lists, so they're only added once the
+  // user chooses where they go.
+  useEffect(() => {
+    const userID = String(user?.UserID || "").trim();
+    if (!isSignedIn || !userID) return;
+    const guestSolves = readGuestSolves();
+    if (!guestSolves.length) return;
+
+    for (const solve of guestSolves) {
+      try {
+        addOfflineSolve(userID, {
+          event: solve.event,
+          sessionID: "main",
+          sessionName: null,
+          rawTimeMs: solve.rawTimeMs ?? solve.time,
+          penalty: solve.penalty ?? null,
+          scramble: solve.scramble ?? "",
+          note: solve.note ?? "",
+          createdAt: solve.createdAt,
+          tags: solve.tags ?? {},
+        });
+      } catch (err) {
+        console.error("Failed to move a signed-out solve to the offline queue:", err);
+        return;
+      }
+    }
+    writeGuestSolves([]);
+    setSessions((prev) =>
+      Object.fromEntries(
+        Object.entries(prev || {}).map(([event, solves]) => [
+          event,
+          Array.isArray(solves) ? solves.filter((solve) => !isGuestSolve(solve)) : solves,
+        ])
+      )
+    );
+    setGuestSolvesToReview(true);
+  }, [isSignedIn, user?.UserID]);
+
+  // The account's private email and whether it's confirmed (from /auth/me,
+  // never from the profile, which other users can read).
+  const [accountEmail, setAccountEmail] = useState({ loaded: false, email: null, emailVerified: false });
+  const [settingsInitialSection, setSettingsInitialSection] = useState("");
+  useEffect(() => {
+    const userID = String(user?.UserID || "").trim();
+    if (!isSignedIn || !userID) {
+      setAccountEmail({ loaded: false, email: null, emailVerified: false });
+      return undefined;
+    }
+    let cancelled = false;
+    authFetchMe()
+      .then((me) => {
+        if (cancelled || !me) return;
+        setAccountEmail({ loaded: true, email: me.email || null, emailVerified: !!me.emailVerified });
+      })
+      .catch((err) => console.warn("Could not load account email:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn, user?.UserID]);
+
+  const handleAccountEmailChanged = useCallback((next) => {
+    setAccountEmail((prev) => ({ ...prev, loaded: true, ...next }));
+  }, []);
+
+  // Open the review popup once nothing else is in the way (a new account sees
+  // profile setup and the tutorial first).
+  useEffect(() => {
+    if (!guestSolvesToReview || !isSignedIn) return;
+    if (showPostSignUpProfileSetup || showTutorialModal) return;
+    setGuestSolvesToReview(false);
+    setShowOfflineSolvesModal(true);
+  }, [guestSolvesToReview, isSignedIn, showPostSignUpProfileSetup, showTutorialModal]);
   const [manualSolveTime, setManualSolveTime] = useState("");
   const [manualSolveScramble, setManualSolveScramble] = useState("");
   const [manualSolveError, setManualSolveError] = useState("");
@@ -3800,11 +3940,11 @@ function App() {
     }
   };
 
-  const handleSignUp = async (username, password) => {
+  const handleSignUp = async (username, password, { acceptTerms = false, email = "" } = {}) => {
     try {
       let signup;
       try {
-        signup = await authSignUp(username, password);
+        signup = await authSignUp(username, password, { acceptTerms, email });
       } catch (error) {
         alert(error?.message || "Could not create the account.");
         return;
@@ -3845,7 +3985,11 @@ function App() {
         await Promise.all(createSessionPromises);
       });
 
-      alert("User created successfully!");
+      alert(
+        signup?.email
+          ? `Account created! We sent a confirmation link to ${signup.email}.`
+          : "Account created!"
+      );
 
       const profile = await getUser(username);
       const userID = profile?.PK?.split("#")[1] || username;
@@ -5563,19 +5707,6 @@ function App() {
     }
   };
 
-  const handleUpdateComments = async (timestamp, comments) => {
-    if (!user) return;
-    try {
-      await runDb("Updating comments", () =>
-        updatePostComments(user.UserID, timestamp, comments)
-      );
-      const fresh = await getPosts(user.UserID);
-      setUser((prev) => ({ ...prev, Posts: fresh }));
-    } catch (err) {
-      console.error("Error updating comments:", err);
-    }
-  };
-
   const leaveSharedRun = useCallback(() => {
     hostedRoomPromptDismissRef.current = "";
     restorePreviousSessionAfterShared();
@@ -5660,7 +5791,7 @@ function App() {
     setUser(null);
     setSessionsList([]);
     setCustomEvents([]);
-    setSessions(INITIAL_SESSIONS);
+    setSessions(sessionsWithGuestSolves());
     setSharedStatsUser(null);
     setSharedStatsSessions({});
     setSharedStatsSessionsList([]);
@@ -6119,7 +6250,7 @@ function App() {
     async (updates = {}) => {
       // Tag bindings work on the home timer and in player-bar mode (the bar's timer
       // feeds the same current session).
-      const timerSurfaceActive = isHomePage || showPlayerBar;
+      const timerSurfaceActive = isHomePage || playerBarVisible;
       if (
         !timerSurfaceActive ||
         (sharedSession && !isHostedSharedSession(sharedSession)) ||
@@ -6221,7 +6352,7 @@ function App() {
       schedulePostSolveTagSave,
       settings?.timerInput,
       sharedSession,
-      showPlayerBar,
+      playerBarVisible,
       tagScopeEventKey,
     ]
   );
@@ -7443,6 +7574,15 @@ function App() {
             setShowOfflineSolvesModal(true);
           }}
         />
+        {isSignedIn && !showPostSignUpProfileSetup && !showTutorialModal ? (
+          <EmailBanner
+            accountEmail={accountEmail}
+            onAddEmail={() => {
+              setSettingsInitialSection("account");
+              setShowSettingsPopup(true);
+            }}
+          />
+        ) : null}
         {location.pathname === "/stats" &&
         isViewingSharedStats &&
         isSignedIn &&
@@ -7465,7 +7605,7 @@ function App() {
         ) : null}
         <div
           className={`navAndPage ${
-            isHomePage || !showPlayerBar ? "fullHeight" : "reducedHeight"
+            isHomePage || !playerBarVisible ? "fullHeight" : "reducedHeight"
           }`}
         >
           <Navigation
@@ -8066,7 +8206,6 @@ function App() {
                     setUser={setUser}
                     deletePost={deletePost}
                     showPlayerBar={showPlayerBar}
-                    updateComments={handleUpdateComments}
                     sessions={sessions}
                     onJoinLiveRoom={joinLiveRoom}
                     liveRoomBusy={liveRoomBusy}
@@ -8087,7 +8226,6 @@ function App() {
                     setUser={setUser}
                     deletePost={deletePost}
                     showPlayerBar={showPlayerBar}
-                    updateComments={handleUpdateComments}
                     sessions={sessions}
                     onJoinLiveRoom={joinLiveRoom}
                     liveRoomBusy={liveRoomBusy}
@@ -8231,7 +8369,6 @@ function App() {
                     user={user}
                     addPost={addPost}
                     deletePost={deletePost}
-                    updateComments={handleUpdateComments}
                     beginSharedSession={beginSharedSession}
                     updateSharedSession={setSharedSession}
                     mergeSharedSession={mergeSharedSession}
@@ -8245,11 +8382,37 @@ function App() {
                 )
               }
             />
+
+            <Route path="/privacy" element={<PrivacyPage />} />
+            <Route path="/terms" element={<TermsPage />} />
+            <Route
+              path="/verify-email"
+              element={
+                <VerifyEmailPage
+                  onVerified={(res) => {
+                    if (isSignedIn) {
+                      handleAccountEmailChanged({ email: res?.email || null, emailVerified: true });
+                    }
+                  }}
+                />
+              }
+            />
+            <Route
+              path="/reset-password"
+              element={
+                <ResetPasswordPage
+                  onRequestSignIn={() => {
+                    navigate("/");
+                    if (!isSignedIn) handleShowSignInPopup();
+                  }}
+                />
+              }
+            />
           </Routes>
         </div>
       </div>
 
-      {!isHomePage && showPlayerBar && (
+      {!isHomePage && playerBarVisible && (
         <PlayerBar
           isSignedIn={isSignedIn}
           sessions={sessions}
@@ -8320,15 +8483,15 @@ function App() {
           onSelectSessionObj={(sessionObj) => {
             setActiveSessionObj(sessionObj);
           }}
-          onHide={() => setShowPlayerBar(false)}
+          onHide={() => setPlayerBarVisible(false)}
         />
       )}
 
-      {!isHomePage && !showPlayerBar && (
+      {!isHomePage && !playerBarVisible && (
         <div className="toggle-bar" style={{ bottom: "12px" }}>
           <button
             className="toggle-button"
-            onClick={() => setShowPlayerBar(true)}
+            onClick={() => setPlayerBarVisible(true)}
             aria-label="Show player bar"
             title="Show player bar"
           >
@@ -8365,7 +8528,13 @@ function App() {
       {showSettingsPopup && (
         <Settings
           userID={user?.UserID}
-          onClose={() => setShowSettingsPopup(false)}
+          accountEmail={accountEmail}
+          onAccountEmailChanged={handleAccountEmailChanged}
+          initialSection={settingsInitialSection}
+          onClose={() => {
+            setShowSettingsPopup(false);
+            setSettingsInitialSection("");
+          }}
           onSignOut={handleSignOut}
           statsContext={statsSettingsContext}
           onStatsRecompute={() => {

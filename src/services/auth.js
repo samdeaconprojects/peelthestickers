@@ -42,14 +42,15 @@ export function handleAuthExpired() {
   }
 }
 
-export async function signUp(username, password) {
-  const data = await apiPost("/api/auth/signup", { username, password });
+export async function signUp(username, password, { email = "", acceptTerms = false } = {}) {
+  const data = await apiPost("/api/auth/signup", { username, email, password, acceptTerms });
   if (data?.token) setAuthToken(data.token);
   return data;
 }
 
-export async function signIn(username, password) {
-  const data = await apiPost("/api/auth/signin", { username, password });
+// `identifier` is a username or an email address.
+export async function signIn(identifier, password) {
+  const data = await apiPost("/api/auth/signin", { username: identifier, password });
   if (data?.token) setAuthToken(data.token);
   return data;
 }
@@ -63,4 +64,26 @@ export async function changePassword(currentPassword, newPassword) {
   const data = await apiPost("/api/auth/password", { currentPassword, newPassword });
   if (data?.token) setAuthToken(data.token);
   return data;
+}
+
+// ---- Account email -------------------------------------------------------
+
+export function verifyEmail(token) {
+  return apiPost("/api/auth/verify-email", { token });
+}
+
+export function resendVerificationEmail() {
+  return apiPost("/api/auth/resend-verification", {});
+}
+
+export function requestPasswordReset(identifier) {
+  return apiPost("/api/auth/forgot-password", { identifier });
+}
+
+export function resetPassword(token, newPassword) {
+  return apiPost("/api/auth/reset-password", { token, newPassword });
+}
+
+export function changeAccountEmail(email, currentPassword) {
+  return apiPost("/api/auth/email", { email, currentPassword });
 }

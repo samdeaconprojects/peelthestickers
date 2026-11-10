@@ -1,0 +1,4 @@
+# Copy to deploy/deploy.conf (gitignored) and fill in.
+PTS_HOST=ubuntu@YOUR_STATIC_IP
+PTS_SSH_KEY=~/.ssh/pts-lightsail.pem
+PTS_DOMAIN=ptstimer.com

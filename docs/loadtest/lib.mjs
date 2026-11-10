@@ -69,7 +69,7 @@ export async function signupMany(prefix, n) {
   const users = await Promise.all(
     Array.from({ length: n }, async (_, i) => {
       const userID = `${prefix}${String(i).padStart(2, "0")}`;
-      let r = await call(null, "POST", "/api/auth/signup", { username: userID, password: PW });
+      let r = await call(null, "POST", "/api/auth/signup", { username: userID, email: `${userID}@loadtest.invalid`, password: PW, acceptTerms: true });
       if (r.status === 409) r = await call(null, "POST", "/api/auth/signin", { username: userID, password: PW });
       if (!r.json?.token) throw new Error(`signup failed ${userID}: ${JSON.stringify(r.json)}`);
       await call(r.json.token, "POST", "/api/user", { userID, name: userID, username: userID, profileEvent: "333" });
