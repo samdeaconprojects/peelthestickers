@@ -23,7 +23,10 @@
       "Sid": "SendAccountEmailsFromNoreplyOnly",
       "Effect": "Allow",
       "Action": "ses:SendEmail",
-      "Resource": "arn:aws:ses:us-east-1:752948842090:identity/*",
+      "Resource": [
+        "arn:aws:ses:us-east-1:752948842090:identity/*",
+        "arn:aws:ses:us-east-1:752948842090:configuration-set/*"
+      ],
       "Condition": {
         "StringEquals": {
           "ses:FromAddress": "noreply@peelthestickers.com"
