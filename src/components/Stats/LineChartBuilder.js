@@ -115,6 +115,7 @@ const LineChartBuilder = ({
   precision,
   onDotClick,
   selectedIndices = new Set(),
+  selectionActive = false,
   dotRadius = 5,
   selectedDotRadius = 8,
   yMin = null,
@@ -514,6 +515,14 @@ const LineChartBuilder = ({
               key={index}
               className="lineChartDot"
               data-interactive="solve-point"
+              // Keeps the bulk bar's click-outside handler from wiping the
+              // selection before this dot's click can extend it.
+              data-bulk-select-item={element.selectionIndex != null ? "true" : undefined}
+              onMouseDown={(event) => {
+                if (event.shiftKey || event.ctrlKey || event.metaKey || selectionActive) {
+                  event.preventDefault();
+                }
+              }}
               cx={x}
               cy={y}
               r={isHovered ? baseRadius + 2.5 : baseRadius}
@@ -722,6 +731,7 @@ LineChartBuilder.propTypes = {
   precision: PropTypes.number,
   onDotClick: PropTypes.func.isRequired,
   selectedIndices: PropTypes.object,
+  selectionActive: PropTypes.bool,
   dotRadius: PropTypes.number,
   selectedDotRadius: PropTypes.number,
   yMin: PropTypes.number,

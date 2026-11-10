@@ -4,6 +4,9 @@ import LineChart from "../Stats/LineChart";
 import PercentBar from "../Stats/PercentBar";
 import BarChart from "../Stats/BarChart";
 import TimeTable from "../Stats/TimeTable";
+import { useSettings } from "../../contexts/SettingsContext";
+import { getProfileChartStyle } from "../../utils/profileChartStyle";
+import { getStatsContainerVars } from "../../utils/statsContainerVars";
 
 function noop() {}
 
@@ -133,9 +136,15 @@ function StatSharePost({ note = "", statShare = null, shareColor = "" }) {
   const trimmedNote = String(note || "").trim();
   const cardKey = statShare?.render?.cardKey || statShare?.cardKey || statShare?.kind || "summary";
   const showHeader = !String(cardKey).startsWith("summary");
+  const settings = useSettings()?.settings;
+  // Same card fill/border as the Stats page, tinted with the post owner's color.
+  const containerVars = getStatsContainerVars(
+    settings,
+    getProfileChartStyle(shareColor ? { Color: shareColor } : null).primary
+  );
 
   return (
-    <div className="statSharePostShell">
+    <div className="statSharePostShell" style={containerVars}>
       {trimmedNote ? <div className="postCaption">{trimmedNote}</div> : null}
       {showHeader && (statShare?.title || statShare?.contextLabel || statShare?.highlightValue) ? (
         <div className="statSharePostHeader">

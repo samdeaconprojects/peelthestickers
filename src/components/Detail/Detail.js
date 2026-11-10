@@ -7,6 +7,13 @@ import { currentEventToString } from "../scrambleUtils";
 import { useDbStatus } from "../../contexts/DbStatusContext";
 import { updateSolve } from "../../services/updateSolve";
 import TagBar from "../TagBar/TagBar";
+import MoveSolvesDialog from "../SolveBulk/MoveSolvesDialog";
+import {
+  isMovableSolve,
+  isOwnSolve,
+  moveSolvesWithLocalState,
+  relabel,
+} from "../../services/moveSolvesWithLocalState";
 import {
   getVisibleSharedTagFields,
   normalizeAlgorithmTagValue,
@@ -263,6 +270,12 @@ function Detail({
   );
   const [actionBusy, setActionBusy] = useState("");
   const [actionMessage, setActionMessage] = useState("");
+  // Move: `moveScope` is null (closed), "one" (single solve), a list index, or "all".
+  const [moveScope, setMoveScope] = useState(null);
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveError, setMoveError] = useState("");
+  const [moveUndo, setMoveUndo] = useState(null);
+  const [, forceRender] = useState(0);
   const tagsStateRef = useRef(tagsState);
 
   useEffect(() => {
@@ -637,6 +650,85 @@ function Detail({
     }
   };
 
+  const getMoveTargets = (scope) => {
+    if (scope === "one") return [solve].filter(isMovableSolve);
+    if (scope === "all") return (isArray ? solve : []).filter(isMovableSolve);
+    if (typeof scope === "number" && isArray) return [solve[scope]].filter(isMovableSolve);
+    return [];
+  };
+
+  const canMove = (items) =>
+    !!userID &&
+    typeof setSessions === "function" &&
+    items.length > 0 &&
+    items.every((s) => isOwnSolve(s, userID));
+
+  const openMove = (scope) => {
+    setMoveError("");
+    setMoveScope(scope);
+  };
+
+  const handleMoveConfirm = async ({ event: toEvent, sessionID: toSessionID, sessionName }) => {
+    const targets = getMoveTargets(moveScope);
+    if (!targets.length) {
+      setMoveScope(null);
+      return;
+    }
+    setMoveBusy(true);
+    setMoveError("");
+    try {
+      // Save pending note/tag edits first so they land on the solve before it moves.
+      await flushPendingAutosaves();
+      const originals = targets.map((s) => ({ ...s }));
+      const { moved, undo } = await moveSolvesWithLocalState({
+        userID,
+        solves: targets,
+        toEvent,
+        toSessionID,
+        toSessionName: sessionName,
+        setSessions,
+      });
+      if (!isMountedRef.current) return;
+      targets.forEach((s) => {
+        delete s.fullIndex;
+        delete s.sessionName;
+        delete s.SessionName;
+        Object.assign(s, relabel(s, toEvent, toSessionID, sessionName));
+      });
+      setMoveScope(null);
+      const label = `${currentEventToString(toEvent) || toEvent} · ${sessionName || toSessionID}`;
+      setActionMessage(
+        moved ? `Moved ${moved === 1 ? "solve" : `${moved} solves`} to ${label}.` : "Already there."
+      );
+      setMoveUndo(
+        moved
+          ? () => async () => {
+              setMoveUndo(null);
+              setActionMessage("Undoing move…");
+              try {
+                await undo();
+                targets.forEach((s, i) => {
+                  delete s.sessionName;
+                  Object.assign(s, originals[i]);
+                });
+                if (isMountedRef.current) setActionMessage("Move undone.");
+              } catch (err) {
+                console.error("Undo move failed:", err);
+                if (isMountedRef.current) setActionMessage("Couldn't undo the move.");
+              } finally {
+                if (isMountedRef.current) forceRender((n) => n + 1);
+              }
+            }
+          : null
+      );
+    } catch (err) {
+      console.error("Move solve failed:", err);
+      if (isMountedRef.current) setMoveError(err?.message || "Move failed. Nothing was changed.");
+    } finally {
+      if (isMountedRef.current) setMoveBusy(false);
+    }
+  };
+
   const handleShare = (index) => {
     const item = isArray ? solve[index] : solve;
     if (typeof addPost !== "function") return;
@@ -820,7 +912,25 @@ function Detail({
             )}
 
             <div className="detailPrimaryActions">
-              {actionMessage ? <div className="detailActionMessage">{actionMessage}</div> : null}
+              {actionMessage ? (
+                <div className="detailActionMessage">
+                  {actionMessage}
+                  {moveUndo ? (
+                    <button type="button" className="detailUndoButton" onClick={moveUndo}>
+                      Undo
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              {!readOnly && canMove(getMoveTargets(isArray ? index : "one")) ? (
+                <button
+                  className="share-button"
+                  onClick={() => openMove(isArray ? index : "one")}
+                  disabled={moveBusy}
+                >
+                  Move
+                </button>
+              ) : null}
               <button className="share-button" onClick={() => handleShare(index)}>
                 Share
               </button>
@@ -858,6 +968,18 @@ function Detail({
     </div>
   ) : (
     <div className="detailFlexCol detailScrollList">
+      {showActions && canMove(getMoveTargets("all")) && getMoveTargets("all").length > 1 ? (
+        <div className="detailListToolbar">
+          <button
+            type="button"
+            className="share-button"
+            onClick={() => openMove("all")}
+            disabled={moveBusy}
+          >
+            Move all {getMoveTargets("all").length}
+          </button>
+        </div>
+      ) : null}
       {solve.map((s, i) => (
         <div key={i} className="detailSolveCard">
           {renderSolveBody(s, i)}
@@ -866,8 +988,30 @@ function Detail({
     </div>
   );
 
+  const moveTargets = moveScope == null ? [] : getMoveTargets(moveScope);
+  const moveDialog = (
+    <MoveSolvesDialog
+      isOpen={moveScope != null}
+      count={moveTargets.length || 1}
+      sessionsList={sessionsList}
+      initialEvent={getSolveEvent(moveTargets[0]) || "333"}
+      initialSession={getSolveSessionID(moveTargets[0]) || "main"}
+      busy={moveBusy}
+      error={moveError}
+      onCancel={() => {
+        if (!moveBusy) setMoveScope(null);
+      }}
+      onConfirm={handleMoveConfirm}
+    />
+  );
+
   if (embedded) {
-    return <div className="detailPopupContent detailPopupContent--embedded">{detailBody}</div>;
+    return (
+      <div className="detailPopupContent detailPopupContent--embedded">
+        {detailBody}
+        {moveDialog}
+      </div>
+    );
   }
 
   const modalContent = (
@@ -882,6 +1026,7 @@ function Detail({
     >
       <div className="detailPopupContent" onClick={(event) => event.stopPropagation()}>
         {detailBody}
+        {moveDialog}
       </div>
     </div>
   );

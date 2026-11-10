@@ -5,6 +5,21 @@ require("dotenv").config();
 
 const app = express();
 const JSON_LIMIT = process.env.PTS_JSON_LIMIT || "10mb";
+// gzip JSON responses (solve pages, stats, room state compress ~5-10x), which
+// is most of the egress bill. Skips the SSE stream, which must flush each
+// event as written. Set PTS_COMPRESSION=false when a proxy/CDN in front
+// already compresses.
+if (String(process.env.PTS_COMPRESSION || "true").toLowerCase() !== "false") {
+  const compression = require("compression");
+  app.use(
+    compression({
+      threshold: 1024,
+      filter: (req, res) =>
+        !String(req.path || "").startsWith("/api/notifications/stream") &&
+        compression.filter(req, res),
+    })
+  );
+}
 app.use(express.json({ limit: JSON_LIMIT }));
 
 const port = process.env.PORT || 5050;
@@ -50,7 +65,8 @@ const {
   buildStatsFromSolves,
   buildTopWindowCandidatesFromSolves,
   getAllSolvesBySession,
-  getAllSolvesByEvent,
+  iterateQueryItems,
+  iterateSolvesByDay,
   getLastNSolvesBySession,
   getLastNSolvesByEvent,
   getLastNSolvesByTag,
@@ -86,6 +102,36 @@ const {
   buildViewerAccess,
   sanitizeProfileForViewer,
 } = require("./lib/visibility");
+const { buildScopedSolvesQuery, buildResumeKey } = require("./lib/scopedSolvesQuery");
+const {
+  getSharedMessageActorID,
+  isConditionalCheckFailed,
+  SHARED_RUN_FORMAT,
+  sharedRunKey,
+  sharedCellKey,
+  sharedRoundKey,
+  roundTimeAttribute,
+  roundTimesFromItem,
+  createEmptyStatsDelta,
+  buildRoundTransitionDelta,
+  isStatsDeltaEmpty,
+  isInvalidDocumentPath,
+  retryOnThrottle,
+  buildStatsDeltaUpdates,
+  buildStatsEnsureSteps,
+} = require("./lib/sharedMessages");
+const {
+  DEFAULT_TTL_MS,
+  createTtlCache,
+  toLeaderboardRow,
+  sortLeaderboardRows,
+  buildLeaderboardView,
+  spectatorPollMs,
+} = require("./lib/liveRoomCache");
+const { MAX_GROUP_MEMBERS, MAX_ROOM_MEMBERS, hasPlaceFor } = require("./lib/memberCaps");
+const { createProfileCache, profileIDsFromWrite } = require("./lib/profileCache");
+const { buildFeed, toProfileCard } = require("./lib/feed");
+const { createRateLimiter, rateLimitMiddleware } = require("./lib/rateLimit");
 const ALLOW_LEGACY_CLAIM =
   String(process.env.PTS_ALLOW_LEGACY_CLAIM || "false").toLowerCase() === "true";
 
@@ -125,6 +171,18 @@ function isUpstreamNetworkError(err) {
   return false;
 }
 
+// 503 + upstreamUnreachable when the database couldn't be reached (the client
+// treats that as "offline", not a rejection); plain 500 otherwise.
+function sendServerError(res, err, message = "Server error") {
+  if (isUpstreamNetworkError(err)) {
+    return res.status(503).json({
+      error: "Can't reach the database right now. Check your connection and try again.",
+      upstreamUnreachable: true,
+    });
+  }
+  return res.status(500).json({ error: message });
+}
+
 const REGION = process.env.AWS_REGION || "us-east-1";
 const TABLE = process.env.PTS_TABLE || "PTSProd";
 const USE_PK_SK = String(process.env.PTS_USE_PK_SK || "true").toLowerCase() === "true";
@@ -144,10 +202,34 @@ const PAID_IMPORT_SOLVE_LIMIT = Math.max(
   Number(process.env.PTS_PAID_IMPORT_SOLVE_LIMIT || 2000000)
 );
 
-const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }), {
-  marshallOptions: { removeUndefinedValues: true },
-});
+// Without these, a request to an unreachable DynamoDB endpoint waits on the
+// socket indefinitely, so routes (sign-in included) hang instead of failing.
+// connectionTimeout covers the TCP/TLS handshake; requestTimeout is how long
+// an open socket may sit idle waiting for AWS to respond.
+const DDB_CONNECTION_TIMEOUT_MS = Math.max(
+  0,
+  Number(process.env.PTS_DDB_CONNECTION_TIMEOUT_MS || 3000)
+);
+const DDB_REQUEST_TIMEOUT_MS = Math.max(
+  0,
+  Number(process.env.PTS_DDB_REQUEST_TIMEOUT_MS || 15000)
+);
+const ddb = DynamoDBDocumentClient.from(
+  new DynamoDBClient({
+    region: REGION,
+    requestHandler: {
+      connectionTimeout: DDB_CONNECTION_TIMEOUT_MS,
+      requestTimeout: DDB_REQUEST_TIMEOUT_MS,
+    },
+  }),
+  {
+    marshallOptions: { removeUndefinedValues: true },
+  }
+);
 const dbMetricsStorage = new AsyncLocalStorage();
+const profileCache = createProfileCache({
+  ttlMs: Math.max(0, Number(process.env.PTS_PROFILE_CACHE_MS || 5000)),
+});
 const notificationClientsByUser = new Map();
 const SSE_KEEPALIVE_MS = 25000;
 
@@ -534,6 +616,22 @@ ddb.send = async function instrumentedSend(command, ...args) {
   const startedAt = Date.now();
   const commandName =
     String(command?.constructor?.name || "UnknownCommand").replace(/Command$/, "") || "Unknown";
+  // Drop cached profiles this write touches, before and after it lands, so a
+  // read that starts mid-write can't cache the old value.
+  const touchedProfileIDs = profileIDsFromWrite(commandName, command?.input);
+  touchedProfileIDs.forEach((id) => profileCache.invalidate(id));
+  if (touchedProfileIDs.length) {
+    const invalidateAfter = () => touchedProfileIDs.forEach((id) => profileCache.invalidate(id));
+    try {
+      return await instrumentedSendInner(command, commandName, startedAt, args);
+    } finally {
+      invalidateAfter();
+    }
+  }
+  return instrumentedSendInner(command, commandName, startedAt, args);
+};
+
+async function instrumentedSendInner(command, commandName, startedAt, args) {
   if (command?.input && command.input.ReturnConsumedCapacity == null) {
     command.input.ReturnConsumedCapacity = "INDEXES";
   }
@@ -580,7 +678,7 @@ ddb.send = async function instrumentedSend(command, ...args) {
     }
     throw error;
   }
-};
+}
 const BEST_CANDIDATES_K = Math.max(
   10,
   Math.min(500, Number(process.env.PTS_BEST_CANDIDATES_K || 100))
@@ -1881,38 +1979,52 @@ async function recomputeAllDayBucketsForEvent(userID, event) {
   if (!ev) return { event: null, daysAffected: [] };
 
   const timeZone = await getUserDayBucketTimeZone(userID);
-  const solves = await getAllSolvesByEvent(ddb, TABLE, userID, ev);
-  const groupedAll = new Map();
-  const groupedMain = new Map();
-
-  for (const solve of solves) {
-    const dayKey = getDayKey(solve?.CreatedAt, { timeZone });
-    if (!dayKey) continue;
-
-    const bucket = groupedAll.get(dayKey) || [];
-    bucket.push(solve);
-    groupedAll.set(dayKey, bucket);
-
-    if (normalizeSessionID(solve?.SessionID) === "main") {
-      const mainBucket = groupedMain.get(dayKey) || [];
-      mainBucket.push(solve);
-      groupedMain.set(dayKey, mainBucket);
-    }
-  }
-
   const [existingAll, existingMain] = await Promise.all([
     queryDayBucketItemsByPrefix(userID, `DAYBUCKET#EVENT#${ev}#`),
     queryDayBucketItemsByPrefix(userID, `DAYBUCKET#EVENT#${ev}#MAIN#`),
   ]);
 
   const allDaysAffected = new Set();
+  const daysWithAll = new Set();
+  const daysWithMain = new Set();
+  const repeatedDays = new Set();
+
+  // One day at a time: 500k solves held at once is more than the API process has to give.
+  const days = iterateSolvesByDay(
+    iterateQueryItems(ddb, TABLE, {
+      indexName: "GSI2",
+      keyConditionExpression: "GSI2PK = :pk",
+      expressionAttributeValues: { ":pk": `EVENT#${userID}#${ev}` },
+    }),
+    (solve) => getDayKey(solve?.CreatedAt, { timeZone })
+  );
+
+  for await (const { dayKey, solves: daySolves, repeat } of days) {
+    allDaysAffected.add(dayKey);
+    daysWithAll.add(dayKey);
+    if (repeat) {
+      repeatedDays.add(dayKey);
+      continue;
+    }
+    const mainSolves = daySolves.filter((solve) => normalizeSessionID(solve?.SessionID) === "main");
+    if (mainSolves.length) daysWithMain.add(dayKey);
+
+    await Promise.all([
+      writeDayBucketItem(buildDayBucketItem({ userID, dayKey, event: ev, timeZone, solves: daySolves })),
+      mainSolves.length
+        ? writeDayBucketItem(
+            buildDayBucketItem({ userID, dayKey, event: ev, mainOnly: true, timeZone, solves: mainSolves })
+          )
+        : null,
+    ]);
+  }
+
   const writes = [];
 
-  for (const [dayKey, daySolves] of groupedAll) {
-    allDaysAffected.add(dayKey);
-    writes.push(() =>
-      writeDayBucketItem(buildDayBucketItem({ userID, dayKey, event: ev, timeZone, solves: daySolves }))
-    );
+  for (const dayKey of repeatedDays) {
+    daysWithMain.add(dayKey);
+    writes.push(() => recomputeEventDayBucket(userID, ev, dayKey));
+    writes.push(() => recomputeEventDayBucket(userID, ev, dayKey, { mainOnly: true }));
   }
 
   for (const item of existingAll) {
@@ -1920,23 +2032,14 @@ async function recomputeAllDayBucketsForEvent(userID, event) {
     const dayKey = String(item?.BucketDay || "");
     if (!dayKey) continue;
     allDaysAffected.add(dayKey);
-    if (!groupedAll.has(dayKey)) writes.push(() => deleteDayBucketItem(userID, dayKey, ev));
-  }
-
-  for (const [dayKey, daySolves] of groupedMain) {
-    allDaysAffected.add(dayKey);
-    writes.push(() =>
-      writeDayBucketItem(
-        buildDayBucketItem({ userID, dayKey, event: ev, mainOnly: true, timeZone, solves: daySolves })
-      )
-    );
+    if (!daysWithAll.has(dayKey)) writes.push(() => deleteDayBucketItem(userID, dayKey, ev));
   }
 
   for (const item of existingMain) {
     const dayKey = String(item?.BucketDay || "");
     if (!dayKey) continue;
     allDaysAffected.add(dayKey);
-    if (!groupedMain.has(dayKey)) writes.push(() => deleteDayBucketItem(userID, dayKey, ev, true));
+    if (!daysWithMain.has(dayKey)) writes.push(() => deleteDayBucketItem(userID, dayKey, ev, true));
   }
 
   await mapWithConcurrency(writes, DAY_BUCKET_RECOMPUTE_CONCURRENCY, (write) => write());
@@ -2588,6 +2691,7 @@ function solveContribution(solve) {
     dnf: penalty === "DNF" ? 1 : 0,
     plus2: penalty === "+2" ? 1 : 0,
     sum: Number.isFinite(finalMs) ? finalMs : 0,
+    sumSq: Number.isFinite(finalMs) ? finalMs * finalMs : 0,
   };
 }
 
@@ -2599,6 +2703,11 @@ function applyCoreDelta(prevStats, removeSolve = null, addSolve = null) {
     Plus2Count: Number(prevStats.Plus2Count || 0),
     SumFinalTimeMs: Number(prevStats.SumFinalTimeMs || 0),
   };
+  // Std dev is derived from this; legacy rows without it keep it unset until a
+  // rebuild rather than starting a partial sum here.
+  const prevSumSq = Number(prevStats.SumFinalTimeSqMs);
+  const trackSumSq = prevStats.SumFinalTimeSqMs != null && Number.isFinite(prevSumSq);
+  if (trackSumSq) next.SumFinalTimeSqMs = prevSumSq;
 
   const remove = solveContribution(removeSolve);
   if (remove) {
@@ -2607,6 +2716,7 @@ function applyCoreDelta(prevStats, removeSolve = null, addSolve = null) {
     next.DNFCount -= remove.dnf;
     next.Plus2Count -= remove.plus2;
     next.SumFinalTimeMs -= remove.sum;
+    if (trackSumSq) next.SumFinalTimeSqMs -= remove.sumSq;
   }
 
   const add = solveContribution(addSolve);
@@ -2616,6 +2726,7 @@ function applyCoreDelta(prevStats, removeSolve = null, addSolve = null) {
     next.DNFCount += add.dnf;
     next.Plus2Count += add.plus2;
     next.SumFinalTimeMs += add.sum;
+    if (trackSumSq) next.SumFinalTimeSqMs += add.sumSq;
   }
 
   next.SolveCountTotal = Math.max(0, next.SolveCountTotal);
@@ -2623,6 +2734,7 @@ function applyCoreDelta(prevStats, removeSolve = null, addSolve = null) {
   next.DNFCount = Math.max(0, next.DNFCount);
   next.Plus2Count = Math.max(0, next.Plus2Count);
   next.SumFinalTimeMs = Math.max(0, next.SumFinalTimeMs);
+  if (trackSumSq) next.SumFinalTimeSqMs = Math.max(0, next.SumFinalTimeSqMs);
   next.MeanMs =
     next.SolveCountIncluded > 0
       ? Math.round(next.SumFinalTimeMs / next.SolveCountIncluded)
@@ -3626,6 +3738,56 @@ async function attemptIncrementalStatsForScope({
 // have been a recompute that already counted this very solve, and re-applying
 // the delta on top of that row would count it twice. A rebuild from the solves
 // themselves cannot be wrong either way.
+// One background rebuild per stats scope at a time. A request that lands while
+// one is running asks for another pass afterwards instead of starting a second
+// full scan, so a burst of moves on a 50k-solve event costs at most two scans.
+const backgroundStatsRebuilds = new Map();
+// When each scope's last background rebuild finished; see
+// applyIncrementalStatsForScope for why a just-finished one still matters.
+const backgroundStatsRebuildFinishedAt = new Map();
+const BACKGROUND_STATS_REBUILD_GRACE_MS = 10000;
+
+function backgroundStatsRebuildKey(userID, ev, sid) {
+  return `${userID}|${ev}|${sid || ""}`;
+}
+
+function queueBackgroundStatsRebuild(userID, event, sessionID = null) {
+  const ev = normalizeEvent(event);
+  const sid = sessionID ? normalizeSessionID(sessionID) : null;
+  if (!userID || !ev) return;
+  const key = backgroundStatsRebuildKey(userID, ev, sid);
+  const running = backgroundStatsRebuilds.get(key);
+  if (running) {
+    running.again = true;
+    return;
+  }
+  const entry = { again: false };
+  backgroundStatsRebuilds.set(key, entry);
+  runInBackground(`statsRebuild:${key}`, async () => {
+    try {
+      do {
+        entry.again = false;
+        await (sid
+          ? recomputeSessionStats(ddb, TABLE, userID, ev, sid)
+          : recomputeEventStats(ddb, TABLE, userID, ev));
+      } while (entry.again);
+    } finally {
+      backgroundStatsRebuilds.delete(key);
+      backgroundStatsRebuildFinishedAt.set(key, Date.now());
+      for (const [k, at] of backgroundStatsRebuildFinishedAt) {
+        if (Date.now() - at > BACKGROUND_STATS_REBUILD_GRACE_MS) backgroundStatsRebuildFinishedAt.delete(k);
+      }
+    }
+  });
+}
+
+function hasRecentBackgroundStatsRebuild(userID, ev, sid) {
+  const key = backgroundStatsRebuildKey(userID, ev, sid);
+  if (backgroundStatsRebuilds.has(key)) return true;
+  const finishedAt = backgroundStatsRebuildFinishedAt.get(key);
+  return Number.isFinite(finishedAt) && Date.now() - finishedAt <= BACKGROUND_STATS_REBUILD_GRACE_MS;
+}
+
 async function applyIncrementalStatsForScope({
   userID,
   event,
@@ -3645,6 +3807,26 @@ async function applyIncrementalStatsForScope({
 
   const ev = normalizeEvent(event);
   const sid = sessionID ? normalizeSessionID(sessionID) : null;
+
+  // The writer we lost to may be a background rebuild (queued by a solve
+  // move). Rebuilding inline here would put that same full scan -- ~25s on a
+  // 50k-solve event -- back on this request. Ask the background job for one
+  // more pass instead (it re-reads every solve, this one included) and answer
+  // with the row as it stands now.
+  if (hasRecentBackgroundStatsRebuild(userID, ev, sid)) {
+    queueBackgroundStatsRebuild(userID, ev, sid);
+    const current = await ddb.send(
+      new GetCommand({
+        TableName: TABLE,
+        Key: {
+          PK: `USER#${userID}`,
+          SK: sid ? `SESSIONSTATS#${ev}#${sid}` : `EVENTSTATS#${ev}`,
+        },
+        ConsistentRead: true,
+      })
+    );
+    return current.Item || null;
+  }
 
   console.warn(
     `applyIncrementalStatsForScope: concurrent write to ${userID} ${ev} ${sid || "(event scope)"}; rebuilding the scope from its solves`
@@ -4233,7 +4415,7 @@ async function finalizeImportJob(userID, jobID) {
   }
 }
 
-async function batchGetItems(keys) {
+async function batchGetItems(keys, { projection = null, names = null } = {}) {
   if (!Array.isArray(keys) || keys.length === 0) return [];
 
   const out = [];
@@ -4251,6 +4433,8 @@ async function batchGetItems(keys) {
           RequestItems: {
             [TABLE]: {
               Keys: requestKeys,
+              ...(projection ? { ProjectionExpression: projection } : {}),
+              ...(names ? { ExpressionAttributeNames: names } : {}),
             },
           },
         })
@@ -4435,14 +4619,9 @@ function buildConversationMetaItem({
     UpdatedAt: ts,
     LastMessageAt: null,
     LastMessagePreview: "",
-    SharedStats: {
-      TotalSolves: 0,
-      TotalWins: 0,
-      TotalSessions: 0,
-      LastSharedAt: null,
-      ByEvent: {},
-      ByUser: {},
-    },
+    // The one copy of the conversation's shared-session stats. Member rows
+    // (USER#/CONVO#) don't carry it; GET /api/conversations reads it from here.
+    SharedStats: createEmptySharedStats(),
   };
 
   if (type === "DM") {
@@ -4499,14 +4678,6 @@ function buildUserConversationItems({
       UpdatedAt: ts,
       LastMessageAt: null,
       LastMessagePreview: "",
-      SharedStats: {
-        TotalSolves: 0,
-        TotalWins: 0,
-        TotalSessions: 0,
-        LastSharedAt: null,
-        ByEvent: {},
-        ByUser: {},
-      },
     };
   });
 }
@@ -4519,18 +4690,6 @@ function createEmptySharedStats() {
     LastSharedAt: null,
     ByEvent: {},
     ByUser: {},
-  };
-}
-
-function normalizeSharedStats(stats) {
-  const safe = stats && typeof stats === "object" ? stats : {};
-  return {
-    TotalSolves: Number(safe.TotalSolves || 0),
-    TotalWins: Number(safe.TotalWins || 0),
-    TotalSessions: Number(safe.TotalSessions || 0),
-    LastSharedAt: safe.LastSharedAt || null,
-    ByEvent: safe.ByEvent && typeof safe.ByEvent === "object" ? safe.ByEvent : {},
-    ByUser: safe.ByUser && typeof safe.ByUser === "object" ? safe.ByUser : {},
   };
 }
 
@@ -4570,7 +4729,7 @@ function parseSharedExtendMessage(text) {
 }
 
 function getSharedRunKey(sharedID) {
-  return `SHAREDRUN#${String(sharedID || "").trim()}`;
+  return sharedRunKey(sharedID);
 }
 
 async function getSharedRun(conversationID, sharedID) {
@@ -4624,13 +4783,8 @@ function buildSharedRunItem({
     CreatorScrambles: creatorScrambles,
     OpponentScrambles: opponentScrambles,
     ParticipantIDs: normalizeMemberIDs(participantIDs),
-    RoundResults: {},
-    Summary: {
-      TotalSolves: 0,
-      TotalWins: 0,
-      ByUser: {},
-      ByEvent: {},
-    },
+    // Results live in their own items (see server/lib/sharedMessages.js).
+    Format: SHARED_RUN_FORMAT,
     CreatedAt: ts,
     UpdatedAt: ts,
   };
@@ -4667,254 +4821,242 @@ function getSharedRoundEvent(runItem, participantID, solveIndex) {
   );
 }
 
-function computeSharedRunSummary(runItem) {
-  const roundResults = runItem?.RoundResults && typeof runItem.RoundResults === "object"
-    ? runItem.RoundResults
-    : {};
-
-  const summary = {
-    TotalSolves: 0,
-    TotalWins: 0,
-    ByUser: {},
-    ByEvent: {},
-  };
-
-  const addSolve = (userID, event) => {
-    const uid = String(userID || "").trim();
-    const ev = normalizeEvent(event || runItem?.CreatorEvent || runItem?.OpponentEvent || "333");
-    if (!uid) return;
-
-    summary.TotalSolves += 1;
-    summary.ByUser[uid] = {
-      Solves: Number(summary.ByUser?.[uid]?.Solves || 0) + 1,
-      Wins: Number(summary.ByUser?.[uid]?.Wins || 0),
-    };
-    summary.ByEvent[ev] = {
-      Solves: Number(summary.ByEvent?.[ev]?.Solves || 0) + 1,
-      Wins: Number(summary.ByEvent?.[ev]?.Wins || 0),
-      ByUser: {
-        ...(summary.ByEvent?.[ev]?.ByUser || {}),
-        [uid]: {
-          Solves: Number(summary.ByEvent?.[ev]?.ByUser?.[uid]?.Solves || 0) + 1,
-          Wins: Number(summary.ByEvent?.[ev]?.ByUser?.[uid]?.Wins || 0),
-        },
-      },
-    };
-  };
-
-  const addWin = (userID, event) => {
-    const uid = String(userID || "").trim();
-    const ev = normalizeEvent(event || runItem?.CreatorEvent || runItem?.OpponentEvent || "333");
-    if (!uid) return;
-
-    summary.TotalWins += 1;
-    summary.ByUser[uid] = {
-      Solves: Number(summary.ByUser?.[uid]?.Solves || 0),
-      Wins: Number(summary.ByUser?.[uid]?.Wins || 0) + 1,
-    };
-    summary.ByEvent[ev] = {
-      Solves: Number(summary.ByEvent?.[ev]?.Solves || 0),
-      Wins: Number(summary.ByEvent?.[ev]?.Wins || 0) + 1,
-      ByUser: {
-        ...(summary.ByEvent?.[ev]?.ByUser || {}),
-        [uid]: {
-          Solves: Number(summary.ByEvent?.[ev]?.ByUser?.[uid]?.Solves || 0),
-          Wins: Number(summary.ByEvent?.[ev]?.ByUser?.[uid]?.Wins || 0) + 1,
-        },
-      },
-    };
-  };
-
-  Object.entries(roundResults).forEach(([solveIndex, row]) => {
-    const entrants = Object.entries(row || {})
-      .map(([participantID, result]) => ({
-        participantID,
-        time: Number(result?.time),
-        event: result?.event || getSharedRoundEvent(runItem, participantID, solveIndex),
-      }))
-      .filter((entry) => entry.participantID && Number.isFinite(entry.time));
-
-    entrants.forEach((entry) => addSolve(entry.participantID, entry.event));
-
-    if (entrants.length < 2) return;
-
-    const best = entrants.reduce((winner, entry) => {
-      if (!winner) return entry;
-      if (entry.time < winner.time) return entry;
-      return winner;
-    }, null);
-
-    const tied = entrants.filter((entry) => entry.time === best?.time);
-    if (best && tied.length === 1) {
-      addWin(best.participantID, best.event);
-    }
-  });
-
-  return summary;
+function sharedRoundEventKey(runItem, participantID, solveIndex) {
+  return normalizeEvent(
+    getSharedRoundEvent(runItem, participantID, solveIndex) ||
+      runItem?.CreatorEvent ||
+      runItem?.OpponentEvent ||
+      "333"
+  );
 }
 
-function buildSharedStatsDelta(previousSummary, nextSummary, eventForSession = null, timestamp = null) {
-  const prev = previousSummary && typeof previousSummary === "object" ? previousSummary : {};
-  const next = nextSummary && typeof nextSummary === "object" ? nextSummary : {};
-  const delta = createEmptySharedStats();
-
-  delta.TotalSolves = Number(next.TotalSolves || 0) - Number(prev.TotalSolves || 0);
-  delta.TotalWins = Number(next.TotalWins || 0) - Number(prev.TotalWins || 0);
-  delta.LastSharedAt = timestamp || null;
-
-  const eventKeys = new Set([
-    ...Object.keys(prev.ByEvent || {}),
-    ...Object.keys(next.ByEvent || {}),
-  ]);
-  eventKeys.forEach((eventKey) => {
-    const prevEvent = prev.ByEvent?.[eventKey] || {};
-    const nextEvent = next.ByEvent?.[eventKey] || {};
-    const eventDelta = {
-      Solves: Number(nextEvent.Solves || 0) - Number(prevEvent.Solves || 0),
-      Wins: Number(nextEvent.Wins || 0) - Number(prevEvent.Wins || 0),
-      Sessions: 0,
-      ByUser: {},
-    };
-    const eventUserKeys = new Set([
-      ...Object.keys(prevEvent.ByUser || {}),
-      ...Object.keys(nextEvent.ByUser || {}),
-    ]);
-    eventUserKeys.forEach((userID) => {
-      const prevUser = prevEvent.ByUser?.[userID] || {};
-      const nextUser = nextEvent.ByUser?.[userID] || {};
-      const userDelta = {
-        Solves: Number(nextUser.Solves || 0) - Number(prevUser.Solves || 0),
-        Wins: Number(nextUser.Wins || 0) - Number(prevUser.Wins || 0),
-        Sessions: 0,
-      };
-      if (userDelta.Solves || userDelta.Wins || userDelta.Sessions) {
-        eventDelta.ByUser[userID] = userDelta;
-      }
-    });
-    if (eventDelta.Solves || eventDelta.Wins || eventDelta.Sessions) {
-      delta.ByEvent[eventKey] = eventDelta;
-    }
-  });
-
-  if (eventForSession) {
-    const ev = normalizeEvent(eventForSession);
-    delta.ByEvent[ev] = {
-      Solves: Number(delta.ByEvent?.[ev]?.Solves || 0),
-      Wins: Number(delta.ByEvent?.[ev]?.Wins || 0),
-      Sessions: Number(delta.ByEvent?.[ev]?.Sessions || 0) + 1,
-      ByUser: {
-        ...(delta.ByEvent?.[ev]?.ByUser || {}),
-      },
-    };
-  }
-
-  const userKeys = new Set([
-    ...Object.keys(prev.ByUser || {}),
-    ...Object.keys(next.ByUser || {}),
-  ]);
-  userKeys.forEach((userID) => {
-    const prevUser = prev.ByUser?.[userID] || {};
-    const nextUser = next.ByUser?.[userID] || {};
-    const userDelta = {
-      Solves: Number(nextUser.Solves || 0) - Number(prevUser.Solves || 0),
-      Wins: Number(nextUser.Wins || 0) - Number(prevUser.Wins || 0),
-      Sessions: 0,
-    };
-    if (userDelta.Solves || userDelta.Wins || userDelta.Sessions) {
-      delta.ByUser[userID] = userDelta;
-    }
-  });
-
-  return delta;
+function sharedRunEventKeys(runItem) {
+  return [
+    ...new Set(
+      [
+        runItem?.CreatorEvent,
+        runItem?.OpponentEvent,
+        ...(Array.isArray(runItem?.CreatorEvents) ? runItem.CreatorEvents : []),
+        ...(Array.isArray(runItem?.OpponentEvents) ? runItem.OpponentEvents : []),
+      ]
+        .filter(Boolean)
+        .map((event) => normalizeEvent(event))
+    ),
+  ];
 }
 
-function mergeSharedStats(baseStats, deltaStats) {
-  const base = normalizeSharedStats(baseStats);
-  const delta = deltaStats && typeof deltaStats === "object" ? deltaStats : {};
-  const next = {
-    ...base,
-    TotalSolves: Number(base.TotalSolves || 0) + Number(delta.TotalSolves || 0),
-    TotalWins: Number(base.TotalWins || 0) + Number(delta.TotalWins || 0),
-    TotalSessions: Number(base.TotalSessions || 0) + Number(delta.TotalSessions || 0),
-    LastSharedAt: delta.LastSharedAt || base.LastSharedAt || null,
-    ByEvent: { ...(base.ByEvent || {}) },
-    ByUser: { ...(base.ByUser || {}) },
-  };
-
-  Object.entries(delta.ByEvent || {}).forEach(([eventKey, values]) => {
-    const current = next.ByEvent[eventKey] || {};
-    next.ByEvent[eventKey] = {
-      Solves: Number(current.Solves || 0) + Number(values.Solves || 0),
-      Wins: Number(current.Wins || 0) + Number(values.Wins || 0),
-      Sessions: Number(current.Sessions || 0) + Number(values.Sessions || 0),
-      ByUser: { ...(current.ByUser || {}) },
-    };
-    Object.entries(values.ByUser || {}).forEach(([userID, byUserValues]) => {
-      const currentByUser = next.ByEvent[eventKey].ByUser[userID] || {};
-      next.ByEvent[eventKey].ByUser[userID] = {
-        Solves: Number(currentByUser.Solves || 0) + Number(byUserValues.Solves || 0),
-        Wins: Number(currentByUser.Wins || 0) + Number(byUserValues.Wins || 0),
-        Sessions: Number(currentByUser.Sessions || 0) + Number(byUserValues.Sessions || 0),
-      };
-    });
-  });
-
-  Object.entries(delta.ByUser || {}).forEach(([userID, values]) => {
-    const current = next.ByUser[userID] || {};
-    next.ByUser[userID] = {
-      Solves: Number(current.Solves || 0) + Number(values.Solves || 0),
-      Wins: Number(current.Wins || 0) + Number(values.Wins || 0),
-      Sessions: Number(current.Sessions || 0) + Number(values.Sessions || 0),
-    };
-  });
-
-  return next;
-}
-
+// Adds a stats delta to the conversation's SharedStats on META. Every number
+// is changed with `path = if_not_exists(path, 0) + n`, so writers never need
+// a lock and never overwrite each other. The first time a player or event
+// shows up its maps don't exist yet; DynamoDB then rejects the write as a
+// whole, we create the maps (without touching existing ones) and send it again.
 async function applySharedStatsToConversation({
   conversationID,
-  memberIDs,
   deltaStats,
   timestamp,
+  ensureUserIDs = [],
+  ensureEventKeys = [],
 }) {
-  const convoKey = { PK: `CONVO#${conversationID}`, SK: "META" };
-  const existingMeta = await ddb.send(
-    new GetCommand({ TableName: TABLE, Key: convoKey, ConsistentRead: true })
-  );
-  const nextMetaStats = mergeSharedStats(existingMeta.Item?.SharedStats, deltaStats);
+  if (isStatsDeltaEmpty(deltaStats)) return;
+  const Key = { PK: `CONVO#${conversationID}`, SK: "META" };
+  const userIDs = [
+    ...new Set([
+      ...ensureUserIDs,
+      ...Object.keys(deltaStats?.ByUser || {}),
+      ...Object.values(deltaStats?.ByEvent || {}).flatMap((ev) => Object.keys(ev?.ByUser || {})),
+    ]),
+  ];
+  const eventKeys = [...new Set([...ensureEventKeys, ...Object.keys(deltaStats?.ByEvent || {})])];
+  let ensured = false;
 
-  await ddb.send(
-    new UpdateCommand({
-      TableName: TABLE,
-      Key: convoKey,
-      UpdateExpression: "SET SharedStats = :stats, UpdatedAt = :updated",
-      ExpressionAttributeValues: {
-        ":stats": nextMetaStats,
-        ":updated": String(timestamp || nowIso()),
-      },
-    })
-  );
-
-  await Promise.all(
-    normalizeMemberIDs(memberIDs).map(async (userID) => {
-      const userKey = { PK: `USER#${userID}`, SK: `CONVO#${conversationID}` };
-      const existingUser = await ddb.send(
-        new GetCommand({ TableName: TABLE, Key: userKey, ConsistentRead: true })
-      );
-      const nextUserStats = mergeSharedStats(existingUser.Item?.SharedStats, deltaStats);
-      return ddb.send(
+  const send = (params) =>
+    retryOnThrottle(() =>
+      ddb.send(
         new UpdateCommand({
           TableName: TABLE,
-          Key: userKey,
-          UpdateExpression: "SET SharedStats = :stats, UpdatedAt = :updated",
-          ExpressionAttributeValues: {
-            ":stats": nextUserStats,
-            ":updated": String(timestamp || nowIso()),
-          },
+          Key,
+          ConditionExpression: "attribute_exists(PK)",
+          ...params,
         })
+      )
+    );
+
+  for (const params of buildStatsDeltaUpdates(deltaStats, { timestamp })) {
+    try {
+      await send(params);
+    } catch (err) {
+      if (!isInvalidDocumentPath(err) || ensured) throw err;
+      ensured = true;
+      for (const step of buildStatsEnsureSteps(userIDs, eventKeys)) {
+        for (const ensureParams of step) await send(ensureParams);
+      }
+      await send(params);
+    }
+  }
+}
+
+// Moves a run stored the old way (every result in RoundResults on the run
+// item) to cell + round items. Safe to run more than once and from several
+// requests at once: every write is "create if absent", and those results were
+// already counted in SharedStats, so nothing is added to the stats here.
+async function migrateLegacySharedRun(conversationID, runItem) {
+  if (Number(runItem?.Format) >= SHARED_RUN_FORMAT) return runItem;
+  const sharedID = String(runItem?.SharedID || "").trim() ||
+    String(runItem?.SK || "").slice("SHAREDRUN#".length);
+  const PK = `CONVO#${conversationID}`;
+  const roundResults =
+    runItem?.RoundResults && typeof runItem.RoundResults === "object" ? runItem.RoundResults : {};
+  const ts = nowIso();
+
+  const putIfAbsent = async (Item) => {
+    try {
+      await ddb.send(
+        new PutCommand({ TableName: TABLE, Item, ConditionExpression: "attribute_not_exists(SK)" })
       );
-    })
-  );
+    } catch (err) {
+      if (!isConditionalCheckFailed(err)) throw err;
+    }
+  };
+
+  const writes = [];
+  Object.entries(roundResults).forEach(([solveIndexRaw, row]) => {
+    const solveIndex = Number(solveIndexRaw);
+    if (!Number.isInteger(solveIndex) || solveIndex < 0) return;
+    const round = {
+      PK,
+      SK: sharedRoundKey(sharedID, solveIndex),
+      ItemType: "SHAREDROUND",
+      SharedID: sharedID,
+      SolveIndex: solveIndex,
+      UpdatedAt: ts,
+    };
+    Object.entries(row || {}).forEach(([userID, result]) => {
+      const time = Number(result?.time);
+      if (!userID || !Number.isFinite(time)) return;
+      round[roundTimeAttribute(userID)] = time;
+      writes.push({
+        PK,
+        SK: sharedCellKey(sharedID, solveIndex, userID),
+        ItemType: "SHAREDCELL",
+        ConversationID: conversationID,
+        SharedID: sharedID,
+        SolveIndex: solveIndex,
+        UserID: userID,
+        Time: time,
+        Event: normalizeEvent(result?.event || sharedRoundEventKey(runItem, userID, solveIndex)),
+        UpdatedAt: String(result?.updatedAt || ts),
+      });
+    });
+    writes.push(round);
+  });
+
+  for (let i = 0; i < writes.length; i += 25) {
+    await Promise.all(writes.slice(i, i + 25).map(putIfAbsent));
+  }
+
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK, SK: sharedRunKey(sharedID) },
+        UpdateExpression:
+          "SET #format = :format, MigratedAt = :ts REMOVE RoundResults, Summary, SummaryRev, Rev",
+        ConditionExpression: "attribute_exists(SK) AND (attribute_not_exists(#format) OR #format < :format)",
+        ExpressionAttributeNames: { "#format": "Format" },
+        ExpressionAttributeValues: { ":format": SHARED_RUN_FORMAT, ":ts": ts },
+      })
+    );
+  } catch (err) {
+    if (!isConditionalCheckFailed(err)) throw err;
+  }
+
+  const { RoundResults, Summary, SummaryRev, Rev, ...rest } = runItem;
+  return { ...rest, Format: SHARED_RUN_FORMAT };
+}
+
+// Stores one player's result for one round of a shared run and counts it.
+// 1. The result goes in its own cell item (written only if it is new or changed).
+// 2. The round item gets that player's time in a single UpdateItem that also
+//    returns the round as it was just before. If the time was already there the
+//    condition fails and we stop: a resend or retry is never counted twice.
+// 3. What that one change did (a new solve; a win moving to or from someone) is
+//    added to the conversation's SharedStats.
+// Step 1 and 2 are idempotent, so a request that failed part-way can simply
+// be sent again.
+async function recordSharedResult({ conversationID, runItem, update, timestamp }) {
+  const sharedID = update.sharedID;
+  const userID = update.senderID;
+  const solveIndex = update.solveIndex;
+  const time = update.time;
+  const PK = `CONVO#${conversationID}`;
+  const updated = String(timestamp || nowIso());
+  const eventKey = sharedRoundEventKey(runItem, userID, solveIndex);
+
+  try {
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: {
+          PK,
+          SK: sharedCellKey(sharedID, solveIndex, userID),
+          ItemType: "SHAREDCELL",
+          ConversationID: conversationID,
+          SharedID: sharedID,
+          SolveIndex: solveIndex,
+          UserID: userID,
+          Time: time,
+          Event: eventKey,
+          UpdatedAt: updated,
+        },
+        ConditionExpression: "attribute_not_exists(SK) OR #time <> :time",
+        ExpressionAttributeNames: { "#time": "Time" },
+        ExpressionAttributeValues: { ":time": time },
+      })
+    );
+  } catch (err) {
+    // Same time already stored. Still go on to the round: if an earlier
+    // attempt stopped after the cell, this is what finishes it.
+    if (!isConditionalCheckFailed(err)) throw err;
+  }
+
+  let before;
+  try {
+    const out = await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK, SK: sharedRoundKey(sharedID, solveIndex) },
+        UpdateExpression:
+          "SET #t = :time, ItemType = :itemType, SharedID = :sid, SolveIndex = :idx, UpdatedAt = :updated",
+        ConditionExpression: "attribute_not_exists(#t) OR #t <> :time",
+        ExpressionAttributeNames: { "#t": roundTimeAttribute(userID) },
+        ExpressionAttributeValues: {
+          ":time": time,
+          ":itemType": "SHAREDROUND",
+          ":sid": sharedID,
+          ":idx": solveIndex,
+          ":updated": updated,
+        },
+        ReturnValues: "ALL_OLD",
+      })
+    );
+    before = roundTimesFromItem(out.Attributes);
+  } catch (err) {
+    if (isConditionalCheckFailed(err)) return;
+    throw err;
+  }
+
+  const deltaStats = buildRoundTransitionDelta({
+    before,
+    userID,
+    time,
+    eventFor: (participantID) => sharedRoundEventKey(runItem, participantID, solveIndex),
+  });
+  await applySharedStatsToConversation({
+    conversationID,
+    deltaStats,
+    timestamp: updated,
+    ensureEventKeys: sharedRunEventKeys(runItem),
+  });
 }
 
 async function processSharedMessageEffects({
@@ -4934,27 +5076,40 @@ async function processSharedMessageEffects({
         participantIDs: memberIDs,
         createdAt: timestamp,
       });
-      await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+      try {
+        await ddb.send(
+          new PutCommand({
+            TableName: TABLE,
+            Item: item,
+            ConditionExpression: "attribute_not_exists(SK)",
+          })
+        );
+      } catch (e) {
+        // Same run posted twice at once: the first one already counted it.
+        if (isConditionalCheckFailed(e)) return;
+        throw e;
+      }
 
-      const deltaStats = createEmptySharedStats();
+      const deltaStats = createEmptyStatsDelta();
       deltaStats.TotalSessions = 1;
-      deltaStats.LastSharedAt = timestamp;
       const eventKey = normalizeEvent(
         sharedPayload.creatorEvent || sharedPayload.event || sharedPayload.opponentEvent || "333"
       );
-      deltaStats.ByEvent[eventKey] = { Solves: 0, Wins: 0, Sessions: 1 };
-      normalizeMemberIDs(memberIDs).forEach((userID) => {
-        deltaStats.ByUser[userID] = { Solves: 0, Wins: 0, Sessions: 1 };
+      const members = normalizeMemberIDs(memberIDs);
+      deltaStats.ByEvent[eventKey] = {
+        Sessions: 1,
+        ByUser: Object.fromEntries(members.map((userID) => [userID, { Sessions: 1 }])),
+      };
+      members.forEach((userID) => {
+        deltaStats.ByUser[userID] = { Sessions: 1 };
       });
-      deltaStats.ByEvent[eventKey].ByUser = Object.fromEntries(
-        normalizeMemberIDs(memberIDs).map((userID) => [userID, { Solves: 0, Wins: 0, Sessions: 1 }])
-      );
 
       await applySharedStatsToConversation({
         conversationID,
-        memberIDs,
         deltaStats,
         timestamp,
+        ensureUserIDs: members,
+        ensureEventKeys: sharedRunEventKeys(item),
       });
     }
     return;
@@ -4977,98 +5132,58 @@ async function processSharedMessageEffects({
       ? extendPayload.opponentScrambles
       : [];
 
-    await ddb.send(
+    const runKey = {
+      PK: `CONVO#${conversationID}`,
+      SK: getSharedRunKey(extendPayload.sharedID),
+    };
+    // list_append is atomic, so two extensions arriving together both land.
+    const appended = await ddb.send(
       new UpdateCommand({
         TableName: TABLE,
-        Key: {
-          PK: `CONVO#${conversationID}`,
-          SK: getSharedRunKey(extendPayload.sharedID),
-        },
+        Key: runKey,
         UpdateExpression:
-          "SET CreatorEvents = :creatorEvents, OpponentEvents = :opponentEvents, CreatorScrambles = :creatorScrambles, OpponentScrambles = :opponentScrambles, #count = :count, UpdatedAt = :updated",
-        ExpressionAttributeNames: {
-          "#count": "Count",
-        },
+          "SET CreatorEvents = list_append(if_not_exists(CreatorEvents, :empty), :creatorEvents), OpponentEvents = list_append(if_not_exists(OpponentEvents, :empty), :opponentEvents), CreatorScrambles = list_append(if_not_exists(CreatorScrambles, :empty), :creatorScrambles), OpponentScrambles = list_append(if_not_exists(OpponentScrambles, :empty), :opponentScrambles), UpdatedAt = :updated",
         ExpressionAttributeValues: {
-          ":creatorEvents": [...(runItem.CreatorEvents || []), ...creatorEvents],
-          ":opponentEvents": [...(runItem.OpponentEvents || []), ...opponentEvents],
-          ":creatorScrambles": [...(runItem.CreatorScrambles || []), ...creatorScrambles],
-          ":opponentScrambles": [...(runItem.OpponentScrambles || []), ...opponentScrambles],
-          ":count": Math.max(
-            Number(runItem.Count || 0),
-            Number(extendPayload.count || 0),
-            (runItem.CreatorScrambles || []).length + creatorScrambles.length,
-            (runItem.OpponentScrambles || []).length + opponentScrambles.length
-          ),
+          ":empty": [],
+          ":creatorEvents": creatorEvents,
+          ":opponentEvents": opponentEvents,
+          ":creatorScrambles": creatorScrambles,
+          ":opponentScrambles": opponentScrambles,
           ":updated": String(timestamp || nowIso()),
         },
+        ReturnValues: "ALL_NEW",
       })
     );
+    const nextCount = Math.max(
+      Number(extendPayload.count || 0),
+      (appended.Attributes?.CreatorScrambles || []).length,
+      (appended.Attributes?.OpponentScrambles || []).length
+    );
+    try {
+      // Count only ever grows, so a slower writer can't shrink it.
+      await ddb.send(
+        new UpdateCommand({
+          TableName: TABLE,
+          Key: runKey,
+          UpdateExpression: "SET #count = :count",
+          ConditionExpression: "attribute_not_exists(#count) OR #count < :count",
+          ExpressionAttributeNames: { "#count": "Count" },
+          ExpressionAttributeValues: { ":count": nextCount },
+        })
+      );
+    } catch (e) {
+      if (!isConditionalCheckFailed(e)) throw e;
+    }
     return;
   }
 
-  const runItem = await getSharedRun(conversationID, updatePayload.sharedID);
-  if (!runItem) return;
+  if (!Number.isInteger(updatePayload.solveIndex) || updatePayload.solveIndex < 0) return;
 
-  const existingRow = runItem.RoundResults?.[updatePayload.solveIndex] || {};
-  const existingResult = existingRow?.[updatePayload.senderID] || null;
-  const existingTime = Number(existingResult?.time);
+  const storedRun = await getSharedRun(conversationID, updatePayload.sharedID);
+  if (!storedRun) return;
+  const runItem = await migrateLegacySharedRun(conversationID, storedRun);
 
-  if (Number.isFinite(existingTime) && existingTime === updatePayload.time) {
-    return;
-  }
-
-  const previousSummary = runItem.Summary || createEmptySharedStats();
-  const nextRoundResults = {
-    ...(runItem.RoundResults || {}),
-    [updatePayload.solveIndex]: {
-      ...existingRow,
-      [updatePayload.senderID]: {
-        time: updatePayload.time,
-        event:
-          existingResult?.event ||
-          getSharedRoundEvent(runItem, updatePayload.senderID, updatePayload.solveIndex),
-        updatedAt: String(timestamp || nowIso()),
-      },
-    },
-  };
-
-  const nextRun = {
-    ...runItem,
-    RoundResults: nextRoundResults,
-  };
-  const nextSummary = computeSharedRunSummary(nextRun);
-
-  await ddb.send(
-    new UpdateCommand({
-      TableName: TABLE,
-      Key: {
-        PK: `CONVO#${conversationID}`,
-        SK: getSharedRunKey(updatePayload.sharedID),
-      },
-      UpdateExpression: "SET RoundResults = :roundResults, Summary = :summary, UpdatedAt = :updated",
-      ExpressionAttributeValues: {
-        ":roundResults": nextRoundResults,
-        ":summary": nextSummary,
-        ":updated": String(timestamp || nowIso()),
-      },
-    })
-  );
-
-  const deltaStats = buildSharedStatsDelta(previousSummary, nextSummary, null, timestamp);
-  if (
-    deltaStats.TotalSolves ||
-    deltaStats.TotalWins ||
-    Object.keys(deltaStats.ByEvent || {}).length ||
-    Object.keys(deltaStats.ByUser || {}).length
-  ) {
-    await applySharedStatsToConversation({
-      conversationID,
-      memberIDs: runItem.ParticipantIDs || memberIDs,
-      deltaStats,
-      timestamp,
-    });
-  }
+  await recordSharedResult({ conversationID, runItem, update: updatePayload, timestamp });
 }
 
 async function getConversationMeta(conversationID) {
@@ -5353,7 +5468,7 @@ async function syncConversationMembership({
           TableName: TABLE,
           Key: { PK: `USER#${userID}`, SK: `CONVO#${conversationID}` },
           UpdateExpression:
-            "SET ConversationID = :cid, ConversationType = :type, #name = :name, DisplayName = :displayName, OtherUserID = :other, MemberIDs = :members, LastMessageAt = :last, LastMessagePreview = :preview, UpdatedAt = :updated, ItemType = :itemType, CreatedAt = if_not_exists(CreatedAt, :created), SharedStats = if_not_exists(SharedStats, :stats)",
+            "SET ConversationID = :cid, ConversationType = :type, #name = :name, DisplayName = :displayName, OtherUserID = :other, MemberIDs = :members, LastMessageAt = :last, LastMessagePreview = :preview, UpdatedAt = :updated, ItemType = :itemType, CreatedAt = if_not_exists(CreatedAt, :created)",
           ExpressionAttributeNames: {
             "#name": "Name",
           },
@@ -5369,7 +5484,6 @@ async function syncConversationMembership({
             ":updated": ts,
             ":itemType": "USERCONVO",
             ":created": ts,
-            ":stats": createEmptySharedStats(),
           },
         })
       );
@@ -5430,9 +5544,16 @@ async function getUserProfile(userID) {
   return out.Item || null;
 }
 
+// Read-only lookups (visibility, author names, the feed). Never use this for a
+// read-modify-write: it can be up to PTS_PROFILE_CACHE_MS old for writes made
+// outside this process.
+function getCachedUserProfile(userID) {
+  return profileCache.get(userID, getUserProfile);
+}
+
 // Followers allowed to see this user's posts, for live post notifications.
 async function listPostAudienceIDs(userID) {
-  const profile = await getUserProfile(userID);
+  const profile = await getCachedUserProfile(userID);
   if (!profile) return [];
   return getFollowers(profile).filter(
     (followerID) =>
@@ -5479,7 +5600,7 @@ function buildNotificationMessage(item = {}) {
 }
 
 async function buildUserPostNotificationPayload(postItem, ownerUserID) {
-  const authorProfile = await getUserProfile(ownerUserID);
+  const authorProfile = await getCachedUserProfile(ownerUserID);
   return {
     type: "post.created",
     scope: "USER",
@@ -5492,7 +5613,7 @@ async function buildUserPostNotificationPayload(postItem, ownerUserID) {
 async function buildGroupPostNotificationPayload(postItem, groupID, authorID) {
   const [group, authorProfile] = await Promise.all([
     getGroupMeta(groupID),
-    getUserProfile(authorID),
+    getCachedUserProfile(authorID),
   ]);
 
   return {
@@ -5509,7 +5630,49 @@ async function buildGroupPostNotificationPayload(postItem, groupID, authorID) {
 // Every /api route except health and the two sign-in routes needs a bearer
 // token. The middleware also pins actor fields in the body (userID, senderID,
 // hostID, ...) to the token, and app.param pins :userID segments.
+// Rate limits (server/lib/rateLimit.js). Behind a reverse proxy set
+// PTS_TRUST_PROXY (e.g. "1") so req.ip is the client, not the proxy.
+app.set("trust proxy", process.env.PTS_TRUST_PROXY || "loopback");
+const envLimit = (name, fallback) => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+// Per IP across the whole API: blunts floods without hurting a venue full of
+// people on one wifi.
+app.use(
+  "/api",
+  rateLimitMiddleware(
+    createRateLimiter({ windowMs: 60000, max: envLimit("PTS_RATE_LIMIT_IP_PER_MIN", 3000) }),
+    (req) => (req.path === "/health" ? "" : `ip:${req.ip}`)
+  )
+);
+// Sign-in and sign-up: per IP, and per username for password guessing.
+app.use(
+  ["/api/auth/signin", "/api/auth/signup"],
+  rateLimitMiddleware(
+    createRateLimiter({ windowMs: 60000, max: envLimit("PTS_RATE_LIMIT_AUTH_IP_PER_MIN", 60) }),
+    (req) => (req.method === "POST" ? `authip:${req.ip}` : "")
+  )
+);
+app.use(
+  "/api/auth/signin",
+  rateLimitMiddleware(
+    createRateLimiter({ windowMs: 5 * 60000, max: envLimit("PTS_RATE_LIMIT_SIGNIN_PER_5MIN", 10) }),
+    (req) =>
+      req.method === "POST"
+        ? `signin:${String(req.body?.username || "").trim().toLowerCase()}`
+        : ""
+  )
+);
 app.use("/api", buildAuthMiddleware());
+// Per signed-in user, after auth so the key is the verified userID.
+app.use(
+  "/api",
+  rateLimitMiddleware(
+    createRateLimiter({ windowMs: 60000, max: envLimit("PTS_RATE_LIMIT_USER_PER_MIN", 900) }),
+    (req) => (req.auth?.userID ? `user:${req.auth.userID}` : "")
+  )
+);
 app.param("userID", userIDParamGuard);
 
 // -------------------- Visibility --------------------
@@ -5530,6 +5693,7 @@ const SECTION_GET_PREFIXES = [
   ["/api/solves/", "fullStats"],
   ["/api/solveWindow/", "fullStats"],
   ["/api/solvesByTag/", "fullStats"],
+  ["/api/solvesScoped/", "fullStats"],
   ["/api/posts/", "posts"],
 ];
 
@@ -5540,10 +5704,11 @@ const PROFILE_SOLVES_LIMIT = 200;
 async function getViewerAccess(req, ownerID, ownerProfile = null) {
   const viewerID = String(req.auth?.userID || "").trim();
   const isAdminViewer = !!req.auth?.isAdmin;
-  const owner = ownerProfile || (await getUserProfile(ownerID));
+  const [owner, viewerProfile] = await Promise.all([
+    ownerProfile || getCachedUserProfile(ownerID),
+    viewerID && viewerID !== ownerID && !isAdminViewer ? getCachedUserProfile(viewerID) : null,
+  ]);
   if (!owner) return null;
-  const viewerProfile =
-    viewerID && viewerID !== ownerID && !isAdminViewer ? await getUserProfile(viewerID) : null;
   return { owner, viewerProfile, access: buildViewerAccess(viewerID, owner, viewerProfile, { isAdmin: isAdminViewer }) };
 }
 
@@ -5670,7 +5835,7 @@ app.post("/api/auth/signup", async (req, res) => {
       return res.status(409).json({ error: "That username is taken", code: "USERNAME_TAKEN" });
     }
     console.error("POST /api/auth/signup error:", e);
-    return res.status(500).json({ error: "Server error" });
+    return sendServerError(res, e);
   }
 });
 
@@ -5709,7 +5874,7 @@ app.post("/api/auth/signin", async (req, res) => {
     return res.json(publicAuthResponse(username, profile));
   } catch (e) {
     console.error("POST /api/auth/signin error:", e);
-    return res.status(500).json({ error: "Server error" });
+    return sendServerError(res, e);
   }
 });
 
@@ -5720,7 +5885,7 @@ app.get("/api/auth/me", async (req, res) => {
     return res.json({ ok: true, userID: req.auth.userID, user: profile, profileExists: !!profile });
   } catch (e) {
     console.error("GET /api/auth/me error:", e);
-    return res.status(500).json({ error: "Server error" });
+    return sendServerError(res, e);
   }
 });
 
@@ -5749,7 +5914,7 @@ app.post("/api/auth/password", async (req, res) => {
     return res.json({ ok: true, token: signToken(userID) });
   } catch (e) {
     console.error("POST /api/auth/password error:", e);
-    return res.status(500).json({ error: "Server error" });
+    return sendServerError(res, e);
   }
 });
 
@@ -5808,20 +5973,18 @@ app.get("/api/user/:userID", async (req, res) => {
   if (!requirePkSk(res)) return;
 
   try {
-    const out = await ddb.send(
-      new GetCommand({
-        TableName: TABLE,
-        Key: { PK: `USER#${userID}`, SK: "PROFILE" },
-      })
-    );
-    if (!out.Item) return res.status(404).json({ user: null });
-
     const viewerID = String(req.auth?.userID || "").trim();
     const isAdminViewer = !!req.auth?.isAdmin;
-    const viewerProfile =
-      viewerID && viewerID !== userID && !isAdminViewer ? await getUserProfile(viewerID) : null;
+    // The owner reading their own profile gets a fresh read; everyone else
+    // can take the few-second cache.
+    const [owner, viewerProfile] = await Promise.all([
+      viewerID === userID ? getUserProfile(userID) : getCachedUserProfile(userID),
+      viewerID && viewerID !== userID && !isAdminViewer ? getCachedUserProfile(viewerID) : null,
+    ]);
+    if (!owner) return res.status(404).json({ user: null });
+
     return res.json({
-      user: sanitizeProfileForViewer(out.Item, viewerID, viewerProfile, { isAdmin: isAdminViewer }),
+      user: sanitizeProfileForViewer(owner, viewerID, viewerProfile, { isAdmin: isAdminViewer }),
     });
   } catch (e) {
     console.error("GET /api/user error:", e);
@@ -5926,6 +6089,17 @@ app.put("/api/user/:userID", async (req, res) => {
     delete merged.FollowingCount;
     delete merged.FollowerCount;
     delete merged.Viewer;
+    delete merged.FollowRev;
+
+    // Billing and import allowance are the server's to set (admin or a
+    // payment webhook), never the user's own profile save.
+    if (!req.auth?.isAdmin) {
+      for (const field of SERVER_OWNED_PROFILE_FIELDS) delete merged[field];
+      if (merged.Settings && typeof merged.Settings === "object") {
+        merged.Settings = { ...merged.Settings };
+        for (const field of SERVER_OWNED_PROFILE_FIELDS) delete merged.Settings[field];
+      }
+    }
 
     // Saving marks the map as the user's own choice (see PRIVACY_VERSION).
     if ("Privacy" in merged) {
@@ -5981,8 +6155,18 @@ app.put("/api/user/:userID", async (req, res) => {
 // FollowRequests = pending followers of a private account. A mutual follow is
 // a friend. See server/lib/visibility.js.
 const FOLLOW_LIST_FIELDS = ["Friends", "Followers", "FollowRequests"];
+const SERVER_OWNED_PROFILE_FIELDS = [
+  "IsPaid",
+  "isPaid",
+  "ImportSolveTier",
+  "importSolveTier",
+  "ImportSolveLimit",
+  "importSolveLimit",
+  "ImportSolveCount",
+  "importSolveCount",
+];
 
-async function setProfileFields(userID, fields) {
+async function setProfileFields(userID, fields, { expectedFollowRev = null } = {}) {
   const names = {};
   const values = { ":u": nowIso() };
   const expr = ["#UpdatedAt = :u"];
@@ -5992,16 +6176,51 @@ async function setProfileFields(userID, fields) {
     values[`:${k}`] = v;
     expr.push(`#${k} = :${k}`);
   }
+  let condition = "attribute_exists(PK)";
+  if (expectedFollowRev !== null) {
+    names["#FollowRev"] = "FollowRev";
+    values[":nextFollowRev"] = expectedFollowRev + 1;
+    expr.push("#FollowRev = :nextFollowRev");
+    if (expectedFollowRev > 0) {
+      values[":followRev"] = expectedFollowRev;
+      condition += " AND #FollowRev = :followRev";
+    } else {
+      condition += " AND attribute_not_exists(#FollowRev)";
+    }
+  }
   await ddb.send(
     new UpdateCommand({
       TableName: TABLE,
       Key: { PK: `USER#${userID}`, SK: "PROFILE" },
       UpdateExpression: `SET ${expr.join(", ")}`,
-      ConditionExpression: "attribute_exists(PK)",
+      ConditionExpression: condition,
       ExpressionAttributeNames: names,
       ExpressionAttributeValues: values,
     })
   );
+}
+
+// Follow lists are arrays on the profile, so changing one is a read, an edit
+// and a write. Two people following the same account at once used to wipe
+// each other out. This rereads and retries when FollowRev moved under us.
+// mutate(profile) returns the fields to set, or null for "nothing to do".
+const FOLLOW_WRITE_ATTEMPTS = 8;
+async function mutateFollowLists(userID, mutate) {
+  for (let attempt = 1; ; attempt += 1) {
+    const profile = await getUserProfile(userID);
+    if (!profile) return null;
+    const fields = mutate(profile);
+    if (!fields || !Object.keys(fields).length) return profile;
+    try {
+      await setProfileFields(userID, fields, {
+        expectedFollowRev: Math.max(0, Number(profile.FollowRev) || 0),
+      });
+      return { ...profile, ...fields };
+    } catch (e) {
+      if (e?.name !== "ConditionalCheckFailedException" || attempt >= FOLLOW_WRITE_ATTEMPTS) throw e;
+      await new Promise((r) => setTimeout(r, 10 + Math.random() * 40 * attempt));
+    }
+  }
 }
 
 function withID(list, id) {
@@ -6012,13 +6231,53 @@ function withoutID(list, id) {
   return list.filter((x) => x !== id);
 }
 
-// follower starts following owner (both profiles already loaded).
-async function linkFollow(followerID, followerProfile, ownerID, ownerProfile) {
-  await setProfileFields(followerID, { Friends: withID(getFollowing(followerProfile), ownerID) });
-  await setProfileFields(ownerID, {
-    Followers: withID(getFollowers(ownerProfile), followerID),
-    FollowRequests: withoutID(getFollowRequests(ownerProfile), followerID),
-  });
+function listChanged(before, after) {
+  return before.length !== after.length || before.some((id, i) => id !== after[i]);
+}
+
+// Set fields only when one of the lists actually changes.
+function changedListFields(profile, next) {
+  const fields = {};
+  for (const [key, list] of Object.entries(next)) {
+    const before = key === "StatsAllowedFriends" ? cleanIDList(profile[key]) : FOLLOW_LIST_GETTERS[key](profile);
+    if (listChanged(before, list(before))) fields[key] = list(before);
+  }
+  return Object.keys(fields).length ? fields : null;
+}
+
+const FOLLOW_LIST_GETTERS = {
+  Friends: (p) => getFollowing(p),
+  Followers: (p) => getFollowers(p),
+  FollowRequests: (p) => getFollowRequests(p),
+};
+
+// follower starts following owner.
+async function linkFollow(followerID, ownerID) {
+  await mutateFollowLists(followerID, (p) =>
+    changedListFields(p, { Friends: (l) => withID(l, ownerID) })
+  );
+  await mutateFollowLists(ownerID, (p) =>
+    changedListFields(p, {
+      Followers: (l) => withID(l, followerID),
+      FollowRequests: (l) => withoutID(l, followerID),
+    })
+  );
+}
+
+// follower stops following owner, from either side.
+async function unlinkFollow(followerID, ownerID) {
+  await mutateFollowLists(followerID, (p) =>
+    changedListFields(p, {
+      Friends: (l) => withoutID(l, ownerID),
+      StatsAllowedFriends: (l) => withoutID(l, ownerID),
+    })
+  );
+  await mutateFollowLists(ownerID, (p) =>
+    changedListFields(p, {
+      Followers: (l) => withoutID(l, followerID),
+      FollowRequests: (l) => withoutID(l, followerID),
+    })
+  );
 }
 
 async function acceptAllFollowRequests(ownerID) {
@@ -6026,14 +6285,9 @@ async function acceptAllFollowRequests(ownerID) {
   const pending = getFollowRequests(owner);
   if (!pending.length) return;
 
-  let followers = getFollowers(owner);
   for (const requesterID of pending) {
-    const requester = await getUserProfile(requesterID);
-    if (!requester) continue;
-    await setProfileFields(requesterID, { Friends: withID(getFollowing(requester), ownerID) });
-    followers = withID(followers, requesterID);
+    await linkFollow(requesterID, ownerID);
   }
-  await setProfileFields(ownerID, { Followers: followers, FollowRequests: [] });
 }
 
 function followStateFor(viewerID, ownerProfile, viewerProfile) {
@@ -6058,11 +6312,13 @@ app.post("/api/follow/:targetID", async (req, res) => {
 
     if (!getFollowing(viewer).includes(targetID)) {
       if (target.PrivateAccount === true) {
-        await setProfileFields(targetID, {
-          FollowRequests: withID(getFollowRequests(target), viewerID),
-        });
+        await mutateFollowLists(targetID, (p) =>
+          getFollowers(p).includes(viewerID)
+            ? null
+            : changedListFields(p, { FollowRequests: (l) => withID(l, viewerID) })
+        );
       } else {
-        await linkFollow(viewerID, viewer, targetID, target);
+        await linkFollow(viewerID, targetID);
       }
     }
 
@@ -6087,19 +6343,10 @@ app.delete("/api/follow/:targetID", async (req, res) => {
   if (!targetID) return res.status(400).json({ error: "Missing targetID" });
 
   try {
-    const [viewer, target] = await Promise.all([getUserProfile(viewerID), getUserProfile(targetID)]);
+    const viewer = await getUserProfile(viewerID);
     if (!viewer) return res.status(404).json({ error: "User not found" });
 
-    await setProfileFields(viewerID, {
-      Friends: withoutID(getFollowing(viewer), targetID),
-      StatsAllowedFriends: withoutID(cleanIDList(viewer.StatsAllowedFriends), targetID),
-    });
-    if (target) {
-      await setProfileFields(targetID, {
-        Followers: withoutID(getFollowers(target), viewerID),
-        FollowRequests: withoutID(getFollowRequests(target), viewerID),
-      });
-    }
+    await unlinkFollow(viewerID, targetID);
 
     const nextViewer = await getUserProfile(viewerID);
     return res.json({ ok: true, state: "none", user: nextViewer });
@@ -6128,11 +6375,11 @@ app.post("/api/followRequests/:userID/:requesterID/:decision", async (req, res) 
 
     const requester = decision === "accept" ? await getUserProfile(requesterID) : null;
     if (requester) {
-      await linkFollow(requesterID, requester, ownerID, owner);
+      await linkFollow(requesterID, ownerID);
     } else {
-      await setProfileFields(ownerID, {
-        FollowRequests: withoutID(getFollowRequests(owner), requesterID),
-      });
+      await mutateFollowLists(ownerID, (p) =>
+        changedListFields(p, { FollowRequests: (l) => withoutID(l, requesterID) })
+      );
     }
 
     return res.json({ ok: true, user: await getUserProfile(ownerID) });
@@ -6149,13 +6396,10 @@ app.delete("/api/followers/:userID/:followerID", async (req, res) => {
   const followerID = String(req.params.followerID || "").trim();
 
   try {
-    const [owner, follower] = await Promise.all([getUserProfile(ownerID), getUserProfile(followerID)]);
+    const owner = await getUserProfile(ownerID);
     if (!owner) return res.status(404).json({ error: "User not found" });
 
-    await setProfileFields(ownerID, { Followers: withoutID(getFollowers(owner), followerID) });
-    if (follower) {
-      await setProfileFields(followerID, { Friends: withoutID(getFollowing(follower), ownerID) });
-    }
+    await unlinkFollow(followerID, ownerID);
     return res.json({ ok: true, user: await getUserProfile(ownerID) });
   } catch (e) {
     console.error("DELETE /api/followers error:", e);
@@ -6276,6 +6520,42 @@ app.post("/api/session", async (req, res) => {
     });
   } catch (e) {
     console.error("POST /api/session error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Rename only touches SessionName; SessionID (and every solve keyed by it) stays put.
+app.put("/api/session/:userID/:event/:sessionID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const userID = String(req.params.userID || "").trim();
+  const event = normalizeEvent(req.params.event);
+  const sessionID = normalizeSessionID(req.params.sessionID || "main");
+  const name = String(req.body?.sessionName || "").trim();
+
+  if (!userID) return res.status(400).json({ error: "Missing userID" });
+  if (!event) return res.status(400).json({ error: "Missing event" });
+  if (!sessionID) return res.status(400).json({ error: "Missing sessionID" });
+  if (!name) return res.status(400).json({ error: "Missing sessionName" });
+  if (name.length > 80) return res.status(400).json({ error: "Session name too long" });
+
+  try {
+    const out = await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${userID}`, SK: `SESSION#${event}#${sessionID}` },
+        UpdateExpression: "SET SessionName = :name, UpdatedAt = :ts",
+        ConditionExpression: "attribute_exists(PK)",
+        ExpressionAttributeValues: { ":name": name, ":ts": nowIso() },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return res.json({ ok: true, item: out.Attributes });
+  } catch (e) {
+    if (e?.name === "ConditionalCheckFailedException") {
+      return res.status(404).json({ error: "Session not found" });
+    }
+    console.error("PUT /api/session error:", e);
     return res.status(500).json({ error: "Server error" });
   }
 });
@@ -6921,6 +7201,89 @@ app.get("/api/solvesLastN/:userID", async (req, res) => {
   }
 });
 
+// Solves across any set of events and sessions, newest first. Filtered reads
+// page through DynamoDB until `limit` matches or SCOPED_SOLVES_PAGE_CAP pages;
+// lastKey (null when done) continues from the last item returned.
+const SCOPED_SOLVES_PAGE_CAP = 25;
+
+app.get("/api/solvesScoped/:userID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const userID = String(req.params.userID || "").trim();
+  const limit = Math.max(1, Math.min(5000, Number(req.query?.limit || 100) || 100));
+  const cursorRaw = req.query?.cursor ? String(req.query.cursor) : null;
+  const startDay = String(req.query?.startDay || "").trim();
+  const endDay = String(req.query?.endDay || "").trim();
+  const requestedTimeZone = String(req.query?.timeZone || "").trim();
+
+  if (!userID) return res.status(400).json({ error: "Missing userID" });
+
+  let cursor = undefined;
+  if (cursorRaw) {
+    try {
+      cursor = JSON.parse(decodeURIComponent(cursorRaw));
+    } catch {
+      cursor = undefined;
+    }
+  }
+
+  try {
+    const fallbackTimeZone = await getUserDayBucketTimeZone(userID);
+    const { timeZone, startIso, endExclusiveIso } = getCreatedAtRangeForLocalDays({
+      startDay,
+      endDay,
+      timeZone: requestedTimeZone || fallbackTimeZone,
+    });
+
+    const query = buildScopedSolvesQuery({
+      userID,
+      events: req.query?.events,
+      pairs: req.query?.pairs,
+      sessions: req.query?.sessions,
+      startIso,
+      endExclusiveIso,
+    });
+
+    const items = [];
+    let lastKey = cursor || null;
+    let pages = 0;
+
+    do {
+      const remaining = limit - items.length;
+      const out = await ddb.send(
+        new QueryCommand({
+          TableName: TABLE,
+          ...(query.indexName ? { IndexName: query.indexName } : {}),
+          KeyConditionExpression: query.keyConditionExpression,
+          ...(query.filterExpression ? { FilterExpression: query.filterExpression } : {}),
+          ...(Object.keys(query.names).length ? { ExpressionAttributeNames: query.names } : {}),
+          ExpressionAttributeValues: query.values,
+          ScanIndexForward: false,
+          // Filtered reads drop items after Limit applies, so read wider, and wider
+          // again each time a sparse filter comes up short.
+          Limit: query.filterExpression ? Math.min(1000, Math.max(200, remaining * 2) * 2 ** pages) : remaining,
+          ExclusiveStartKey: lastKey || undefined,
+        })
+      );
+      pages += 1;
+
+      const pageItems = out.Items || [];
+      if (pageItems.length > remaining) {
+        items.push(...pageItems.slice(0, remaining));
+        lastKey = buildResumeKey(items[items.length - 1], query.indexName);
+        break;
+      }
+      items.push(...pageItems);
+      lastKey = out.LastEvaluatedKey || null;
+    } while (lastKey && items.length < limit && pages < SCOPED_SOLVES_PAGE_CAP);
+
+    return res.json({ ok: true, items, lastKey, timeZone });
+  } catch (e) {
+    console.error("GET /api/solvesScoped error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
 app.get("/api/solveWindow/:userID", async (req, res) => {
   if (!requirePkSk(res)) return;
 
@@ -7184,8 +7547,11 @@ app.post("/api/importJobs", async (req, res) => {
     const profile = await getUserProfile(userID);
     if (!profile) return res.status(404).json({ error: "User not found" });
 
+    // A file bigger than the whole allowance can't fit however much of it is already imported, so
+    // say so before writing anything. Otherwise overlap with earlier imports is unknown until the
+    // chunks are checked, and each chunk reserves only what is actually new.
     const allowance = getImportSolveAllowance(profile);
-    if (allowance.used >= allowance.limit) {
+    if (allowance.used >= allowance.limit || totalSolves > allowance.limit) {
       throw buildImportSolveLimitError({
         requested: totalSolves,
         used: allowance.used,
@@ -7920,6 +8286,11 @@ app.get("/api/wca/competitions/:userID/:competitionID", async (req, res) => {
   }
 });
 
+// Moves up to this many solves answer right after an incremental stats pass
+// (a few small reads per scope) and leave the authoritative rebuild to the
+// background. Past it, the request rebuilds each scope itself, as before.
+const MOVE_INCREMENTAL_STATS_MAX = 25;
+
 app.post("/api/solves/move-session", async (req, res) => {
   if (!requirePkSk(res)) return;
 
@@ -7963,10 +8334,12 @@ app.post("/api/solves/move-session", async (req, res) => {
     const readMs = Date.now() - readStartedAt;
 
     const existingBySK = new Map(existingItems.map((item) => [String(item?.SK || ""), item]));
-    const writeRequests = [];
+    const moves = [];
     const sessionScopes = new Map();
     const eventScopes = new Set();
     const tagScopeMutations = new Map();
+    const dayBucketDirtyScopes = new Map();
+    const dayBucketTimeZone = await getUserDayBucketTimeZone(userID);
     let skipped = 0;
 
     for (const solveRef of solveRefs) {
@@ -8006,8 +8379,21 @@ app.post("/api/solves/move-session", async (req, res) => {
         existing,
       });
 
-      writeRequests.push(...buildReplaceSolveAndTagRequests(existing, rebuilt));
-      writeRequests.push(...buildSingleRankMutationRequests({ userID, oldSolve: existing, newSolve: rebuilt }));
+      moves.push({
+        existing,
+        rebuilt,
+        writeRequests: [
+          ...buildReplaceSolveAndTagRequests(existing, rebuilt),
+          ...buildSingleRankMutationRequests({ userID, oldSolve: existing, newSolve: rebuilt }),
+        ],
+      });
+
+      const dirtyScopes = buildDirtyDayBucketScopesFromSolveMutation({
+        oldSolve: existing,
+        newSolve: rebuilt,
+        timeZone: dayBucketTimeZone,
+      });
+      for (const [key, scope] of dirtyScopes) dayBucketDirtyScopes.set(key, scope);
 
       sessionScopes.set(`${oldEvent}|${oldSessionID}`, { event: oldEvent, sessionID: oldSessionID });
       sessionScopes.set(`${nextEvent}|${nextSessionID}`, { event: nextEvent, sessionID: nextSessionID });
@@ -8017,23 +8403,56 @@ app.post("/api/solves/move-session", async (req, res) => {
       addTagScopeMutation(tagScopeMutations, rebuilt, "add");
     }
 
-    const writeStartedAt = Date.now();
-    const wrote = await batchWriteRequestsWithRetry(writeRequests);
-    const writeMs = Date.now() - writeStartedAt;
+    const useIncrementalStats = moves.length <= MOVE_INCREMENTAL_STATS_MAX;
+    let wrote = 0;
+    let writeMs = 0;
+    let recomputeMs = 0;
 
-    const recomputeStartedAt = Date.now();
-    await Promise.all([
-      ...Array.from(sessionScopes.values()).map((scope) =>
-        recomputeSessionStats(ddb, TABLE, userID, scope.event, scope.sessionID)
-      ),
-      ...Array.from(eventScopes.values()).map((event) => recomputeEventStats(ddb, TABLE, userID, event)),
-    ]);
+    if (useIncrementalStats) {
+      // Same order as a single-solve edit: write the solve, then apply its
+      // remove/add delta, so each incremental pass sees the table as it is
+      // after that solve (and only that solve) has moved. That gets counts,
+      // mean, std dev and singles right before we answer.
+      for (const move of moves) {
+        const writeStartedAt = Date.now();
+        wrote += await batchWriteRequestsWithRetry(move.writeRequests);
+        writeMs += Date.now() - writeStartedAt;
+
+        const statsStartedAt = Date.now();
+        await applySolveMutationStats({ userID, oldSolve: move.existing, newSolve: move.rebuilt });
+        recomputeMs += Date.now() - statsStartedAt;
+      }
+
+      // The incremental windows are not exact when a solve leaves or joins the
+      // middle of a scope's history (best/worst averages, median), and a move
+      // usually does both. Rebuild those scopes from their solves off the
+      // request path; on a 50k-solve event that scan is what used to make the
+      // move itself take ~25s.
+      for (const scope of sessionScopes.values()) {
+        queueBackgroundStatsRebuild(userID, scope.event, scope.sessionID);
+      }
+      for (const event of eventScopes) queueBackgroundStatsRebuild(userID, event);
+    } else {
+      const writeStartedAt = Date.now();
+      wrote = await batchWriteRequestsWithRetry(moves.flatMap((move) => move.writeRequests));
+      writeMs = Date.now() - writeStartedAt;
+
+      const recomputeStartedAt = Date.now();
+      await Promise.all([
+        ...Array.from(sessionScopes.values()).map((scope) =>
+          recomputeSessionStats(ddb, TABLE, userID, scope.event, scope.sessionID)
+        ),
+        ...Array.from(eventScopes.values()).map((event) => recomputeEventStats(ddb, TABLE, userID, event)),
+      ]);
+      recomputeMs = Date.now() - recomputeStartedAt;
+    }
+
+    await markDayBucketScopesDirty(userID, dayBucketDirtyScopes);
     queueTagStatsInvalidationInBackground(
       `move-session:${userID}:${fromEvent}:${toEvent}`,
       userID,
       tagScopeMutations
     );
-    const recomputeMs = Date.now() - recomputeStartedAt;
 
     return res.json({
       ok: true,
@@ -8047,6 +8466,7 @@ app.post("/api/solves/move-session", async (req, res) => {
         writeMs,
         recomputeMs,
       },
+      statsMode: useIncrementalStats ? "incremental" : "rebuild",
       fromEvent,
       fromSessionID,
       toEvent,
@@ -8554,116 +8974,166 @@ app.post("/api/recomputeEventStats", async (req, res) => {
   }
 });
 
+// Loads one bucket scope (all events, one event, or one event's main session)
+// for a day range, recomputing dirty / stale / incomplete buckets first.
+async function loadDayBucketScopeItems(userID, { event, mainOnly, startDay, endDay, timeZone }) {
+  const prefix = event
+    ? mainOnly
+      ? `DAYBUCKET#EVENT#${event}#MAIN`
+      : `DAYBUCKET#EVENT#${event}`
+    : "DAYBUCKET#ALL";
+
+  const rangeStart = `${prefix}#${startDay || "0000-00-00"}`;
+  const rangeEnd = `${prefix}#${endDay || "9999-99-99"}`;
+
+  const dirtyPrefix = event
+    ? mainOnly
+      ? `DAYBUCKETDIRTY#EVENT#${event}#MAIN`
+      : `DAYBUCKETDIRTY#EVENT#${event}`
+    : "DAYBUCKETDIRTY#ALL";
+  const dirtyRangeStart = `${dirtyPrefix}#${startDay || "0000-00-00"}`;
+  const dirtyRangeEnd = `${dirtyPrefix}#${endDay || "9999-99-99"}`;
+
+  const dirtyItems = await queryUserItemsByRange(userID, dirtyRangeStart, dirtyRangeEnd);
+
+  const dirtyScopes = dirtyItems.map((item) => ({
+    dayKey: String(item?.DayKey || "").trim(),
+    event: String(item?.Event || "").trim(),
+    mainOnly: item?.MainOnly === true,
+    allEvents: String(item?.SK || "").startsWith("DAYBUCKETDIRTY#ALL#"),
+  })).filter((scope) => scope.dayKey);
+
+  if (dirtyScopes.length) {
+    await recomputeDirtyDayBucketScopes(userID, dirtyScopes, timeZone);
+  }
+
+  const loadBucketItems = async () => queryUserItemsByRange(userID, rangeStart, rangeEnd);
+
+  const buildScopeFromBucketItem = (item) => {
+    const dayKey = String(item?.BucketDay || "").trim();
+    if (!dayKey) return null;
+
+    if (String(item?.SK || "").startsWith("DAYBUCKET#ALL#")) {
+      return {
+        dayKey,
+        event: "",
+        mainOnly: false,
+        allEvents: true,
+      };
+    }
+
+    const eventKey = normalizeEvent(item?.Event);
+    if (!eventKey) return null;
+
+    return {
+      dayKey,
+      event: eventKey,
+      mainOnly: item?.SessionID === "main",
+      allEvents: false,
+    };
+  };
+
+  let rawItems = await loadBucketItems();
+  const staleScopes = rawItems
+    .filter((item) => item?.stale === true || !hasCurrentDayBucketVersion(item))
+    .map(buildScopeFromBucketItem)
+    .filter((scope) => scope && scope.dayKey && (scope.allEvents || scope.event));
+
+  if (staleScopes.length) {
+    await recomputeDirtyDayBucketScopes(userID, staleScopes, timeZone);
+    rawItems = await loadBucketItems();
+  }
+
+  let items = rawItems.filter((item) => hasCurrentDayBucketVersion(item) && item?.stale !== true);
+  // Also rebuilds buckets written before worst values were stored.
+  const missingLargeAverageScopes = items
+    .filter(
+      (item) =>
+        item &&
+        ([25, 50, 100, 1000].some(
+          (size) =>
+            Number(item?.SolveCountTotal || 0) >= size &&
+            !Number.isFinite(Number(item?.[`BestAo${size}Ms`]))
+        ) ||
+          (Number(item?.SolveCountIncluded || 0) > 0 && item?.WorstSingleMs == null))
+    )
+    .map((item) => ({
+      dayKey: String(item?.BucketDay || "").trim(),
+      event: String(item?.Event || "").trim(),
+      mainOnly: item?.SessionID === "main",
+      allEvents: String(item?.SK || "").startsWith("DAYBUCKET#ALL#"),
+    }))
+    .filter((scope) => scope.dayKey && (scope.allEvents || scope.event));
+
+  if (missingLargeAverageScopes.length) {
+    await recomputeDirtyDayBucketScopes(userID, missingLargeAverageScopes, timeZone);
+    rawItems = await loadBucketItems();
+    items = rawItems.filter((item) => hasCurrentDayBucketVersion(item) && item?.stale !== true);
+  }
+
+  return items;
+}
+
+// ?event=333[&mainOnly=true]  one event (optionally its main session)
+// ?events=333,444[&mainOnly=true]  several events: items are merged per day,
+//   and eventItems keeps the per-event buckets for breakdowns
+// (neither)  all events, all sessions
 app.get("/api/dayBuckets/:userID", async (req, res) => {
   if (!requirePkSk(res)) return;
 
   const userID = String(req.params.userID || "").trim();
   const event = normalizeEvent(req.query?.event);
+  const events = Array.from(
+    new Set(
+      String(req.query?.events || "")
+        .split(",")
+        .map((value) => normalizeEvent(value))
+        .filter(Boolean)
+    )
+  );
   const mainOnly = String(req.query?.mainOnly || "false").toLowerCase() === "true";
   const startDay = String(req.query?.startDay || "").trim();
   const endDay = String(req.query?.endDay || "").trim();
 
   if (!userID) return res.status(400).json({ error: "Missing userID" });
-  if (mainOnly && !event) {
+  if (mainOnly && !event && !events.length) {
     return res.status(400).json({ error: "mainOnly requires event" });
   }
 
   try {
     const timeZone = await getUserDayBucketTimeZone(userID);
-    const prefix = event
-      ? mainOnly
-        ? `DAYBUCKET#EVENT#${event}#MAIN`
-        : `DAYBUCKET#EVENT#${event}`
-      : "DAYBUCKET#ALL";
 
-    const rangeStart = `${prefix}#${startDay || "0000-00-00"}`;
-    const rangeEnd = `${prefix}#${endDay || "9999-99-99"}`;
-
-    const dirtyPrefix = event
-      ? mainOnly
-        ? `DAYBUCKETDIRTY#EVENT#${event}#MAIN`
-        : `DAYBUCKETDIRTY#EVENT#${event}`
-      : "DAYBUCKETDIRTY#ALL";
-    const dirtyRangeStart = `${dirtyPrefix}#${startDay || "0000-00-00"}`;
-    const dirtyRangeEnd = `${dirtyPrefix}#${endDay || "9999-99-99"}`;
-
-    const dirtyItems = await queryUserItemsByRange(userID, dirtyRangeStart, dirtyRangeEnd);
-
-    const dirtyScopes = dirtyItems.map((item) => ({
-      dayKey: String(item?.DayKey || "").trim(),
-      event: String(item?.Event || "").trim(),
-      mainOnly: item?.MainOnly === true,
-      allEvents: String(item?.SK || "").startsWith("DAYBUCKETDIRTY#ALL#"),
-    })).filter((scope) => scope.dayKey);
-
-    if (dirtyScopes.length) {
-      await recomputeDirtyDayBucketScopes(userID, dirtyScopes, timeZone);
-    }
-
-    const loadBucketItems = async () => queryUserItemsByRange(userID, rangeStart, rangeEnd);
-
-    const buildScopeFromBucketItem = (item) => {
-      const dayKey = String(item?.BucketDay || "").trim();
-      if (!dayKey) return null;
-
-      if (String(item?.SK || "").startsWith("DAYBUCKET#ALL#")) {
-        return {
-          dayKey,
-          event: "",
-          mainOnly: false,
-          allEvents: true,
-        };
+    if (events.length) {
+      const perEvent = await Promise.all(
+        events.map((ev) => loadDayBucketScopeItems(userID, { event: ev, mainOnly, startDay, endDay, timeZone }))
+      );
+      const eventItems = perEvent.flat();
+      const byDay = new Map();
+      for (const item of eventItems) {
+        const day = String(item?.BucketDay || "").trim();
+        if (!day) continue;
+        if (!byDay.has(day)) byDay.set(day, []);
+        byDay.get(day).push(item);
       }
-
-      const eventKey = normalizeEvent(item?.Event);
-      if (!eventKey) return null;
-
-      return {
-        dayKey,
-        event: eventKey,
-        mainOnly: item?.SessionID === "main",
-        allEvents: false,
-      };
-    };
-
-    let rawItems = await loadBucketItems();
-    const staleScopes = rawItems
-      .filter((item) => item?.stale === true || !hasCurrentDayBucketVersion(item))
-      .map(buildScopeFromBucketItem)
-      .filter((scope) => scope && scope.dayKey && (scope.allEvents || scope.event));
-
-    if (staleScopes.length) {
-      await recomputeDirtyDayBucketScopes(userID, staleScopes, timeZone);
-      rawItems = await loadBucketItems();
+      const items = Array.from(byDay.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([day, group]) => ({
+          ...mergeDayBucketSummaries(group),
+          BucketDay: day,
+          Events: Array.from(new Set(group.map((item) => item?.Event).filter(Boolean))),
+        }));
+      return res.json({
+        ok: true,
+        items,
+        eventItems,
+        aggregateSummary: eventItems.length ? mergeDayBucketSummaries(eventItems) : null,
+        scope: mainOnly ? "events-main" : "events",
+        events,
+        timeZone,
+      });
     }
 
-    let items = rawItems.filter((item) => hasCurrentDayBucketVersion(item) && item?.stale !== true);
-    // Also rebuilds buckets written before worst values were stored.
-    const missingLargeAverageScopes = items
-      .filter(
-        (item) =>
-          item &&
-          ([25, 50, 100, 1000].some(
-            (size) =>
-              Number(item?.SolveCountTotal || 0) >= size &&
-              !Number.isFinite(Number(item?.[`BestAo${size}Ms`]))
-          ) ||
-            (Number(item?.SolveCountIncluded || 0) > 0 && item?.WorstSingleMs == null))
-      )
-      .map((item) => ({
-        dayKey: String(item?.BucketDay || "").trim(),
-        event: String(item?.Event || "").trim(),
-        mainOnly: item?.SessionID === "main",
-        allEvents: String(item?.SK || "").startsWith("DAYBUCKET#ALL#"),
-      }))
-      .filter((scope) => scope.dayKey && (scope.allEvents || scope.event));
-
-    if (missingLargeAverageScopes.length) {
-      await recomputeDirtyDayBucketScopes(userID, missingLargeAverageScopes, timeZone);
-      rawItems = await loadBucketItems();
-      items = rawItems.filter((item) => hasCurrentDayBucketVersion(item) && item?.stale !== true);
-    }
-
+    const items = await loadDayBucketScopeItems(userID, { event, mainOnly, startDay, endDay, timeZone });
     const aggregateSummary = items.length ? mergeDayBucketSummaries(items) : null;
     return res.json({
       ok: true,
@@ -8769,6 +9239,18 @@ app.post("/api/post", async (req, res) => {
     };
 
     await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+    // Lets the feed skip followed accounts that haven't posted lately.
+    await ddb
+      .send(
+        new UpdateCommand({
+          TableName: TABLE,
+          Key: { PK: `USER#${userID}`, SK: "PROFILE" },
+          UpdateExpression: "SET LastPostAt = :ts",
+          ConditionExpression: "attribute_exists(PK)",
+          ExpressionAttributeValues: { ":ts": timestamp },
+        })
+      )
+      .catch((err) => console.warn("LastPostAt update failed:", err?.name || err));
     const [friendIDs, payload] = await Promise.all([
       listPostAudienceIDs(userID),
       buildUserPostNotificationPayload(item, userID),
@@ -8777,6 +9259,97 @@ app.post("/api/post", async (req, res) => {
     return res.json({ ok: true, item });
   } catch (e) {
     console.error("POST /api/post error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Profile cards for many users in one request (list rows, feed authors, chat
+// members). Same visibility as GET /api/user, minus the follow lists.
+const PROFILE_BATCH_MAX = 500;
+app.post("/api/profiles", async (req, res) => {
+  if (!requirePkSk(res)) return;
+  const viewerID = String(req.auth?.userID || "").trim();
+  const isAdminViewer = !!req.auth?.isAdmin;
+  const ids = Array.from(
+    new Set(
+      (Array.isArray(req.body?.ids) ? req.body.ids : [])
+        .map((id) => String(id || "").trim())
+        .filter(Boolean)
+    )
+  ).slice(0, PROFILE_BATCH_MAX);
+
+  try {
+    const viewerProfile = viewerID && !isAdminViewer ? await getCachedUserProfile(viewerID) : null;
+    const profiles = await mapWithConcurrency(ids, 25, (id) => getCachedUserProfile(id));
+    const users = {};
+    ids.forEach((id, i) => {
+      users[id] = profiles[i]
+        ? toProfileCard(
+            sanitizeProfileForViewer(profiles[i], viewerID, id === viewerID ? null : viewerProfile, {
+              isAdmin: isAdminViewer,
+            })
+          )
+        : null;
+    });
+    return res.json({ ok: true, users });
+  } catch (e) {
+    console.error("POST /api/profiles error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Newest posts from the signed-in user and everyone they follow whose posts
+// they may see, merged on the server. See server/lib/feed.js.
+app.get("/api/feed", async (req, res) => {
+  if (!requirePkSk(res)) return;
+  const viewerID = String(req.auth?.userID || "").trim();
+  if (!viewerID) return res.status(401).json({ error: "Sign in required", code: "UNAUTHENTICATED" });
+
+  try {
+    const limitRaw = Number(req.query?.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 100) : 25;
+    const viewer = await getCachedUserProfile(viewerID);
+    if (!viewer) return res.status(404).json({ error: "User not found" });
+
+    const followingIDs = getFollowing(viewer).filter((id) => id && id !== viewerID);
+    const followed = await mapWithConcurrency(followingIDs, 25, (id) => getCachedUserProfile(id));
+
+    const authors = [{ userID: viewerID, lastPostAt: viewer.LastPostAt || null, profile: viewer }];
+    followingIDs.forEach((id, i) => {
+      const owner = followed[i];
+      if (!owner) return;
+      if (buildViewerAccess(viewerID, owner, viewer).canView.posts !== true) return;
+      authors.push({ userID: id, lastPostAt: owner.LastPostAt || null, profile: owner });
+    });
+
+    const { items, authorsRead, authorsTotal } = await buildFeed({
+      authors,
+      limit,
+      fetchPosts: async ({ userID }, perAuthor) => {
+        const out = await ddb.send(
+          new QueryCommand({
+            TableName: TABLE,
+            KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
+            ExpressionAttributeValues: { ":pk": `USER#${userID}`, ":pfx": "POST#" },
+            ScanIndexForward: false,
+            Limit: perAuthor,
+          })
+        );
+        return out.Items || [];
+      },
+    });
+
+    const authorCards = {};
+    for (const author of authors) {
+      if (!items.some((p) => p.AuthorID === author.userID)) continue;
+      authorCards[author.userID] = toProfileCard(
+        sanitizeProfileForViewer(author.profile, viewerID, author.userID === viewerID ? null : viewer)
+      );
+    }
+
+    return res.json({ ok: true, items, authors: authorCards, authorsRead, authorsTotal });
+  } catch (e) {
+    console.error("GET /api/feed error:", e);
     return res.status(500).json({ error: "Server error" });
   }
 });
@@ -8920,6 +9493,41 @@ app.post("/api/customEvent", async (req, res) => {
   }
 });
 
+// Rename only touches EventName; EventID stays the original slug so sessions
+// and solves under it don't move.
+app.put("/api/customEvent/:userID/:eventID", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const userID = String(req.params.userID || "").trim();
+  const eventID = String(req.params.eventID || "").trim();
+  const eventName = String(req.body?.eventName || "").trim();
+
+  if (!userID) return res.status(400).json({ error: "Missing userID" });
+  if (!eventID) return res.status(400).json({ error: "Missing eventID" });
+  if (!eventName) return res.status(400).json({ error: "Missing eventName" });
+  if (eventName.length > 80) return res.status(400).json({ error: "Event name too long" });
+
+  try {
+    const out = await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${userID}`, SK: `CUSTOMEVENT#${eventID}` },
+        UpdateExpression: "SET EventName = :name, UpdatedAt = :ts",
+        ConditionExpression: "attribute_exists(PK)",
+        ExpressionAttributeValues: { ":name": eventName, ":ts": nowIso() },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return res.json({ ok: true, item: out.Attributes });
+  } catch (e) {
+    if (e?.name === "ConditionalCheckFailedException") {
+      return res.status(404).json({ error: "Custom event not found" });
+    }
+    console.error("PUT /api/customEvent error:", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
 app.get("/api/customEvents/:userID", async (req, res) => {
   if (!requirePkSk(res)) return;
 
@@ -8986,6 +9594,13 @@ app.post("/api/group", async (req, res) => {
     if (existing) {
       const members = await listGroupMembers(groupID);
       return res.json({ ok: true, item: existing, members, existed: true });
+    }
+
+    if (memberIDs.length > MAX_GROUP_MEMBERS) {
+      return res.status(400).json({
+        error: `Groups can have at most ${MAX_GROUP_MEMBERS} members`,
+        code: "GROUP_FULL",
+      });
     }
 
     const ts = nowIso();
@@ -9063,6 +9678,13 @@ app.post("/api/group/join", async (req, res) => {
         item: group,
         members: existingMembers,
         existed: true,
+      });
+    }
+
+    if (!hasPlaceFor(existingMemberIDs, userID, MAX_GROUP_MEMBERS)) {
+      return res.status(409).json({
+        error: `This room is full (${MAX_GROUP_MEMBERS} members max)`,
+        code: "GROUP_FULL",
       });
     }
 
@@ -9202,34 +9824,53 @@ async function getRoomMeta(roomID) {
   return out.Item || null;
 }
 
+// Both read every page: a single query stops at 1MB, which a big room's
+// member list (or a long stream's scrambles) can pass.
 async function listRoomMembers(roomID) {
-  const out = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
-      ExpressionAttributeValues: {
-        ":pk": `ROOM#${roomID}`,
-        ":pfx": "MEMBER#",
-      },
-    })
-  );
-  return out.Items || [];
+  return queryAllPages({
+    TableName: TABLE,
+    KeyConditionExpression: "PK = :pk AND begins_with(SK, :pfx)",
+    ExpressionAttributeValues: {
+      ":pk": `ROOM#${roomID}`,
+      ":pfx": "MEMBER#",
+    },
+  });
 }
 
 async function listRoomScrambles(roomID, fromIndex = 0) {
-  const out = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      KeyConditionExpression: "PK = :pk AND SK >= :from",
-      ExpressionAttributeValues: {
-        ":pk": `ROOM#${roomID}`,
-        ":from": `SCRAMBLE#${String(fromIndex).padStart(8, "0")}`,
-      },
-    })
-  );
-  return (out.Items || [])
+  const items = await queryAllPages({
+    TableName: TABLE,
+    KeyConditionExpression: "PK = :pk AND SK >= :from",
+    ExpressionAttributeValues: {
+      ":pk": `ROOM#${roomID}`,
+      ":from": `SCRAMBLE#${String(fromIndex).padStart(8, "0")}`,
+    },
+  });
+  return items
     .filter((item) => item.SK.startsWith("SCRAMBLE#"))
     .sort((a, b) => (a.Index || 0) - (b.Index || 0));
+}
+
+// Spectators poll /state every couple of seconds; serve them from a ~1s
+// snapshot so the room is read from DynamoDB about once a second however many
+// are watching. Host actions and joins/leaves invalidate it straight away;
+// spectator solves just show up on the next refresh.
+const roomSnapshotCache = createTtlCache({ ttlMs: DEFAULT_TTL_MS });
+setInterval(() => roomSnapshotCache.prune(), 60 * 1000).unref();
+
+async function getRoomSnapshot(roomID) {
+  return roomSnapshotCache.get(roomID, async () => {
+    const [meta, scrambles, members] = await Promise.all([
+      getRoomMeta(roomID),
+      listRoomScrambles(roomID, 0),
+      listRoomMembers(roomID),
+    ]);
+    return {
+      meta,
+      scrambles: scrambles.map((s) => ({ index: s.Index, event: s.Event, scramble: s.Scramble })),
+      rows: sortLeaderboardRows(members.map(toLeaderboardRow)),
+    };
+  });
 }
 
 function normalizeRoomEvent(event) {
@@ -9298,6 +9939,7 @@ app.post("/api/room/open", async (req, res) => {
         ExpressionAttributeValues: { ":roomID": roomID },
       })
     );
+    roomSnapshotCache.invalidate(roomID);
 
     return res.json({ ok: true, item: meta });
   } catch (e) {
@@ -9336,6 +9978,7 @@ app.post("/api/room/:roomID/close", async (req, res) => {
         UpdateExpression: "REMOVE ActiveRoomID",
       })
     );
+    roomSnapshotCache.invalidate(roomID);
 
     const members = await listRoomMembers(roomID);
     publishNotificationToUsers(
@@ -9361,13 +10004,12 @@ app.get("/api/room/byHost/:hostID", async (req, res) => {
       return res.json({ ok: true, item: null });
     }
 
-    const meta = await getRoomMeta(hostID);
+    const { meta, rows } = await getRoomSnapshot(hostID);
     if (!meta || meta.Active !== true) {
       return res.json({ ok: true, item: null });
     }
 
-    const members = await listRoomMembers(hostID);
-    return res.json({ ok: true, item: meta, memberCount: members.length });
+    return res.json({ ok: true, item: meta, memberCount: rows.length });
   } catch (e) {
     console.error("GET /api/room/byHost error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
@@ -9424,9 +10066,10 @@ app.post("/api/room/:roomID/scramble", async (req, res) => {
         ExpressionAttributeValues: { ":index": index, ":event": event, ":updated": ts },
       })
     );
+    roomSnapshotCache.invalidate(roomID);
 
-    const members = await listRoomMembers(roomID);
-    const memberIDs = members.map((m) => m.UserID).filter(Boolean);
+    const { rows } = await getRoomSnapshot(roomID);
+    const memberIDs = rows.map((row) => row.userID).filter(Boolean);
 
     publishNotificationToUsers(
       memberIDs,
@@ -9459,7 +10102,8 @@ app.post("/api/room/:roomID/join", async (req, res) => {
     if (!roomID) return res.status(400).json({ error: "Missing roomID" });
     if (!userID) return res.status(400).json({ error: "Missing userID" });
 
-    const meta = await getRoomMeta(roomID);
+    const snapshot = await getRoomSnapshot(roomID);
+    const meta = snapshot.meta;
     if (!meta || meta.Active !== true) {
       return res.status(404).json({ error: "Room not active" });
     }
@@ -9467,43 +10111,46 @@ app.post("/api/room/:roomID/join", async (req, res) => {
     if (!(await canViewSection(req, roomID, "liveRoom"))) {
       return res.status(403).json({ error: "This live room is private", code: "PRIVATE", section: "liveRoom" });
     }
+    if (
+      userID !== meta.HostID &&
+      !hasPlaceFor(snapshot.rows.map((row) => row.userID), userID, MAX_ROOM_MEMBERS)
+    ) {
+      return res.status(409).json({
+        error: `This live room is full (${MAX_ROOM_MEMBERS} max)`,
+        code: "ROOM_FULL",
+      });
+    }
 
     const ts = nowIso();
-    await ddb.send(
-      new PutCommand({
-        TableName: TABLE,
-        Item: {
-          PK: `ROOM#${roomID}`,
-          SK: `MEMBER#${userID}`,
-          ItemType: "ROOMMEMBER",
-          RoomID: roomID,
-          UserID: userID,
-          Name: name,
-          Color: color,
-          Role: userID === meta.HostID ? "HOST" : "MEMBER",
-          CurrentIndex: -1,
-          LastTime: null,
-          JoinedAt: ts,
-          UpdatedAt: ts,
-        },
-      })
-    );
+    const memberItem = {
+      PK: `ROOM#${roomID}`,
+      SK: `MEMBER#${userID}`,
+      ItemType: "ROOMMEMBER",
+      RoomID: roomID,
+      UserID: userID,
+      Name: name,
+      Color: color,
+      Role: userID === meta.HostID ? "HOST" : "MEMBER",
+      CurrentIndex: -1,
+      LastTime: null,
+      JoinedAt: ts,
+      UpdatedAt: ts,
+    };
+    await ddb.send(new PutCommand({ TableName: TABLE, Item: memberItem }));
 
-    const scrambles = await listRoomScrambles(roomID, 0);
-    const members = await listRoomMembers(roomID);
+    // The snapshot may predate this join; put the joiner's fresh row in so
+    // they see themselves straight away. Everyone else sees them within a
+    // second, without a burst of joins forcing a reload per join.
+    const rows = sortLeaderboardRows([
+      ...snapshot.rows.filter((row) => row.userID !== userID),
+      toLeaderboardRow(memberItem),
+    ]);
 
     return res.json({
       ok: true,
       item: meta,
-      scrambles: scrambles.map((s) => ({ index: s.Index, event: s.Event, scramble: s.Scramble })),
-      leaderboard: members.map((m) => ({
-        userID: m.UserID,
-        name: m.Name,
-        color: m.Color,
-        role: m.Role,
-        currentIndex: m.CurrentIndex,
-        lastTime: m.LastTime,
-      })),
+      scrambles: snapshot.scrambles,
+      ...buildLeaderboardView(rows, { viewerID: userID }),
     });
   } catch (e) {
     console.error("POST /api/room/:roomID/join error:", e);
@@ -9575,26 +10222,15 @@ app.get("/api/room/:roomID/state", async (req, res) => {
     const fromIndex = Math.max(0, Number(req.query?.fromIndex) || 0);
     if (!roomID) return res.status(400).json({ error: "Missing roomID" });
 
-    const meta = await getRoomMeta(roomID);
+    const { meta, scrambles, rows } = await getRoomSnapshot(roomID);
     if (!meta) return res.status(404).json({ error: "Room not found" });
-
-    const [scrambles, members] = await Promise.all([
-      listRoomScrambles(roomID, fromIndex),
-      listRoomMembers(roomID),
-    ]);
 
     return res.json({
       ok: true,
       item: meta,
-      scrambles: scrambles.map((s) => ({ index: s.Index, event: s.Event, scramble: s.Scramble })),
-      leaderboard: members.map((m) => ({
-        userID: m.UserID,
-        name: m.Name,
-        color: m.Color,
-        role: m.Role,
-        currentIndex: m.CurrentIndex,
-        lastTime: m.LastTime,
-      })),
+      scrambles: scrambles.filter((s) => s.index >= fromIndex),
+      ...buildLeaderboardView(rows, { viewerID: req.auth?.userID }),
+      pollAfterMs: spectatorPollMs(rows.length),
     });
   } catch (e) {
     console.error("GET /api/room/:roomID/state error:", e);
@@ -9609,20 +10245,10 @@ app.get("/api/room/:roomID/leaderboard", async (req, res) => {
     const roomID = String(req.params.roomID || "").trim();
     if (!roomID) return res.status(400).json({ error: "Missing roomID" });
 
-    const members = await listRoomMembers(roomID);
-    const leaderboard = members
-      .map((m) => ({
-        userID: m.UserID,
-        name: m.Name,
-        color: m.Color,
-        role: m.Role,
-        currentIndex: m.CurrentIndex,
-        lastTime: m.LastTime,
-        updatedAt: m.UpdatedAt,
-      }))
-      .sort((a, b) => (b.currentIndex || -1) - (a.currentIndex || -1));
-
-    return res.json({ ok: true, leaderboard });
+    // Full list (only the host polls this, every few seconds), from the same
+    // snapshot spectators share.
+    const { rows } = await getRoomSnapshot(roomID);
+    return res.json({ ok: true, leaderboard: rows, memberCount: rows.length });
   } catch (e) {
     console.error("GET /api/room/:roomID/leaderboard error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
@@ -9662,6 +10288,13 @@ app.post("/api/conversation", async (req, res) => {
     if (existing) {
       const members = await listConversationMembers(conversationID);
       return res.json({ ok: true, item: existing, members, existed: true });
+    }
+
+    if (memberIDs.length > MAX_GROUP_MEMBERS) {
+      return res.status(400).json({
+        error: `Groups can have at most ${MAX_GROUP_MEMBERS} members`,
+        code: "GROUP_FULL",
+      });
     }
 
     const created = await createConversationRecords({
@@ -9707,6 +10340,28 @@ app.get("/api/conversations/:userID", async (req, res) => {
       )
       .slice(0, limit);
 
+    // Shared-session stats are kept once, on each conversation's META, not
+    // copied onto every member's row. Older rows may still hold a stale copy,
+    // so META's always wins; a failed lookup just leaves the stats out.
+    try {
+      const metas = await batchGetItems(
+        items
+          .map((item) => String(item?.ConversationID || "").trim())
+          .filter(Boolean)
+          .map((cid) => ({ PK: `CONVO#${cid}`, SK: "META" })),
+        { projection: "PK, SharedStats" }
+      );
+      const statsByConversation = new Map(
+        metas.map((meta) => [String(meta.PK || "").slice("CONVO#".length), meta.SharedStats || null])
+      );
+      items.forEach((item) => {
+        const cid = String(item?.ConversationID || "").trim();
+        item.SharedStats = statsByConversation.get(cid) || item.SharedStats || null;
+      });
+    } catch (statsErr) {
+      console.error("GET /api/conversations shared stats lookup failed:", statsErr?.name || statsErr);
+    }
+
     return res.json({ ok: true, items });
   } catch (e) {
     console.error("GET /api/conversations error:", e);
@@ -9750,10 +10405,23 @@ app.post("/api/message", async (req, res) => {
       return res.status(403).json({ error: "Sender is not a member of this conversation" });
     }
 
+    // Shared-session updates/joins name the player inside the text, and every
+    // reader (this server and the clients) attributes the result to that name,
+    // so it must be the sender.
+    const embeddedActorID = getSharedMessageActorID(text);
+    if (embeddedActorID && embeddedActorID !== senderID && !req.auth?.isAdmin) {
+      return res.status(403).json({
+        error: "Shared session updates can only be posted for yourself",
+        code: "FORBIDDEN",
+      });
+    }
+
     const timestamp = nowIso();
     const item = {
       PK: `CONVO#${conversationID}`,
-      SK: `MSG#${timestamp}`,
+      // Suffix keeps two messages sent in the same millisecond from sharing a
+      // key (and the second silently replacing the first).
+      SK: `MSG#${timestamp}#${crypto.randomUUID().slice(0, 8)}`,
       ItemType: "MESSAGE",
       SenderID: senderID,
       Text: text,
@@ -9766,20 +10434,50 @@ app.post("/api/message", async (req, res) => {
       UpdatedAt: timestamp,
     };
 
-    await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
-    await processSharedMessageEffects({
-      conversationID,
-      text,
-      memberIDs: members.map((member) => member?.UserID).filter(Boolean),
-      timestamp,
-    });
-    await touchConversationActivity({
-      conversationID,
-      meta,
-      members,
-      timestamp,
-      preview: text,
-    });
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: item,
+        ConditionExpression: "attribute_not_exists(SK)",
+      })
+    );
+    // The message is saved at this point. Shared-run bookkeeping and the
+    // conversation list are secondary: if they fail, log it and still answer
+    // 200 and push the message to everyone, rather than leaving the sender to
+    // retry something that already worked and live viewers waiting for a poll.
+    try {
+      await processSharedMessageEffects({
+        conversationID,
+        text,
+        memberIDs: members.map((member) => member?.UserID).filter(Boolean),
+        timestamp,
+      });
+    } catch (effectErr) {
+      console.error("POST /api/message shared-run effects failed:", {
+        conversationID,
+        text: String(text || "").slice(0, 200),
+        error: effectErr?.name || effectErr?.message || effectErr,
+      });
+    }
+    // Per-solve shared updates are hidden in chat, so they don't change the
+    // preview or order of the conversation list; skipping them saves a write
+    // per member on every solve.
+    if (!String(text || "").startsWith("[sharedUpdate]")) {
+      try {
+        await touchConversationActivity({
+          conversationID,
+          meta,
+          members,
+          timestamp,
+          preview: text,
+        });
+      } catch (touchErr) {
+        console.error("POST /api/message conversation activity update failed:", {
+          conversationID,
+          error: touchErr?.name || touchErr?.message || touchErr,
+        });
+      }
+    }
 
     publishNotificationToUsers(
       members.map((member) => member?.UserID).filter(Boolean),
@@ -9801,6 +10499,36 @@ app.post("/api/message", async (req, res) => {
     return res.json({ ok: true, item, conversation: { ...meta, LastMessageAt: timestamp } });
   } catch (e) {
     console.error("POST /api/message error:", e);
+    return res.status(500).json({ error: e?.message || "Server error" });
+  }
+});
+
+// The conversation's shared-session stats (kept on META only), for refreshing
+// the chat header without reloading the whole conversation list.
+app.get("/api/conversation/:conversationID/shared-stats", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  const conversationID = String(req.params.conversationID || "").trim();
+  const viewerID = req.auth.userID;
+  if (!conversationID) return res.status(400).json({ error: "Missing conversationID" });
+
+  try {
+    const [meta, membership] = await Promise.all([
+      getConversationMeta(conversationID),
+      ddb.send(
+        new GetCommand({
+          TableName: TABLE,
+          Key: { PK: `CONVO#${conversationID}`, SK: `MEMBER#${viewerID}` },
+        })
+      ),
+    ]);
+    if (!meta) return res.status(404).json({ error: "Conversation not found" });
+    if (!membership.Item && !req.auth.isAdmin) {
+      return res.status(403).json({ error: "User is not a member of this conversation" });
+    }
+    return res.json({ ok: true, conversationID, sharedStats: meta.SharedStats || createEmptySharedStats() });
+  } catch (e) {
+    console.error("GET /api/conversation/:id/shared-stats error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
   }
 });

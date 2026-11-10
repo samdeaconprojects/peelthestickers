@@ -1,7 +1,7 @@
 // src/services/getPosts.js
 import { apiGet } from "./api.js";
 
-function normalizePost(item) {
+export function normalizePost(item) {
   if (!item || typeof item !== "object") return item;
 
   const timestamp =

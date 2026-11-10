@@ -125,8 +125,8 @@
   gap: 12px;
   padding: 12px;
   border-radius: 10px;
-  background: rgba(100, 100, 100, 0.1);
-  border: 2px solid var(--profile-stats-card-border-soft, rgba(200, 200, 200, 0.3));
+  background: var(--stats-container-bg, rgba(100, 100, 100, 0.1));
+  border: 2px solid var(--stats-container-border, rgba(200, 200, 200, 0.3));
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
 }
@@ -166,8 +166,8 @@
   min-height: 240px;
   padding: 12px;
   box-sizing: border-box;
-  background-color: rgba(100, 100, 100, 0.1);
-  border: 2px solid var(--profile-stats-card-border-soft, rgba(200, 200, 200, 0.3));
+  background-color: var(--stats-container-bg, rgba(100, 100, 100, 0.1));
+  border: 2px solid var(--stats-container-border, rgba(200, 200, 200, 0.3));
   border-radius: 10px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   overflow: hidden;
@@ -177,7 +177,7 @@
 /* Same hover treatment as the Stats page cards (.statsCardShell) */
 .profileStatsItem:hover,
 .profileStatsMatrixCard:hover {
-  border-color: var(--profile-stats-card-border-hover, rgba(255,255,255,0.44));
+  border-color: var(--stats-container-border-hover, rgba(255,255,255,0.44));
   box-shadow: 0 14px 36px rgba(0,0,0,0.18);
 }
 
@@ -188,7 +188,7 @@
 }
 
 .profileStatsItem--summary:hover .ssCard {
-  border-color: var(--ss-card-border-hover, var(--profile-stats-card-border-hover, rgba(255,255,255,0.44)));
+  border-color: var(--ss-card-border-hover, var(--stats-container-border-hover, rgba(255,255,255,0.44)));
 }
 
 .profilePage .postShell:hover .post {
@@ -234,7 +234,8 @@
   box-sizing: border-box;
   border-radius: 10px;
   align-items: center;
-  background-color: rgba(100, 100, 100, 0.1);
+  background-color: var(--stats-container-bg, rgba(100, 100, 100, 0.1));
+  border-color: var(--stats-container-border, rgba(200, 200, 200, 0.3));
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
@@ -251,6 +252,179 @@
 
 .profileStatsItem--savedAverage .postAverageSnapshot {
   margin-right: 18px;
+}
+
+/* Tall saved solve/average tile: the grid row is stretched by a taller neighbour.
+   Size-contained so it fills the row without ever setting the row height. */
+.profileStatsItem--tall {
+  contain: size;
+}
+
+.postShell--tall {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  container-type: size;
+}
+
+.postShell--tall .postTall {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 22px 28px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 8px;
+  overflow: hidden;
+}
+
+/* Puzzle + event name share the top row. */
+.postTallHeader {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.postTall .postTallIcon {
+  /* Wider than the glyph: the puzzle art overflows its 14px anchor box. */
+  width: 52px;
+  height: 40px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.postTallIconGlyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  overflow: visible;
+  /* Nudge left/down: the puzzle art sits up-right of its anchor box. */
+  transform: translate(-8px, 8px) scale(1.1);
+  transform-origin: center;
+}
+
+.postTallIcon.is-other .postTallIconGlyph {
+  transform: translate(-8px, 8px) scale(0.75);
+}
+
+.postTallLabel {
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 700;
+  font-size: clamp(1.5rem, 12cqh, 2.8rem);
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Time fills the remaining ~2/3 of the tile. */
+/* Right side of the body row, time pinned right. */
+.postTallTime {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  color: #ffffff;
+  font-weight: 800;
+  font-size: min(58cqh, 30cqw);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.postTall .postAverageSnapshot {
+  width: min(480px, 100%);
+  margin: 0;
+  align-self: flex-end;
+}
+
+.postTall .postTallNote {
+  margin: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Solve tags: same chip as the home tag strip (TagBar .tagHomeChip), read-only. */
+.postTagRow.tagHomeSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.postTagChip.tagHomeChip {
+  width: auto;
+  min-width: 0;
+  opacity: 1;
+  cursor: inherit;
+}
+
+.postTagChip.tagHomeChip:hover {
+  transform: none;
+}
+
+/* Compact version of the home chip for the tile's tag column. */
+.postTallBody .postTagChip.tagHomeChip {
+  min-height: 0;
+  padding: 5px 10px;
+  gap: 6px;
+  border-radius: 9px;
+}
+
+.postTallBody .postTagChip .tagHomeChipValue {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.postTallBody .postTagChip .tagHomeChipIconWrap,
+.postTallBody .postTagChip .tagHomeChipIcon {
+  width: 13px;
+  height: 13px;
+  flex-basis: 13px;
+}
+
+/* Tall tile: tags stacked on the left, time on the right. */
+.postTallBody {
+  margin-top: 8px;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.postTallBody .postTagRow {
+  flex: 0 1 auto;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  /* Centred, then nudged ~6px below the middle. */
+  align-self: center;
+  margin-top: 12px;
+  max-width: 140px;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+/* Just enough narrower than the no-tags size to fit beside the tag column. */
+.postTall--withTags .postTallTime {
+  font-size: min(58cqh, 28cqw);
 }
 
 .profileStatsItem--line {
@@ -597,17 +771,19 @@
   flex: 0 0 auto;
 }
 
+/* Cells mirror the home horizontal time row (82x36, 4px gap). */
 .postAverageSnapshotGrid {
   display: grid;
-  gap: 8px;
+  gap: 4px;
+  justify-content: center;
 }
 
 .postAverageSnapshotGrid--5 {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 82px));
 }
 
 .postAverageSnapshotGrid--12 {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 82px));
 }
 
 .postAverageSnapshotCell {
@@ -616,8 +792,9 @@
 
 .postAverageSnapshotSummary {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 82px));
+  gap: 4px;
+  justify-content: center;
 }
 
 .postAverageSnapshotSummaryItem {
@@ -629,20 +806,28 @@
   width: 100%;
   min-width: 0;
   max-width: none;
-  min-height: calc(34px * var(--home-timelist-scale, 1));
-  height: calc(34px * var(--home-timelist-scale, 1));
+  min-height: 36px;
+  height: 36px;
   margin: 0;
-  padding: calc(5px * var(--home-timelist-padding-scale, 1));
+  padding: 0;
   border-radius: 5px;
   display: flex;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  font-size: calc(1rem * var(--home-timelist-scale, 1));
-  font-weight: 800;
+  font-size: 1.16rem;
+  font-weight: 400;
   line-height: 1;
   letter-spacing: 0;
   background: transparent;
+}
+
+.postAverageSnapshotTime.time-item.dashed-border-min {
+  background-color: rgba(0, 255, 0, 0.1);
+}
+
+.postAverageSnapshotTime.time-item.dashed-border-max {
+  background-color: rgba(255, 0, 0, 0.1);
 }
 
 .postCaption,
@@ -1010,6 +1195,11 @@
     border-radius: 999px;
     background: #ff3c3c;
     box-shadow: 0 0 0 3px rgba(255, 60, 60, 0.25);
+}
+
+.profileLiveRoomError {
+    font-size: 0.78rem;
+    color: #ff8080;
 }
 
 .statsEditorOverlay {
@@ -1862,6 +2052,20 @@
   line-height: 1.2;
   padding: 0 8px;
   cursor: pointer;
+}
+
+.statsOrganizerToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(8, 13, 18, 0.88);
+  font-size: 0.82rem;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .statsOrganizerBar select {

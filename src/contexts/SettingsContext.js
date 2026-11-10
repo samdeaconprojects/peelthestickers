@@ -24,6 +24,11 @@ const SettingsContext = createContext(null);
 
 export const useSettings = () => useContext(SettingsContext);
 
+function clampStatsDefault(value, min, max, fallback) {
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+}
+
 function normalizeScrambleMode(rawValue) {
   const raw = String(rawValue || "").trim().toLowerCase();
 
@@ -237,9 +242,14 @@ export const defaultSettings = {
   statsContainerColorMode: "profile",
   statsContainerCustomColor: "#2EC4B6",
   statsContainerBackground: false,
+  statsContainerBackgroundOpacity: 13,
   statsTopBarBackground: false,
   statsHoverGrow: false,
   statsNavButtonsEnabled: false,
+  // What the stats page opens on: the last N solves, or the last N days.
+  statsDefaultFrameKind: "index",
+  statsDefaultSolveCount: 100,
+  statsDefaultDays: 7,
 
   // random-state = cubing.js default
   // legacy = old generateScramble behavior
@@ -340,9 +350,18 @@ function mergeSettings(input) {
       safe.statsContainerCustomColor
     ),
     statsContainerBackground: safe.statsContainerBackground === true,
+    statsContainerBackgroundOpacity: clampStatsDefault(
+      safe.statsContainerBackgroundOpacity,
+      2,
+      50,
+      defaultSettings.statsContainerBackgroundOpacity
+    ),
     statsTopBarBackground: safe.statsTopBarBackground === true,
     statsHoverGrow: safe.statsHoverGrow === true,
     statsNavButtonsEnabled: safe.statsNavButtonsEnabled === true,
+    statsDefaultFrameKind: safe.statsDefaultFrameKind === "date" ? "date" : "index",
+    statsDefaultSolveCount: clampStatsDefault(safe.statsDefaultSolveCount, 5, 10000, defaultSettings.statsDefaultSolveCount),
+    statsDefaultDays: clampStatsDefault(safe.statsDefaultDays, 1, 3650, defaultSettings.statsDefaultDays),
     playerBarTagFields,
     homeLeftOfTimer: normalizeHomeLeftOfTimer(safe.homeLeftOfTimer),
     homeAveragesOrder: normalizeHomeAveragesOrder(safe.homeAveragesOrder),

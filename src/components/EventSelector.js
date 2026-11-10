@@ -13,6 +13,8 @@ import { useDbStatus } from "../contexts/DbStatusContext";
 import { createSession } from "../services/createSession";
 import { createCustomEvent } from "../services/createCustomEvent";
 import { deleteSession } from "../services/deleteSession";
+import { renameSession } from "../services/renameSession";
+import { renameCustomEvent } from "../services/renameCustomEvent";
 import { getSessions } from "../services/getSessions";
 import { getCustomEvents } from "../services/getCustomEvents";
 import PuzzleSVG from "./PuzzleSVGs/PuzzleSVG";
@@ -557,7 +559,7 @@ const EventSelector = forwardRef(function EventSelector(
   };
 
   const commitSelection = useCallback(
-    (eventId, sessionId) => {
+    (eventId, sessionId, sessionList = sessions) => {
       const normalizedEvent = normalizeEventId(eventId || currentEvent);
       const normalizedSession = String(sessionId || "main").trim() || "main";
       const eventChanged = normalizeEventId(currentEvent) !== normalizedEvent;
@@ -572,7 +574,7 @@ const EventSelector = forwardRef(function EventSelector(
         onSessionChange?.();
       }
 
-      const sessionObj = (sessions || []).find(
+      const sessionObj = (sessionList || []).find(
         (s) =>
           String(s.SessionID || "main") === normalizedSession &&
           normalizeEventId(s.Event) === normalizedEvent
@@ -697,6 +699,46 @@ const EventSelector = forwardRef(function EventSelector(
     userID,
   ]);
 
+  const canRenameActiveSession =
+    !!activeSessionObj &&
+    String(activeSessionObj.SessionID || "main") !== "main" &&
+    !/^(SHARED#|shared_)/.test(String(activeSessionObj.SessionID || ""));
+
+  const handleRenameActiveSession = useCallback(async () => {
+    if (!userID || !activeSessionObj) return;
+    const eventId = normalizeEventId(activeSessionObj.Event || activeEvent);
+    const sessionId = String(activeSessionObj.SessionID || "main").trim() || "main";
+    const currentName = String(activeSessionObj.SessionName || sessionId);
+    const next = window.prompt("Rename session", currentName);
+    const name = String(next || "").trim();
+    if (!name || name === currentName) return;
+
+    try {
+      await runDb("Renaming session", () => renameSession(userID, eventId, sessionId, name));
+      await refreshData({ includeSessions: true, includeCustomEvents: false });
+    } catch (err) {
+      console.error("❌ Failed to rename session:", err);
+      alert(err?.message || "Failed to rename session.");
+    }
+  }, [activeEvent, activeSessionObj, refreshData, runDb, userID]);
+
+  const handleRenameActiveEvent = useCallback(async () => {
+    if (!userID || !activeEventIsCustom) return;
+    const eventId = normalizeEventId(activeEvent);
+    const currentName = eventLookup.get(eventId)?.name || eventId;
+    const next = window.prompt("Rename event", currentName);
+    const name = String(next || "").trim();
+    if (!name || name === currentName) return;
+
+    try {
+      await runDb("Renaming event", () => renameCustomEvent(userID, eventId, name));
+      await refreshData({ includeSessions: false, includeCustomEvents: true });
+    } catch (err) {
+      console.error("❌ Failed to rename event:", err);
+      alert(err?.message || "Failed to rename event.");
+    }
+  }, [activeEvent, activeEventIsCustom, eventLookup, refreshData, runDb, userID]);
+
   const close = useCallback(() => {
     setIsOpen(false);
     setShowAddSession(false);
@@ -774,10 +816,11 @@ const EventSelector = forwardRef(function EventSelector(
     if (!name) return;
 
     try {
-      await runDb("Creating session", () => createSession(userID, ev, name)); // old signature supported
-      await refreshData();
+      const created = await runDb("Creating session", () => createSession(userID, ev, name)); // old signature supported
+      const refreshed = await refreshData();
       setShowAddSession(false);
       setNewSessionName("");
+      if (created?.SessionID) commitSelection(ev, created.SessionID, refreshed?.sessions);
     } catch (err) {
       console.error("❌ Failed to create session:", err);
       alert("Failed to create session.");
@@ -794,15 +837,16 @@ const EventSelector = forwardRef(function EventSelector(
     const relayLegs = Array.isArray(legs) ? legs : [];
 
     try {
-      await runDb("Creating relay session", () =>
+      const created = await runDb("Creating relay session", () =>
         createSession(userID, ev, sessionID, cleanName, {
           sessionType: "RELAY",
           relayLegs,
         })
       );
-      await refreshData();
+      const refreshed = await refreshData();
       setShowAddSession(false);
       setNewSessionName("");
+      commitSelection(ev, created?.SessionID || sessionID, refreshed?.sessions);
     } catch (err) {
       console.error("❌ Failed to create relay session:", err);
       alert("Failed to create relay session.");
@@ -829,10 +873,11 @@ const EventSelector = forwardRef(function EventSelector(
     if (!name) return;
 
     try {
-      await runDb("Creating custom event", () => createCustomEvent(userID, name));
-      await refreshData();
+      const created = await runDb("Creating custom event", () => createCustomEvent(userID, name));
+      const refreshed = await refreshData();
       setShowAddEvent(false);
       setNewEventName("");
+      if (created?.EventID) commitSelection(created.EventID, "main", refreshed?.sessions);
     } catch (err) {
       console.error("❌ Failed to create custom event:", err);
       alert("Failed to create custom event.");
@@ -863,12 +908,11 @@ const EventSelector = forwardRef(function EventSelector(
         })
       );
 
-      await refreshData();
-      setDraftEvent(eventId);
-      setDraftSession("main");
+      const refreshed = await refreshData();
       setShowAddEvent(false);
       setNewEventName("");
       setRelayBuilderLegs([]);
+      commitSelection(eventId, "main", refreshed?.sessions);
     } catch (err) {
       console.error("❌ Failed to create relay:", err);
       alert("Failed to create relay.");
@@ -1028,6 +1072,18 @@ const EventSelector = forwardRef(function EventSelector(
                         onClick={handleDeleteActiveSession}
                       >
                         {deletingMainDeletesEvent ? "Delete Event" : "Delete Session"}
+                      </button>
+                    )}
+
+                    {canRenameActiveSession && (
+                      <button type="button" className="add-event-btn" onClick={handleRenameActiveSession}>
+                        Rename Session
+                      </button>
+                    )}
+
+                    {activeEventIsCustom && (
+                      <button type="button" className="add-event-btn" onClick={handleRenameActiveEvent}>
+                        Rename Event
                       </button>
                     )}
 

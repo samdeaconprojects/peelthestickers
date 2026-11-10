@@ -83,6 +83,33 @@ const calculateMedianTime = (solves) => {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 };
 
+// Threshold is kept in seconds; display as s.cc, m:ss.cc or h:mm:ss.cc
+const formatThreshold = (secondsValue) => {
+  const totalCs = Math.round((Number(secondsValue) || 0) * 100);
+  if (totalCs < 0) return "0.00";
+  const cs = String(totalCs % 100).padStart(2, "0");
+  const totalSec = Math.floor(totalCs / 100);
+  const hours = Math.floor(totalSec / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${cs}`;
+  }
+  if (minutes > 0) return `${minutes}:${String(seconds).padStart(2, "0")}.${cs}`;
+  return `${seconds}.${cs}`;
+};
+
+// Accepts "202.3", "3:22.3" or "1:02:03.5"; returns seconds or null
+const parseThreshold = (text) => {
+  const parts = String(text || "").trim().split(":");
+  if (!parts.length || parts.length > 3) return null;
+  if (!parts.every((part, i) => (
+    i === parts.length - 1 ? /^\d*\.?\d*$/.test(part) && /\d/.test(part) : /^\d+$/.test(part)
+  ))) return null;
+  const value = parts.reduce((acc, part) => acc * 60 + Number(part), 0);
+  return Number.isFinite(value) ? value : null;
+};
+
 const PercentBarBuilder = ({
   solves,
   comparisonSeries = [],
@@ -97,6 +124,7 @@ const PercentBarBuilder = ({
   const pointerDragRef = useRef({ active: false, moved: false });
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [threshold, setThreshold] = useState(10);
+  const [thresholdDraft, setThresholdDraft] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
 
   // Measure the *card/container*, not window
@@ -133,14 +161,14 @@ const PercentBarBuilder = ({
 
     const total = input.length;
     if (total === 0) {
-      return { below: [], pct: 0 };
+      return { below: [], pct: 0, total: 0 };
     }
 
     const th = Number(threshold);
     const below = input.filter((s) => (s.time ?? Infinity) / 1000 < th);
     const pct = total > 0 ? (below.length / total) * 100 : 0;
 
-    return { below, pct };
+    return { below, pct, total };
   }, [solves, threshold]);
 
   const numericSolveTimesSec = useMemo(() => {
@@ -244,6 +272,7 @@ const PercentBarBuilder = ({
           fillPaint: resolvePercentFillPaint(series?.style || null, 0, "#7c8cff"),
           below: [],
           pct: 0,
+          total: 0,
         };
       }
 
@@ -257,6 +286,7 @@ const PercentBarBuilder = ({
         fillPaint: resolvePercentFillPaint(series?.style || null, pct, "#7c8cff"),
         below,
         pct,
+        total,
       };
     });
   }, [comparisonSeries, threshold]);
@@ -276,6 +306,7 @@ const PercentBarBuilder = ({
       color: resolvePercentFillColor(seriesStyle, computed.pct, "#50B6FF"),
       fillPaint: resolvePercentFillPaint(seriesStyle, computed.pct, "#50B6FF"),
       pct: computed.pct,
+      total: computed.total,
       solves: computed.below,
     },
     ...comparisonComputed.map((item) => ({
@@ -284,11 +315,56 @@ const PercentBarBuilder = ({
       color: item.color,
       fillPaint: item.fillPaint,
       pct: item.pct,
+      total: item.total,
       solves: item.below,
     })),
   ];
   const chartHeight = Math.max(96, h ? h - pad * 2 : 160);
   const primaryGradientFill = buildGradientFillBackground(seriesStyle, "#50B6FF");
+  const thresholdText = thresholdDraft ?? formatThreshold(threshold);
+  const countStyle = {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "rgba(255,255,255,0.45)",
+    letterSpacing: 0.3,
+    display: "block",
+    marginTop: 4,
+    fontVariantNumeric: "tabular-nums",
+  };
+
+  const handleThresholdChange = (event) => {
+    const text = event.target.value;
+    setThresholdDraft(text);
+    const parsed = parseThreshold(text);
+    if (parsed != null) setThreshold(parsed);
+  };
+
+  const handleThresholdKeyDown = (event) => {
+    if (event.key === "Enter") {
+      event.currentTarget.blur();
+      return;
+    }
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    stepThreshold((event.shiftKey ? 10 : 1) * (event.key === "ArrowUp" ? 1 : -1));
+  };
+
+  const stepThreshold = (step) => {
+    setThresholdDraft(null);
+    setThreshold((prev) => Math.max(0, Number(((Number(prev) || 0) + step).toFixed(2))));
+  };
+
+  const stepperButtonStyle = {
+    flex: 1,
+    width: 18,
+    padding: 0,
+    border: 0,
+    background: "rgba(255,255,255,0.08)",
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 8,
+    lineHeight: 1,
+    cursor: "pointer",
+  };
   return (
     <div
       ref={containerRef}
@@ -466,15 +542,20 @@ const PercentBarBuilder = ({
           }}
         >
           Sub
+          <span style={{ position: "relative", display: "inline-flex" }}>
           <input
-            type="number"
-            value={threshold}
-            onChange={(e) => setThreshold(e.target.value)}
+            type="text"
+            inputMode="decimal"
+            value={thresholdText}
+            onChange={handleThresholdChange}
+            onKeyDown={handleThresholdKeyDown}
+            onBlur={() => setThresholdDraft(null)}
+            title="Seconds, m:ss.cc or h:mm:ss.cc (↑/↓ to step)"
             className="percent-bar-input"
             data-interactive="percent-bar-control"
             style={{
-              width: 108,
-              padding: "6px 10px",
+              width: `calc(${Math.max(6, thresholdText.length + 1)}ch + 20px)`,
+              padding: "6px 30px 6px 10px",
               fontSize: 22,
               fontWeight: 800,
               background: "transparent",
@@ -486,6 +567,39 @@ const PercentBarBuilder = ({
             onClickCapture={stopControlEvent}
             onPointerDownCapture={stopControlEvent}
           />
+          <span
+            style={{
+              position: "absolute",
+              top: 4,
+              right: 4,
+              bottom: 4,
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              borderRadius: 4,
+              overflow: "hidden",
+            }}
+          >
+            {[["▲", 1, "Increase by 1s"], ["▼", -1, "Decrease by 1s"]].map(([glyph, dir, label]) => (
+              <button
+                key={glyph}
+                type="button"
+                aria-label={label}
+                data-interactive="percent-bar-control"
+                style={stepperButtonStyle}
+                onPointerDown={(e) => {
+                  // Step on pointerdown: the card's click-capture guard swallows onClick here
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.button !== 0) return;
+                  stepThreshold((e.shiftKey ? 10 : 1) * dir);
+                }}
+              >
+                {glyph}
+              </button>
+            ))}
+          </span>
+          </span>
         </label>
 
         <div
@@ -499,11 +613,15 @@ const PercentBarBuilder = ({
           }}
         >
           {!hasComparison ? (
-            <div style={{ whiteSpace: "nowrap" }}>{computed.pct.toFixed(1)}%</div>
+            <div style={{ whiteSpace: "nowrap" }}>
+              {computed.pct.toFixed(1)}%
+              <span style={countStyle}>{computed.below.length}/{computed.total}</span>
+            </div>
           ) : (
             seriesRows.map((series) => (
               <div key={`pct-${series.id}`} style={{ whiteSpace: "nowrap" }}>
                 <span>{series.pct.toFixed(1)}%</span>
+                <span style={countStyle}>{series.solves.length}/{series.total}</span>
               </div>
             ))
           )}

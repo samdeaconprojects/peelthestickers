@@ -1206,6 +1206,15 @@ function SummaryTileValue({
   single = false,
   emphasizeValue = false,
 }) {
+  const isWorst = label === "WORST" || label === "Worst";
+  const ms = Number(value);
+  const lengthClass = isWorst || !Number.isFinite(ms)
+    ? ""
+    : ms >= 600000
+      ? "ssTileMetricValue--tenMinutes"
+      : ms >= 60000
+        ? "ssTileMetricValue--minutes"
+        : "";
   return (
     <div
       className={`ssTileMetricValueBlock ${
@@ -1215,7 +1224,7 @@ function SummaryTileValue({
       {showLabel ? <div className={`ssTileMetricValueLabel ${className}`}>{label}</div> : null}
       <StatValueButton onClick={onClick} disabled={disabled}>
         <div className={`ssTileMetricValue ${className} ${emphasizeValue ? "ssTileMetricValue--emphasized" : ""}`}>
-          {formatStatTime(value, { average })}
+          <span className={lengthClass || undefined}>{formatStatTime(value, { average })}</span>
         </div>
       </StatValueButton>
     </div>

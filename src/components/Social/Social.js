@@ -13,12 +13,13 @@ import Post from "../Profile/Post";
 import PostDetail from "../Profile/PostDetail";
 import StatSharePost from "../Profile/StatSharePost";
 import NameTag from "../Profile/NameTag";
-import { getPosts } from "../../services/getPosts";
 import { getUser } from "../../services/getUser";
+import { getFeed, getProfiles } from "../../services/getProfiles";
 import { updatePostComments } from "../../services/updatePostComments";
 import { getMessagesPage } from "../../services/getMessages";
 import { sendMessage } from "../../services/sendMessage";
 import { getConversations } from "../../services/getConversations";
+import { getConversationSharedStats } from "../../services/getConversationSharedStats";
 import { createConversation } from "../../services/createConversation";
 import { getGroups } from "../../services/getGroups";
 import { joinGroup } from "../../services/joinGroup";
@@ -40,7 +41,6 @@ import CreateGroupModal from "./CreateGroupModal";
 import JoinRoomModal from "./JoinRoomModal";
 
 import DotIcon from "../../assets/Dot.svg";
-import FlipIcon from "../../assets/Flip.svg";
 import SearchIcon from "../../assets/Search.svg";
 
 import SocialHomeIcon from "../../assets/SocialHome.svg";
@@ -201,19 +201,13 @@ const loadProfilesById = async (ids = []) => {
     )
   );
 
-  const entries = await Promise.all(
-    uniqueIds.map(async (id) => {
-      try {
-        const prof = await getUser(id);
-        return [id, prof];
-      } catch (e) {
-        console.warn("getUser failed for", id, e);
-        return [id, null];
-      }
-    })
-  );
-
-  return Object.fromEntries(entries);
+  if (!uniqueIds.length) return {};
+  try {
+    return await getProfiles(uniqueIds);
+  } catch (e) {
+    console.warn("getProfiles failed", e);
+    return Object.fromEntries(uniqueIds.map((id) => [id, null]));
+  }
 };
 
 const normalizeConversationRecord = (item, profile = null) => {
@@ -663,6 +657,54 @@ function Social({
   useEffect(() => {
     setShowConversationPicker(false);
   }, [selectedConversation?.conversationID]);
+
+  // Shared-session stats live once on the conversation (server-side), so the
+  // open chat re-reads them when it opens and, at most every few seconds,
+  // while shared results are coming in.
+  const sharedStatsRefreshRef = useRef({ timer: null, conversationID: "", lastAt: 0 });
+  const refreshSelectedSharedStats = useCallback(async (conversationID) => {
+    const id = String(conversationID || "").trim();
+    if (!id) return;
+    try {
+      const sharedStats = await getConversationSharedStats(id);
+      if (!sharedStats) return;
+      setConversations((prev) =>
+        prev.map((conv) => (conv.conversationID === id ? { ...conv, sharedStats } : conv))
+      );
+      setSelectedConversation((prev) =>
+        prev?.conversationID === id ? { ...prev, sharedStats } : prev
+      );
+    } catch (err) {
+      console.warn("Could not refresh shared stats", err);
+    }
+  }, []);
+  const scheduleSharedStatsRefresh = useCallback(
+    (conversationID) => {
+      const state = sharedStatsRefreshRef.current;
+      if (state.timer) return;
+      const wait = Math.max(0, state.lastAt + 3000 - Date.now());
+      state.conversationID = conversationID;
+      state.timer = setTimeout(() => {
+        state.timer = null;
+        state.lastAt = Date.now();
+        if (selectedConversationRef.current?.conversationID === state.conversationID) {
+          refreshSelectedSharedStats(state.conversationID);
+        }
+      }, Math.max(wait, 800));
+    },
+    [refreshSelectedSharedStats]
+  );
+  useEffect(() => {
+    const id = selectedConversation?.conversationID;
+    if (!id || selectedConversation?.isPlaceholder) return;
+    refreshSelectedSharedStats(id);
+  }, [selectedConversation?.conversationID, selectedConversation?.isPlaceholder, refreshSelectedSharedStats]);
+  useEffect(
+    () => () => {
+      if (sharedStatsRefreshRef.current.timer) clearTimeout(sharedStatsRefreshRef.current.timer);
+    },
+    []
+  );
 
   useEffect(() => {
     sharedSessionRef.current = sharedSession;
@@ -1159,35 +1201,43 @@ function Social({
         );
 
         if (includeFeed) {
-          const own = await getPosts(user.UserID, FEED_POST_LIMIT);
-          const ownAnnotated = own.map((p) => ({
-            ...p,
-            author: user.Name,
-            authorID: user.UserID,
-            isOwn: true,
-            postColor: user.Color || user.color || "#2EC4B6",
-            authorTagColorCatalog: user.TagColorCatalog || null,
-            profileEvent: user.ProfileEvent || "333",
-            profileScramble: user.ProfileScramble || "",
-          }));
-
-          const friendsArrays = await Promise.all(
-            friendIds.map(async (id) => {
-              const posts = await getPosts(id, FEED_POST_LIMIT);
-              const prof = profilesById[id];
-
-              return posts.map((p) => ({
+          // One request for own + followed posts (server merges and applies
+          // each author's post privacy), instead of one per followed account.
+          const feedPage = await getFeed(FEED_POST_LIMIT).catch((err) => {
+            console.warn("getFeed failed; showing group posts only", err);
+            return { items: [], authors: {} };
+          });
+          const ownAnnotated = [];
+          const friendsArrays = [];
+          feedPage.items.forEach((p) => {
+            const authorID = String(p.AuthorID || "").trim();
+            if (authorID === user.UserID) {
+              ownAnnotated.push({
                 ...p,
-                author: prof?.Name || prof?.name || id,
-                authorID: id,
+                author: user.Name,
+                authorID: user.UserID,
+                isOwn: true,
+                postColor: user.Color || user.color || "#2EC4B6",
+                authorTagColorCatalog: user.TagColorCatalog || null,
+                profileEvent: user.ProfileEvent || "333",
+                profileScramble: user.ProfileScramble || "",
+              });
+              return;
+            }
+            const prof = profilesById[authorID] || feedPage.authors[authorID];
+            friendsArrays.push([
+              {
+                ...p,
+                author: prof?.Name || prof?.name || authorID,
+                authorID,
                 isOwn: false,
                 postColor: prof?.Color || prof?.color || "#cccccc",
                 authorTagColorCatalog: prof?.TagColorCatalog || null,
                 profileEvent: prof?.ProfileEvent || prof?.profileEvent || "333",
                 profileScramble: prof?.ProfileScramble || prof?.profileScramble || "",
-              }));
-            })
-          );
+              },
+            ]);
+          });
 
           const groupPostArrays = await Promise.all(
             groups.map(async (group) => {
@@ -1319,10 +1369,6 @@ function Social({
     await loadSocialData(preferredConversationID, { includeFeed: false });
   }, [loadSocialData, location.state?.conversationID]);
 
-  const handleRefreshMessagesAndSidebar = useCallback(async () => {
-    await Promise.allSettled([refreshConversationDirectory(), handleRefreshMessages()]);
-  }, [refreshConversationDirectory, handleRefreshMessages]);
-
   const handleSocialEvent = useCallback(
     async (payload = {}) => {
       const eventType = String(payload?.type || "").trim();
@@ -1377,6 +1423,13 @@ function Social({
               }
             : prev
         );
+        const messageText = String(message?.text || "");
+        if (
+          selectedConversationRef.current?.conversationID === conversationID &&
+          (messageText.startsWith("[sharedUpdate]") || messageText.startsWith("[sharedAoN]"))
+        ) {
+          scheduleSharedStatsRefresh(conversationID);
+        }
         return;
       }
 
@@ -1432,7 +1485,7 @@ function Social({
         });
       }
     },
-    [patchFeedItem, refreshConversationDirectory, removeFeedItem, upsertFeedItem, user]
+    [patchFeedItem, refreshConversationDirectory, removeFeedItem, scheduleSharedStatsRefresh, upsertFeedItem, user]
   );
 
   useEffect(() => {
@@ -3047,17 +3100,6 @@ function Social({
           </div>
 
           <div className="searchActionRow">
-            <button
-              type="button"
-              className="searchActionButton"
-              onClick={handleRefreshMessagesAndSidebar}
-              aria-label="Refresh messages"
-              title={activeTab === 1 ? "Refresh" : "Open a conversation to refresh"}
-              disabled={activeTab !== 1 || !selectedConversation}
-            >
-              <img className="searchActionIcon" src={FlipIcon} alt="" />
-            </button>
-
             <button
               type="button"
               className="searchActionButton"

@@ -17,6 +17,13 @@ import {
   getSolveTagValue,
   getTagChipStyle,
 } from "../TagBar/tagUtils";
+import MoveSolvesDialog from "../SolveBulk/MoveSolvesDialog";
+import {
+  isMovableSolve,
+  isOwnSolve,
+  moveSolvesWithLocalState,
+  relabel,
+} from "../../services/moveSolvesWithLocalState";
 import "./AverageDetailModal.css";
 import "../TagBar/TagBar.css";
 
@@ -173,11 +180,20 @@ function AverageDetailModal({
   tagColors = {},
   profileColor = "#2EC4B6",
   embedded = false,
+  userID = null,
+  setSessions = null,
+  sessionsList = [],
 }) {
   const [displayMode, setDisplayMode] = useState("items");
   const [activeTagFilters, setActiveTagFilters] = useState({});
   const [actionBusy, setActionBusy] = useState("");
   const [actionMessage, setActionMessage] = useState("");
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveError, setMoveError] = useState("");
+  const [moveUndo, setMoveUndo] = useState(null);
+  // Bumped after a move relabels the solve objects in place, so derived labels refresh.
+  const [solvesVersion, setSolvesVersion] = useState(0);
 
   const detail = useMemo(() => {
     const items = Array.isArray(solves) ? solves.filter(Boolean) : [];
@@ -233,12 +249,18 @@ function AverageDetailModal({
       sessionIndexLabel: formatSessionIndexLabel(items),
       sharedTagGroups,
     };
-  }, [solves, tagConfig]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solves, tagConfig, solvesVersion]);
 
   useEffect(() => {
+    // While closed, the parent passes a new empty solves array on every render.
+    if (!isOpen) return;
     setActiveTagFilters({});
     setActionBusy("");
     setActionMessage("");
+    setMoveOpen(false);
+    setMoveError("");
+    setMoveUndo(null);
   }, [solves, isOpen]);
 
   const filteredRows = useMemo(() => {
@@ -273,6 +295,75 @@ function AverageDetailModal({
       ...prev,
       [field]: prev[field] === value ? "" : value,
     }));
+  };
+
+  const moveTargets = useMemo(
+    () => filteredRows.map((row) => row.solve).filter(isMovableSolve),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredRows, solvesVersion]
+  );
+  const canMove =
+    !embedded &&
+    !!userID &&
+    typeof setSessions === "function" &&
+    moveTargets.length > 0 &&
+    moveTargets.every((s) => isOwnSolve(s, userID));
+
+  const handleMoveConfirm = async ({ event: toEvent, sessionID: toSessionID, sessionName }) => {
+    const targets = moveTargets;
+    if (!targets.length) {
+      setMoveOpen(false);
+      return;
+    }
+    setMoveBusy(true);
+    setMoveError("");
+    try {
+      const originals = targets.map((s) => ({ ...s }));
+      const { moved, undo } = await moveSolvesWithLocalState({
+        userID,
+        solves: targets,
+        toEvent,
+        toSessionID,
+        toSessionName: sessionName,
+        setSessions,
+      });
+      targets.forEach((s) => {
+        delete s.sessionName;
+        delete s.SessionName;
+        Object.assign(s, relabel(s, toEvent, toSessionID, sessionName));
+      });
+      setSolvesVersion((n) => n + 1);
+      setMoveOpen(false);
+      const label = `${currentEventToString(toEvent) || toEvent} · ${sessionName || toSessionID}`;
+      setActionMessage(
+        moved ? `Moved ${moved === 1 ? "1 solve" : `${moved} solves`} to ${label}.` : "Already there."
+      );
+      setMoveUndo(
+        moved
+          ? () => async () => {
+              setMoveUndo(null);
+              setActionMessage("Undoing move…");
+              try {
+                await undo();
+                targets.forEach((s, i) => {
+                  delete s.sessionName;
+                  Object.assign(s, originals[i]);
+                });
+                setSolvesVersion((n) => n + 1);
+                setActionMessage("Move undone.");
+              } catch (err) {
+                console.error("Undo move failed:", err);
+                setActionMessage("Couldn't undo the move.");
+              }
+            }
+          : null
+      );
+    } catch (err) {
+      console.error("Move average failed:", err);
+      setMoveError(err?.message || "Move failed. Nothing was changed.");
+    } finally {
+      setMoveBusy(false);
+    }
   };
 
   const handleShare = () => {
@@ -463,6 +554,24 @@ function AverageDetailModal({
                 Share
               </button>
             ) : null}
+            {canMove ? (
+              <button
+                type="button"
+                className="averageDetailShareButton"
+                onClick={() => {
+                  setMoveError("");
+                  setMoveOpen(true);
+                }}
+                disabled={moveBusy}
+                title={
+                  hasActiveFilters
+                    ? "Moves the solves shown with the current tag filters"
+                    : "Move these solves to another event or session"
+                }
+              >
+                Move
+              </button>
+            ) : null}
             {canSaveToProfile ? (
               <button
                 type="button"
@@ -475,7 +584,29 @@ function AverageDetailModal({
             ) : null}
           </div>
         </div>
-        {actionMessage ? <div className="detailTagsError">{actionMessage}</div> : null}
+        {actionMessage ? (
+          <div className="detailTagsError">
+            {actionMessage}
+            {moveUndo ? (
+              <button type="button" className="averageDetailUndoButton" onClick={moveUndo}>
+                Undo
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        <MoveSolvesDialog
+          isOpen={moveOpen}
+          count={moveTargets.length || 1}
+          sessionsList={sessionsList}
+          initialEvent={moveTargets[0]?.event || moveTargets[0]?.Event || detail.event || "333"}
+          initialSession={getSolveSessionID(moveTargets[0]) || "main"}
+          busy={moveBusy}
+          error={moveError}
+          onCancel={() => {
+            if (!moveBusy) setMoveOpen(false);
+          }}
+          onConfirm={handleMoveConfirm}
+        />
 
         <div className={`averageDetailList averageDetailList--${displayMode}`}>
           <TimeTable
@@ -523,6 +654,9 @@ AverageDetailModal.propTypes = {
   tagColors: PropTypes.object,
   profileColor: PropTypes.string,
   embedded: PropTypes.bool,
+  userID: PropTypes.string,
+  setSessions: PropTypes.func,
+  sessionsList: PropTypes.arrayOf(PropTypes.object),
 };
 
 export default AverageDetailModal;

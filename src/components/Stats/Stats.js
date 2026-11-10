@@ -26,8 +26,9 @@ import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import PtsLinkStatsIcon from "../../assets/ptsLinkStats.svg";
 import tagBadge from "../../assets/Tag.svg";
 
-import { getSolvesBySession, getSolvesBySessionPage } from "../../services/getSolvesBySession";
+import { forEachSolvesPage, getSolvesBySession, getSolvesBySessionPage } from "../../services/getSolvesBySession";
 import { getSolvesByTag } from "../../services/getSolvesByTag";
+import { getLastNSolvesScoped } from "../../services/getSolvesScoped";
 import { getSessionStats } from "../../services/getSessionStats";
 import { getEventStats } from "../../services/getEventStats";
 import { getDayBuckets } from "../../services/getDayBuckets";
@@ -39,6 +40,8 @@ import { updateUser } from "../../services/updateUser";
 import { getSolveWindowFromStart } from "../../services/getSolveWindow";
 
 import ImportSolvesModal from "./ImportSolvesModal";
+import { chunkImportSolves } from "../../utils/importParsers";
+import { buildExportJsonParts, serializeSolvesPage } from "../../utils/exportJson";
 import ExportDataModal from "./ExportDataModal";
 import {
   appendImportJobChunk,
@@ -53,6 +56,7 @@ import { getSessions as fetchSessionsList } from "../../services/getSessions";
 import { useDbStatus } from "../../contexts/DbStatusContext";
 import { findBestStrictWindow } from "../../utils/strictAverageUtils";
 import { getProfileChartStyle } from "../../utils/profileChartStyle";
+import { getStatsContainerVars } from "../../utils/statsContainerVars";
 import { getProfileEventScramble } from "../../utils/profileEventSolves";
 import {
   collectTagSelectionOptions,
@@ -77,9 +81,6 @@ import {
 const ALL_EVENTS = "__all_events__";
 const ALL_SESSIONS = "__all_sessions__";
 const ALL_TIME_START_DAY = "1900-01-01";
-const STATS_CONTAINER_GRAY_BG = "rgba(100, 100, 100, 0.1)";
-const STATS_CONTAINER_GRAY_BORDER = "rgba(200, 200, 200, 0.2)";
-const STATS_CONTAINER_GRAY_BORDER_HOVER = "rgba(200, 200, 200, 0.6)";
 const DEFAULT_HEATMAP_PALETTE = "default";
 const PROFILE_PALETTE = "profile";
 const COMPARE_PALETTES = {
@@ -207,6 +208,8 @@ function buildImportSourceKey({
 
   return `src_${String(hash >>> 0).padStart(10, "0")}`;
 }
+
+const DATE_SCOPED_COMMIT_INTERVAL_MS = 3000;
 
 function stripDbKeys(record) {
   if (!record || typeof record !== "object") return record;
@@ -1325,14 +1328,40 @@ function canUseDayBucketScope({
   return isAllEventsMode || isAllSessionsMode || String(sessionId || "main") === "main";
 }
 
-function buildDayBucketScopeQuery({ isAllEventsMode, isAllSessionsMode, statsEvent, sessionId }) {
+function buildDayBucketScopeQuery({ isAllEventsMode, isAllSessionsMode, statsEvent, sessionId, scope = null }) {
+  // Primary scope: an event subset, or "main sessions only" across events, needs
+  // the per-event bucket merge. Returns null when buckets can't represent it
+  // (custom session picks beyond main), so the page falls back to raw solves.
+  if (scope) {
+    const { events, sessions, pairs } = scope;
+    const multiSession = sessions?.mode !== "main" && (pairs || []).length > 1;
+    if (events === ALL_EVENTS && sessions?.mode === "all") {
+      return { event: "", events: [], mainOnly: false, scopeLabel: "all-events" };
+    }
+    if (events === ALL_EVENTS || (Array.isArray(events) && events.length > 1) || multiSession) {
+      const list = Array.from(new Set((pairs || []).map((p) => p.Event)));
+      // Sessions not loaded yet: no events to ask for (mainOnly needs at least one).
+      if (!list.length) return null;
+      if (sessions?.mode === "custom") {
+        if (!(pairs || []).every((p) => p.SessionID === "main")) return null;
+        return { event: "", events: list, mainOnly: true, scopeLabel: "events-main" };
+      }
+      const mainOnly = sessions?.mode === "main";
+      if (list.length === 1 && !mainOnly) {
+        return { event: list[0], events: [], mainOnly: false, scopeLabel: "event" };
+      }
+      return { event: "", events: list, mainOnly, scopeLabel: mainOnly ? "events-main" : "events" };
+    }
+  }
+
   if (isAllEventsMode) {
-    return { event: "", mainOnly: false, scopeLabel: "all-events" };
+    return { event: "", events: [], mainOnly: false, scopeLabel: "all-events" };
   }
 
   if (isAllSessionsMode) {
     return {
       event: String(statsEvent || "").toUpperCase(),
+      events: [],
       mainOnly: false,
       scopeLabel: "event",
     };
@@ -1340,6 +1369,7 @@ function buildDayBucketScopeQuery({ isAllEventsMode, isAllSessionsMode, statsEve
 
   return {
     event: String(statsEvent || "").toUpperCase(),
+    events: [],
     mainOnly: String(sessionId || "main") === "main",
     scopeLabel: "event-main",
   };
@@ -1366,6 +1396,95 @@ function getSessionStatsFromSessionsList(sessionsList, event, sessionID) {
         String(s?.SessionID || "main") === String(sessionID || "main")
     )?.Stats || null
   );
+}
+
+// "3x3", "3x3 + 4x4", "3x3 +2", "All events", "All but 2x2".
+function getScopeEventsLabel(scopeEvents, allEvents) {
+  if (scopeEvents === ALL_EVENTS) return "All events";
+  const list = scopeEvents || [];
+  const names = list.map((ev) => getEventDisplayMeta(ev).label);
+  const total = (allEvents || []).length;
+  if (total > 3 && list.length >= total - 2 && list.length < total) {
+    const missing = (allEvents || []).filter((ev) => !list.includes(ev));
+    return `All but ${missing.map((ev) => getEventDisplayMeta(ev).label).join(", ")}`;
+  }
+  if (total > 0 && list.length === total && total > 1) return "All events";
+  if (names.length <= 2) return names.join(" + ");
+  return `${names[0]} +${names.length - 1}`;
+}
+
+// "Main", "Main sessions", "All sessions", "Main, OH practice", "Main, A +2".
+function getScopeSessionsLabel(scopeSessions, pairs, sessionsList, isMultiEvent) {
+  const mode = scopeSessions?.mode || "main";
+  if (mode === "all") return "All sessions";
+  if (mode === "main") return isMultiEvent ? "Main sessions" : "Main";
+  const names = (pairs || []).map((p) => {
+    const found = (sessionsList || []).find(
+      (s) =>
+        String(s?.Event || "").toUpperCase() === p.Event && String(s?.SessionID || "main") === p.SessionID
+    );
+    const name = normalizeSessionLabel(p.SessionID, found?.SessionName || found?.Name || p.SessionID);
+    return isMultiEvent ? `${getEventDisplayMeta(p.Event).label} ${name}` : name;
+  });
+  const totalForScope = new Set(
+    (sessionsList || [])
+      .filter((s) => (pairs || []).some((p) => p.Event === String(s?.Event || "").toUpperCase()))
+      .map((s) => `${String(s?.Event || "").toUpperCase()}|${s?.SessionID || "main"}`)
+  ).size;
+  if (totalForScope > 1 && names.length >= totalForScope) return "All sessions";
+  if (names.length <= 2) return names.join(", ");
+  return `${names.slice(0, 2).join(", ")} +${names.length - 2}`;
+}
+
+function makeInitialScopeSessions(event, session) {
+  const sid = String(session || "main");
+  if (sid === "main" || sid === ALL_SESSIONS) return { mode: sid === ALL_SESSIONS ? "all" : "main", keys: [] };
+  return { mode: "custom", keys: [`${String(event || "333").toUpperCase()}|${sid}`] };
+}
+
+function getEventsFromSessionsList(sessionsList) {
+  const set = new Set();
+  for (const s of sessionsList || []) {
+    const ev = String(s?.Event || "").trim().toUpperCase();
+    if (ev) set.add(ev);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+function getSessionIdsForEvent(sessionsList, event) {
+  const ev = String(event || "").toUpperCase();
+  const ids = [];
+  for (const s of sessionsList || []) {
+    if (String(s?.Event || "").toUpperCase() !== ev) continue;
+    const sid = String(s?.SessionID || "main");
+    if (!ids.includes(sid)) ids.push(sid);
+  }
+  return ids;
+}
+
+// Expands the scope into the {Event, SessionID} pairs whose solves are in view.
+// "main" falls back to an event's first session when it has no main; a custom
+// pick that names nothing for an event uses that event's main.
+function resolveScopePairs(events, scopeSessions, sessionsList) {
+  const out = [];
+  const mode = scopeSessions?.mode || "main";
+  const keys = new Set(scopeSessions?.keys || []);
+  for (const rawEvent of events || []) {
+    const ev = String(rawEvent || "").toUpperCase();
+    if (!ev) continue;
+    const ids = getSessionIdsForEvent(sessionsList, ev);
+    const mainId = ids.includes("main") || !ids.length ? "main" : ids[0];
+    let picked;
+    if (mode === "all") picked = ids.length ? ids : ["main"];
+    else if (mode === "custom") {
+      // Before the sessions list loads, trust the keys as given.
+      const fromKeys = [...keys].filter((k) => k.startsWith(`${ev}|`)).map((k) => k.slice(ev.length + 1));
+      picked = ids.length ? ids.filter((sid) => keys.has(`${ev}|${sid}`)) : fromKeys;
+      if (!picked.length) picked = [mainId];
+    } else picked = [mainId];
+    for (const sid of picked) out.push({ Event: ev, SessionID: sid });
+  }
+  return out;
 }
 
 function getEventAggregateFromSessionsList(sessionsList, event) {
@@ -1488,14 +1607,36 @@ function shiftLocalDayKey(dayKey, offsetDays) {
   return getLocalDayKey(next);
 }
 
-// The stats date range lives in the URL (?from=&to=&raw=1) so browser back /
-// forward step between views. All Time is stored as from=all with no end, so
-// a bookmark always runs through today.
-const STATS_RANGE_PARAMS = ["view", "from", "to", "raw"];
+// The stats scope lives in the URL so browser back / forward step between views:
+//   ?ev=all | ev=333,444   events (omitted = the timer's current event)
+//   &ss=all | ss=333:oh,…  sessions (omitted = main)
+//   &from=&to=&raw=1       date range. All Time is from=all with no end, so a
+//                          bookmark always runs through today.
+// Old links with view=time open as all events, main sessions.
+const STATS_RANGE_PARAMS = ["view", "ev", "ss", "from", "to", "raw"];
 
-function buildStatsRangeParams(start, end, raw, viewMode = "standard") {
+function encodeScopeEvents(scopeEvents) {
+  if (scopeEvents === ALL_EVENTS) return "all";
+  return (scopeEvents || []).join(",");
+}
+
+function encodeScopeSessions(scopeSessions) {
+  if (scopeSessions?.mode === "all") return "all";
+  if (scopeSessions?.mode === "custom") return (scopeSessions.keys || []).map((k) => k.replace("|", ":")).join(",");
+  return "";
+}
+
+// scope: { events, sessions, defaultEvent } — the event param is only written
+// when it differs from the timer's event, so a plain /stats link stays clean.
+function buildStatsRangeParams(start, end, raw, scope = null) {
   const params = new URLSearchParams();
-  if (viewMode === "time") params.set("view", "time");
+  if (scope) {
+    const ev = encodeScopeEvents(scope.events);
+    const defaultEv = String(scope.defaultEvent || "").toUpperCase();
+    if (ev && ev !== defaultEv) params.set("ev", ev);
+    const ss = encodeScopeSessions(scope.sessions);
+    if (ss) params.set("ss", ss);
+  }
   if (start === ALL_TIME_START_DAY) {
     params.set("from", "all");
     return params;
@@ -1506,16 +1647,50 @@ function buildStatsRangeParams(start, end, raw, viewMode = "standard") {
   return params;
 }
 
+// events: null (not in URL), ALL_EVENTS, or [event]; sessions: null or a scopeSessions object.
 function parseStatsRangeSearch(search) {
   const params = new URLSearchParams(search || "");
-  const view = params.get("view") === "time" ? "time" : "standard";
+  const legacyTime = params.get("view") === "time";
+  const evRaw = String(params.get("ev") || "").trim();
+  const ssRaw = String(params.get("ss") || "").trim();
+  let events = null;
+  if (evRaw === "all" || (legacyTime && !evRaw)) events = ALL_EVENTS;
+  else if (evRaw) {
+    const list = evRaw.split(",").map((e) => e.trim().toUpperCase()).filter(Boolean);
+    if (list.length) events = list;
+  }
+  let sessions = null;
+  if (ssRaw === "all") sessions = { mode: "all", keys: [] };
+  else if (ssRaw) {
+    const keys = ssRaw
+      .split(",")
+      .map((k) => k.trim())
+      .filter((k) => k.includes(":"))
+      .map((k) => {
+        const i = k.indexOf(":");
+        return `${k.slice(0, i).toUpperCase()}|${k.slice(i + 1)}`;
+      });
+    if (keys.length) sessions = { mode: "custom", keys };
+  }
+  const multi = events === ALL_EVENTS || (Array.isArray(events) && events.length > 1);
   const from = params.get("from") || "";
-  if (from === "all") return { view, start: ALL_TIME_START_DAY, end: getTodayLocalDayKey(), raw: false };
+  if (from === "all") return { events, sessions, start: ALL_TIME_START_DAY, end: getTodayLocalDayKey(), raw: false };
   const isDayKey = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value);
   const start = isDayKey(from) ? from : "";
   const to = params.get("to") || "";
   const end = isDayKey(to) ? to : "";
-  return { view, start, end, raw: view === "standard" && params.get("raw") === "1" && !!start && !!end };
+  return { events, sessions, start, end, raw: !multi && params.get("raw") === "1" && !!start && !!end };
+}
+
+// The URL's scope/range params rebuilt in canonical form, comparable to a
+// buildStatsRangeParams(...).toString() key.
+function urlStatsRangeKey(search, defaultEvent) {
+  const parsed = parseStatsRangeSearch(search);
+  return buildStatsRangeParams(parsed.start, parsed.end, parsed.raw, {
+    events: parsed.events || [String(defaultEvent || "333").toUpperCase()],
+    sessions: parsed.sessions || { mode: "main", keys: [] },
+    defaultEvent: defaultEvent || "333",
+  }).toString();
 }
 
 function withStatsRangeParams(search, rangeParams) {
@@ -1613,10 +1788,6 @@ function filterSolvesByDateRange(input, startDay, endDay) {
   });
 }
 
-const STATS_VIEW_MODE_OPTIONS = [
-  { value: "standard", label: "Solves" },
-  { value: "time", label: "Time" },
-];
 
 function Stats({
   sessions,
@@ -1655,20 +1826,21 @@ function Stats({
   const location = useLocation();
   const navigate = useNavigate();
   const isStatsRoute = location.pathname === "/stats";
-  const DEFAULT_IN_VIEW = 100;
+  // Solves in view when stats opens or the scope changes (setting: statsDefaultSolveCount).
+  const DEFAULT_IN_VIEW = Math.max(5, Math.round(Number(settings?.statsDefaultSolveCount)) || 100);
   const DEFAULT_PAGE_FETCH = 500;
 
-  const [standardSelection, setStandardSelection] = useState({
-    event: currentEvent || "333",
-    session: currentSession || "main",
-  });
-  const [timeSelection, setTimeSelection] = useState({
-    event: ALL_EVENTS,
-    session: ALL_SESSIONS,
-  });
+  // Stats scope: which events and sessions are in view. There is no separate
+  // "time view" any more: more than one event (or merged sessions) uses the
+  // multi-event layout, a single event + session uses the per-solve layout.
+  //   scopeEvents: [event, ...] or ALL_EVENTS
+  //   scopeSessions.mode: "main" (main session of each event), "all", or
+  //     "custom" (only the "EVENT|sid" keys in scopeSessions.keys)
+  const [scopeEvents, setScopeEvents] = useState(() => [String(currentEvent || "333").toUpperCase()]);
+  const [scopeSessions, setScopeSessions] = useState(() =>
+    makeInitialScopeSessions(currentEvent, currentSession)
+  );
   const [primaryPaletteKey, setPrimaryPaletteKey] = useState(DEFAULT_PRIMARY_PALETTE);
-  const [statsEvent, setStatsEvent] = useState(currentEvent || "333");
-  const [statsSession, setStatsSession] = useState(currentSession || "main");
   const [compareSelection, setCompareSelection] = useState(null);
   const [compareSessionMenuOpen, setCompareSessionMenuOpen] = useState(false);
   const [compareSessionSolves, setCompareSessionSolves] = useState([]);
@@ -1681,6 +1853,30 @@ const [scopeModalState, setScopeModalState] = useState(null);
 const [scopeModalSection, setScopeModalSection] = useState("event");  const compareRequestTokenRef = useRef(0);
   const compareSessionMenuWrapRef = useRef(null);
 
+  const scopeEventList = useMemo(
+    () => (scopeEvents === ALL_EVENTS ? getEventsFromSessionsList(sessionsList) : scopeEvents),
+    [scopeEvents, sessionsList]
+  );
+  const isMultiEventScope = scopeEvents === ALL_EVENTS || scopeEventList.length > 1;
+  // null = every event; otherwise the chosen subset (used to filter multi-event data).
+  const scopeEventSet = useMemo(
+    () => (scopeEvents === ALL_EVENTS ? null : new Set(scopeEventList)),
+    [scopeEventList, scopeEvents]
+  );
+  const scopePairs = useMemo(
+    () => resolveScopePairs(scopeEventList, scopeSessions, sessionsList),
+    [scopeEventList, scopeSessions, sessionsList]
+  );
+  // null = no session restriction beyond the main/all mode; otherwise "EVENT|sid" keys.
+  const scopePairSet = useMemo(
+    () => (scopeSessions.mode === "all" ? null : new Set(scopePairs.map((p) => `${p.Event}|${p.SessionID}`))),
+    [scopePairs, scopeSessions.mode]
+  );
+  // Legacy single-value view of the scope; most of the page still reads these.
+  const statsEvent = isMultiEventScope ? ALL_EVENTS : scopeEventList[0] || String(currentEvent || "333").toUpperCase();
+  const statsSession = !isMultiEventScope && scopePairs.length === 1 ? scopePairs[0].SessionID : ALL_SESSIONS;
+  const statsViewMode = isMultiEventScope || scopePairs.length > 1 ? "time" : "standard";
+  const timeViewMainSessionsOnly = scopeSessions.mode === "main";
   const sessionId = useMemo(() => statsSession || "main", [statsSession]);
   const effectiveTimeZone = useMemo(() => getEffectiveTimeZone(user), [user]);
 
@@ -1718,6 +1914,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const [showAllActive, setShowAllActive] = useState(false);
   const [compareShowAllActive, setCompareShowAllActive] = useState(false);
   const [timeScopeSolves, setTimeScopeSolves] = useState([]);
+  // Index frame for multi-event / merged-session scopes: the last N solves,
+  // either combined across the scope or N per event.
+  const [multiIndexCount, setMultiIndexCount] = useState(null); // null = DEFAULT_IN_VIEW
+  const [multiIndexSplit, setMultiIndexSplit] = useState("combined");
+  const [multiIndexSolves, setMultiIndexSolves] = useState([]);
+  const [multiIndexKey, setMultiIndexKey] = useState("");
+  const [loadingMultiIndex, setLoadingMultiIndex] = useState(false);
+  const [multiIndexError, setMultiIndexError] = useState(false);
   const [timeScopeCacheKey, setTimeScopeCacheKey] = useState("");
   const [overallScopeSolves, setOverallScopeSolves] = useState([]);
   const [overallScopeCacheKey, setOverallScopeCacheKey] = useState("");
@@ -1778,14 +1982,20 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const recomputeRequestRef = useRef(null);
   const importRequestRef = useRef(null);
   const exportRequestRef = useRef(null);
-  const [statsViewMode, setStatsViewMode] = useState("standard");
-  const [timeViewMainSessionsOnly, setTimeViewMainSessionsOnly] = useState(true);
   const summaryLayout = "row";
   const showSolveCharts = isSolveLevelMode || statsViewMode === "time";
   const [selectedTimeDay, setSelectedTimeDay] = useState("");
-  const [dateFilterStart, setDateFilterStart] = useState("");
-  const [dateFilterEnd, setDateFilterEnd] = useState("");
-  const [preferRawDateRangeView, setPreferRawDateRangeView] = useState(false);
+  // Setting statsDefaultFrameKind "date": open on the last N days instead of the
+  // last N solves. A range in the URL still wins (applied by the URL effect).
+  const [initialDateFrame] = useState(() => {
+    if (settings?.statsDefaultFrameKind !== "date") return null;
+    const days = Math.max(1, Math.round(Number(settings?.statsDefaultDays)) || 7);
+    const end = getTodayLocalDayKey();
+    return { start: shiftLocalDayKey(end, -(days - 1)), end, raw: days <= MAX_RAW_INDEX_RANGE_DAYS };
+  });
+  const [dateFilterStart, setDateFilterStart] = useState(initialDateFrame?.start || "");
+  const [dateFilterEnd, setDateFilterEnd] = useState(initialDateFrame?.end || "");
+  const [preferRawDateRangeView, setPreferRawDateRangeView] = useState(!!initialDateFrame?.raw);
   // Raw (every-solve) range views are only ever allowed for short windows.
   // A wide range with the raw flag set would page in every solve in it, so
   // anything past MAX_RAW_INDEX_RANGE_DAYS stays on day buckets instead.
@@ -1836,8 +2046,24 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     [effectiveCompareDateFilterEnd, effectiveCompareDateFilterStart, effectiveTimeZone]
   );
   const compareEnabled = !!compareSelection;
+  const primaryBucketScopeQuery = useMemo(
+    () =>
+      buildDayBucketScopeQuery({
+        isAllEventsMode,
+        isAllSessionsMode,
+        statsEvent,
+        sessionId,
+        scope: { events: scopeEvents, sessions: scopeSessions, pairs: scopePairs },
+      }),
+    [isAllEventsMode, isAllSessionsMode, scopeEvents, scopePairs, scopeSessions, sessionId, statsEvent]
+  );
+  const bucketScopeQuery = primaryBucketScopeQuery || { event: "", events: [], mainOnly: false, scopeLabel: "" };
+  const bucketScopeEventsKey = (bucketScopeQuery.events || []).join(",");
   const canUseBucketRange = useMemo(
     () =>
+      !!primaryBucketScopeQuery &&
+      // Multi scopes with no date range are a "last N solves" frame, never buckets.
+      !(statsViewMode === "time" && !hasActiveDateFilter) &&
       canUseDayBucketScope({
         userID: user?.UserID,
         hasActiveTagFilter,
@@ -1852,6 +2078,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       hasActiveTagFilter,
       isAllEventsMode,
       isAllSessionsMode,
+      primaryBucketScopeQuery,
       sessionId,
       statsViewMode,
       user?.UserID,
@@ -1881,10 +2108,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       user?.UserID,
     ]
   );
-  const bucketScopeQuery = useMemo(
-    () => buildDayBucketScopeQuery({ isAllEventsMode, isAllSessionsMode, statsEvent, sessionId }),
-    [isAllEventsMode, isAllSessionsMode, sessionId, statsEvent]
-  );
   const compareBucketScopeQuery = useMemo(
     () =>
       buildDayBucketScopeQuery({
@@ -1901,12 +2124,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       user.UserID,
       bucketScopeQuery.scopeLabel,
       bucketScopeQuery.event || "*",
+      bucketScopeEventsKey || "*",
       bucketScopeQuery.mainOnly ? "main" : "all",
       dateFilterStart || "*",
       dateFilterEnd || "*",
       effectiveTimeZone || "*",
     ].join("::");
   }, [
+    bucketScopeEventsKey,
     bucketScopeQuery.event,
     bucketScopeQuery.mainOnly,
     bucketScopeQuery.scopeLabel,
@@ -2024,25 +2249,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     return () => document.removeEventListener("mousedown", onDown);
   }, [compareSessionMenuOpen]);
 
-  useEffect(() => {
-    if (statsViewMode === "time") {
-      setStatsEvent(timeSelection.event || ALL_EVENTS);
-      setStatsSession(timeSelection.session || ALL_SESSIONS);
-      return;
-    }
-
-    setStatsEvent(standardSelection.event || currentEvent || "333");
-    setStatsSession(standardSelection.session || currentSession || "main");
-  }, [
-    currentEvent,
-    currentSession,
-    standardSelection.event,
-    standardSelection.session,
-    statsViewMode,
-    timeSelection.event,
-    timeSelection.session,
-  ]);
-
   const normalizeSolve = useCallback((item) => {
     if (!item) return null;
 
@@ -2097,41 +2303,16 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     return values;
   }, [sessions, sessionsList]);
 
-  const eventOptions = useMemo(() => {
-    return statsViewMode === "time" ? [ALL_EVENTS, ...baseEventOptions] : baseEventOptions;
-  }, [baseEventOptions, statsViewMode]);
+  const eventOptions = baseEventOptions;
+  const scopeAllEvents = baseEventOptions;
+  const scopeEventsLabel = getScopeEventsLabel(scopeEvents, scopeAllEvents);
+  const scopeSessionsLabel = getScopeSessionsLabel(scopeSessions, scopePairs, sessionsList, isMultiEventScope);
+  // Card titles: multi scopes (no compare) name the whole scope, e.g. "3x3 + 4x4 · Main sessions".
+  const cardTitleEventLabel = statsViewMode === "time" ? scopeEventsLabel : null;
+  const cardTitleSessionLabel = statsViewMode === "time" ? scopeSessionsLabel : null;
 
-  const solveScopeSessions = useMemo(() => {
-    const allSessions = Array.isArray(sessionsList) ? sessionsList : [];
-
-    if (statsViewMode === "time" || isAllEventsMode) {
-      return allSessions
-        .map((s) => ({
-          Event: String(s?.Event || "").toUpperCase(),
-          SessionID: String(s?.SessionID || "main"),
-        }))
-        .filter((s) => s.Event);
-    }
-
-    if (isAllSessionsMode) {
-      return allSessions
-        .filter((s) => String(s?.Event || "").toUpperCase() === String(statsEvent || "").toUpperCase())
-        .map((s) => ({
-          Event: String(s?.Event || "").toUpperCase(),
-          SessionID: String(s?.SessionID || "main"),
-        }))
-        .filter((s) => s.Event);
-    }
-
-    if (!statsEvent) return [];
-
-    return [
-      {
-        Event: String(statsEvent || "").toUpperCase(),
-        SessionID: String(sessionId || "main"),
-      },
-    ];
-  }, [isAllEventsMode, isAllSessionsMode, sessionId, sessionsList, statsEvent, statsViewMode]);
+  // Every {Event, SessionID} pair in scope; raw scope loads fan out over these.
+  const solveScopeSessions = scopePairs;
 
   const solveScopeSessionKey = useMemo(() => {
     return solveScopeSessions
@@ -2168,12 +2349,81 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     return out;
   }, [sessions]);
 
+  const multiIndexN = multiIndexCount || DEFAULT_IN_VIEW;
+  const multiIndexActive = statsViewMode === "time" && !hasActiveDateFilter && !hasActiveTagFilter;
+  const multiIndexRequestKey = multiIndexActive
+    ? [solveScopeSessionKey, scopeSessions.mode, multiIndexN, multiIndexSplit, statsMutationTick].join("::")
+    : "";
+  const hasMultiIndexSolves = multiIndexActive && multiIndexKey === multiIndexRequestKey;
+
   const allLoadedSolves = useMemo(() => {
+    // A multi-scope "last N" frame shows only its scoped fetch: never fall back
+    // to the app's solve cache, which can hold an event's entire history.
+    if (multiIndexActive) return hasMultiIndexSolves ? multiIndexSolves : [];
     if (statsViewMode === "time" && timeScopeSolves.length > 0) {
       return timeScopeSolves;
     }
     return sessionCachedSolves;
-  }, [sessionCachedSolves, statsViewMode, timeScopeSolves]);
+  }, [hasMultiIndexSolves, multiIndexActive, multiIndexSolves, sessionCachedSolves, statsViewMode, timeScopeSolves]);
+
+  useEffect(() => {
+    const userID = user?.UserID;
+    if (!userID || !multiIndexRequestKey || multiIndexKey === multiIndexRequestKey) return undefined;
+    let cancelled = false;
+    setLoadingMultiIndex(true);
+    const pairs = scopeSessions.mode === "custom" ? scopePairs.map((p) => ({ event: p.Event, sessionID: p.SessionID })) : null;
+    const base = {
+      pairs,
+      sessionsMode: scopeSessions.mode === "main" ? "main" : "",
+      timeZone: effectiveTimeZone,
+    };
+    const requests =
+      multiIndexSplit === "perEvent"
+        ? scopeEventList.map((ev) =>
+            getLastNSolvesScoped(userID, {
+              ...base,
+              events: [ev],
+              pairs: pairs ? pairs.filter((p) => p.event === ev) : null,
+              n: multiIndexN,
+              isCancelled: () => cancelled,
+            })
+          )
+        : [
+            getLastNSolvesScoped(userID, {
+              ...base,
+              events: scopeEvents === ALL_EVENTS ? "all" : scopeEventList,
+              n: multiIndexN,
+              isCancelled: () => cancelled,
+            }),
+          ];
+    Promise.all(requests)
+      .then((results) => {
+        if (cancelled) return;
+        const solves = results
+          .flat()
+          .map(normalizeSolve)
+          .filter(Boolean)
+          .sort((a, b) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime());
+        setMultiIndexSolves(solves);
+        setMultiIndexError(false);
+        setMultiIndexKey(multiIndexRequestKey);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Failed to load scoped solves:", error);
+        setMultiIndexSolves([]);
+        setMultiIndexError(true);
+        setMultiIndexKey(multiIndexRequestKey);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingMultiIndex(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // multiIndexRequestKey captures the scope, N, split and mutations.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [multiIndexRequestKey, user?.UserID]);
 
   const selectedSessionSolves = useMemo(() => {
     if (statsViewMode !== "standard") return [];
@@ -2251,6 +2501,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         ? hasDateScopedSessionCache
           ? dateScopedSessionSolves
           : []
+        : multiIndexActive
+        ? multiIndexSolves
         : hasScopedSolveCache
         ? timeScopeSolves
         : sessionCachedSolves;
@@ -2271,6 +2523,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     isAllEventsMode,
     isAllSessionsMode,
     isSolveLevelMode,
+    multiIndexActive,
+    multiIndexSolves,
     sessionCachedSolves,
     sessionId,
     statsEvent,
@@ -2339,19 +2593,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       return String(a.SessionName).localeCompare(String(b.SessionName));
     });
 
-    if (statsViewMode === "time") {
-      return [
-        {
-          SessionID: ALL_SESSIONS,
-          SessionName: "All Sessions",
-          Stats: getEventAggregateFromSessionsList(sessionsList, ev),
-        },
-        ...deduped,
-      ];
-    }
-
     return deduped;
-  }, [sessionsList, statsEvent, isAllEventsMode, statsViewMode]);
+  }, [sessionsList, statsEvent, isAllEventsMode]);
 
   const compareEvent = String(compareSelection?.event || statsEvent || "").toUpperCase();
   const compareSessionId = String(compareSelection?.session || "main");
@@ -2486,32 +2729,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   }, [compareEvent, sessionsList]);
 
   useEffect(() => {
-    if (isAllEventsMode) {
-      if (statsViewMode === "time") {
-        setTimeSelection((prev) =>
-          prev?.session === ALL_SESSIONS ? prev : { ...prev, session: ALL_SESSIONS }
-        );
-      }
-      return;
-    }
-
-    const valid = sessionsForEvent.some((s) => s.SessionID === statsSession);
-    if (!valid) {
-      const hasMain = sessionsForEvent.some((s) => s.SessionID === "main");
-      const fallbackSession = hasMain ? "main" : (sessionsForEvent[0]?.SessionID || "main");
-      if (statsViewMode === "time") {
-        setTimeSelection((prev) =>
-          prev?.session === fallbackSession ? prev : { ...prev, session: fallbackSession }
-        );
-      } else {
-        setStandardSelection((prev) =>
-          prev?.session === fallbackSession ? prev : { ...prev, session: fallbackSession }
-        );
-      }
-    }
-  }, [isAllEventsMode, sessionsForEvent, statsSession, statsViewMode]);
-
-  useEffect(() => {
     if (!compareSelection) return;
     if (!compareSessionsForEvent.length) return;
 
@@ -2527,10 +2744,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   }, [compareSelection, compareSessionId, compareSessionsForEvent]);
 
   useEffect(() => {
-    setStandardSelection({
-      event: currentEvent || "333",
-      session: currentSession || "main",
-    });
+    setScopeEvents([String(currentEvent || "333").toUpperCase()]);
+    setScopeSessions(makeInitialScopeSessions(currentEvent, currentSession));
 
     setSolvesPerPage(DEFAULT_IN_VIEW);
     setCurrentPage(0);
@@ -2541,7 +2756,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
     setTagFilterSelection(makeEmptyTagSelection());
     setSelectedTimeDay("");
-  }, [currentEvent, currentSession]);
+  }, [DEFAULT_IN_VIEW, currentEvent, currentSession]);
 
   useEffect(() => {
     if (scopeModalState === "compare" && !compareEnabled) {
@@ -2650,6 +2865,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     const filteredSessions = (sessionsList || []).filter((session) => {
       const event = String(session?.Event || "").trim().toUpperCase();
       if (!event) return false;
+      if (scopeEventSet && !scopeEventSet.has(event)) return false;
       if (timeViewMainSessionsOnly) {
         return String(session?.SessionID || "main") === "main";
       }
@@ -2663,7 +2879,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           .filter(Boolean)
       )
     ).sort((a, b) => a.localeCompare(b));
-  }, [sessionsList, statsViewMode, timeViewMainSessionsOnly]);
+  }, [scopeEventSet, sessionsList, statsViewMode, timeViewMainSessionsOnly]);
 
   const timeViewMatrixEventsKey = useMemo(
     () => timeViewMatrixEvents.join(","),
@@ -2810,12 +3026,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
     try {
       let cursor = null;
-      let accumulated = [];
-      let pageCount = 0;
+      const pages = [];
+      let lastCommitAt = 0;
       const seenCursors = new Set();
       setDateScopedSessionSolves([]);
       setDateScopedSessionCacheKey(dateScopedSessionKey);
-      const commitAccumulated = () =>
+      const commitAccumulated = () => {
+        lastCommitAt = Date.now();
+        const accumulated = pages.slice().reverse().flat();
         setDateScopedSessionSolves(
           withSolveFullIndices(
             accumulated,
@@ -2824,6 +3042,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               : accumulated
           )
         );
+      };
 
       do {
         const { items, lastKey } = await getSolvesBySessionPage(
@@ -2842,38 +3061,25 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           .filter(Boolean)
           .reverse();
 
-        accumulated = [...pageOldestToNewest, ...accumulated];
+        pages.push(pageOldestToNewest);
         // With a tag filter these solves are only the index reference behind the
         // tag-scoped list, so commit them once at the end instead of re-rendering
-        // every chart after each page.
-        if (!hasActiveTagFilter) commitAccumulated();
-
-        pageCount += 1;
-        if (pageCount > 100) {
-          console.warn("Aborting date-scoped session load after 100 pages", {
-            userID,
-            statsEvent,
-            sessionId,
-            dateRangeQueryOpts,
-          });
-          break;
+        // every chart after each page. Without one, show progress, but a long
+        // history can't afford to re-render its charts after every page.
+        const nextCursor = lastKey || null;
+        if (nextCursor && !hasActiveTagFilter && Date.now() - lastCommitAt >= DATE_SCOPED_COMMIT_INTERVAL_MS) {
+          commitAccumulated();
         }
 
         const nextCursorKey = lastKey ? JSON.stringify(lastKey) : "";
         if (nextCursorKey && seenCursors.has(nextCursorKey)) {
-          console.warn("Aborting date-scoped session load after repeated cursor", {
-            userID,
-            statsEvent,
-            sessionId,
-            dateRangeQueryOpts,
-          });
-          break;
+          throw new Error("Date-scoped session load got a repeated cursor");
         }
         if (nextCursorKey) seenCursors.add(nextCursorKey);
-        cursor = lastKey || null;
+        cursor = nextCursor;
       } while (cursor);
 
-      if (hasActiveTagFilter) commitAccumulated();
+      commitAccumulated();
       return true;
     } catch (error) {
       console.error("Failed to load date-scoped session solves:", error);
@@ -2953,6 +3159,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       try {
         const data = await getDayBuckets(user.UserID, {
           event: bucketScopeQuery.event,
+          events: bucketScopeQuery.events,
           mainOnly: bucketScopeQuery.mainOnly,
           startDay: dateFilterStart,
           endDay: dateFilterEnd,
@@ -2961,6 +3168,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         if (cancelled) return;
         setDayBucketRangeData({
           items: Array.isArray(data?.items) ? data.items : [],
+          eventItems: Array.isArray(data?.eventItems) ? data.eventItems : null,
           aggregateSummary: data?.aggregateSummary || null,
           scope: data?.scope || bucketScopeQuery.scopeLabel,
         });
@@ -2984,7 +3192,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       cancelled = true;
     };
   }, [
+    bucketScopeQuery.events,
     aggregateRefreshNonce,
+    bucketScopeEventsKey,
     bucketScopeQuery.event,
     bucketScopeQuery.mainOnly,
     bucketScopeQuery.scopeLabel,
@@ -3017,6 +3227,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     setRawRangeIndexOffset(null);
     getDayBuckets(user.UserID, {
       event: bucketScopeQuery.event,
+      events: bucketScopeQuery.events,
       mainOnly: bucketScopeQuery.mainOnly,
       startDay: dateFilterStart,
       endDay: getTodayLocalDayKey(),
@@ -3037,6 +3248,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       cancelled = true;
     };
   }, [
+    bucketScopeQuery.events,
     bucketScopeQuery.event,
     bucketScopeQuery.mainOnly,
     canUseBucketRange,
@@ -3577,15 +3789,19 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     let scoped = statsViewMode === "time" ? allLoadedSolves : activeStandardSolves;
 
     if (statsViewMode === "time") {
-      if (!isAllEventsMode) {
-        scoped = scoped.filter(
-          (solve) => String(solve?.event || solve?.Event || "").toUpperCase() === String(statsEvent || "").toUpperCase()
+      if (scopeEventSet) {
+        scoped = scoped.filter((solve) =>
+          scopeEventSet.has(String(solve?.event || solve?.Event || "").toUpperCase())
         );
       }
 
-      if (!isAllSessionsMode) {
-        scoped = scoped.filter(
-          (solve) => String(solve?.sessionID || solve?.SessionID || "main") === String(sessionId || "main")
+      if (scopePairSet) {
+        scoped = scoped.filter((solve) =>
+          scopePairSet.has(
+            `${String(solve?.event || solve?.Event || "").toUpperCase()}|${String(
+              solve?.sessionID || solve?.SessionID || "main"
+            )}`
+          )
         );
       }
     }
@@ -3596,10 +3812,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     activeStandardSolves,
     dateFilterEnd,
     dateFilterStart,
-    isAllEventsMode,
-    isAllSessionsMode,
-    sessionId,
-    statsEvent,
+    scopeEventSet,
+    scopePairSet,
     statsViewMode,
   ]);
 
@@ -3705,6 +3919,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const timeViewFocusedSolves = useMemo(() => {
     if (statsViewMode !== "time") return chartVisibleSolves;
     if (hasActiveDateFilter) return allLoadedFilteredRawSolves;
+    if (hasMultiIndexSolves && !selectedTimeDay) return allLoadedFilteredRawSolves;
 
     const latestSolve = allLoadedFilteredRawSolves[allLoadedFilteredRawSolves.length - 1] || null;
     const focusDay = String(
@@ -3720,6 +3935,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     allLoadedFilteredRawSolves,
     chartVisibleSolves,
     hasActiveDateFilter,
+    hasMultiIndexSolves,
     selectedTimeDay,
     statsViewMode,
   ]);
@@ -3863,7 +4079,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     return aggregateStatsList(allEventsBreakdown.map((row) => row.stats));
   }, [allEventsBreakdown]);
   const timeViewEventMatrixItems = useMemo(() => {
-    if (hasActiveDateFilter) {
+    if (hasActiveDateFilter || hasMultiIndexSolves) {
       const solvesByEvent = new Map();
 
       for (const solve of allLoadedFilteredRawSolves || []) {
@@ -3907,9 +4123,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     const filteredSessions = (sessionsList || []).filter((session) => {
       const event = String(session?.Event || "").trim().toUpperCase();
       if (!event) return false;
-      if (timeViewMainSessionsOnly) {
-        return String(session?.SessionID || "main") === "main";
-      }
+      if (scopeEventSet && !scopeEventSet.has(event)) return false;
+      if (scopePairSet) return scopePairSet.has(`${event}|${String(session?.SessionID || "main")}`);
       return true;
     });
 
@@ -3924,7 +4139,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     return Array.from(statsByEvent.entries())
       .map(([event, statsList]) => {
         const fallbackAggregate = aggregateStatsList(statsList);
-        const aggregate = cachedEventMatrixStats[event] || fallbackAggregate;
+        // The cache holds main-session or whole-event stats; custom session picks aggregate their own.
+        const aggregate =
+          scopeSessions.mode === "custom" ? fallbackAggregate : cachedEventMatrixStats[event] || fallbackAggregate;
         return {
           event,
           mainOnly: timeViewMainSessionsOnly,
@@ -3949,6 +4166,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       .filter((item) => item.solveCount > 0)
       .sort(compareTimeViewEventMatrixItems);
   }, [
+    hasMultiIndexSolves,
+    scopeEventSet,
+    scopePairSet,
+    scopeSessions.mode,
     allLoadedFilteredRawSolves,
     cachedEventMatrixStats,
     hasActiveDateFilter,
@@ -3980,17 +4201,21 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const timeViewEventBreakdownData = useMemo(() => {
     if (!isAllEventsMode) return [];
 
-    if (!hasActiveDateFilter) {
-      return (allEventsBreakdown || []).map((row) => ({
+    if (!hasActiveDateFilter && !hasMultiIndexSolves) {
+      return (allEventsBreakdown || [])
+        .filter((row) => !scopeEventSet || scopeEventSet.has(String(row?.event || "").toUpperCase()))
+        .map((row) => ({
         label: String(row?.event || "Unknown"),
         value: Number(row?.stats?.SolveCountTotal || 0),
         solves: [],
       }));
     }
 
-    if (activeBucketSummary && Array.isArray(activeBucketItems) && activeBucketItems.length > 0) {
+    // Event-subset buckets come merged per day; their per-event rows are in eventItems.
+    const breakdownBucketItems = dayBucketRangeData.eventItems || activeBucketItems;
+    if (activeBucketSummary && Array.isArray(breakdownBucketItems) && breakdownBucketItems.length > 0) {
       const grouped = new Map();
-      for (const item of activeBucketItems) {
+      for (const item of breakdownBucketItems) {
         const event = String(item?.Event || "").trim().toUpperCase() || "Unknown";
         const count = Number(item?.SolveCountTotal || 0);
         if (count <= 0) continue;
@@ -4010,7 +4235,17 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     return Array.from(grouped.entries())
       .map(([label, value]) => ({ label, value, solves: [] }))
       .sort((a, b) => b.value - a.value || String(a.label).localeCompare(String(b.label)));
-  }, [activeBucketItems, activeBucketSummary, allEventsBreakdown, hasActiveDateFilter, isAllEventsMode, pieChartSolves]);
+  }, [
+    hasMultiIndexSolves,
+    activeBucketItems,
+    activeBucketSummary,
+    allEventsBreakdown,
+    dayBucketRangeData.eventItems,
+    hasActiveDateFilter,
+    isAllEventsMode,
+    pieChartSolves,
+    scopeEventSet,
+  ]);
   const activeCompareBucketItems = useMemo(
     () =>
       canUseCompareBucketRange && compareDayBucketRangeKey === compareDayBucketRangeRequestKey
@@ -4534,28 +4769,37 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   // previous view (e.g. All Time after drilling into a day) instead of
   // leaving Stats. Nothing is kept in memory: popping an entry just re-applies
   // that range, which reloads from day buckets / the solve cache as usual.
+  const urlScope = { events: scopeEvents, sessions: scopeSessions, defaultEvent: currentEvent || "333" };
   const statsRangeKey = buildStatsRangeParams(
     dateFilterStart,
     dateFilterEnd,
-    rawRangeViewActive,
-    statsViewMode
+    rawRangeViewActive && statsViewMode === "standard",
+    urlScope
   ).toString();
   // staleKey: the range state held when a URL restore was applied. Until state
   // moves off it, the writer below must not push that stale range back into
   // the URL, or the two effects ping-pong (page flicker, junk history).
-  const urlRangeSyncRef = useRef({ initialized: false, staleKey: null });
+  const urlRangeSyncRef = useRef({ initialized: false, staleKey: null, wrote: false });
 
   useEffect(() => {
     if (!isStatsRoute) return;
     const sync = urlRangeSyncRef.current;
     const parsed = parseStatsRangeSearch(location.search);
     const hasUrlRange = !!(parsed.start || parsed.end);
+    const hasUrlScope = !!(parsed.events || parsed.sessions);
     if (!sync.initialized) {
       sync.initialized = true;
-      if (!hasUrlRange) return;
+      if (!hasUrlRange && !hasUrlScope) return;
     }
-    const urlKey = buildStatsRangeParams(parsed.start, parsed.end, parsed.raw, parsed.view).toString();
-    if (urlKey === statsRangeKey) return;
+    const parsedEvents = parsed.events || [String(currentEvent || "333").toUpperCase()];
+    const parsedSessions = parsed.sessions || { mode: "main", keys: [] };
+    const parsedMulti =
+      parsedEvents === ALL_EVENTS ||
+      parsedEvents.length > 1 ||
+      parsedSessions.mode === "all" ||
+      (parsedSessions.keys || []).length > 1;
+    const parsedView = parsedMulti ? "time" : "standard";
+    if (urlStatsRangeKey(location.search, currentEvent) === statsRangeKey) return;
 
     // Never let a URL silently start a raw scan of a wide range: only short
     // windows are restored unless the standard view is backed by day buckets.
@@ -4564,13 +4808,17 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     const span = getInclusiveDaySpan(parsed.start, parsed.end);
     const isShortRange = span > 0 && span <= MAX_RAW_INDEX_RANGE_DAYS;
     const targetSession =
-      parsed.view === "time" ? ALL_SESSIONS : standardSelection.session || currentSession || "main";
+      parsedView === "time"
+        ? ALL_SESSIONS
+        : parsedSessions.mode === "custom"
+          ? String(parsedSessions.keys[0] || "").split("|")[1] || "main"
+          : "main";
     const bucketScopeOk =
-      parsed.view === "standard" &&
+      parsedView === "standard" &&
       canUseDayBucketScope({
         userID: user?.UserID,
         hasActiveTagFilter,
-        statsViewMode: parsed.view,
+        statsViewMode: parsedView,
         hasActiveDateFilter: hasUrlRange,
         isAllEventsMode: false,
         isAllSessionsMode: targetSession === ALL_SESSIONS,
@@ -4585,10 +4833,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     }
 
     sync.staleKey = statsRangeKey;
-    if (parsed.view !== statsViewMode) {
-      setStatsViewMode(parsed.view);
+    if (encodeScopeEvents(parsedEvents) !== encodeScopeEvents(scopeEvents)) {
+      setScopeEvents(parsedEvents);
       setSessionMenuOpen(false);
-      if (parsed.view === "time") setTimeSelection({ event: ALL_EVENTS, session: ALL_SESSIONS });
+    }
+    if (encodeScopeSessions(parsedSessions) !== encodeScopeSessions(scopeSessions)) {
+      setScopeSessions(parsedSessions);
     }
     if (parsed.raw) fitRawRangeToViewRef.current = true;
     setDateFilterStart(parsed.start);
@@ -4608,12 +4858,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       if (statsRangeKey === sync.staleKey) return;
       sync.staleKey = null;
     }
-    const parsed = parseStatsRangeSearch(location.search);
-    const urlKey = buildStatsRangeParams(parsed.start, parsed.end, parsed.raw, parsed.view).toString();
-    if (urlKey === statsRangeKey) return;
+    if (urlStatsRangeKey(location.search, currentEvent) === statsRangeKey) return;
+    // The first write after opening just records the opening scope (e.g. the
+    // default "last 7 days"), so it replaces rather than adds a history step.
+    const isFirstWrite = !sync.wrote && !!initialDateFrame;
+    sync.wrote = true;
     navigate(
       { search: withStatsRangeParams(location.search, new URLSearchParams(statsRangeKey)) },
-      { state: { ptsStatsRange: true } }
+      isFirstWrite ? { replace: true, state: location.state } : { state: { ptsStatsRange: true } }
     );
     // Written only when the range itself changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4633,87 +4885,112 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     });
   }, [applyPrimaryDateRange, canStepBackInStatsHistory, navigate]);
 
-  const handleEventChange = useCallback(
-    async (event) => {
-      const next = event.target.value;
+  // Single entry point for scope changes (event set and/or session set). Resets
+  // paging and tags, and carries the date range across a switch between the
+  // single-scope and multi-scope layouts the way the old view toggle did:
+  // short ranges always survive, wider ones only when they stay bucket-backed.
+  const applyScope = useCallback(
+    async ({ events = scopeEvents, sessions = scopeSessions } = {}) => {
+      const nextList = events === ALL_EVENTS ? getEventsFromSessionsList(sessionsList) : events;
+      if (!nextList.length && events !== ALL_EVENTS) return;
+      const nextPairs = resolveScopePairs(nextList, sessions, sessionsList);
+      const nextMulti = events === ALL_EVENTS || nextList.length > 1;
+      const nextView = nextMulti || nextPairs.length > 1 ? "time" : "standard";
 
-      if (statsViewMode === "time" && wantsRawTimeScope) {
+      if (nextView === "time" && wantsRawTimeScope) {
         const approved = await warnBeforeSolveScan({
-          title: "Load new time scope?",
-          intro: "Changing the time-view scope loads every solve in that scope so the time charts can rebuild.",
-          event: next,
+          title: "Load new scope?",
+          intro: "Changing the scope loads every solve in it so the charts can rebuild.",
+          event: nextMulti ? ALL_EVENTS : nextList[0],
           sessionID: ALL_SESSIONS,
           extraLines:
             dateFilterStart || dateFilterEnd
               ? [`Date filter: ${formatShortDateRangeLabel(dateFilterStart, dateFilterEnd, dateFilterLabel)}.`]
               : [],
-          confirmLabel: "Load Time Scope",
+          confirmLabel: "Load Scope",
         });
         if (!approved) return;
       }
 
-      setStatsEvent(next);
+      setScopeEvents(events);
+      setScopeSessions(sessions);
       setSessionMenuOpen(false);
 
       setSolvesPerPage(DEFAULT_IN_VIEW);
       setCurrentPage(0);
-
       setPageCursor(null);
       setHasMoreOlder(false);
       setIsAllLoaded(false);
       setShowAllActive(false);
-
       setTagFilterSelection(makeEmptyTagSelection());
 
-      if (statsViewMode === "time") {
-        const nextSession = next === ALL_EVENTS ? ALL_SESSIONS : ALL_SESSIONS;
-        setTimeSelection({ event: next, session: nextSession });
-        setStatsSession(nextSession);
+      if (nextView === statsViewMode) return;
+      const span = getInclusiveDaySpan(dateFilterStart, dateFilterEnd);
+      const isShortRange = span > 0 && span <= MAX_RAW_INDEX_RANGE_DAYS;
+      if (nextView === "time") {
+        setPreferRawDateRangeView(false);
+        // Multi scopes open in the Time view: keep a short range, otherwise this week.
+        if (!isShortRange) {
+          const week = getWeekRangeFromDayKey(getTodayLocalDayKey());
+          setDateFilterStart(week.start);
+          setDateFilterEnd(week.end);
+          setSelectedTimeDay("");
+        }
+        return;
+      }
+      const keepRange = isShortRange || (hasActiveDateFilter && nextPairs[0]?.SessionID === "main");
+      if (keepRange && isShortRange) {
+        fitRawRangeToViewRef.current = true;
+        setPreferRawDateRangeView(true);
       } else {
-        setStatsSession("main");
-        setStandardSelection({ event: next, session: "main" });
+        setPreferRawDateRangeView(false);
+      }
+      if (!keepRange) {
+        setDateFilterStart("");
+        setDateFilterEnd("");
+        setSelectedTimeDay("");
       }
     },
-    [DEFAULT_IN_VIEW, dateFilterEnd, dateFilterLabel, dateFilterStart, statsViewMode, wantsRawTimeScope, warnBeforeSolveScan]
+    [
+      DEFAULT_IN_VIEW,
+      dateFilterEnd,
+      dateFilterLabel,
+      dateFilterStart,
+      hasActiveDateFilter,
+      scopeEvents,
+      scopeSessions,
+      sessionsList,
+      statsViewMode,
+      wantsRawTimeScope,
+      warnBeforeSolveScan,
+    ]
   );
 
-  const handlePickSession = useCallback(
-    async (sid) => {
-      if (statsViewMode === "time" && wantsRawTimeScope) {
-        const approved = await warnBeforeSolveScan({
-          title: "Load new time scope?",
-          intro: "Changing the time-view session loads every solve in that scope so the time charts can rebuild.",
-          event: statsEvent,
-          sessionID: sid,
-          extraLines:
-            dateFilterStart || dateFilterEnd
-              ? [`Date filter: ${formatShortDateRangeLabel(dateFilterStart, dateFilterEnd, dateFilterLabel)}.`]
-              : [],
-          confirmLabel: "Load Time Scope",
-        });
-        if (!approved) return;
-      }
-
-      setStatsSession(sid);
-      setSessionMenuOpen(false);
-
-      setSolvesPerPage(DEFAULT_IN_VIEW);
-      setCurrentPage(0);
-
-      setPageCursor(null);
-      setHasMoreOlder(false);
-      setIsAllLoaded(false);
-      setShowAllActive(false);
-
-      setTagFilterSelection(makeEmptyTagSelection());
-
-      if (statsViewMode === "time") {
-        setTimeSelection((prev) => ({ ...prev, session: sid }));
-      } else {
-        setStandardSelection((prev) => ({ ...prev, session: sid }));
-      }
+  // Picking one event from the selector (or a legacy <select> change event).
+  const handleEventChange = useCallback(
+    (eventOrValue) => {
+      const next = typeof eventOrValue === "string" ? eventOrValue : eventOrValue?.target?.value;
+      if (!next) return;
+      if (next === ALL_EVENTS) return applyScope({ events: ALL_EVENTS });
+      return applyScope({
+        events: [String(next).toUpperCase()],
+        sessions: scopeSessions.mode === "custom" ? { mode: "main", keys: [] } : scopeSessions,
+      });
     },
-    [DEFAULT_IN_VIEW, dateFilterEnd, dateFilterLabel, dateFilterStart, statsEvent, statsViewMode, wantsRawTimeScope, warnBeforeSolveScan]
+    [applyScope, scopeSessions]
+  );
+
+  // Picking exactly one session of the single event in view.
+  const handlePickSession = useCallback(
+    (sid) => {
+      const ev = scopeEventList[0];
+      if (!ev) return;
+      if (sid === ALL_SESSIONS) return applyScope({ sessions: { mode: "all", keys: [] } });
+      return applyScope({
+        sessions: sid === "main" ? { mode: "main", keys: [] } : { mode: "custom", keys: [`${ev}|${sid}`] },
+      });
+    },
+    [applyScope, scopeEventList]
   );
 
   const handleAddCompareRow = useCallback(() => {
@@ -4763,12 +5040,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         ? showAllActive
         : compareShowAllActive;
 
-    setStatsEvent(promotedEvent);
-    setStatsSession(promotedSession);
-    setStandardSelection({
-      event: promotedEvent,
-      session: promotedSession,
-    });
+    setScopeEvents([String(promotedEvent).toUpperCase()]);
+    setScopeSessions(makeInitialScopeSessions(promotedEvent, promotedSession));
     setTagFilterSelection(promotedTags);
     setPrimaryPaletteKey(promotedPaletteKey);
     setDateFilterStart(promotedDateStart);
@@ -4867,54 +5140,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   // hundred solves) either way, or a longer range going back to a Main
   // session, which day buckets cover. Anything else resets to the view's
   // default rather than raw-loading a wide range.
-  const handleSetViewMode = useCallback(async (nextMode) => {
-    if (nextMode === statsViewMode) return;
-
-    const span = getInclusiveDaySpan(dateFilterStart, dateFilterEnd);
-    const isShortRange = span > 0 && span <= MAX_RAW_INDEX_RANGE_DAYS;
-
-    setStatsViewMode(nextMode);
-    setSessionMenuOpen(false);
-    setCurrentPage(0);
-
-    if (nextMode === "time") {
-      setPreferRawDateRangeView(false);
-      if (!isShortRange) {
-        setDateFilterStart("");
-        setDateFilterEnd("");
-      }
-      setTimeSelection({
-        event: ALL_EVENTS,
-        session: ALL_SESSIONS,
-      });
-      return;
-    }
-
-    const nextEvent = standardSelection?.event || currentEvent || "333";
-    const nextSession = standardSelection?.session || currentSession || "main";
-    const keepRange = isShortRange || (hasActiveDateFilter && nextSession === "main");
-    if (keepRange && isShortRange) {
-      fitRawRangeToViewRef.current = true;
-      setPreferRawDateRangeView(true);
-    } else {
-      setPreferRawDateRangeView(false);
-    }
-    if (!keepRange) {
-      setDateFilterStart("");
-      setDateFilterEnd("");
-      setSelectedTimeDay("");
-    }
-    setStandardSelection({ event: nextEvent, session: nextSession });
-  }, [
-    currentEvent,
-    currentSession,
-    dateFilterEnd,
-    dateFilterStart,
-    hasActiveDateFilter,
-    standardSelection?.event,
-    standardSelection?.session,
-    statsViewMode,
-  ]);
 
 
   const handleDeleteSolve = useCallback(
@@ -5025,13 +5250,16 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       return;
     }
 
+    let loadedCount = activeStandardSolves.length;
     if (hasMoreOlder && !loadingMore && !isAllLoaded) {
       const result = await appendOlderSessionPages({ minSolveCount: target });
-      const loadedCount = activeStandardSolves.length + Number(result?.addedCount || 0);
-      const loadedTarget = Math.min(target, Math.max(activeStandardSolves.length, loadedCount));
-      setSolvesPerPage(loadedTarget);
-      setCurrentPage(getAnchoredSolvePage(solvesPerPage, currentPage, loadedTarget));
+      loadedCount += Number(result?.addedCount || 0);
     }
+    // Nothing older to fetch: widen to everything loaded instead of stalling below the next preset.
+    const loadedTarget = Math.min(target, loadedCount);
+    if (loadedTarget <= solvesPerPage) return;
+    setSolvesPerPage(loadedTarget);
+    setCurrentPage(getAnchoredSolvePage(solvesPerPage, currentPage, loadedTarget));
   }, [
     currentPage,
     solvesPerPage,
@@ -5076,6 +5304,47 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     isAllLoaded,
     appendOlderSessionPages,
     isSolveLevelMode,
+  ]);
+
+  // Range modal "Last N" picks. A multi scope reloads its scoped solves; a
+  // single scope resizes its page, loading older solves when it needs more.
+  // Either way an active date range is cleared first.
+  const pendingIndexTargetRef = useRef(null);
+  const handleSetIndexFrame = useCallback(
+    (n) => {
+      const target = Math.max(1, Math.round(Number(n)) || DEFAULT_IN_VIEW);
+      setSelectedTimeDay("");
+      if (statsViewMode === "time") {
+        setMultiIndexCount(target);
+      } else {
+        pendingIndexTargetRef.current = target;
+      }
+      if (hasActiveDateFilter) void applyPrimaryDateRange("", "");
+      else if (statsViewMode !== "time") setCurrentPage(0);
+    },
+    [DEFAULT_IN_VIEW, applyPrimaryDateRange, hasActiveDateFilter, statsViewMode]
+  );
+
+  useEffect(() => {
+    const target = pendingIndexTargetRef.current;
+    if (!target || hasActiveDateFilter || !isSolveLevelMode || loadingInitial || loadingMore) return;
+    if (target <= activeStandardSolves.length || !hasMoreOlder || isAllLoaded) {
+      pendingIndexTargetRef.current = null;
+      setSolvesPerPage(Math.max(1, Math.min(target, activeStandardSolves.length || target)));
+      setCurrentPage(0);
+      return;
+    }
+    void appendOlderSessionPages({ minSolveCount: target });
+  }, [
+    activeStandardSolves.length,
+    appendOlderSessionPages,
+    hasActiveDateFilter,
+    hasMoreOlder,
+    isAllLoaded,
+    isSolveLevelMode,
+    loadingInitial,
+    loadingMore,
+    solvesPerPage,
   ]);
 
   const handleShowAll = useCallback(async () => {
@@ -5454,8 +5723,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   }, [allLoadedSolves, availableTimeDays, dateFilterEnd, dateFilterStart]);
 
   const applyTimeRangePreset = useCallback(async (preset) => {
+    // "All" stays a date window (all time) so the scope keeps its Time view.
     if (preset === "all") {
-      await applyPrimaryDateRange("", "");
+      const applied = await applyPrimaryDateRange(ALL_TIME_START_DAY, getTodayLocalDayKey());
+      if (applied) {
+        setSelectedTimeDay("");
+        setPreferRawDateRangeView(false);
+        setCurrentPage(0);
+      }
       return;
     }
 
@@ -5674,7 +5949,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       if (normalized.length === 0) return;
 
       const isPtsExportImport = detectedFormat === "pts-export";
-      const IMPORT_CHUNK_SIZE = 1500;
 
       // The modal tags each solve with _importSessionID (use that session, creating it when a
       // name comes with it) or just _importSessionName (reuse that event's session by name, or create it).
@@ -5763,11 +6037,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               return clean;
             });
 
-            totalChunks += Math.max(1, Math.ceil(cleanSolves.length / IMPORT_CHUNK_SIZE));
+            const chunks = chunkImportSolves(cleanSolves);
+            totalChunks += chunks.length;
             preparedGroups.push({
               ev,
               destSessionForThisEvent,
-              solves: cleanSolves,
+              chunks,
             });
           }
 
@@ -5789,9 +6064,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
           let overallCompleted = 0;
           for (const group of preparedGroups) {
-            const eventTotal = group.solves.length;
-            for (let i = 0; i < group.solves.length; i += IMPORT_CHUNK_SIZE) {
-              const chunk = group.solves.slice(i, i + IMPORT_CHUNK_SIZE);
+            for (const chunk of group.chunks) {
               try {
                 await sendImportChunk(jobID, { sourceKey, solves: chunk });
               } catch (chunkError) {
@@ -5801,22 +6074,18 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     await finalizeImportJob(userID, jobID);
                   } catch (_) {}
                 }
+                // Running it again can't get past the import allowance, so don't suggest it.
                 throw new Error(
-                  `Import stopped after ${overallCompleted} of ${overallTotal} solves: ${
-                    chunkError?.message || "upload failed"
-                  }. Run the same import again to continue - solves already imported are skipped.`
+                  Number(chunkError?.status) === 403
+                    ? `Import stopped after ${overallCompleted} of ${overallTotal} solves. ${
+                        chunkError?.message || "Import limit reached."
+                      } The solves before that point were kept.`
+                    : `Import stopped after ${overallCompleted} of ${overallTotal} solves: ${
+                        chunkError?.message || "upload failed"
+                      }. Run the same import again to continue - solves already imported are skipped.`
                 );
               }
               overallCompleted += chunk.length;
-              setImportProgress({
-                phase: "writing",
-                completed: overallCompleted,
-                total: overallTotal,
-                label: `Importing solves... (${overallCompleted}/${overallTotal})`,
-              });
-            }
-
-            if (eventTotal === 0) {
               setImportProgress({
                 phase: "writing",
                 completed: overallCompleted,
@@ -5944,8 +6213,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     ]
   );
 
-  const downloadJsonFile = useCallback((filename, payload) => {
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+  const downloadJsonFile = useCallback((filename, parts) => {
+    const blob = new Blob(parts, {
       type: "application/json;charset=utf-8",
     });
     const url = URL.createObjectURL(blob);
@@ -6019,34 +6288,39 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         const sessionExports = [];
         let solvesExported = 0;
         let sessionsCompleted = 0;
+        let lastProgressAt = 0;
         for (const session of chosenSessions) {
           const event = String(session?.Event || "").toUpperCase();
           const sessionID = String(session?.SessionID || "main");
-          const solves = await getSolvesBySession(userID, event, sessionID);
-          solvesExported += Array.isArray(solves) ? solves.length : 0;
+          const reportProgress = () => {
+            lastProgressAt = Date.now();
+            setExportProgress({
+              phase: "fetching",
+              completed: sessionsCompleted,
+              total: chosenSessions.length,
+              label: `Collecting sessions (${sessionsCompleted}/${chosenSessions.length})`,
+              sessionsCompleted,
+              totalSessions: chosenSessions.length,
+              solvesExported,
+              currentSessionLabel: `${event} / ${sessionID}`,
+            });
+          };
+
+          // Each page goes straight to a Blob so a huge session isn't held in the tab's heap.
+          const solveParts = [];
+          await forEachSolvesPage(userID, event, sessionID, (items) => {
+            if (!items.length) return;
+            solveParts.push(new Blob([serializeSolvesPage(items, stripDbKeys)]));
+            solvesExported += items.length;
+            if (Date.now() - lastProgressAt >= 1000) reportProgress();
+          });
           sessionsCompleted += 1;
+          reportProgress();
 
-          setExportProgress({
-            phase: "fetching",
-            completed: sessionsCompleted,
-            total: chosenSessions.length,
-            label: `Collecting sessions (${sessionsCompleted}/${chosenSessions.length})`,
-            sessionsCompleted,
-            totalSessions: chosenSessions.length,
-            solvesExported,
-            currentSessionLabel: `${event} / ${sessionID}`,
-          });
-
-          sessionExports.push({
-            session: stripDbKeys(session),
-            solves: (solves || []).map((solve) => stripDbKeys(solve)),
-          });
+          sessionExports.push({ session: stripDbKeys(session), solveParts });
         }
 
-        const solveCount = sessionExports.reduce(
-          (total, item) => total + (Array.isArray(item?.solves) ? item.solves.length : 0),
-          0
-        );
+        const solveCount = solvesExported;
 
         const selectedEventSet = new Set(
           sessionExports.map((item) => String(item?.session?.Event || "").toUpperCase()).filter(Boolean)
@@ -6089,9 +6363,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             sessions: sessionExports.length,
             solves: solveCount,
           },
-          data: {
-            sessions: sessionExports,
-          },
         };
 
         const filename = `${safeUserName || "pts-user"}-${
@@ -6108,7 +6379,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           solvesExported: solveCount,
         });
 
-        downloadJsonFile(filename, payload);
+        downloadJsonFile(filename, buildExportJsonParts(payload, sessionExports));
         setShowExport(false);
       } catch (e) {
         console.error("Export failed:", e);
@@ -6480,8 +6751,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     );
   }, [compareSelection?.paletteKey, paletteOptions]);
 
-  const showEventBreakdownCard = statsViewMode === "time" && isAllEventsMode;
-  const showAllEventsTimeMatrixCard = statsViewMode === "time" && isAllEventsMode && !compareEnabled;
+  // Solves | Time view: a date window means Time, otherwise Solves (last N).
+  // Multi scopes in the Solves view use the single-scope cards over the combined
+  // solves; in the Time view they get the time cards (event matrix, breakdown).
+  const primaryScopeView = hasActiveDateFilter ? "time" : "solves";
+  const layoutViewMode = statsViewMode === "time" && primaryScopeView === "solves" ? "standard" : statsViewMode;
+  const layoutAllEvents = isAllEventsMode && layoutViewMode === "time";
+  const showEventBreakdownCard = layoutViewMode === "time" && isAllEventsMode;
+  const showAllEventsTimeMatrixCard = layoutViewMode === "time" && isAllEventsMode && !compareEnabled;
   const percentCardLoading =
     compareSummaryLoading ||
     (showEventBreakdownCard
@@ -6784,24 +7061,24 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             chart: "lineChart",
             event: statsEvent,
             session: sessionId,
-            title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+            title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
             viewMode: statsViewMode,
           }),
           key: "line",
-          title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+          title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
           subtitle: "Line Chart",
           profileConfig: {
             chart: "lineChart",
             event: statsEvent,
             session: sessionId,
-            title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+            title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
             subtitle: "Line Chart",
             seriesStyle: primaryCompareStyle,
             viewMode: statsViewMode,
           },
           statShare: {
             cardKey: "line",
-            title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+            title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
             contextLabel: "Line Chart",
             highlightValue: dateRangeText || `${showingCount} solves`,
             detailLines: [`${showingCount} visible solves`, headerStatusText].filter(Boolean),
@@ -6825,24 +7102,24 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             chart: "percentBar",
             event: statsEvent,
             session: sessionId,
-            title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+            title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
             viewMode: statsViewMode,
           }),
           key: "percent",
-          title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+          title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
           subtitle: showEventBreakdownCard ? "Event Breakdown" : "Solves Distribution",
           profileConfig: {
             chart: "percentBar",
             event: statsEvent,
             session: sessionId,
-            title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+            title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
             subtitle: showEventBreakdownCard ? "Event Breakdown" : "Solves Distribution",
             legendItems: compareLegendItems,
             viewMode: statsViewMode,
           },
           statShare: {
             cardKey: "percent",
-            title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+            title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
             contextLabel: showEventBreakdownCard ? "Event Breakdown" : "Solves Distribution",
             highlightValue: `${pieChartSolves?.length || 0} solves`,
             detailLines: [showEventBreakdownCard ? "Breakdown by event" : "Distribution by solve time", headerStatusText].filter(Boolean),
@@ -6861,17 +7138,17 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             chart: "barChart",
             event: statsEvent,
             session: sessionId,
-            title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+            title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
             viewMode: statsViewMode,
           }),
           key: "bar",
-          title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+          title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
           subtitle: "Bar Chart",
           profileConfig: {
             chart: "barChart",
             event: statsEvent,
             session: sessionId,
-            title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+            title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
             subtitle: "Bar Chart",
             seriesStyle: primaryCompareStyle,
             legendItems: compareLegendItems,
@@ -6879,7 +7156,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           },
           statShare: {
             cardKey: "bar",
-            title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+            title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
             contextLabel: "Bar Chart",
             highlightValue: `${barChartSolves?.length || 0} solves`,
             detailLines: ["Solve-time histogram", headerStatusText].filter(Boolean),
@@ -6898,24 +7175,24 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             chart: "timeTable",
             event: statsEvent,
             session: sessionId,
-            title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+            title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
             viewMode: statsViewMode,
           }),
           key: "table",
-          title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+          title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
           subtitle: "Time Table",
           profileConfig: {
             chart: "timeTable",
             event: statsEvent,
             session: sessionId,
-            title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+            title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
             subtitle: "Time Table",
             seriesStyle: primaryCompareStyle,
             viewMode: statsViewMode,
           },
           statShare: {
             cardKey: "table",
-            title: buildStatCardTitle(eventSelectLabel, selectedSessionDisplay),
+            title: buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay),
             contextLabel: "Time Table",
             highlightValue: `${allLoadedFilteredRawSolves?.length || 0} loaded solves`,
             detailLines: ["Recent solve list and averages", headerStatusText].filter(Boolean),
@@ -6936,6 +7213,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
     return cards;
   }, [
+    cardTitleEventLabel,
+    cardTitleSessionLabel,
     allLoadedFilteredRawSolves,
     barChartSolves,
     compareEnabled,
@@ -7703,7 +7982,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             }
             seriesStyle={primaryCompareStyle}
             legendItems={compareLegendItems}
-            title={buildStatCardTitle(eventSelectLabel, selectedSessionDisplay)}
+            title={buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay)}
             titleDate={lineChartTitleDate}
             titleIndexRange={lineChartTitleIndexRange}
             solveIndexOffset={lineChartSolveIndexOffset}
@@ -7723,6 +8002,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             onSolveOpen={openSolveDetail}
             onControlsChange={updateFocusedLineChartControls}
             onBucketSelect={handleBucketDaySelect}
+            {...bulkTagEditorProps}
           />
         );
       }
@@ -7829,6 +8109,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             eventKey={compareEnabled && tableCompareView === "compare" ? compareEvent : statsEvent}
             practiceMode={false}
             solveIndexOffset={compareEnabled && tableCompareView === "compare" ? null : tableSolveIndexOffset}
+            {...bulkTagEditorProps}
           />
         );
       }
@@ -7837,6 +8118,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     },
     [
       addPost,
+      bulkTagEditorProps,
       wcaCompetitions,
       handleCompetitionOpen,
       activeBucketItems,
@@ -8085,6 +8367,223 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     return () => document.removeEventListener("keydown", onKeyDown, { capture: true });
   }, [closeScopeModal, scopeModalState]);
 
+  // ---- Multi-select scope pickers (primary row) ----
+
+  const setScopeEventList = (list) => {
+    const unique = Array.from(new Set(list.map((ev) => String(ev).toUpperCase()))).filter(Boolean);
+    if (!unique.length) return;
+    const isEveryEvent = scopeAllEvents.length > 1 && unique.length === scopeAllEvents.length;
+    const keepCustom = scopeSessions.mode === "custom" && unique.length === 1 && scopeEventList.length === 1 && unique[0] === scopeEventList[0];
+    void applyScope({
+      events: isEveryEvent ? ALL_EVENTS : unique,
+      sessions: scopeSessions.mode === "custom" && !keepCustom ? { mode: "main", keys: [] } : scopeSessions,
+    });
+  };
+
+  const scopeMultiEvent = {
+    isMulti: isMultiEventScope,
+    label: scopeEventsLabel,
+    items: scopeAllEvents.map((ev) => ({
+      key: ev,
+      label: getEventDisplayMeta(ev).label,
+      active: scopeEvents === ALL_EVENTS || scopeEventList.includes(ev),
+    })),
+    onToggle: (ev) => {
+      const current = scopeEvents === ALL_EVENTS ? scopeAllEvents : scopeEventList;
+      setScopeEventList(current.includes(ev) ? current.filter((e) => e !== ev) : [...current, ev]);
+    },
+    onOnly: (ev) => setScopeEventList([ev]),
+    onAll: () => void applyScope({ events: ALL_EVENTS, sessions: scopeSessions.mode === "custom" ? { mode: "main", keys: [] } : scopeSessions }),
+    onInvert: () => {
+      if (scopeEvents === ALL_EVENTS) return;
+      setScopeEventList(scopeAllEvents.filter((ev) => !scopeEventList.includes(ev)));
+    },
+  };
+
+  const scopeSessionGroups = scopeEventList.map((ev) => ({
+    event: ev,
+    label: getEventDisplayMeta(ev).label,
+    sessions: getSessionIdsForEvent(sessionsList, ev).map((sid) => {
+      const found = (sessionsList || []).find(
+        (s) => String(s?.Event || "").toUpperCase() === ev && String(s?.SessionID || "main") === sid
+      );
+      return {
+        key: `${ev}|${sid}`,
+        sid,
+        label: normalizeSessionLabel(sid, found?.SessionName || found?.Name || sid),
+      };
+    }),
+  }));
+  const scopeActivePairKeys = new Set(scopePairs.map((p) => `${p.Event}|${p.SessionID}`));
+  const setScopeSessionKeys = (keys) => {
+    if (!keys.size) return;
+    const allKeys = scopeSessionGroups.flatMap((g) => g.sessions.map((x) => x.key));
+    const mainKeys = new Set(resolveScopePairs(scopeEventList, { mode: "main" }, sessionsList).map((p) => `${p.Event}|${p.SessionID}`));
+    const sameAs = (set) => set.size === keys.size && [...keys].every((k) => set.has(k));
+    const sessions = sameAs(mainKeys)
+      ? { mode: "main", keys: [] }
+      : allKeys.length > 1 && sameAs(new Set(allKeys))
+        ? { mode: "all", keys: [] }
+        : { mode: "custom", keys: [...keys] };
+    void applyScope({ sessions });
+  };
+  const scopeMultiSession = {
+    label: scopeSessionsLabel,
+    mode: scopeSessions.mode,
+    groups: scopeSessionGroups,
+    isActive: (key) => scopeActivePairKeys.has(key),
+    onMode: (mode) => void applyScope({ sessions: { mode, keys: [] } }),
+    onToggle: (key) => {
+      const next = new Set(scopeActivePairKeys);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      setScopeSessionKeys(next);
+    },
+    onOnly: (key) => setScopeSessionKeys(new Set([key])),
+  };
+
+  const renderScopeChip = ({ key, label, active, onToggle, onOnly, accentColor }) => (
+    <span key={key} className={`statsScopeMultiChip ${active ? "active" : ""}`}>
+      <button
+        type="button"
+        className={`statsScopeChip ${active ? "active" : ""}`}
+        style={active ? { borderColor: accentColor, background: `${accentColor}22` } : undefined}
+        aria-pressed={active}
+        onClick={onToggle}
+      >
+        {label}
+      </button>
+      <button type="button" className="statsScopeOnlyBtn" onClick={onOnly} title={`Only ${label}`}>
+        only
+      </button>
+    </span>
+  );
+
+  const renderMultiEventPicker = (picker, scopeKey, accentColor) => (
+    <div className="statsScopeMultiPicker">
+      <div className="statsScopeMultiActions">
+        <button type="button" className="statsScopeMultiAction" onClick={picker.onAll}>All events</button>
+        <button type="button" className="statsScopeMultiAction" onClick={picker.onInvert}>Invert</button>
+      </div>
+      <div className="statsScopeChipGrid">
+        {picker.items.map((item) =>
+          renderScopeChip({
+            key: `${scopeKey}-event-${item.key}`,
+            label: item.label,
+            active: item.active,
+            onToggle: () => picker.onToggle(item.key),
+            onOnly: () => picker.onOnly(item.key),
+            accentColor,
+          })
+        )}
+      </div>
+    </div>
+  );
+
+  const renderMultiSessionPicker = (picker, scopeKey, accentColor) => (
+    <div className="statsScopeMultiPicker">
+      <div className="statsScopeMultiActions">
+        <button
+          type="button"
+          className={`statsScopeMultiAction ${picker.mode === "main" ? "active" : ""}`}
+          onClick={() => picker.onMode("main")}
+        >
+          Main only
+        </button>
+        <button
+          type="button"
+          className={`statsScopeMultiAction ${picker.mode === "all" ? "active" : ""}`}
+          onClick={() => picker.onMode("all")}
+        >
+          All sessions
+        </button>
+      </div>
+      {picker.groups.map((group) => (
+        <div key={`${scopeKey}-sessions-${group.event}`} className="statsScopeMultiGroup">
+          {picker.groups.length > 1 ? <div className="statsScopeMultiGroupLabel">{group.label}</div> : null}
+          <div className="statsScopeChipGrid">
+            {group.sessions.map((session) =>
+              renderScopeChip({
+                key: `${scopeKey}-session-${session.key}`,
+                label: session.label,
+                active: picker.isActive(session.key),
+                onToggle: () => picker.onToggle(session.key),
+                onOnly: () => picker.onOnly(session.key),
+                accentColor,
+              })
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const INDEX_FRAME_PRESETS = [50, 100, 500, 1000, 5000];
+  const renderIndexFramePicker = (frame, scopeKey, accentColor) => (
+    <div className="statsScopeMultiPicker statsScopeIndexFrame">
+      <div className="statsScopeMultiGroupLabel">Last solves</div>
+      <div className="statsScopeChipGrid">
+        {INDEX_FRAME_PRESETS.map((n) => {
+          const active = frame.active && frame.n === n;
+          return (
+            <button
+              key={`${scopeKey}-index-${n}`}
+              type="button"
+              className={`statsScopeChip ${active ? "active" : ""}`}
+              style={active ? { borderColor: accentColor, background: `${accentColor}22` } : undefined}
+              onClick={() => frame.onPick(n)}
+            >
+              Last {n.toLocaleString()}
+            </button>
+          );
+        })}
+        <input
+          type="number"
+          min="1"
+          max="5000"
+          className="statsScopeIndexInput"
+          placeholder="N"
+          aria-label="Custom solve count"
+          defaultValue={INDEX_FRAME_PRESETS.includes(frame.n) ? "" : frame.n}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            const n = Math.round(Number(event.currentTarget.value));
+            if (n > 0) frame.onPick(Math.min(5000, n));
+          }}
+        />
+      </div>
+      {frame.isMulti ? (
+        <div className="statsScopeMultiActions">
+          <button
+            type="button"
+            className={`statsScopeMultiAction ${frame.split === "combined" ? "active" : ""}`}
+            onClick={() => frame.onSplit("combined")}
+            title="Your last N solves across the chosen events"
+          >
+            Combined
+          </button>
+          <button
+            type="button"
+            className={`statsScopeMultiAction ${frame.split === "perEvent" ? "active" : ""}`}
+            onClick={() => frame.onSplit("perEvent")}
+            title="The last N solves of each chosen event"
+          >
+            Per event
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+
+  // Date window for a Time-view preset (compare row; the primary row uses applyTimeRangePreset).
+  const getTimePresetRange = (preset) => {
+    const today = getTodayLocalDayKey();
+    if (preset === "day") return { start: today, end: today };
+    if (preset === "week") return getWeekRangeFromDayKey(today);
+    if (preset === "month") return getMonthRangeFromDayKey(today);
+    return { start: ALL_TIME_START_DAY, end: today };
+  };
+
   const renderTagScopeModal = ({
     isOpen,
     title,
@@ -8107,19 +8606,50 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     dateStartDay,
     dateEndDay,
     onDateApply,
-    onViewModeChange = null,
+    // Primary row only: multi-select pickers (see buildScopeMultiPickers).
+    multiEvent = null,
+    multiSession = null,
+    indexFrame = null,
+    // Solves | Time view for this scope.
+    view = "solves",
+    onViewChange,
+    isMultiScope = false,
+    rangeLabel = "",
   }) => {
     if (!isOpen) return null;
 
-    const hasViewSection = typeof onViewModeChange === "function";
+    const tagsAvailable = !multiEvent || !multiEvent.isMulti;
+    // Same order as the scope row: events, sessions, tags, then the view/range.
     const sectionButtons = [
-      ...(hasViewSection ? [{ key: "view", label: "View" }] : []),
-      { key: "event", label: "Event" },
-      { key: "session", label: "Session" },
-      { key: "tags", label: "Tags" },
+      { key: "event", label: "Events" },
+      { key: "session", label: "Sessions" },
+      ...(tagsAvailable ? [{ key: "tags", label: "Tags" }] : []),
+      { key: "date", label: isMultiScope ? "View" : "Range" },
       ...(typeof onPaletteChange === "function" ? [{ key: "color", label: "Color" }] : []),
-      { key: "date", label: "Date" },
     ];
+    // Several events: the date-window view is the multi-event view.
+    const timeViewName = isMultiScope ? "Multi-event" : "Time";
+    const viewName = view === "time" ? timeViewName : "Solves";
+    const viewOptions = [
+      {
+        value: "solves",
+        label: "Solves",
+        hint: "Count back by solves",
+      },
+      {
+        value: "time",
+        label: timeViewName,
+        hint: isMultiScope ? "Each event side by side over a window of days" : "Pick a window of days",
+      },
+    ];
+    const viewExplainer =
+      view === "time"
+        ? isMultiScope
+          ? "Every solve in the days you pick, broken down by event."
+          : "Every solve in the days you pick. Step through them with the arrows in the bar."
+        : isMultiScope
+        ? "Your most recent solves across the selected events, combined into one set of solve cards."
+        : "Your most recent solves. Page older and newer with the arrows in the bar.";
 
     const activeTagField = getTagFieldForSection(scopeModalSection);
     const resolvedTagEvent =
@@ -8162,7 +8692,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           <div className="statsScopeModalHeader">
             <p className="statsScopeModalEyebrow">{title}</p>
             <h3>{subtitle}</h3>
-            <p>Adjust view, event, session, shared tags, color style, and date range for this stats scope.</p>
+            <p>
+              {isMultiScope ? `${viewName} view${rangeLabel ? ` · ${rangeLabel}` : ""}` : rangeLabel}
+            </p>
           </div>
 
           <div className="statsScopeModalNav">
@@ -8178,53 +8710,22 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             ))}
           </div>
 
-          {hasViewSection && (
-            <div className="statsScopeModalSection">
-              <button
-                type="button"
-                className={`statsScopeSectionHeader ${scopeModalSection === "view" ? "active" : ""}`}
-                onClick={() => setScopeModalSection("view")}
-              >
-                <span>View</span>
-                <span>{statsViewMode === "time" ? "Time" : "Solves"}</span>
-              </button>
-
-              {scopeModalSection === "view" && (
-                <div className="statsScopeChipGrid">
-                  {STATS_VIEW_MODE_OPTIONS.map((option) => {
-                    const active = statsViewMode === option.value;
-                    return (
-                      <button
-                        key={`${scopeKey}-view-${option.value}`}
-                        type="button"
-                        className={`statsScopeChip ${active ? "active" : ""}`}
-                        style={
-                          active
-                            ? { borderColor: accentColor, background: `${accentColor}22` }
-                            : undefined
-                        }
-                        onClick={() => onViewModeChange(option.value)}
-                      >
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
           <div className="statsScopeModalSection">
             <button
               type="button"
               className={`statsScopeSectionHeader ${scopeModalSection === "event" ? "active" : ""}`}
               onClick={() => setScopeModalSection("event")}
             >
-              <span>Event</span>
-              <span>{eventValue === ALL_EVENTS ? "All Events" : eventValue === "333" ? "3x3" : eventValue}</span>
+              <span>Events</span>
+              <span>
+                {multiEvent
+                  ? multiEvent.label
+                  : eventValue === ALL_EVENTS ? "All Events" : eventValue === "333" ? "3x3" : eventValue}
+              </span>
             </button>
 
-            {scopeModalSection === "event" && (
+            {scopeModalSection === "event" && multiEvent && renderMultiEventPicker(multiEvent, scopeKey, accentColor)}
+            {scopeModalSection === "event" && !multiEvent && (
               <div className="statsScopeChipGrid">
                 {eventItems.map((eventKey) => {
                   const label =
@@ -8256,9 +8757,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               className={`statsScopeSectionHeader ${scopeModalSection === "session" ? "active" : ""}`}
               onClick={() => setScopeModalSection("session")}
             >
-              <span>Session</span>
+              <span>Sessions</span>
               <span>
-                {sessionValue === ALL_SESSIONS
+                {multiSession
+                  ? multiSession.label
+                  : sessionValue === ALL_SESSIONS
                   ? "All Sessions"
                   : normalizeSessionLabel(
                       sessionValue,
@@ -8267,7 +8770,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               </span>
             </button>
 
-            {scopeModalSection === "session" && (
+            {scopeModalSection === "session" && multiSession && renderMultiSessionPicker(multiSession, scopeKey, accentColor)}
+            {scopeModalSection === "session" && !multiSession && (
               <div className="statsScopeChipGrid">
                 {sessionItems.map((s) => {
                   const sid = s.SessionID || "main";
@@ -8294,6 +8798,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             )}
           </div>
 
+          {tagsAvailable && (
           <div className="statsScopeModalSection">
             <button
               type="button"
@@ -8373,6 +8878,88 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               </>
             )}
           </div>
+          )}
+
+          <div className="statsScopeModalSection">
+            <button
+              type="button"
+              className={`statsScopeSectionHeader ${scopeModalSection === "date" ? "active" : ""}`}
+              onClick={() => setScopeModalSection("date")}
+            >
+              <span>{isMultiScope ? "View" : "Range"}</span>
+              <span>
+                {isMultiScope ? viewName : rangeLabel}
+                {isMultiScope && rangeLabel ? ` · ${rangeLabel}` : ""}
+              </span>
+            </button>
+
+            {/* Single event: no view switch, just the solve count or a date range. */}
+            {scopeModalSection === "date" && !isMultiScope && (
+              <div className="statsScopeViewPanel">
+                {indexFrame ? renderIndexFramePicker(indexFrame, scopeKey, accentColor) : null}
+                <div className="statsScopeMultiGroupLabel statsScopeTimeCustomLabel">
+                  {indexFrame ? "Or a date range" : "Date range"}
+                </div>
+                <StatsDateRangePicker
+                  startDay={dateStartDay}
+                  endDay={dateEndDay}
+                  accentColor={accentColor}
+                  onApply={onDateApply}
+                />
+              </div>
+            )}
+
+            {scopeModalSection === "date" && isMultiScope && (
+              <div className="statsScopeViewPanel">
+                <div className="statsScopeViewSwitch" role="radiogroup" aria-label="View by">
+                  {viewOptions.map((option) => {
+                    const active = view === option.value;
+                    return (
+                      <button
+                        key={`${scopeKey}-view-${option.value}`}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        className={`statsScopeViewOption ${active ? "active" : ""}`}
+                        style={
+                          active
+                            ? { borderColor: accentColor, background: `${accentColor}22` }
+                            : undefined
+                        }
+                        onClick={() => {
+                          if (!active && typeof onViewChange === "function") onViewChange(option.value);
+                        }}
+                      >
+                        <span className="statsScopeViewOptionLabel">{option.label}</span>
+                        <span className="statsScopeViewOptionHint">{option.hint}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <p className="statsScopeViewExplainer">{viewExplainer}</p>
+
+                {view === "solves" ? (
+                  indexFrame ? (
+                    renderIndexFramePicker(indexFrame, scopeKey, accentColor)
+                  ) : (
+                    <div className="statsScopeModalMeta">
+                      Use + and − in the bar to change how many solves are in view.
+                    </div>
+                  )
+                ) : (
+                  <>
+                    <StatsDateRangePicker
+                      startDay={dateStartDay}
+                      endDay={dateEndDay}
+                      accentColor={accentColor}
+                      onApply={onDateApply}
+                    />
+                  </>
+                )}
+              </div>
+            )}
+          </div>
 
           {typeof onPaletteChange === "function" && (
             <div className="statsScopeModalSection">
@@ -8412,26 +8999,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               )}
             </div>
           )}
-
-          <div className="statsScopeModalSection">
-            <button
-              type="button"
-              className={`statsScopeSectionHeader ${scopeModalSection === "date" ? "active" : ""}`}
-              onClick={() => setScopeModalSection("date")}
-            >
-              <span>Date</span>
-              <span>{dateLabel}</span>
-            </button>
-
-            {scopeModalSection === "date" && (
-              <StatsDateRangePicker
-                startDay={dateStartDay}
-                endDay={dateEndDay}
-                accentColor={accentColor}
-                onApply={onDateApply}
-              />
-            )}
-          </div>
         </div>
       </div>
     );
@@ -8737,9 +9304,17 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     loading = false,
     scopeModalKey,
     leadContent = null,
-    showViewModeChip = false,
+    // Primary row (no compare): multi-scope labels, the quick All-events hop,
+    // and no tag button when several events are in scope.
+    scopeLabels = null,
+    // Solves | Time view toggle (every row); with several events, Time reads "Multi-event".
+    view = null,
+    onViewChange = null,
+    timeViewLabel = "Time",
   }) => {
-    const { label: eventLabel, puzzleEvent } = getEventDisplayMeta(eventValue);
+    const meta = getEventDisplayMeta(scopeLabels ? scopeLabels.iconEvent : eventValue);
+    const eventLabel = scopeLabels ? scopeLabels.events : meta.label;
+    const puzzleEvent = meta.puzzleEvent;
     const hasActiveTags = Object.values(sanitizeTagSelection(tagSelection)).some((value) =>
       String(value || "").trim()
     );
@@ -8814,6 +9389,21 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             </span>
           </button>
 
+          {scopeLabels ? (
+            <button
+              type="button"
+              className="statsScopeAllEventsBtn"
+              onClick={(e) => {
+                e.stopPropagation();
+                scopeLabels.onAllEventsToggle();
+              }}
+              title={scopeLabels.allEventsTitle}
+              aria-label={scopeLabels.allEventsTitle}
+            >
+              {scopeLabels.allEventsText}
+            </button>
+          ) : null}
+
           <button
             type="button"
             className="statsScopeSummaryChip statsScopeSummaryChip--session"
@@ -8823,11 +9413,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             }}
           >
             <span className="statsScopeSummaryChipValue">
-              {sessionValue === ALL_SESSIONS ? "All Sessions" : sessionDisplay}
+              {scopeLabels ? scopeLabels.sessions : sessionValue === ALL_SESSIONS ? "All Sessions" : sessionDisplay}
             </span>
           </button>
 
-          {hasActiveTags ? (
+          {scopeLabels?.hideTags ? null : hasActiveTags ? (
             <button
               type="button"
               className="statsScopeSummaryChip statsScopeSummaryChip--tags"
@@ -8875,28 +9465,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
 
         </div>
 
-        {/* Range pill: Solves/Time switch on the left, the range itself in the
-            middle, and (time view, single event) a hop to all events on the right. */}
+        {/* Range pill: the solve count or date range in view. */}
         <div className={`statsScopeRange ${rangePreview ? "is-preview" : ""}`}>
-          {showViewModeChip ? (
-            <div className="statsScopeRangeMode" role="group" aria-label="Stats view">
-              {STATS_VIEW_MODE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`statsScopeRangeModeBtn ${statsViewMode === option.value ? "is-active" : ""}`}
-                  aria-pressed={statsViewMode === option.value}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleSetViewMode(option.value);
-                  }}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
           <button
             type="button"
             className={`statsScopeSummaryChip statsScopeSummaryChip--date ${rangePreview ? "is-preview" : ""}`}
@@ -8911,23 +9481,38 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             ) : null}
           </button>
 
-          {showViewModeChip && statsViewMode === "time" && eventValue !== ALL_EVENTS ? (
-            <button
-              type="button"
-              className="statsScopeRangeAllBtn"
-              onClick={(e) => {
-                e.stopPropagation();
-                void handleEventChange({ target: { value: ALL_EVENTS } });
-              }}
-              aria-label="All events for this range"
-              title="All events for this range"
-            >
-              All
-            </button>
-          ) : null}
         </div>
 
         <div className="statsScopeRowActions">
+          {view && typeof onViewChange === "function" ? (
+            <div className="statsScopeLayoutToggle" role="group" aria-label="View by">
+              {[
+                { value: "solves", label: "Solves", title: "View by solves: your last N solves" },
+                {
+                  value: "time",
+                  label: timeViewLabel,
+                  title:
+                    timeViewLabel === "Time"
+                      ? "View by time: a window of days"
+                      : "Multi-event view: each event side by side over a window of days",
+                },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`statsScopeLayoutBtn ${view === option.value ? "is-active" : ""}`}
+                  aria-pressed={view === option.value}
+                  title={option.title}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (view !== option.value) onViewChange(option.value);
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
           {renderViewportControls(scopeModalKey)}
         </div>
       </div>
@@ -8944,14 +9529,33 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     const primary = showAll ? `All ${countText}` : page === 0 ? `Last ${countText}` : solvesText;
     return { primary, secondary: rangeText };
   };
-  const primaryDateSummary = buildDateSummary({
-    label: dateFilterLabel,
-    rangeText: dateRangeText,
-    count: showingCount,
-    hasDateFilter: hasActiveDateFilter,
-    page: currentPage,
-    showAll: showAllActive,
-  });
+  // Multi-event / merged-session index frame: "Last 1,000" (or "Last 100 each")
+  // over the loaded solves' count and day span.
+  const multiIndexSummary = (() => {
+    if (!multiIndexActive) return null;
+    const nText = Number(multiIndexN).toLocaleString();
+    const primary = multiIndexSplit === "perEvent" ? `Last ${nText} each` : `Last ${nText}`;
+    if (loadingMultiIndex && !hasMultiIndexSolves) return { primary, secondary: "Loading…" };
+    const solves = hasMultiIndexSolves ? multiIndexSolves : [];
+    if (!solves.length) return { primary, secondary: multiIndexError ? "Couldn't load solves" : "No solves" };
+    const firstDay = getLocalDayKey(getSolveDate(solves[0]));
+    const lastDay = getLocalDayKey(getSolveDate(solves[solves.length - 1]));
+    const count = solves.length.toLocaleString();
+    return {
+      primary,
+      secondary: `${count} solves · ${formatShortDateRangeLabel(firstDay, lastDay, "")}`,
+    };
+  })();
+  const primaryDateSummary =
+    multiIndexSummary ||
+    buildDateSummary({
+      label: dateFilterLabel,
+      rangeText: dateRangeText,
+      count: showingCount,
+      hasDateFilter: hasActiveDateFilter,
+      page: currentPage,
+      showAll: showAllActive,
+    });
   const compareDateSummary = buildDateSummary({
     label: compareDateFilterLabel,
     rangeText: compareDateRangeText,
@@ -8961,34 +9565,71 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     showAll: linkStatsControls ? showAllActive : compareShowAllActive,
   });
 
-  // One-click hop between this event's view and the all-events time view;
-  // handleSetViewMode keeps the current day / short range across the switch.
-  const standardScopeLabel = (() => {
-    const event = standardSelection?.event || currentEvent || "333";
-    const session = standardSelection?.session || currentSession || "main";
-    const found = (sessionsList || []).find(
-      (item) =>
-        String(item?.Event || "").toUpperCase() === String(event).toUpperCase() &&
-        String(item?.SessionID || "main") === String(session)
-    );
-    const sessionLabel =
-      session === ALL_SESSIONS
-        ? "All Sessions"
-        : normalizeSessionLabel(session, found?.SessionName || found?.Name || session);
-    return `${getEventDisplayMeta(event).label} ${sessionLabel}`;
-  })();
+  // One-click hop between the timer's event and every event, keeping the range.
+  const homeEvent = String(currentEvent || "333").toUpperCase();
+  const homeEventLabel = getEventDisplayMeta(homeEvent).label;
   const primaryViewSwitchChip =
-    statsViewMode === "time"
+    scopeEvents === ALL_EVENTS
       ? {
-          label: `← ${standardScopeLabel}`,
-          title: `Back to ${standardScopeLabel} for this date range`,
-          onClick: () => void handleSetViewMode("standard"),
+          label: `← ${homeEventLabel}`,
+          title: `Back to ${homeEventLabel} for this range`,
+          onClick: () => void handleEventChange(homeEvent),
         }
       : {
           label: "All events →",
-          title: "See every event for this date range",
-          onClick: () => void handleSetViewMode("time"),
+          title: "See every event for this range",
+          onClick: () => void scopeMultiEvent.onAll(),
         };
+  const primaryScopeLabels = {
+    events: scopeEventsLabel,
+    sessions: scopeSessionsLabel,
+    // Several (but not all) events show the first one's puzzle; all events show none.
+    iconEvent: scopeEvents === ALL_EVENTS ? ALL_EVENTS : scopeEventList[0] || homeEvent,
+    hideTags: isMultiEventScope,
+    allEventsText: scopeEvents === ALL_EVENTS ? homeEventLabel : "All",
+    allEventsTitle: primaryViewSwitchChip.title,
+    onAllEventsToggle: primaryViewSwitchChip.onClick,
+  };
+
+  // Solves | Time: Solves drops the date window (back to the last N solves),
+  // Time opens this week.
+  const handlePrimaryViewChange = (next) => {
+    if (next === primaryScopeView) return;
+    if (next === "solves") {
+      setSelectedTimeDay("");
+      void applyPrimaryDateRange("", "", {
+        onApply: () => {
+          setPreferRawDateRangeView(false);
+          setCurrentPage(0);
+        },
+      });
+      return;
+    }
+    void applyTimeRangePreset("week");
+  };
+  const compareScopeView =
+    effectiveCompareDateFilterStart || effectiveCompareDateFilterEnd ? "time" : "solves";
+  const applyCompareDateRange = (nextStart, nextEnd) => {
+    if (linkStatsControls) {
+      void applyPrimaryDateRange(nextStart, nextEnd);
+      return;
+    }
+    setCompareDateFilterStart(nextStart);
+    setCompareDateFilterEnd(nextEnd);
+  };
+  const handleCompareTimePreset = (preset) => {
+    const range = getTimePresetRange(preset);
+    applyCompareDateRange(range.start, range.end);
+  };
+  const handleCompareViewChange = (next) => {
+    if (next === compareScopeView) return;
+    if (linkStatsControls) {
+      handlePrimaryViewChange(next);
+      return;
+    }
+    if (next === "solves") applyCompareDateRange("", "");
+    else handleCompareTimePreset("week");
+  };
 
   const primaryBackChip =
     rawRangeViewActive && statsViewMode === "standard"
@@ -9016,38 +9657,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   };
   const showCompareOverviewMini = useSharedCompareRail && !isAllEventsMode;
 
-  // Card container tint: profile color (default), neutral gray, or a custom color.
-  // The -force vars also override cards that carry their own per-series color.
-  const statsContainerColorMode = settings?.statsContainerColorMode || "profile";
-  const statsContainerVars =
-    statsContainerColorMode === "gray"
-      ? {
-          "--stats-container-bg": STATS_CONTAINER_GRAY_BG,
-          "--stats-container-border": STATS_CONTAINER_GRAY_BORDER,
-          "--stats-container-force-bg": STATS_CONTAINER_GRAY_BG,
-          "--stats-container-force-border": STATS_CONTAINER_GRAY_BORDER,
-          "--stats-container-border-hover": STATS_CONTAINER_GRAY_BORDER_HOVER,
-          "--stats-container-force-border-hover": STATS_CONTAINER_GRAY_BORDER_HOVER,
-        }
-      : statsContainerColorMode === "custom"
-        ? {
-            "--stats-container-bg": `${settings?.statsContainerCustomColor || "#2EC4B6"}22`,
-            "--stats-container-border": `${settings?.statsContainerCustomColor || "#2EC4B6"}4d`,
-            "--stats-container-force-bg": `${settings?.statsContainerCustomColor || "#2EC4B6"}22`,
-            "--stats-container-force-border": `${settings?.statsContainerCustomColor || "#2EC4B6"}4d`,
-            "--stats-container-border-hover": `${settings?.statsContainerCustomColor || "#2EC4B6"}a6`,
-            "--stats-container-force-border-hover": `${settings?.statsContainerCustomColor || "#2EC4B6"}a6`,
-          }
-        : {
-            "--stats-container-bg": `${profileChartStyle?.primary || "#2EC4B6"}22`,
-            "--stats-container-border": `${profileChartStyle?.primary || "#2EC4B6"}4d`,
-            "--stats-container-border-hover": `${profileChartStyle?.primary || "#2EC4B6"}a6`,
-          };
-  // Fill off: cards keep their border but drop the tinted background.
-  if (settings?.statsContainerBackground !== true) {
-    statsContainerVars["--stats-container-bg"] = "transparent";
-    statsContainerVars["--stats-container-force-bg"] = "transparent";
-  }
+  const statsContainerVars = getStatsContainerVars(settings, profileChartStyle?.primary || "#2EC4B6");
   // The top selector + overview cards have their own fill toggle.
   const statsTopBarFill = settings?.statsTopBarBackground === true;
   if (!statsTopBarFill) {
@@ -9111,7 +9721,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                 tagPills: selectedTagPills,
                 dateSummary: primaryDateSummary,
                 scopeModalKey: "primary",
-                showViewModeChip: !compareEnabled,
+                scopeLabels: compareEnabled ? null : primaryScopeLabels,
+                // Only multi-event scopes switch between Solves and Multi-event.
+                view: statsViewMode === "time" ? primaryScopeView : null,
+                onViewChange: handlePrimaryViewChange,
+                timeViewLabel: "Multi-event",
               })}
 
               {compareEnabled &&
@@ -9218,7 +9832,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             {renderTagScopeModal({
         isOpen: scopeModalState === "primary",
         title: compareEnabled ? "Scope A" : "Scope",
-        subtitle: `${eventSelectLabel} · ${selectedSessionDisplay}`,
+        subtitle: compareEnabled
+          ? `${eventSelectLabel} · ${selectedSessionDisplay}`
+          : `${scopeEventsLabel} · ${scopeSessionsLabel}`,
         scopeKey: "primary",
         eventValue: statsEvent,
         onEventChange: (next) =>
@@ -9251,9 +9867,27 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         onDateApply: (nextStart, nextEnd) => {
           void applyPrimaryDateRange(nextStart, nextEnd);
         },
-        onViewModeChange: (nextMode) => {
-          void handleSetViewMode(nextMode);
-        },
+        // Compare rows are single-event, so the primary row only goes multi when alone.
+        multiEvent: compareEnabled ? null : scopeMultiEvent,
+        multiSession: compareEnabled ? null : scopeMultiSession,
+        indexFrame: compareEnabled
+          ? null
+          : {
+              active: !hasActiveDateFilter,
+              n: statsViewMode === "time" ? multiIndexN : solvesPerPage,
+              label: primaryDateSummary?.primary || "",
+              isMulti: statsViewMode === "time",
+              split: multiIndexSplit,
+              onPick: handleSetIndexFrame,
+              onSplit: (split) => {
+                setMultiIndexSplit(split);
+                if (hasActiveDateFilter) void applyPrimaryDateRange("", "");
+              },
+            },
+        view: primaryScopeView,
+        onViewChange: handlePrimaryViewChange,
+        isMultiScope: statsViewMode === "time",
+        rangeLabel: primaryDateSummary?.primary || "",
       })}
 
             {renderTagScopeModal({
@@ -9295,6 +9929,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           setCompareDateFilterStart(nextStart);
           setCompareDateFilterEnd(nextEnd);
         },
+        view: compareScopeView,
+        onViewChange: handleCompareViewChange,
+        rangeLabel: compareDateSummary?.primary || "",
       })}
 
       <div className="stats-page">
@@ -9331,19 +9968,19 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           );
         })}
         <div
-          className={`stats-grid stats-grid--figma ${statsViewMode === "time" ? "stats-grid--time" : ""} ${
+          className={`stats-grid stats-grid--figma ${layoutViewMode === "time" ? "stats-grid--time" : ""} ${
             showAllEventsTimeMatrixCard ? "" : "stats-grid--noEventMatrix"
           }`}
         >
           <div
             className={`stats-item stats-item--header stats-item--minh stats-item--headerSplit${
-              isAllEventsMode || (!compareEnabled && statsViewMode === "time") || (!compareEnabled && summaryLayout === "row")
+              layoutAllEvents || (!compareEnabled && layoutViewMode === "time") || (!compareEnabled && summaryLayout === "row")
                 ? " stats-item--headerSplitSingle"
                 : ""
             }${compareEnabled ? " stats-item--headerSplitSingle" : ""}`}
           >
             {!compareEnabled ? (
-              statsViewMode === "time" ? (
+              layoutViewMode === "time" ? (
                 <div
                   className={`statsSummaryPanel statsCardShell ${primarySummaryLoading ? "is-loading" : ""}`}
                   aria-busy={primarySummaryLoading}
@@ -9360,7 +9997,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     loadedSolveCount={loadedSolveCountForSummary}
                     solveIndexOffset={summarySolveIndexOffset}
                     showCurrentMetrics={currentPage === 0}
-                    viewMode={statsViewMode}
+                    viewMode={layoutViewMode}
                     summaryLayout={summaryLayout}
                     selectedDay={selectedTimeDay}
                     selectedTagPills={selectedTagPills}
@@ -9369,7 +10006,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     loading={primarySummaryLoading}
                   />
                 </div>
-              ) : isAllEventsMode ? (
+              ) : layoutAllEvents ? (
                 <div
                   className={`statsSummaryPanel statsCardShell ${primaryOverallSummaryLoading ? "is-loading" : ""}`}
                   aria-busy={primaryOverallSummaryLoading}
@@ -9383,8 +10020,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     overviewOnly={isAllTimeBucketOverview}
                     bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
                     bucketItems={useBucketBackedRange ? activeBucketItems : []}
-                    allEventsBreakdown={statsViewMode === "time" ? null : isAllEventsMode ? allEventsBreakdown : null}
-                    eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
+                    allEventsBreakdown={layoutViewMode === "time" ? null : layoutAllEvents ? allEventsBreakdown : null}
+                    eventBreakdownData={layoutViewMode === "time" ? timeViewEventBreakdownData : []}
                     allowOverallDerived={allowOverallDerivedMetrics}
                     mode={summaryMode}
                     selectedEvent={eventSelectLabel}
@@ -9394,7 +10031,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     loadedSolveCount={loadedSolveCountForSummary}
                     solveIndexOffset={summarySolveIndexOffset}
                     showCurrentMetrics={currentPage === 0}
-                    viewMode={statsViewMode}
+                    viewMode={layoutViewMode}
                     summaryLayout={summaryLayout}
                     selectedDay={selectedTimeDay}
                     profileColor={primaryAccentColor}
@@ -9418,7 +10055,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                       bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
                       bucketItems={useBucketBackedRange ? activeBucketItems : []}
                       allEventsBreakdown={null}
-                      eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
+                      eventBreakdownData={layoutViewMode === "time" ? timeViewEventBreakdownData : []}
                       allowOverallDerived={allowOverallDerivedMetrics}
                       mode={summaryMode}
                       selectedEvent={eventSelectLabel}
@@ -9428,7 +10065,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                       loadedSolveCount={loadedSolveCountForSummary}
                       solveIndexOffset={summarySolveIndexOffset}
                       showCurrentMetrics={currentPage === 0}
-                      viewMode={statsViewMode}
+                      viewMode={layoutViewMode}
                       summaryLayout={summaryLayout}
                       selectedDay={selectedTimeDay}
                       profileColor={primaryAccentColor}
@@ -9451,12 +10088,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
             bucketItems={useBucketBackedRange ? activeBucketItems : []}
                       allEventsBreakdown={null}
-                      eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
+                      eventBreakdownData={layoutViewMode === "time" ? timeViewEventBreakdownData : []}
                       mode={summaryMode}
             loadedSolveCount={loadedSolveCountForSummary}
             solveIndexOffset={summarySolveIndexOffset}
             showCurrentMetrics={currentPage === 0}
-            viewMode={statsViewMode}
+            viewMode={layoutViewMode}
             summaryLayout={summaryLayout}
             selectedDay={selectedTimeDay}
             selectedTagPills={selectedTagPills}
@@ -9520,7 +10157,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
                         bucketItems={useBucketBackedRange ? activeBucketItems : []}
                         allEventsBreakdown={null}
-                        eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
+                        eventBreakdownData={layoutViewMode === "time" ? timeViewEventBreakdownData : []}
                         allowOverallDerived={allowOverallDerivedMetrics}
                         mode={summaryMode}
                         selectedEvent={eventSelectLabel}
@@ -9530,7 +10167,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         loadedSolveCount={loadedSolveCountForSummary}
                         solveIndexOffset={summarySolveIndexOffset}
                         showCurrentMetrics={currentPage === 0}
-                        viewMode={statsViewMode}
+                        viewMode={layoutViewMode}
                         summaryLayout={summaryLayout}
                         selectedDay={selectedTimeDay}
                         summarySource="primary"
@@ -9555,12 +10192,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                         bucketSummary={useBucketBackedRange ? activeBucketSummary : null}
                         bucketItems={useBucketBackedRange ? activeBucketItems : []}
                         allEventsBreakdown={null}
-                        eventBreakdownData={statsViewMode === "time" ? timeViewEventBreakdownData : []}
+                        eventBreakdownData={layoutViewMode === "time" ? timeViewEventBreakdownData : []}
                         mode={summaryMode}
                       loadedSolveCount={loadedSolveCountForSummary}
                       solveIndexOffset={summarySolveIndexOffset}
                       showCurrentMetrics={currentPage === 0}
-                      viewMode={statsViewMode}
+                      viewMode={layoutViewMode}
                       summaryLayout={summaryLayout}
                       selectedDay={selectedTimeDay}
                       selectedTagPills={selectedTagPills}
@@ -9596,7 +10233,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   </div>
                 </div>
 
-                {!isAllEventsMode && (
+                {!layoutAllEvents && (
                   <div className="statsSummaryRow">
                     <div
                       className="statsSummaryRowLabel"
@@ -9711,7 +10348,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     : loadingEventMatrixStats
                 }
                 mainOnly={timeViewMainSessionsOnly}
-                onToggleMainOnly={setTimeViewMainSessionsOnly}
+                onToggleMainOnly={(mainOnly) =>
+                  void applyScope({ sessions: { mode: mainOnly ? "main" : "all", keys: [] } })
+                }
                 onStatSelect={handleEventMatrixStatSelect}
               />
             </div>
@@ -9720,7 +10359,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           {showSolveCharts && (
             <>
               <div
-                className={`stats-item stats-item--line stats-item--minh statsCardShell ${statsViewMode === "time" ? "stats-item--lineWide" : ""} ${chartCardsLoading ? "is-loading" : ""}`}
+                className={`stats-item stats-item--line stats-item--minh statsCardShell ${layoutViewMode === "time" ? "stats-item--lineWide" : ""} ${chartCardsLoading ? "is-loading" : ""}`}
                 aria-busy={chartCardsLoading}
                 {...bindCardFocus(cardDefinitions.find((item) => item.key === "line")?.id)}
               >
@@ -9743,7 +10382,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   }
                   seriesStyle={primaryCompareStyle}
                   legendItems={compareLegendItems}
-                  title={buildStatCardTitle(eventSelectLabel, selectedSessionDisplay)}
+                  title={buildStatCardTitle(cardTitleEventLabel || eventSelectLabel, cardTitleSessionLabel || selectedSessionDisplay)}
                   titleDate={lineChartTitleDate}
                   titleIndexRange={lineChartTitleIndexRange}
                   solveIndexOffset={lineChartSolveIndexOffset}
@@ -9755,11 +10394,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   currentSession={sessionId}
                   eventKey={statsEvent}
                   practiceMode={false}
-                  viewMode={statsViewMode}
+                  viewMode={layoutViewMode}
                   selectedDay={selectedTimeDay}
                   onSelectedDayChange={setSelectedTimeDay}
                   onSolveOpen={openSolveDetail}
                   onBucketSelect={handleBucketDaySelect}
+                  {...bulkTagEditorProps}
                 />
               </div>
 
@@ -9799,7 +10439,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                 </div>
               )}
 
-              {statsViewMode !== "time" && (
+              {layoutViewMode !== "time" && (
                 <div
                   className={`stats-item stats-item--bar stats-item--minh statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
                   aria-busy={chartCardsLoading}
@@ -9829,7 +10469,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                 </div>
               )}
 
-              {statsViewMode !== "time" && (
+              {layoutViewMode !== "time" && (
                 <div
                   className={`stats-item stats-item--tagBreakdown statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
                   aria-busy={chartCardsLoading}
@@ -9897,7 +10537,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     solves={
                       compareEnabled && tableCompareView === "compare"
                         ? compareVisiblePageFilteredRawSolves
-                        : statsViewMode === "time"
+                        : layoutViewMode === "time"
                           ? timeViewFocusedSolves
                           : chartVisibleSolves
                     }
@@ -9960,6 +10600,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         tagConfig={safeTagConfig}
         tagColors={selectedSolveTagColors}
         profileColor={user?.Color || user?.color || "#2EC4B6"}
+        userID={readOnly ? null : user?.UserID}
+        setSessions={statsSetSessions}
+        sessionsList={sessionsList}
         onClose={() => setSelectedAverageDetail(null)}
         onSolveOpen={openSolveDetail}
       />

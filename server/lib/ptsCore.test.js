@@ -15,6 +15,8 @@ const {
   minIsoTimestamp,
   planScopeExtremeReads,
   applyScopeExtremes,
+  getDayKey,
+  iterateSolvesByDay,
 } = require("./ptsCore");
 
 function solve(id, rawTimeMs, penalty, createdAt) {
@@ -381,4 +383,37 @@ test("emptying a scope clears every extreme", () => {
   assert.strictEqual(next.FirstSolveAt, null);
   assert.strictEqual(next.Plus2BestMs, null);
   assert.strictEqual(next.WorstSingleMs, null);
+});
+
+async function collectDays(solves) {
+  async function* source() {
+    yield* solves;
+  }
+  const out = [];
+  for await (const day of iterateSolvesByDay(source(), (solve) => solve.day)) out.push(day);
+  return out;
+}
+
+test("iterateSolvesByDay groups date-ordered solves by day", async () => {
+  const days = await collectDays([{ day: "a" }, { day: "a" }, { day: "b" }, { day: "" }, { day: "c" }]);
+  assert.deepStrictEqual(
+    days.map((d) => [d.dayKey, d.solves.length, d.repeat]),
+    [["a", 2, false], ["b", 1, false], ["c", 1, false]]
+  );
+});
+
+test("iterateSolvesByDay flags a day that comes back, since neither part is the whole day", async () => {
+  const days = await collectDays([{ day: "a" }, { day: "b" }, { day: "a" }]);
+  assert.deepStrictEqual(days.map((d) => d.repeat), [false, false, true]);
+});
+
+test("iterateSolvesByDay handles no solves", async () => {
+  assert.deepStrictEqual(await collectDays([]), []);
+});
+
+test("getDayKey honours the time zone with its cached formatters", () => {
+  const at = "2026-01-02T03:00:00.000Z";
+  assert.strictEqual(getDayKey(at, { timeZone: "UTC" }), "2026-01-02");
+  assert.strictEqual(getDayKey(at, { timeZone: "America/Los_Angeles" }), "2026-01-01");
+  assert.strictEqual(getDayKey(at, { timeZone: "UTC" }), "2026-01-02");
 });

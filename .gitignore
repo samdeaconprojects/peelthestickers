@@ -32,3 +32,6 @@ yarn-error.log*
 
 # Local API output (npm --prefix server start | tee -a server/api.log)
 server/api.log
+
+# Cross-account table copy checkpoints
+server/scripts/.copy-checkpoint-*.json

@@ -67,6 +67,8 @@ export const joinRoom = async ({ roomID, userID, name = "", color = "" } = {}) =
     item: data?.item || null,
     scrambles: Array.isArray(data?.scrambles) ? data.scrambles : [],
     leaderboard: Array.isArray(data?.leaderboard) ? data.leaderboard : [],
+    // The server sends only the top rows (plus you and the host) for big rooms.
+    memberCount: Number.isFinite(Number(data?.memberCount)) ? Number(data.memberCount) : null,
   };
 };
 
@@ -100,6 +102,13 @@ export const getRoomState = async (roomID, fromIndex = 0) => {
     item: data?.item || null,
     scrambles: Array.isArray(data?.scrambles) ? data.scrambles : [],
     leaderboard: Array.isArray(data?.leaderboard) ? data.leaderboard : [],
+    // The server sends only the top rows (plus you and the host) for big rooms.
+    memberCount: Number.isFinite(Number(data?.memberCount)) ? Number(data.memberCount) : null,
+    // How long to wait before the next poll; longer for big rooms.
+    pollAfterMs:
+      Number.isFinite(Number(data?.pollAfterMs)) && Number(data.pollAfterMs) > 0
+        ? Math.min(30000, Math.max(1000, Number(data.pollAfterMs)))
+        : null,
   };
 };
 

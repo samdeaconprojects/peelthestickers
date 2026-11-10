@@ -56,6 +56,8 @@ import {
   isEditableTarget,
 } from "./utils/keybindings";
 import { getUser } from "./services/getUser";
+import { getProfiles } from "./services/getProfiles";
+import { createSocialEventSource } from "./services/socialEvents";
 import { updateUser } from "./services/updateUser";
 import { getSessions } from "./services/getSessions";
 import { getLastNSolvesBySession, getSolvesBySession } from "./services/getSolvesBySession";
@@ -230,6 +232,42 @@ function readNavPrefs(userID, fallbackSettings = {}) {
     };
   } catch {
     return fallback;
+  }
+}
+
+// Practice solves never hit the DB until the user saves them, so the in-progress
+// practice run lives in localStorage to survive a page reload.
+const PRACTICE_STORAGE_KEY = "pts:practice";
+
+function readPracticeState() {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(PRACTICE_STORAGE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed?.active) return null;
+    return {
+      solves: Array.isArray(parsed.solves) ? parsed.solves : [],
+      saveTargetSession: String(parsed.saveTargetSession || "").trim() || "main",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writePracticeState(state) {
+  if (typeof window === "undefined") return;
+
+  try {
+    if (!state?.active) {
+      window.localStorage.removeItem(PRACTICE_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(PRACTICE_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // storage full or blocked: practice still works, it just won't survive a reload
   }
 }
 
@@ -1745,10 +1783,23 @@ function App() {
   const [tagConfig, setTagConfig] = useState(DEFAULT_TAG_CONFIG);
   const [homeDiscoveredTagOptions, setHomeDiscoveredTagOptions] = useState({});
 
-  const [practiceMode, setPracticeMode] = useState(false);
-  const [practiceSolves, setPracticeSolves] = useState([]);
+  const [initialPracticeState] = useState(readPracticeState);
+  const [practiceMode, setPracticeMode] = useState(() => !!initialPracticeState);
+  const [practiceSolves, setPracticeSolves] = useState(
+    () => initialPracticeState?.solves || []
+  );
   const [showPracticeExit, setShowPracticeExit] = useState(false);
-  const [practiceSaveTargetSession, setPracticeSaveTargetSession] = useState("main");
+  const [practiceSaveTargetSession, setPracticeSaveTargetSession] = useState(
+    () => initialPracticeState?.saveTargetSession || "main"
+  );
+
+  useEffect(() => {
+    writePracticeState({
+      active: practiceMode,
+      solves: practiceSolves,
+      saveTargetSession: practiceSaveTargetSession,
+    });
+  }, [practiceMode, practiceSolves, practiceSaveTargetSession]);
 
   const [scrambleProgress, setScrambleProgress] = useState(0);
   const [scrambleProgressTotal, setScrambleProgressTotal] = useState(0);
@@ -3171,7 +3222,7 @@ function App() {
       setLiveRoomBusy(true);
       setLiveRoomError("");
       try {
-        const { item, scrambles: initialScrambles, leaderboard } = await joinRoom({
+        const { item, scrambles: initialScrambles, leaderboard, memberCount } = await joinRoom({
           roomID: id,
           userID: user.UserID,
           name: user?.Username || user?.Name || user.UserID,
@@ -3189,6 +3240,7 @@ function App() {
           hostIndex: item.HostIndex ?? -1,
           scrambles: initialScrambles,
           leaderboard,
+          memberCount,
           localIndex: 0,
           active: true,
         });
@@ -3257,8 +3309,10 @@ function App() {
     });
   }, [liveRoomHost, isSignedIn, user?.UserID, isRelayActive, sharedSession, liveRoomFollow, scrambles, currentEvent]);
 
-  // Spectator: poll for new scrambles + leaderboard. Polling (not push)
-  // keeps this cheap at hundreds of concurrent spectators.
+  // Spectator: new scrambles arrive over the notification stream as the host
+  // publishes them; a poll backs that up and refreshes the leaderboard. The
+  // server sets the poll interval, slower for big rooms, so a few thousand
+  // spectators stay within what one API process serves.
   useEffect(() => {
     if (!liveRoomFollow?.active || !user?.UserID) {
       stopLiveRoomPolling();
@@ -3266,18 +3320,66 @@ function App() {
     }
 
     let cancelled = false;
+    let pollAfterMs = 2500;
+    const roomID = liveRoomFollow.roomID;
+
+    const applyNewScrambles = (follow, newScrambles, hostIndex) => {
+      if (!newScrambles.length) {
+        if (hostIndex != null) {
+          setLiveRoomFollow((prev) =>
+            prev && prev.roomID === follow.roomID ? { ...prev, hostIndex } : prev
+          );
+        }
+        return;
+      }
+      const priorEvent = follow.scrambles.length
+        ? follow.scrambles[follow.scrambles.length - 1].event
+        : follow.event;
+      const eventSwitch = newScrambles.find((s) => s.event !== priorEvent);
+
+      setLiveRoomFollow((prev) => {
+        if (!prev || prev.roomID !== follow.roomID) return prev;
+        // The push and the poll can deliver the same scramble; keep the
+        // list contiguous by index.
+        const fresh = newScrambles.filter((s) => s.index >= prev.scrambles.length);
+        if (!fresh.length) return hostIndex != null ? { ...prev, hostIndex } : prev;
+        return {
+          ...prev,
+          scrambles: [...prev.scrambles, ...fresh],
+          hostIndex: hostIndex != null ? hostIndex : prev.hostIndex,
+        };
+      });
+
+      if (eventSwitch && eventSwitch.index > follow.localIndex) {
+        setLiveRoomEventPrompt({
+          previousEvent: priorEvent,
+          newEvent: eventSwitch.event,
+          changeIndex: eventSwitch.index,
+          applyOnNextSolve: false,
+        });
+      }
+    };
+
+    const schedule = (ms) => {
+      if (cancelled) return;
+      stopLiveRoomPolling();
+      liveRoomPollTimeoutRef.current = setTimeout(tick, ms);
+    };
 
     const tick = async () => {
       const follow = liveRoomFollowRef.current;
       if (!follow || cancelled) return;
 
       try {
-        const { item, scrambles: newScrambles, leaderboard } = await getRoomState(
-          follow.roomID,
-          follow.scrambles.length
-        );
-
+        const {
+          item,
+          scrambles: newScrambles,
+          leaderboard,
+          memberCount,
+          pollAfterMs: serverPollMs,
+        } = await getRoomState(follow.roomID, follow.scrambles.length);
         if (cancelled) return;
+        if (serverPollMs) pollAfterMs = serverPollMs;
 
         if (!item || item.Active !== true) {
           setLiveRoomFollow(null);
@@ -3285,52 +3387,44 @@ function App() {
           return;
         }
 
-        if (newScrambles.length) {
-          const priorEvent = follow.scrambles.length
-            ? follow.scrambles[follow.scrambles.length - 1].event
-            : follow.event;
-          const eventSwitch = newScrambles.find((s) => s.event !== priorEvent);
-
-          setLiveRoomFollow((prev) =>
-            prev && prev.roomID === follow.roomID
-              ? {
-                  ...prev,
-                  scrambles: [...prev.scrambles, ...newScrambles],
-                  hostIndex: item.HostIndex,
-                }
-              : prev
-          );
-
-          if (eventSwitch && eventSwitch.index > follow.localIndex) {
-            setLiveRoomEventPrompt({
-              previousEvent: priorEvent,
-              newEvent: eventSwitch.event,
-              changeIndex: eventSwitch.index,
-              applyOnNextSolve: false,
-            });
-          }
-        } else {
-          setLiveRoomFollow((prev) =>
-            prev && prev.roomID === follow.roomID ? { ...prev, hostIndex: item.HostIndex } : prev
-          );
-        }
+        applyNewScrambles(follow, newScrambles, item.HostIndex);
 
         setLiveRoomFollow((prev) =>
-          prev && prev.roomID === follow.roomID ? { ...prev, leaderboard } : prev
+          prev && prev.roomID === follow.roomID ? { ...prev, leaderboard, memberCount } : prev
         );
       } catch (err) {
         console.warn("Live room poll failed:", err);
       } finally {
-        if (!cancelled) {
-          liveRoomPollTimeoutRef.current = setTimeout(tick, 2500);
-        }
+        schedule(pollAfterMs);
       }
     };
+
+    const source = createSocialEventSource(user.UserID, {
+      onEvent: (payload) => {
+        if (cancelled || payload?.type !== "room.scramble" || payload.roomID !== roomID) return;
+        const follow = liveRoomFollowRef.current;
+        if (!follow || follow.roomID !== roomID) return;
+        const index = Number(payload.index);
+        if (!Number.isFinite(index)) return;
+        if (index > follow.scrambles.length) {
+          // Missed one (reconnect); let the poll fill the gap, spread out so
+          // a whole room doesn't ask at once.
+          schedule(Math.random() * 1500);
+          return;
+        }
+        applyNewScrambles(
+          follow,
+          [{ index, event: String(payload.event || follow.event || "333"), scramble: String(payload.scramble || "") }],
+          index
+        );
+      },
+    });
 
     tick();
     return () => {
       cancelled = true;
       stopLiveRoomPolling();
+      if (source) source.close();
     };
   }, [liveRoomFollow?.active, liveRoomFollow?.roomID, user?.UserID, stopLiveRoomPolling]);
 
@@ -5141,17 +5235,12 @@ function App() {
           console.warn("Failed to load groups for share composer", err);
           return [];
         }),
-        Promise.all(
-          (Array.isArray(user.Friends) ? user.Friends : []).map(async (friendID) => {
-            try {
-              const profile = await getUser(friendID);
-              return [friendID, profile];
-            } catch (err) {
-              console.warn("Failed to load friend profile for share composer", friendID, err);
-              return [friendID, null];
-            }
-          })
-        ).catch(() => []),
+        getProfiles(Array.isArray(user.Friends) ? user.Friends : [])
+          .then((byID) => Object.entries(byID))
+          .catch((err) => {
+            console.warn("Failed to load friend profiles for share composer", err);
+            return [];
+          }),
       ])
         .then(([conversations, groups, friendProfiles]) => {
           const groupsByConversationID = Object.fromEntries(
@@ -6930,6 +7019,16 @@ function App() {
     user?.UserID,
   ]);
 
+  // A one-solve window is a single: open the regular solve detail, not the average modal.
+  const openAverageSelection = (solves) => {
+    const list = Array.isArray(solves) ? solves : [];
+    if (list.length === 1) {
+      setSelectedAverageSolve({ ...list[0], userID: user?.UserID });
+      return;
+    }
+    setSelectedAverageSolves(list);
+  };
+
   const requestAverageWindow = async (count, startSolveRef, targetAvg, variant = "best") => {
     if (
       !practiceMode &&
@@ -6961,7 +7060,7 @@ function App() {
           Math.round(apiWindowValue) === Math.round(Number(targetAvg));
 
         if (exactApiMatch) {
-          setSelectedAverageSolves(normalized);
+          openAverageSelection(normalized);
           return true;
         }
       } catch (err) {
@@ -6982,14 +7081,14 @@ function App() {
     }
 
     if (selected.length > 0) {
-      setSelectedAverageSolves(selected);
+      openAverageSelection(selected);
       return true;
     }
 
     const fullSessionSolves = await loadAllCurrentSessionSolves();
     const exactWindow = findAverageWindowByValue(fullSessionSolves, count, targetAvg);
     if (exactWindow.length > 0) {
-      setSelectedAverageSolves(exactWindow);
+      openAverageSelection(exactWindow);
       return true;
     }
 
@@ -7024,7 +7123,7 @@ function App() {
 
       await refreshCanonicalCurrentSessionStats();
 
-      setSelectedAverageSolves(fallbackWindow);
+      openAverageSelection(fallbackWindow);
       return true;
     }
 
@@ -7828,7 +7927,7 @@ function App() {
                             vertical
                             currentSolves={currentSolves}
                             overallSessionStats={currentSessionStatsForEvent}
-                            setSelectedAverageSolves={setSelectedAverageSolves}
+                            setSelectedAverageSolves={openAverageSelection}
                             onRequestBestAverageWindow={requestAverageWindow}
                           />
                         ) : (
@@ -7869,7 +7968,7 @@ function App() {
                         <AveragesDisplay
                           currentSolves={currentSolves}
                           overallSessionStats={currentSessionStatsForEvent}
-                          setSelectedAverageSolves={setSelectedAverageSolves}
+                          setSelectedAverageSolves={openAverageSelection}
                           onRequestBestAverageWindow={requestAverageWindow}
                         />
                       ) : null}
@@ -7889,6 +7988,9 @@ function App() {
                       tagConfig={homeTagConfig}
                       tagColors={currentTagColors}
                       profileColor={user?.Color || user?.color || "#2EC4B6"}
+                      userID={practiceMode ? null : user?.UserID}
+                      setSessions={setSessions}
+                      sessionsList={sessionsList}
                       onClose={() => {
                         setSelectedAverageSolves([]);
                       }}
@@ -7968,6 +8070,7 @@ function App() {
                     sessions={sessions}
                     onJoinLiveRoom={joinLiveRoom}
                     liveRoomBusy={liveRoomBusy}
+                    liveRoomError={liveRoomError}
                   />
                 ) : (
                   renderSignedOutScreen("Profile")
@@ -7988,6 +8091,7 @@ function App() {
                     sessions={sessions}
                     onJoinLiveRoom={joinLiveRoom}
                     liveRoomBusy={liveRoomBusy}
+                    liveRoomError={liveRoomError}
                   />
                 ) : (
                   renderSignedOutScreen("Profile")
@@ -8202,6 +8306,8 @@ function App() {
           onRefreshSharedAverage={refreshActiveSharedSession}
           onLeaveSharedSession={leaveSharedRun}
           onCloseHostedRoom={closeHostedRoom}
+          practiceMode={practiceMode}
+          liveMode={liveRoomHost?.active ? "host" : liveRoomFollow ? "follow" : null}
           onSessionChange={() => {
             sharedReturnTargetRef.current = null;
             setSharedSession(null);

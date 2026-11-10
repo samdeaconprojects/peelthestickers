@@ -45,6 +45,8 @@ function PlayerBar({
   onCloseHostedRoom,
   onSessionChange,
   onSelectSessionObj,
+  practiceMode = false,
+  liveMode = null,
 }) {
   const location = useLocation();
   const { pathname } = location;
@@ -106,6 +108,24 @@ function PlayerBar({
             onSessionChange={onSessionChange}
             onSelectSessionObj={onSelectSessionObj}
           />
+          {practiceMode ? (
+            <span
+              className="playerbar-mode-chip playerbar-mode-chip--practice"
+              title="Practice mode: solves aren't saved until you end practice"
+            >
+              <span className="playerbar-mode-chip__dot" aria-hidden="true" />
+              Practice
+            </span>
+          ) : null}
+          {liveMode ? (
+            <span
+              className="playerbar-mode-chip playerbar-mode-chip--live"
+              title={liveMode === "host" ? "You're live" : "Following a live room"}
+            >
+              <span className="playerbar-mode-chip__dot" aria-hidden="true" />
+              Live
+            </span>
+          ) : null}
           {sharedAverageMeta?.active ? (
             <div
               className="playerbar-shared-chip"

@@ -40,6 +40,8 @@ export function LiveRoomFollowBar({
   const leaderboard = [...(follow.leaderboard || [])].sort(
     (a, b) => (b.currentIndex ?? -1) - (a.currentIndex ?? -1)
   );
+  // Big rooms only send the leaders (plus you and the host).
+  const hiddenCount = Math.max(0, (follow.memberCount ?? leaderboard.length) - leaderboard.length);
 
   return (
     <div className="liveRoomFollowBar">
@@ -96,6 +98,11 @@ export function LiveRoomFollowBar({
               </div>
             ))
           )}
+          {hiddenCount > 0 ? (
+            <div className="liveRoomFollowBar__empty">
+              +{hiddenCount} more following · {follow.memberCount} in the room
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

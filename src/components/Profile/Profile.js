@@ -18,6 +18,13 @@ import AllEventsTimeMatrix from "../Stats/AllEventsTimeMatrix";
 import { calculateAverage } from "../TimeList/TimeUtils";
 import { EVENT_KEYBINDING_LABELS } from "../../utils/keybindings";
 import { getProfileChartStyle } from "../../utils/profileChartStyle";
+import { getStatsContainerVars } from "../../utils/statsContainerVars";
+import {
+  TILE_TAG_AUTO,
+  TILE_TAG_NONE,
+  getTileTagSlotOptions,
+  normalizeTileTagSlots,
+} from "../../utils/profileTileTags";
 import { getProfileEventScramble } from "../../utils/profileEventSolves";
 import {
   MAX_STAT_LISTS,
@@ -513,6 +520,56 @@ function getProfileStatsChromeStyle(profile) {
   };
 }
 
+// Saved solve/average tile. When a taller neighbour stretches its grid row well past
+// the tile's own content, it switches to the tall Post layout (puzzle, name, big time).
+// The tall tile is size-contained so it never drives the row height itself.
+const TALL_TILE_MIN_HEIGHT = 220;
+const TALL_TILE_EXTRA = 80;
+
+function ProfileSolveTile({ className, postProps }) {
+  const ref = useRef(null);
+  const compactContentHeightRef = useRef(0);
+  const [tall, setTall] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const measure = () => {
+      const height = el.getBoundingClientRect().height;
+      if (!el.classList.contains("profileStatsItem--tall")) {
+        const post = el.querySelector(".post");
+        if (post) {
+          const style = window.getComputedStyle(post);
+          const chrome =
+            parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) +
+            parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+          const content = Array.from(post.children).reduce(
+            (max, child) => Math.max(max, child.getBoundingClientRect().height),
+            0
+          );
+          compactContentHeightRef.current = content + chrome;
+        }
+      }
+      const compactHeight = compactContentHeightRef.current;
+      setTall(
+        compactHeight > 0 &&
+          height >= TALL_TILE_MIN_HEIGHT &&
+          height >= compactHeight + TALL_TILE_EXTRA
+      );
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    measure();
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref} className={`${className} ${tall ? "profileStatsItem--tall" : ""}`}>
+      <Post {...postProps} layout={tall ? "tall" : "default"} />
+    </div>
+  );
+}
+
 // Shown in place of a section the viewer isn't allowed to see.
 function ProfilePrivateNotice({ what, viewedID, followState, privateAccount }) {
   const notFollowing = followState === "none" || followState === "follow-back";
@@ -539,6 +596,7 @@ function Profile({
   showPlayerBar = true,
   onJoinLiveRoom,
   liveRoomBusy = false,
+  liveRoomError = "",
 }) {
   const { runDb } = useDbStatus();
   const { settings } = useSettings();
@@ -1137,7 +1195,12 @@ function Profile({
 
   if (!viewedProfile) return null;
   if (!viewedProfile.UserID) return <div>Loading profile…</div>;
-  const profileStatsChromeStyle = getProfileStatsChromeStyle(viewedProfile);
+  // Card fill/border vars shared with the Stats page so profile cards match it.
+  const tileTagSlotOptions = getTileTagSlotOptions(viewedProfile?.TagConfig);
+  const profileStatsChromeStyle = {
+    ...getProfileStatsChromeStyle(viewedProfile),
+    ...getStatsContainerVars(settings, getProfileChartStyle(viewedProfile).primary),
+  };
 
   const showEventMatrix = !isSavedTab && eventMatrixConfig.show;
   const showEventMatrixRail = showEventMatrix && eventMatrixConfig.orientation === "vertical";
@@ -1165,18 +1228,22 @@ function Profile({
       if (!solve) return null;
 
       return (
-        <div key={key} className={cardClassName}>
-          <Post
-            user={viewedProfile}
-            name={viewedProfile.Name || viewedProfile.name}
-            date={item.createdAt || solve.datetime || solve.createdAt}
-            solveList={[solve]}
-            postColor={viewedProfile.Color || viewedProfile.color}
-            note={item.note || ""}
-            showMeta={false}
-            onClick={() => openSavedProfileCard(item)}
-          />
-        </div>
+        <ProfileSolveTile
+          key={key}
+          className={cardClassName}
+          postProps={{
+            user: viewedProfile,
+            name: viewedProfile.Name || viewedProfile.name,
+            date: item.createdAt || solve.datetime || solve.createdAt,
+            solveList: [solve],
+            postColor: viewedProfile.Color || viewedProfile.color,
+            note: item.note || "",
+            showMeta: false,
+            onClick: () => openSavedProfileCard(item),
+            showTags: item.showTags !== false,
+            tagSlots: item.tagSlots || null,
+          }}
+        />
       );
     }
 
@@ -1187,18 +1254,22 @@ function Profile({
       if (!solves.length) return null;
 
       return (
-        <div key={key} className={cardClassName}>
-          <Post
-            user={viewedProfile}
-            name={viewedProfile.Name || viewedProfile.name}
-            date={item.createdAt || solves[0]?.datetime || solves[0]?.createdAt}
-            solveList={solves}
-            postColor={viewedProfile.Color || viewedProfile.color}
-            note={item.note || ""}
-            showMeta={false}
-            onClick={() => openSavedProfileCard(item)}
-          />
-        </div>
+        <ProfileSolveTile
+          key={key}
+          className={cardClassName}
+          postProps={{
+            user: viewedProfile,
+            name: viewedProfile.Name || viewedProfile.name,
+            date: item.createdAt || solves[0]?.datetime || solves[0]?.createdAt,
+            solveList: solves,
+            postColor: viewedProfile.Color || viewedProfile.color,
+            note: item.note || "",
+            showMeta: false,
+            onClick: () => openSavedProfileCard(item),
+            showTags: item.showTags !== false,
+            tagSlots: item.tagSlots || null,
+          }}
+        />
       );
     }
 
@@ -1317,6 +1388,7 @@ function Profile({
         onEditStats={openStatsEditor}
         onJoinLiveRoom={!isOwn ? onJoinLiveRoom : null}
         liveRoomBusy={liveRoomBusy}
+        liveRoomError={liveRoomError}
         followState={followState}
         followBusy={followBusy}
         onFollow={!isOwn ? handleFollow : null}
@@ -1466,6 +1538,48 @@ function Profile({
                       <span className="statsOrganizerTitle">
                         {idx + 1}. {getStatCardTitle(item)}
                       </span>
+
+                      {isSavedProfileCard(item) && (
+                        <label className="statsOrganizerToggle" title="Show the solve's tags on this tile">
+                          <input
+                            type="checkbox"
+                            checked={item.showTags !== false}
+                            onChange={(e) =>
+                              updateDraftStat(idx, (current) => ({
+                                ...current,
+                                showTags: e.target.checked,
+                              }))
+                            }
+                          />
+                          Show tags
+                        </label>
+                      )}
+
+                      {isSavedProfileCard(item) &&
+                        item.showTags !== false &&
+                        normalizeTileTagSlots(item.tagSlots).map((slot, slotIdx) => (
+                          <select
+                            key={slotIdx}
+                            aria-label={`Tag ${slotIdx + 1}`}
+                            title={`Tag ${slotIdx + 1} (tall tile)`}
+                            value={slot}
+                            onChange={(e) =>
+                              updateDraftStat(idx, (current) => {
+                                const nextSlots = normalizeTileTagSlots(current.tagSlots);
+                                nextSlots[slotIdx] = e.target.value;
+                                return { ...current, tagSlots: nextSlots };
+                              })
+                            }
+                          >
+                            <option value={TILE_TAG_AUTO}>Tag {slotIdx + 1}: Auto</option>
+                            <option value={TILE_TAG_NONE}>Tag {slotIdx + 1}: None</option>
+                            {tileTagSlotOptions.map((opt) => (
+                              <option key={opt.key} value={opt.key}>
+                                Tag {slotIdx + 1}: {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        ))}
 
                       {!isSavedProfileCard(item) && (
                         <select

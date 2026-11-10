@@ -74,6 +74,22 @@ function getDayBucketTimeZone(value) {
   return normalizeTimeZone(value) || DEFAULT_DAY_BUCKET_TIMEZONE;
 }
 
+// Building a formatter costs far more than using one, and bulk recomputes call this per solve.
+const dayKeyFormatters = new Map();
+function getDayKeyFormatter(timeZone) {
+  let formatter = dayKeyFormatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    dayKeyFormatters.set(timeZone, formatter);
+  }
+  return formatter;
+}
+
 function getDayKey(createdAt, { timeZone } = {}) {
   const raw = String(createdAt || "").trim();
   if (!raw) return "";
@@ -82,12 +98,7 @@ function getDayKey(createdAt, { timeZone } = {}) {
   if (!Number.isFinite(date.getTime())) return "";
 
   const resolvedTimeZone = getDayBucketTimeZone(timeZone);
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: resolvedTimeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
+  const parts = getDayKeyFormatter(resolvedTimeZone).formatToParts(date);
 
   const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   if (!byType.year || !byType.month || !byType.day) return "";
@@ -1541,6 +1552,31 @@ async function* iterateQueryItems(
 
     cursor = out.LastEvaluatedKey;
   } while (cursor);
+}
+
+// Yields { dayKey, solves } for date-ordered solves, holding one day in memory at a time, so a
+// whole event's history never has to fit in the process. A day can only repeat if the input
+// wasn't really in date order; callers get `repeat: true` and must not treat it as the full day.
+async function* iterateSolvesByDay(iterable, getKey) {
+  const finished = new Set();
+  let current = "";
+  let solves = [];
+
+  for await (const solve of iterable) {
+    const dayKey = getKey(solve);
+    if (!dayKey) continue;
+    if (dayKey !== current) {
+      if (current) {
+        yield { dayKey: current, solves, repeat: finished.has(current) };
+        finished.add(current);
+      }
+      current = dayKey;
+      solves = [];
+    }
+    solves.push(solve);
+  }
+
+  if (current) yield { dayKey: current, solves, repeat: finished.has(current) };
 }
 
 async function* iterateTagScopeSolves(
@@ -3417,6 +3453,8 @@ module.exports = {
 
   getAllSolvesBySession,
   getAllSolvesByEvent,
+  iterateQueryItems,
+  iterateSolvesByDay,
   getAllSolvesByTag,
   getLastNSolvesBySession,
   getLastNSolvesByEvent,

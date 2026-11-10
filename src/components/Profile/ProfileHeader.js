@@ -104,6 +104,7 @@ export default function ProfileHeader({
   onEditStats,
   onJoinLiveRoom,
   liveRoomBusy = false,
+  liveRoomError = "",
   followState = null,
   followBusy = false,
   onFollow,
@@ -123,9 +124,11 @@ export default function ProfileHeader({
   } = user;
 
   const [liveRoom, setLiveRoom] = useState(null);
+  const [liveRoomJoinFailed, setLiveRoomJoinFailed] = useState(false);
   const [openWidget, setOpenWidget] = useState(null);
   const navigate = useNavigate();
   useEffect(() => {
+    setLiveRoomJoinFailed(false);
     if (!UserID || isOwn) {
       setLiveRoom(null);
       return;
@@ -303,12 +306,15 @@ export default function ProfileHeader({
                 type="button"
                 className="profileLiveRoomBadge"
                 disabled={liveRoomBusy}
-                onClick={() => onJoinLiveRoom(UserID)}
+                onClick={async () => setLiveRoomJoinFailed(!(await onJoinLiveRoom(UserID)))}
                 title={`${liveRoom.memberCount || 0} watching`}
               >
                 <span className="profileLiveRoomBadge__dot" />
                 Live — Join
               </button>
+            )}
+            {!isOwn && liveRoomJoinFailed && liveRoomError && (
+              <span className="profileLiveRoomError">{liveRoomError}</span>
             )}
             {isOwn && typeof onEditStats === "function" && (
               <div className="profileHeaderActions">

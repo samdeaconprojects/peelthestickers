@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import NameTag from "./NameTag";
 import { getUser } from "../../services/getUser";
+import { getProfiles } from "../../services/getProfiles";
 import { updateUser } from "../../services/updateUser";
 import {
   followUser,
@@ -72,20 +73,20 @@ export default function FollowListPanel({
     const missing = ids.filter((id) => !profilesByID[id]);
     if (!missing.length) return;
     let cancelled = false;
-    Promise.all(
-      missing.map((id) =>
-        getUser(id).catch(() => ({ UserID: id, userID: id, Name: id, name: id }))
-      )
-    ).then((loaded) => {
-      if (cancelled) return;
-      setProfilesByID((prev) => {
-        const next = { ...prev };
-        loaded.forEach((p, i) => {
-          next[missing[i]] = { ...p, UserID: missing[i] };
+    const fallback = (id) => ({ UserID: id, userID: id, Name: id, name: id });
+    getProfiles(missing)
+      .then((byID) => missing.map((id) => byID[id] || fallback(id)))
+      .catch(() => missing.map(fallback))
+      .then((loaded) => {
+        if (cancelled) return;
+        setProfilesByID((prev) => {
+          const next = { ...prev };
+          loaded.forEach((p, i) => {
+            next[missing[i]] = { ...p, UserID: missing[i] };
+          });
+          return next;
         });
-        return next;
       });
-    });
     return () => {
       cancelled = true;
     };

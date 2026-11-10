@@ -1402,6 +1402,23 @@ function Settings({
               />
             </div>
 
+            {settings.statsContainerBackground === true ? (
+              <div className="setting-item">
+                <label>Stats Card Background Strength</label>
+                <input
+                  type="range"
+                  min="2"
+                  max="50"
+                  step="1"
+                  value={settings.statsContainerBackgroundOpacity ?? 13}
+                  onChange={(e) =>
+                    updateSettings({ statsContainerBackgroundOpacity: Number(e.target.value) })
+                  }
+                />
+                <span>{settings.statsContainerBackgroundOpacity ?? 13}%</span>
+              </div>
+            ) : null}
+
             <div className="setting-item">
               <label>Stats Selector + Overview Background Fill</label>
               <input
@@ -1419,6 +1436,40 @@ function Settings({
                 type="checkbox"
                 checked={settings.statsHoverGrow === true}
                 onChange={(e) => updateSettings({ statsHoverGrow: e.target.checked })}
+              />
+            </div>
+
+            <div className="setting-item">
+              <label>Stats Opens With</label>
+              <SettingsChoice
+                value={settings.statsDefaultFrameKind === "date" ? "date" : "index"}
+                onChange={(e) => updateSettings({ statsDefaultFrameKind: e.target.value })}
+              >
+                <option value="index">Last solves</option>
+                <option value="date">Last days</option>
+              </SettingsChoice>
+            </div>
+
+            <div className="setting-item">
+              <label>{settings.statsDefaultFrameKind === "date" ? "Days In View" : "Solves In View"}</label>
+              <input
+                type="number"
+                min="1"
+                max={settings.statsDefaultFrameKind === "date" ? 3650 : 10000}
+                step="1"
+                value={
+                  settings.statsDefaultFrameKind === "date"
+                    ? Number(settings.statsDefaultDays ?? 7)
+                    : Number(settings.statsDefaultSolveCount ?? 100)
+                }
+                onChange={(e) => {
+                  const value = Math.max(1, Number(e.target.value) || 1);
+                  updateSettings(
+                    settings.statsDefaultFrameKind === "date"
+                      ? { statsDefaultDays: value }
+                      : { statsDefaultSolveCount: value }
+                  );
+                }}
               />
             </div>
 

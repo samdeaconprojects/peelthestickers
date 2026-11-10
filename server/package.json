@@ -12,7 +12,7 @@
     "recomputeStats": "node scripts/recomputeSessionStats.js",
     "backfillStats": "node scripts/backfillSessionStats.js",
     "backfillDayBuckets": "node scripts/backfillDayBuckets.js",
-  "backfillAverageTrim": "node scripts/backfillAverageTrim.js",
+    "backfillAverageTrim": "node scripts/backfillAverageTrim.js",
     "backfillConversationShared": "node scripts/backfillConversationSharedStats.js",
     "backfillSingles": "node scripts/backfillSingleRanks.js",
     "backfillSolveSource": "node scripts/backfillSolveSource.js",
@@ -28,8 +28,8 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.600.0",
     "@aws-sdk/lib-dynamodb": "^3.600.0",
+    "compression": "^1.7.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2"
   }
-  
 }

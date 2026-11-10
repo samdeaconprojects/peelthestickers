@@ -130,6 +130,42 @@
   background: rgba(255, 255, 255, 0.24);
 }
 
+/* practice / live mode labels, inline after the event/session label */
+.playerbar-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  height: 18px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.playerbar-mode-chip__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.playerbar-mode-chip--practice {
+  border: 1px solid rgba(52, 199, 89, 0.55);
+  background: rgba(52, 199, 89, 0.18);
+  color: #34c759;
+}
+
+.playerbar-mode-chip--live {
+  border: 1px solid rgba(255, 60, 60, 0.5);
+  background: rgba(255, 60, 60, 0.14);
+  color: #ff3c3c;
+}
+
 .playerbar-timer {
   display: flex;
   justify-content: center;
@@ -360,18 +396,17 @@
   right: 2px;
   width: 20px;
   height: 20px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  background: rgba(var(--player-bar-bg-rgb), 0.92);
+  border: none;
+  border-radius: 0;
+  background: transparent;
   color: #fff;
   display: grid;
   place-items: center;
-  font-size: 10px;
   line-height: 1;
   padding: 0;
   opacity: 0.68;
   z-index: 2005;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.28);
+  box-shadow: none;
 }
 
 .playerbar-toggle-inbar:hover {
@@ -379,7 +414,7 @@
 }
 
 .playerbar-toggle-glyph {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 /* far-right cube fills the column height */
@@ -599,6 +634,34 @@
   max-width: 54px;
   height: 32px;
   padding: 0 2px;
+}
+
+/* Minute-length times ("3:21.59", "12:03.45", "3:21.59+") overflow the 54px cells */
+.playerbar-timelist .TimeList td.time-len-lg {
+  font-size: calc(0.82rem * var(--home-timelist-scale, 1));
+  letter-spacing: -0.02em;
+  padding: 0 1px;
+}
+
+.playerbar-timelist .TimeList td.time-len-xl {
+  font-size: calc(0.72rem * var(--home-timelist-scale, 1));
+  letter-spacing: -0.03em;
+  padding: 0 1px;
+}
+
+/* Match the home horizontal row: full opacity, dashed + tinted row best/worst */
+.playerbar-timelist .TimeList td.TimeItem[data-bulk-select-item] {
+  opacity: 1;
+}
+
+.playerbar-timelist .TimeList td.TimeItem.row-border-min {
+  border: 2px dashed #00FF00 !important;
+  background-color: rgba(0, 255, 0, 0.1);
+}
+
+.playerbar-timelist .TimeList td.TimeItem.row-border-max {
+  border: 2px dashed #FF0000 !important;
+  background-color: rgba(255, 0, 0, 0.1);
 }
 
 .playerbar-timelist .TimeList td:nth-child(13) {

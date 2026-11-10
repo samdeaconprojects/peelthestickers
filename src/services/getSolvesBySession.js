@@ -21,10 +21,24 @@ const solvesPageLoader = createCachedRequestLoader(async (path) => {
 }, { cacheMs: 1500 });
 
 const solvesFullLoader = createCachedRequestLoader(async ({ userID, event, sessionID, opts }) => {
-  let cursor = null;
   const all = [];
+  await forEachSolvesPage(
+    userID,
+    event,
+    sessionID,
+    (items) => {
+      if (items.length) all.push(...items);
+    },
+    opts
+  );
+  return all.reverse();
+}, { cacheMs: 1500 });
+
+// Calls onPage(items) for every page of the session, newest first. Throws rather
+// than stops early: callers treat the result as the whole session.
+export const forEachSolvesPage = async (userID, event, sessionID, onPage, opts = {}) => {
+  let cursor = null;
   const seenCursors = new Set();
-  let pageCount = 0;
 
   do {
     const { items, lastKey } = await getSolvesBySessionPage(
@@ -35,34 +49,16 @@ const solvesFullLoader = createCachedRequestLoader(async ({ userID, event, sessi
       cursor,
       opts
     );
-    if (items?.length) all.push(...items);
-    pageCount += 1;
-    if (pageCount > 100) {
-      console.warn("getSolvesBySession: aborting after 100 pages", {
-        userID,
-        event,
-        sessionID,
-        opts,
-      });
-      break;
-    }
+    await onPage(items || []);
 
     const nextCursorKey = lastKey ? JSON.stringify(lastKey) : "";
     if (nextCursorKey && seenCursors.has(nextCursorKey)) {
-      console.warn("getSolvesBySession: repeated cursor detected, aborting", {
-        userID,
-        event,
-        sessionID,
-        opts,
-      });
-      break;
+      throw new Error("getSolvesBySession: repeated cursor");
     }
     if (nextCursorKey) seenCursors.add(nextCursorKey);
     cursor = lastKey || null;
   } while (cursor);
-
-  return all.reverse();
-}, { cacheMs: 1500 });
+};
 
 export const getSolvesBySessionPage = async (
   userID,

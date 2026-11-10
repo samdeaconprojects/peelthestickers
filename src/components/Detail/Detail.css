@@ -321,6 +321,24 @@
   margin-right: 4px;
 }
 
+.detailUndoButton {
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #2ec4b6;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.detailListToolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
 .penalty-buttons {
   display: flex;
   flex-direction: row;

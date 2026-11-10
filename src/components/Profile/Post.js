@@ -9,6 +9,10 @@ import { currentEventToString } from "../../components/scrambleUtils";
 import { calculateAverage, formatTime } from '../TimeList/TimeUtils';
 import TimeItem from '../TimeList/TimeItem';
 import StatSharePost from './StatSharePost';
+import '../TagBar/TagBar.css';
+import tagBadge from '../../assets/Tag.svg';
+import { getTagChipStyle, getTagColorMapForEvent } from '../TagBar/tagUtils';
+import { getTileTagChips } from '../../utils/profileTileTags';
 
 /* --- helper: add alpha to hex color --- */
 const withAlpha = (hex, alpha = 0.12) => {
@@ -201,6 +205,9 @@ function Post({
   postType = "solve",
   statShare = null,
   showMeta = true,
+  layout = "default",
+  showTags = false,
+  tagSlots = null,
 }) {
   const resolvedPostType = statShare ? "stat-share" : postType;
   const primary = solveList[0] || {};
@@ -257,6 +264,156 @@ function Post({
       </div>
     </div>
   );
+
+  // Tags only render in the tall tile layout.
+  const tagChips = showTags && layout === "tall" ? getTileTagChips(solveList, tagSlots) : [];
+  const tagColors = tagChips.length
+    ? getTagColorMapForEvent(user?.TagColorCatalog, event || "333")
+    : {};
+  const tagRow = tagChips.length ? (
+    <div className="postTagRow tagHomeSummary" aria-label="Solve tags">
+      {tagChips.map((chip) => (
+        <span
+          key={chip.key}
+          className="tagHomeChip is-set postTagChip"
+          style={getTagChipStyle(chip.field, chip.value, tagColors, postColor || "#2EC4B6")}
+        >
+          <span className="tagHomeChipIconWrap" aria-hidden="true">
+            <img src={tagBadge} alt="" className="tagHomeChipIcon" />
+          </span>
+          <span className="tagHomeChipText">
+            <span className="tagHomeChipValue">{chip.label}</span>
+          </span>
+        </span>
+      ))}
+    </div>
+  ) : null;
+
+  const averageSnapshot = showAverageSolveList ? (
+    <div className="postAverageSnapshot" aria-label="Average solves">
+      {solveList.length <= 12 ? (
+        <div
+          className={`postAverageSnapshotGrid ${
+            solveList.length <= 5 ? "postAverageSnapshotGrid--5" : "postAverageSnapshotGrid--12"
+          }`}
+        >
+          {solveList.map((solve, index) => {
+            const solveMs = getComparableSolveTime(solve);
+            const isBest = averageBestWorst.best.has(index);
+            const isWorst = averageBestWorst.worst.has(index);
+            const perfClass = getPerfClassByRank01(averageRankMap[index]);
+
+            return (
+              <div
+                key={`${solve?.datetime || solve?.createdAt || index}-${index}`}
+                className="postAverageSnapshotCell"
+              >
+                <TimeItem
+                  ms={Number.isFinite(solveMs) ? solveMs : undefined}
+                  time={
+                    Number.isFinite(solveMs)
+                      ? undefined
+                      : solve?.time != null
+                        ? formatTime(solve.time, false, solve?.penalty)
+                        : "--"
+                  }
+                  penalty={solve?.penalty}
+                  rangeMin={averageRangeMin ?? undefined}
+                  rangeMax={averageRangeMax ?? undefined}
+                  className={`postAverageSnapshotTime ${isBest ? "dashed-border-min" : ""} ${
+                    isWorst ? "dashed-border-max" : ""
+                  }`}
+                  style={buildPerfBorderStyle(perfClass, "solid")}
+                  disablePerformanceClass={true}
+                />
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="postAverageSnapshotSummary">
+          {bestAverageSolve ? (
+            <div className="postAverageSnapshotSummaryItem">
+              <TimeItem
+                ms={Number.isFinite(getComparableSolveTime(bestAverageSolve))
+                  ? getComparableSolveTime(bestAverageSolve)
+                  : undefined}
+                time={
+                  Number.isFinite(getComparableSolveTime(bestAverageSolve))
+                    ? undefined
+                    : bestAverageSolve?.time != null
+                      ? formatTime(bestAverageSolve.time, false, bestAverageSolve?.penalty)
+                      : "--"
+                }
+                penalty={bestAverageSolve?.penalty}
+                className="postAverageSnapshotTime dashed-border-min"
+                disablePerformanceClass={true}
+              />
+            </div>
+          ) : null}
+
+          {worstAverageSolve ? (
+            <div className="postAverageSnapshotSummaryItem">
+              <TimeItem
+                ms={Number.isFinite(getComparableSolveTime(worstAverageSolve))
+                  ? getComparableSolveTime(worstAverageSolve)
+                  : undefined}
+                time={
+                  Number.isFinite(getComparableSolveTime(worstAverageSolve))
+                    ? undefined
+                    : worstAverageSolve?.time != null
+                      ? formatTime(worstAverageSolve.time, false, worstAverageSolve?.penalty)
+                      : "--"
+                }
+                penalty={worstAverageSolve?.penalty}
+                className="postAverageSnapshotTime dashed-border-max"
+                disablePerformanceClass={true}
+              />
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  ) : null;
+
+  // Tall tile (profile grid row stretched by a taller neighbour): puzzle on top,
+  // event name, then a big time filling the card.
+  if (layout === "tall" && resolvedPostType !== "stat-share") {
+    return (
+      <div className="postShell postShell--tall" onClick={onClick}>
+        <div
+          className={`post postTall ${tagRow ? "postTall--withTags" : ""}`}
+          style={{
+            "--post-border": withAlpha(postColor, 0.5),
+            "--post-border-hover": withAlpha(postColor, 0.85),
+          }}
+        >
+          <div className="postTallHeader">
+            <div className={`postTallIcon ${nxn ? "is-nxn" : "is-other"}`} aria-hidden="true">
+              <span className="postTallIconGlyph">
+                <PuzzleSVG
+                  event={event || "333"}
+                  scramble={scramble || ""}
+                  isStatsHeaderIcon
+                />
+              </span>
+            </div>
+            <div className="postTallLabel">
+              {eventStr} {singleOrAvg}
+            </div>
+          </div>
+          <div className="postTallBody">
+            {tagRow}
+            <div className="postTallTime">
+              {headlineTime != null ? formatTime(headlineTime, solveList.length > 1) : "--"}
+            </div>
+          </div>
+          {averageSnapshot}
+          {trimmedNote ? <div className="postCaption postTallNote">{trimmedNote}</div> : null}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -336,94 +493,7 @@ function Post({
               ) : null}
             </div>
 
-            {showAverageSolveList ? (
-              <div className="postAverageSnapshot" aria-label="Average solves">
-                {solveList.length <= 12 ? (
-                  <div
-                    className={`postAverageSnapshotGrid ${
-                      solveList.length <= 5 ? "postAverageSnapshotGrid--5" : "postAverageSnapshotGrid--12"
-                    }`}
-                  >
-                    {solveList.map((solve, index) => {
-                      const solveMs = getComparableSolveTime(solve);
-                      const isBest = averageBestWorst.best.has(index);
-                      const isWorst = averageBestWorst.worst.has(index);
-                      const perfClass = getPerfClassByRank01(averageRankMap[index]);
-
-                      return (
-                        <div
-                          key={`${solve?.datetime || solve?.createdAt || index}-${index}`}
-                          className="postAverageSnapshotCell"
-                        >
-                          <TimeItem
-                            ms={Number.isFinite(solveMs) ? solveMs : undefined}
-                            time={
-                              Number.isFinite(solveMs)
-                                ? undefined
-                                : solve?.time != null
-                                  ? formatTime(solve.time, false, solve?.penalty)
-                                  : "--"
-                            }
-                            penalty={solve?.penalty}
-                            rangeMin={averageRangeMin ?? undefined}
-                            rangeMax={averageRangeMax ?? undefined}
-                            className={`postAverageSnapshotTime ${isBest ? "row-border-min" : ""} ${
-                              isWorst ? "row-border-max" : ""
-                            }`}
-                            style={buildPerfBorderStyle(perfClass, "solid")}
-                            disablePerformanceClass={true}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="postAverageSnapshotSummary">
-                    {bestAverageSolve ? (
-                      <div className="postAverageSnapshotSummaryItem">
-                        <TimeItem
-                          ms={Number.isFinite(getComparableSolveTime(bestAverageSolve))
-                            ? getComparableSolveTime(bestAverageSolve)
-                            : undefined}
-                          time={
-                            Number.isFinite(getComparableSolveTime(bestAverageSolve))
-                              ? undefined
-                              : bestAverageSolve?.time != null
-                                ? formatTime(bestAverageSolve.time, false, bestAverageSolve?.penalty)
-                                : "--"
-                          }
-                          penalty={bestAverageSolve?.penalty}
-                          className="postAverageSnapshotTime row-border-min"
-                          style={buildPerfBorderStyle("fastest", "dotted")}
-                          disablePerformanceClass={true}
-                        />
-                      </div>
-                    ) : null}
-
-                    {worstAverageSolve ? (
-                      <div className="postAverageSnapshotSummaryItem">
-                        <TimeItem
-                          ms={Number.isFinite(getComparableSolveTime(worstAverageSolve))
-                            ? getComparableSolveTime(worstAverageSolve)
-                            : undefined}
-                          time={
-                            Number.isFinite(getComparableSolveTime(worstAverageSolve))
-                              ? undefined
-                              : worstAverageSolve?.time != null
-                                ? formatTime(worstAverageSolve.time, false, worstAverageSolve?.penalty)
-                                : "--"
-                          }
-                          penalty={worstAverageSolve?.penalty}
-                          className="postAverageSnapshotTime row-border-max"
-                          style={buildPerfBorderStyle("slowest", "dotted")}
-                          disablePerformanceClass={true}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                )}
-              </div>
-            ) : null}
+            {averageSnapshot}
 
             {showMeta ? postMeta : null}
           </div>

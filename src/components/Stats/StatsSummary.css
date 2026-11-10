@@ -823,6 +823,15 @@
   gap: 0;
 }
 
+/* Shrink long best values (m:ss.cc, mm:ss.cc) relative to whatever size the context sets */
+.ssTileMetricValue--minutes {
+  font-size: 0.86em;
+}
+
+.ssTileMetricValue--tenMinutes {
+  font-size: 0.76em;
+}
+
 .ssTileMetricValueBlock--worst .ssTileMetricValue {
   font-size: clamp(0.92rem, 1.2vw, 1.16rem);
   line-height: 1;

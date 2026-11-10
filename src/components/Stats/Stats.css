@@ -831,6 +831,8 @@ td:nth-child(13) {
   width: 640px;
   max-width: 92vw;
   max-height: 74vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   text-align: left;
 }
 
@@ -1800,10 +1802,11 @@ td:nth-child(13) {
   align-items: stretch;
 }
 
+/* Multi-event view: the event bests matrix leads, above the summary. */
 .stats-grid--time {
   grid-template-areas:
-    "header header"
     "eventmatrix eventmatrix"
+    "header header"
     "line line"
     "percent percent"
     "table table";
@@ -4726,53 +4729,65 @@ input {
   color: rgba(255,255,255,0.6);
 }
 
-/* Range pill: centered in the selector row and the most prominent control in it.
-   Holds the Solves/Time switch, the range button and (time view) an "All" hop.
-   While a paging/zoom control is hovered the range previews that control's result.
-   Single selector row is 54px with 5+7px padding + 2px border = 38px inside. */
+/* Range readout: centered in the selector row and the most prominent text in it.
+   No box of its own — the type carries it; hover/focus brighten the text and the
+   date line picks up an underline hint that it opens the date picker.
+   While a paging/zoom control is hovered the range previews that control's result. */
 .statsScopeRange {
   justify-self: center;
   display: inline-flex;
   align-items: center;
   gap: 2px;
   height: 36px;
-  padding: 0 3px;
   box-sizing: border-box;
-  border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.07);
-  background: rgba(255,255,255,0.02);
-  transition: border-color 0.16s ease, background 0.16s ease;
-}
-
-.statsScopeRange:hover,
-.statsScopeRange:focus-within {
-  border-color: rgba(255,255,255,0.22);
-  background: rgba(255,255,255,0.05);
-}
-
-.statsScopeRange.is-preview {
-  border-style: dashed;
-  border-color: rgba(255,255,255,0.55);
 }
 
 .statsScopeRange .statsScopeSummaryChip--date {
   align-items: center;
   min-width: 150px;
   height: 100%;
-  padding: 0 14px;
-  gap: 1px;
+  padding: 0 10px;
+  gap: 3px;
   text-align: center;
   opacity: 1;
   border: none;
   border-radius: 8px;
   background: transparent;
+  box-shadow: none;
 }
 
 .statsScopeRange .statsScopeSummaryChip--date:hover,
 .statsScopeRange .statsScopeSummaryChip--date:focus-visible {
   border: none;
-  background: rgba(255,255,255,0.06);
+  background: transparent;
   transform: none;
+}
+
+.statsScopeRange .statsScopeSummaryChip--date:focus-visible {
+  outline: 1px solid rgba(255,255,255,0.35);
+  outline-offset: 2px;
+}
+
+.statsScopeRange .statsScopeDatePrimary,
+.statsScopeRange .statsScopeDateSecondary {
+  transition: color 0.16s ease, text-decoration-color 0.16s ease;
+}
+
+.statsScopeRange .statsScopeSummaryChip--date:hover .statsScopeDatePrimary,
+.statsScopeRange .statsScopeSummaryChip--date:focus-visible .statsScopeDatePrimary {
+  color: #fff;
+}
+
+.statsScopeRange .statsScopeDateSecondary {
+  text-decoration: underline dotted;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+}
+
+.statsScopeRange .statsScopeSummaryChip--date:hover .statsScopeDateSecondary,
+.statsScopeRange .statsScopeSummaryChip--date:focus-visible .statsScopeDateSecondary {
+  color: rgba(255,255,255,0.85);
+  text-decoration-color: rgba(255,255,255,0.45);
 }
 
 .statsScopeDatePrimary {
@@ -4788,57 +4803,115 @@ input {
   letter-spacing: 0.02em;
 }
 
+.statsScopeRange.is-preview .statsScopeDatePrimary {
+  color: rgba(255,255,255,0.7);
+}
+
 .statsScopeRange.is-preview .statsScopeDateSecondary {
   color: rgba(255,255,255,0.86);
+  text-decoration-color: rgba(255,255,255,0.55);
 }
 
-/* Solves / Time: two stacked half-height toggles at the pill's left edge. */
-.statsScopeRangeMode {
-  display: flex;
-  flex-direction: column;
-  height: 30px;
-  border-radius: 7px;
-  overflow: hidden;
-}
-
-.statsScopeRangeModeBtn,
-.statsScopeRangeAllBtn {
+/* Quick hop next to the event name: "All" events, or back to the timer's event. */
+.statsScopeAllEventsBtn {
   appearance: none;
-  border: none;
-  margin: 0;
-  background: transparent;
-  color: rgba(255,255,255,0.5);
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 9px;
+  margin-left: -2px;
+  border-radius: 7px;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.02);
+  color: rgba(255,255,255,0.62);
   font: inherit;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  line-height: 1;
   cursor: pointer;
   opacity: 1;
-  transition: background 0.16s ease, color 0.16s ease;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
 }
 
-.statsScopeRangeModeBtn {
-  flex: 1 1 0;
-  padding: 0 6px;
-}
-
-.statsScopeRangeModeBtn.is-active {
+.statsScopeAllEventsBtn:hover,
+.statsScopeAllEventsBtn:focus-visible {
   color: white;
-  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.22);
+  background: rgba(255,255,255,0.06);
 }
 
-.statsScopeRangeModeBtn:not(.is-active):hover,
-.statsScopeRangeAllBtn:hover {
+/* Multi-select event / session pickers in the scope modal. */
+.statsScopeMultiPicker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.statsScopeMultiActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.statsScopeMultiAction {
+  appearance: none;
+  padding: 4px 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: transparent;
+  color: rgba(255,255,255,0.75);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.statsScopeMultiAction:hover,
+.statsScopeMultiAction.active {
   color: white;
+  border-color: rgba(255,255,255,0.32);
   background: rgba(255,255,255,0.08);
 }
 
-.statsScopeRangeAllBtn {
-  height: 30px;
-  padding: 0 7px;
-  border-radius: 7px;
+.statsScopeMultiGroupLabel {
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.55);
+}
+
+.statsScopeMultiChip {
+  position: relative;
+  display: inline-flex;
+}
+
+/* "only" sits over the chip's top-right corner and shows on hover. */
+.statsScopeOnlyBtn {
+  position: absolute;
+  top: -7px;
+  right: -6px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.22);
+  background: rgba(20,20,24,0.95);
+  color: rgba(255,255,255,0.8);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.statsScopeMultiChip:hover .statsScopeOnlyBtn,
+.statsScopeOnlyBtn:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .statsCompareControls--dual .statsScopeRange {
@@ -4981,4 +5054,153 @@ input {
 .statsScopePair:focus-within {
   border-color: rgba(255,255,255,0.22);
   background: rgba(255,255,255,0.05);
+}
+
+/* Range section: "Last N" presets + custom count above the date picker. */
+.statsScopeIndexFrame {
+  margin-bottom: 12px;
+}
+
+.statsScopeIndexInput {
+  width: 72px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: transparent;
+  color: white;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* Multi-event scopes: per-solve cards or time cards. */
+.statsScopeLayoutToggle {
+  display: inline-flex;
+  flex-direction: column;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.02);
+  overflow: hidden;
+}
+
+.statsScopeLayoutBtn {
+  appearance: none;
+  flex: 1 1 0;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,0.5);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 1;
+}
+
+.statsScopeLayoutBtn + .statsScopeLayoutBtn {
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.statsScopeLayoutBtn.is-active {
+  color: white;
+  background: rgba(255,255,255,0.1);
+}
+
+.statsScopeLayoutBtn:not(.is-active):hover {
+  color: white;
+  background: rgba(255,255,255,0.06);
+}
+
+/* Scope modal: Solves | Time view switch. */
+.statsScopeViewPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.statsScopeViewSwitch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.statsScopeViewOption {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  height: auto;
+  min-height: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: var(--theme-surface-soft, rgba(255,255,255,0.06));
+  color: white;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.statsScopeViewOption:hover {
+  background: rgba(255,255,255,0.12);
+}
+
+.statsScopeViewOptionLabel {
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.statsScopeViewOptionHint {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.6);
+}
+
+.statsScopeViewExplainer {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(255,255,255,0.68);
+}
+
+.statsScopeIndexFrame {
+  margin-bottom: 0;
+}
+
+.statsScopeTimeCustomLabel {
+  margin: 4px 0 0;
+}
+
+/* Long event names (relays) wrap instead of running out of the modal. */
+.statsScopeModal .statsScopeMultiChip {
+  max-width: 100%;
+}
+
+.statsScopeModal .statsScopeChip {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+/* Multi-event view: matrix sits first, so it doesn't tuck under a header. */
+.stats-grid--time .stats-item--eventMatrix {
+  margin-top: 0;
+}
+
+@media (max-width: 900px) {
+  .stats-grid--time:not(.stats-grid--noEventMatrix) {
+    grid-template-areas:
+      "eventmatrix"
+      "header"
+      "line"
+      "percent"
+      "bar"
+      "tagbreakdown"
+      "table";
+  }
 }

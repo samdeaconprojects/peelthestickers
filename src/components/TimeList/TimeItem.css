@@ -162,3 +162,23 @@
     flex: 0 0 calc(100% / 5 - 10px);
   }
 }
+
+/* Session-wide overall best/worst single: solid fill matching the border.
+   Per-average (row / window) best & worst keep their dotted/dashed borders. */
+.TimeItem.overall-fill-min,
+.TimeItem.overall-fill-max {
+  opacity: 1 !important;
+  font-weight: 700;
+}
+
+.TimeItem.overall-fill-min {
+  border: 2px solid #00FF00 !important;
+  background: #00FF00 !important;
+  color: #04150a !important;
+}
+
+.TimeItem.overall-fill-max {
+  border: 2px solid #FF0000 !important;
+  background: #FF0000 !important;
+  color: #ffffff !important;
+}

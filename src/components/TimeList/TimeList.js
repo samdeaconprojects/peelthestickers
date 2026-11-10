@@ -101,6 +101,14 @@ function buildRank01Map(items) {
   return out;
 }
 
+// Lets tight fixed-width cells (player bar) shrink minute-length times to fit.
+function timeLengthClass(text) {
+  const len = String(text ?? "").length;
+  if (len >= 8) return "time-len-xl";
+  if (len >= 7) return "time-len-lg";
+  return "";
+}
+
 function hasRealSolveRef(solve) {
   const ref = solve?.solveRef;
   return typeof ref === "string" && ref.startsWith("SOLVE#");
@@ -471,9 +479,16 @@ function TimeList({
   }, [times]);
 
   const overallMin = overallCalc.minIdx;
-  const overallMax = overallCalc.maxIdx;
   const overallMinValue = overallCalc.minVal;
   const overallMaxValue = overallCalc.maxVal;
+  // Session-wide best/worst single, matched by value so tied solves all get the fill.
+  const isOverallBestTime = (value) =>
+    typeof value === "number" && overallMinValue != null && value === overallMinValue;
+  const isOverallWorstTime = (value) =>
+    typeof value === "number" &&
+    overallMaxValue != null &&
+    overallMaxValue !== overallMinValue &&
+    value === overallMaxValue;
 
   const canonicalSessionBestSingleMs = useMemo(() => {
     const value = Number(sessionBestSingleMs);
@@ -918,8 +933,8 @@ function TimeList({
       <tr key={i}>
         {timesRow.map((solve, index) => {
           const solveIndex = startIndex + i + index;
-          const isBest = solveIndex === overallMin;
-          const isWorst = solveIndex === overallMax;
+          const isBest = isOverallBestTime(solve?.time);
+          const isWorst = isOverallWorstTime(solve?.time);
           const isRowBest = index === rowBestLocalIndex;
           const isRowWorst = index === rowWorstLocalIndex;
           const isCurrentFive = currentFiveIndices.includes(solveIndex);
@@ -945,13 +960,15 @@ function TimeList({
 
           return (
             <td
-              className={`TimeItem ${perfClass} ${isBest ? "overall-border-min" : ""} ${
-                isWorst ? "overall-border-max" : ""
-              } ${isRowBest ? "row-border-min" : ""} ${
-                isRowWorst ? "row-border-max" : ""
-              } ${isCurrentFive ? "current-five" : ""} ${
+              className={`TimeItem ${perfClass} ${
+                isBest ? "overall-border-min overall-fill-min" : ""
+              } ${isWorst ? "overall-border-max overall-fill-max" : ""} ${
+                isRowBest && !isBest && !isWorst ? "row-border-min" : ""
+              } ${isRowWorst && !isBest && !isWorst ? "row-border-max" : ""} ${isCurrentFive ? "current-five" : ""} ${
                 beatSessionSingle ? "session-single-beaten" : ""
-              } ${offlineRunStartRefs.has(solve?.solveRef) ? "offline-run-start" : ""}`}
+              } ${offlineRunStartRefs.has(solve?.solveRef) ? "offline-run-start" : ""} ${timeLengthClass(
+                formatTime(solve.time, false, solve.penalty)
+              )}`}
               data-bulk-select-item="true"
               style={{ ...(perfStyle || {}), ...(selectStyleInline || {}) }}
               key={index}
@@ -985,7 +1002,9 @@ function TimeList({
             </td>
           ))}
         <td
-          className="TimeItem current-five averageCell nonRollingAverageCell"
+          className={`TimeItem current-five averageCell nonRollingAverageCell ${timeLengthClass(
+            formatTime(averageData.average, true)
+          )}`}
           onClick={() => openAverageWindow(timesRow)}
         >
           {formatTime(averageData.average, true)}
@@ -1098,8 +1117,8 @@ function TimeList({
           <tbody style={{ rowGap: `${verticalFit.gap}px` }}>
             {pageIndices.map((gi) => {
               const solve = solvesSafe[gi];
-              const isBest = gi === overallMin;
-              const isWorst = gi === overallMax;
+              const isBest = isOverallBestTime(solve?.time);
+              const isWorst = isOverallWorstTime(solve?.time);
               const rank01 = timeColorMode === "index" ? rank01ByIndex[gi] ?? 0 : 0;
               const { perfClass, perfStyle } =
                 !isBest && !isWorst
@@ -1119,9 +1138,9 @@ function TimeList({
                 <tr key={solve?.solveRef || gi}>
                   <td className="vertical-solve-number">{globalBaseIndex + gi + 1}</td>
                   <td
-                    className={`TimeItem ${perfClass} ${isBest ? "overall-border-min" : ""} ${
-                      isWorst ? "overall-border-max" : ""
-                    } ${sessionSingleBeatByIndex[gi] ? "session-single-beaten" : ""} ${
+                    className={`TimeItem ${perfClass} ${
+                      isBest ? "overall-border-min overall-fill-min" : ""
+                    } ${isWorst ? "overall-border-max overall-fill-max" : ""} ${sessionSingleBeatByIndex[gi] ? "session-single-beaten" : ""} ${
                       offlineRunStartRefs.has(solve?.solveRef) ? "offline-run-start" : ""
                     }`}
                     data-bulk-select-item="true"
@@ -1362,6 +1381,8 @@ function TimeList({
                 const globalIdx = key;
 
                 const tval = solve?.time;
+                const isOverallBest = isOverallBestTime(solve?.time);
+                const isOverallWorst = isOverallWorstTime(solve?.time);
                 const isBest = index === bestTimeIndex;
                 const isWorst = index === worstTimeIndex;
                 const beatSessionSingle = !!sessionSingleBeatByIndex[globalIdx];
@@ -1369,7 +1390,7 @@ function TimeList({
                 const rank01 = timeColorMode === "index" ? horizontalRank01ByKey[key] ?? 0 : 0;
 
                 const { perfClass, perfStyle } =
-                  !isBest && !isWorst
+                  !isBest && !isWorst && !isOverallBest && !isOverallWorst
                     ? getPerfClassAndStyle(tval, overallMinValue, overallMaxValue, rank01)
                     : { perfClass: "", perfStyle: null };
 
@@ -1385,8 +1406,16 @@ function TimeList({
                 return (
                   <div
                     key={index}
-                    className={`TimeItem ${perfClass} ${isBest ? "dashed-border-min" : ""} ${
-                      isWorst ? "dashed-border-max" : ""
+                    className={`TimeItem ${perfClass} ${
+                      isOverallBest
+                        ? "overall-fill-min"
+                        : isOverallWorst
+                        ? "overall-fill-max"
+                        : isBest
+                        ? "dashed-border-min"
+                        : isWorst
+                        ? "dashed-border-max"
+                        : ""
                     } ${beatSessionSingle ? "session-single-beaten" : ""} ${
                       offlineRunStartRefs.has(solve?.solveRef) ? "offline-run-start" : ""
                     }`}

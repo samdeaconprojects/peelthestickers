@@ -464,3 +464,15 @@
     max-height: min(58vh, 480px);
   }
 }
+
+.averageDetailUndoButton {
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #2ec4b6;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  cursor: pointer;
+}

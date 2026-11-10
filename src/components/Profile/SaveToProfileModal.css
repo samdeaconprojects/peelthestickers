@@ -1,23 +1,26 @@
 .saveToProfileOverlay {
   position: fixed;
   inset: 0;
-  z-index: 2450;
-  background: rgba(6, 10, 14, 0.76);
+  /* Above the solve detail (4000) and average detail (3000) it opens from. */
+  z-index: 4500;
+  background: rgba(8, 12, 16, 0.62);
+  backdrop-filter: blur(4px);
   display: grid;
   place-items: center;
-  padding: 20px;
+  padding: 28px;
   box-sizing: border-box;
 }
 
 .saveToProfileModal {
   width: min(460px, 100%);
-  max-height: calc(100vh - 40px);
+  max-height: calc(100vh - 56px);
   overflow-y: auto;
-  border-radius: 18px;
-  border: 2px solid rgba(255, 255, 255, 0.14);
-  background: linear-gradient(180deg, rgba(18, 28, 34, 0.98), rgba(10, 16, 20, 0.98));
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
-  padding: 18px;
+  border-radius: 22px;
+  border: 1.5px solid rgba(255, 255, 255, 0.24);
+  background: var(--detail-surface-strong);
+  color: #fff;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  padding: 20px;
   box-sizing: border-box;
 }
 

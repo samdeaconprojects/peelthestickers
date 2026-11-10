@@ -58,25 +58,28 @@ button:hover {
 }
 
 .toggle-button {
-  width: 38px;
-  height: 38px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.32);
-  background: rgba(var(--player-bar-bg-rgb), 0.98);
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   color: white;
-  font-size: 16px;
   line-height: 1;
   cursor: pointer;
   outline: none;
-  opacity: 1;
+  opacity: 0.68;
   display: grid;
   place-items: center;
   padding: 0;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.32);
+  box-shadow: none;
+}
+
+.toggle-button:hover {
+  opacity: 1;
 }
 
 .toggle-button-glyph {
-  font-size: 14px;
+  font-size: 10px;
 }
 
 .deleteUndoToast {

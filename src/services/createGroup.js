@@ -31,6 +31,8 @@ export const createGroup = async ({
     isJoinable: isJoinable === true,
     isStreamRoom: isStreamRoom === true || isJoinable === true,
   }).catch(async (error) => {
+    if (error?.code === "GROUP_FULL") throw error;
+
     if (isJoinable === true || isStreamRoom === true) {
       throw new Error(
         `Room creation failed before the joinable room could be saved: ${error?.message || error}`

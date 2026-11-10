@@ -36,10 +36,16 @@ export function createCachedRequestLoader(load, options = {}) {
     const promise = Promise.resolve()
       .then(() => load(loaderOptions?.loadArg, loaderOptions))
       .then((value) => {
-        entries.set(normalizedKey, {
+        const entry = {
           value,
           resolvedAt: Date.now(),
-        });
+        };
+        entries.set(normalizedKey, entry);
+        // Evict on a timer too: a key that is never asked for again (a page of a huge
+        // session) would otherwise keep its response in memory for good.
+        setTimeout(() => {
+          if (entries.get(normalizedKey) === entry) entries.delete(normalizedKey);
+        }, cacheMs + 1);
         return value;
       })
       .catch((error) => {

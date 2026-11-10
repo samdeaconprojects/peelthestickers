@@ -570,6 +570,11 @@ function LineChart({
   onSolveOpen = null,
   onControlsChange = null,
   onBucketSelect = null,
+  tagConfig,
+  cubeModelOptions = [],
+  discoveredTagOptions = {},
+  tagColors = {},
+  onTagColorsChange = null,
 }) {
   const DEFAULT_DOT_SIZE = 5;
   const MIN_DOT_SIZE = 2;
@@ -648,6 +653,20 @@ function LineChart({
     eventKey,
     practiceMode,
   });
+
+  // Selection indices point into bulkSelectableSolves, so a different solve
+  // list (filter, range, event change) must not keep stale highlights.
+  const { clearSelection } = selection;
+  const selectableSignature = useMemo(() => {
+    const first = bulkSelectableSolves[0];
+    const last = bulkSelectableSolves[bulkSelectableSolves.length - 1];
+    const keyOf = (solve) =>
+      solve ? String(solve.solveRef?.SK || solve.SK || solve.createdAt || solve.datetime || "") : "";
+    return `${bulkSelectableSolves.length}|${keyOf(first)}|${keyOf(last)}`;
+  }, [bulkSelectableSolves]);
+  useEffect(() => {
+    clearSelection();
+  }, [clearSelection, selectableSignature]);
 
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -923,9 +942,9 @@ function LineChart({
     }
 
     const syntheticEvent = {
-      shiftKey: window.__ptsShiftDown === true,
-      ctrlKey: window.__ptsCtrlDown === true,
-      metaKey: window.__ptsMetaDown === true,
+      shiftKey: event?.shiftKey === true || window.__ptsShiftDown === true,
+      ctrlKey: event?.ctrlKey === true || window.__ptsCtrlDown === true,
+      metaKey: event?.metaKey === true || window.__ptsMetaDown === true,
       preventDefault: () => {},
     };
 
@@ -1027,6 +1046,12 @@ function LineChart({
           applyBulkMove={bulkActions.applyBulkMove}
           applyBulkDelete={bulkActions.applyBulkDelete}
           applyBulkShare={bulkActions.applyBulkShare}
+          tagConfig={tagConfig}
+          cubeModelOptions={cubeModelOptions}
+          discoveredTagOptions={discoveredTagOptions}
+          tagColors={tagColors}
+          onTagColorsChange={onTagColorsChange}
+          profileColor={user?.Color || user?.color || "#2EC4B6"}
           enableShare={true}
         />
       )}
@@ -1297,6 +1322,7 @@ function LineChart({
             verticalGuides={7}
             showGuides={showGrid}
             selectedIndices={selection.selectedIndices}
+            selectionActive={bulkEnabled && selection.selectionCount > 0}
             dotRadius={dotSize}
             selectedDotRadius={dotSize + 3}
             yMin={resolvedYMin}
