@@ -31,6 +31,7 @@ import Scramble from "./components/Scramble/Scramble";
 import PuzzleSVG from "./components/PuzzleSVGs/PuzzleSVG";
 import SignInPopup from "./components/SignInPopup/SignInPopup";
 import { PrivacyPage, TermsPage } from "./components/Legal/Legal";
+import AdminMetricsPage from "./components/Admin/AdminMetricsPage";
 import EmailBanner from "./components/Account/EmailBanner";
 import { VerifyEmailPage, ResetPasswordPage } from "./components/Account/EmailActionPages";
 import {
@@ -1833,11 +1834,13 @@ function App() {
   // The account's private email and whether it's confirmed (from /auth/me,
   // never from the profile, which other users can read).
   const [accountEmail, setAccountEmail] = useState({ loaded: false, email: null, emailVerified: false });
+  const [isAdmin, setIsAdmin] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState("");
   useEffect(() => {
     const userID = String(user?.UserID || "").trim();
     if (!isSignedIn || !userID) {
       setAccountEmail({ loaded: false, email: null, emailVerified: false });
+      setIsAdmin(false);
       return undefined;
     }
     let cancelled = false;
@@ -1845,6 +1848,7 @@ function App() {
       .then((me) => {
         if (cancelled || !me) return;
         setAccountEmail({ loaded: true, email: me.email || null, emailVerified: !!me.emailVerified });
+        setIsAdmin(me.isAdmin === true);
       })
       .catch((err) => console.warn("Could not load account email:", err));
     return () => {
@@ -7654,6 +7658,7 @@ function App() {
             handleSettingsClick={() => setShowSettingsPopup(true)}
             user={user}
             dbStatus={dbStatus}
+            isAdmin={isAdmin}
           />
 
           <div
@@ -8433,6 +8438,7 @@ function App() {
             />
 
             <Route path="/privacy" element={<PrivacyPage />} />
+            {isAdmin ? <Route path="/admin" element={<AdminMetricsPage />} /> : null}
             <Route path="/terms" element={<TermsPage />} />
             <Route
               path="/verify-email"

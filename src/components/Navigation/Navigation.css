@@ -394,3 +394,20 @@
     transform: translateY(0) scale(1);
   }
 }
+
+.nav-admin-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.nav-admin-link:hover,
+.nav-admin-link.is-active {
+  color: #2ec4b6;
+  background: rgba(46, 196, 182, 0.12);
+}

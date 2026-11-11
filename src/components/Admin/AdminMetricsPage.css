@@ -1,0 +1,293 @@
+.adminPage {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 28px 16px calc(var(--player-bar-height, 146px) + 48px);
+  color: rgba(255, 255, 255, 0.86);
+  text-align: left;
+  font-size: 14px;
+}
+
+.adminPage h1 {
+  margin: 0;
+  font-size: 26px;
+  color: white;
+}
+
+.adminPage h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: white;
+}
+
+.adminPage__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.adminPage__meta,
+.adminPage .dim {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+}
+
+.adminPage__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.adminPage__error {
+  color: #ff6b6b;
+}
+
+.adminPage__notice {
+  background: rgba(244, 197, 66, 0.12);
+  border: 1px solid rgba(244, 197, 66, 0.4);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.adminBtn {
+  background: #2ec4b6;
+  color: #0e171d;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.adminBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.adminBtn--ghost {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.adminTiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.adminTile,
+.adminPanel {
+  background: var(--theme-surface, rgba(24, 31, 35, 0.9));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.adminTile__label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.adminTile__value {
+  font-size: 28px;
+  font-weight: 700;
+  color: white;
+  font-variant-numeric: tabular-nums;
+  margin: 2px 0;
+}
+
+.adminTile__sub {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.adminPanels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.adminSpark {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 120px;
+}
+
+.adminSpark__col {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.adminSpark__bar {
+  width: 100%;
+  min-height: 2px;
+  background: #2ec4b6;
+  border-radius: 3px 3px 0 0;
+}
+
+.adminSpark__axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 6px;
+}
+
+.adminEvents {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.adminEvents__row {
+  display: grid;
+  grid-template-columns: 90px 1fr 80px;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.adminEvents__track {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.adminEvents__fill {
+  display: block;
+  height: 100%;
+  background: #5da9ff;
+  border-radius: 4px;
+}
+
+.adminEvents__n {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.adminTable__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.adminTable__controls h2 {
+  margin: 0 8px 0 0;
+}
+
+.adminInput {
+  background: rgba(255, 255, 255, 0.06);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.adminCheck {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.adminTable__wrap {
+  overflow-x: auto;
+}
+
+.adminTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.adminTable th,
+.adminTable td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.adminTable th {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.adminTable .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.adminTable .strong {
+  color: white;
+  font-weight: 600;
+}
+
+.adminTable a {
+  color: #2ec4b6;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.adminTable tr.is-flagged td {
+  background: rgba(255, 107, 107, 0.06);
+}
+
+.adminBadges {
+  display: flex;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.adminBadge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(46, 196, 182, 0.18);
+  color: #2ec4b6;
+}
+
+.adminBadge--dim {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.adminTable td.adminTable__flags {
+  white-space: normal;
+  min-width: 220px;
+}
+
+.adminFlag {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 7px;
+  margin: 0 4px 4px 0;
+  border-radius: 6px;
+  background: rgba(255, 107, 107, 0.16);
+  color: #ff8a8a;
+}
+
+.adminTable__more {
+  margin-top: 12px;
+}
+
+.adminPage__hint {
+  margin: -8px 0 12px;
+}

@@ -53,6 +53,7 @@ New environment variables for `server/.env`:
 |---|---|---|
 | `PTS_JWT_SECRET` | yes in production | Long random string. Generate with `openssl rand -hex 48`. Changing it signs everyone out. Without it in development a random one is used per start. |
 | `PTS_ADMIN_USER_IDS` | no | Comma-separated userIDs allowed to call `/api/_table`, `/api/batchWrite`, `/api/admin/*` and to act on other users. |
+| `PTS_ADMIN_METRICS_DAILY` | no | `false` turns off the daily admin-metrics run that snapshots solve counts (see `ADMIN_METRICS.md`). Default on. |
 | `PTS_ALLOW_LEGACY_CLAIM` | no | `true` lets a pre-auth profile (no `AUTH` item) be claimed by whoever first signs up with that username. Turn on only during the migration window for existing testers, then off. |
 | `PTS_TOKEN_TTL` | no | Token lifetime, default `30d`. |
 

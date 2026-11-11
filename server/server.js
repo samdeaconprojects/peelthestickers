@@ -134,6 +134,7 @@ const { MAX_GROUP_MEMBERS, MAX_ROOM_MEMBERS, hasPlaceFor } = require("./lib/memb
 const { createProfileCache, profileIDsFromWrite } = require("./lib/profileCache");
 const { buildFeed, toProfileCard } = require("./lib/feed");
 const { createRateLimiter, rateLimitMiddleware } = require("./lib/rateLimit");
+const { createAdminMetrics } = require("./lib/adminMetrics");
 const {
   normalizeEmail,
   validateEmail,
@@ -235,6 +236,10 @@ const ddb = DynamoDBDocumentClient.from(
   }
 );
 const dbMetricsStorage = new AsyncLocalStorage();
+const adminMetrics = createAdminMetrics({ ddb, table: TABLE });
+if (String(process.env.PTS_ADMIN_METRICS_DAILY || "true").toLowerCase() !== "false") {
+  adminMetrics.startDailySnapshots();
+}
 const profileCache = createProfileCache({
   ttlMs: Math.max(0, Number(process.env.PTS_PROFILE_CACHE_MS || 5000)),
 });
@@ -6116,6 +6121,7 @@ app.post("/api/auth/signup", async (req, res) => {
     );
     claimedEmail = "";
     claimedUsername = false;
+    await adminMetrics.registerUser(username, ts).catch((err) => console.warn("registerUser failed:", err));
 
     await sendVerificationFor(username, email);
     return res.json({ ...publicAuthResponse(username, profile), email, emailVerified: false });
@@ -6348,6 +6354,7 @@ app.get("/api/auth/me", async (req, res) => {
       userID: req.auth.userID,
       user: profile,
       profileExists: !!profile,
+      isAdmin: !!req.auth.isAdmin,
       ...accountEmailFields(authItem),
     });
   } catch (e) {
@@ -6404,6 +6411,28 @@ app.get("/api/notifications/stream/:userID", (req, res) => {
   req.on("close", () => {
     removeNotificationClient(userID, client.id);
   });
+});
+
+// -------------------- Admin: metrics --------------------
+app.get("/api/admin/metrics", requireAdmin, async (req, res) => {
+  try {
+    const refresh = req.query.refresh === "1" || req.query.refresh === "true";
+    return res.json(await adminMetrics.get({ refresh }));
+  } catch (e) {
+    console.error("GET /api/admin/metrics error:", e);
+    return sendServerError(res, e);
+  }
+});
+
+// One-off full table scan that adds accounts made before the user registry
+// existed. Safe to re-run.
+app.post("/api/admin/metrics/rebuild-registry", requireAdmin, async (_, res) => {
+  try {
+    return res.json({ ok: true, ...(await adminMetrics.rebuildRegistry()) });
+  } catch (e) {
+    console.error("POST /api/admin/metrics/rebuild-registry error:", e);
+    return sendServerError(res, e);
+  }
 });
 
 // -------------------- Debug: table shape --------------------
@@ -6517,6 +6546,7 @@ app.post("/api/user", async (req, res) => {
         ConditionExpression: "attribute_not_exists(PK)",
       })
     );
+    await adminMetrics.registerUser(id, ts).catch((err) => console.warn("registerUser failed:", err));
     return res.json({ ok: true, item });
   } catch (e) {
     if (e?.name === "ConditionalCheckFailedException") {
