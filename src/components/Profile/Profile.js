@@ -597,6 +597,7 @@ function Profile({
   onJoinLiveRoom,
   liveRoomBusy = false,
   liveRoomError = "",
+  onOpenSettings,
 }) {
   const { runDb } = useDbStatus();
   const { settings } = useSettings();
@@ -1403,6 +1404,18 @@ function Profile({
       {editingStats && (
         <div className="statsEditorOverlay" onClick={closeStatsEditor}>
           <div className="statsEditor statsOrganizer" onClick={(e) => e.stopPropagation()}>
+            {typeof onOpenSettings === "function" && (
+              <button
+                type="button"
+                className="statsEditorProfileSettingsButton"
+                onClick={() => {
+                  closeStatsEditor();
+                  onOpenSettings("profile");
+                }}
+              >
+                Edit name &amp; profile settings
+              </button>
+            )}
             <div className="statsEditorHeader">
               <div>
                 <h3>{isMainGroup ? "Customize stats" : `Edit ${activeGroup.name}`}</h3>

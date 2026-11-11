@@ -118,9 +118,14 @@ function buildSpeedColorResolver(daySolves) {
   return (solve) => {
     const timeMs = getSolveBaseMs(solve);
     if (!Number.isFinite(timeMs)) return "rgba(255,255,255,0.32)";
-    const ratio = (timeMs - minTime) / denom;
-    if (timeMs <= (minTime + maxTime) / 2) return `rgb(${255 * ratio}, 255, 0)`;
-    return `rgb(255, ${255 * (1 - ratio)}, 0)`;
+    const ratio = Math.min(1, Math.max(0, (timeMs - minTime) / denom));
+    // teal (fast) -> yellow -> coral (slow)
+    const stops = [[56, 214, 201], [242, 239, 98], [255, 140, 90]];
+    const t = ratio * 2;
+    const [a, b] = t <= 1 ? [stops[0], stops[1]] : [stops[1], stops[2]];
+    const k = t <= 1 ? t : t - 1;
+    const mix = (i) => Math.round(a[i] + (b[i] - a[i]) * k);
+    return `rgb(${mix(0)}, ${mix(1)}, ${mix(2)})`;
   };
 }
 
@@ -378,9 +383,9 @@ function TimePeriodChart({
   const chartHeight = CHART_HEIGHT;
   const [selectedSolve, setSelectedSolve] = useState(null);
   const [segmentSort, setSegmentSort] = useState("chronological");
-  const [colorMode, setColorMode] = useState("speed");
+  const [colorMode, setColorMode] = useState(null);
   const [scaleToActiveHours, setScaleToActiveHours] = useState(true);
-  const [chartMode, setChartMode] = useState("segments");
+  const [chartMode, setChartMode] = useState("hour-bars");
 
   useEffect(() => {
     const node = canvasRef.current;
@@ -400,13 +405,26 @@ function TimePeriodChart({
     return () => observer.disconnect();
   }, []);
 
+  const eventCount = useMemo(() => {
+    const set = new Set();
+    for (const solve of Array.isArray(solves) ? solves : []) {
+      const ev = getSolveTagValue(solve, "Event");
+      if (ev) set.add(ev);
+    }
+    return set.size;
+  }, [solves]);
+
+  // Default to coloring by event when the range spans multiple events, unless
+  // the user has explicitly picked a color mode.
+  const effectiveColorMode = colorMode ?? (eventCount > 1 ? "event" : "speed");
+
   const timeline = useMemo(
-    () => buildTimeline(Array.isArray(solves) ? solves : [], segmentSort, colorMode, chartMode, chartWidth, chartHeight),
-    [solves, segmentSort, colorMode, chartMode, chartWidth, chartHeight]
+    () => buildTimeline(Array.isArray(solves) ? solves : [], segmentSort, effectiveColorMode, chartMode, chartWidth, chartHeight),
+    [solves, segmentSort, effectiveColorMode, chartMode, chartWidth, chartHeight]
   );
   const hourlyBars = useMemo(
-    () => buildHourlyBars(Array.isArray(solves) ? solves : [], colorMode),
-    [solves, colorMode]
+    () => buildHourlyBars(Array.isArray(solves) ? solves : [], effectiveColorMode),
+    [solves, effectiveColorMode]
   );
 
   const hourDomain = useMemo(
@@ -481,67 +499,88 @@ function TimePeriodChart({
     });
   const peakHourCount = chartMode === "hour-bars" ? hourlyBars.maxTotal : timeline.maxStack;
 
+  const yTicks = useMemo(() => {
+    if (chartMode !== "hour-bars" || !hourlyBars.maxTotal) return [];
+    const max = hourlyBars.maxTotal;
+    const rough = max / 4;
+    const mag = Math.pow(10, Math.floor(Math.log10(Math.max(1, rough))));
+    const step = [1, 2, 5, 10].map((m) => m * mag).find((v) => v >= rough) || mag * 10;
+    const innerH = chartHeight - CHART_PADDING_BOTTOM - CHART_PADDING_TOP;
+    const ticks = [];
+    for (let v = step; v <= max; v += step) {
+      ticks.push({ value: v, y: chartHeight - CHART_PADDING_BOTTOM - (v / max) * innerH });
+    }
+    return ticks;
+  }, [chartMode, hourlyBars.maxTotal, chartHeight]);
+
   return (
     <div className="timePeriodChart">
-      <div className="lineChartControls lineChartControls--time lineChartControls--timePeriod">
-        <button
-          type="button"
-          className={`statsToggleBtn ${chartMode === "segments" ? "is-active" : ""}`}
-          onClick={() => setChartMode((value) => (value === "segments" ? "hour-bars" : "segments"))}
-          title={chartMode === "segments" ? "Click to show stacked hour bars" : "Click to show individual solve segments"}
-        >
-          View: {chartMode === "segments" ? "Segments" : "Hour Bars"}
-        </button>
+      <div className="tpcHeader">
+        <div className="tpcTitleBlock">
+          <div className="tpcTitle">When you solve</div>
+          <div className="tpcSubtitle">
+            {chartMode === "hour-bars"
+              ? "Solves per hour of day"
+              : "Each mark is one solve, placed at its time of day and stacked within the hour"}
+            <span className="tpcDot">·</span>
+            {rangeLabel}
+          </div>
+        </div>
+        <div className="tpcStats">
+          <span><b>{timeline.totalSolves.toLocaleString()}</b> solves</span>
+          <span><b>{timeline.activeHours}</b> active hrs</span>
+          <span><b>{peakHourCount}</b> peak/hr</span>
+        </div>
+      </div>
 
-        <select
-          className="statsSelect statsSelect--chart"
-          value={segmentSort}
-          onChange={(e) => setSegmentSort(e.target.value)}
-        >
-          <option value="chronological">Segment Order: Time</option>
-          <option value="fastest">Segment Order: Fastest</option>
-          <option value="slowest">Segment Order: Slowest</option>
-        </select>
-
-        <select
-          className="statsSelect statsSelect--chart"
-          value={colorMode}
-          onChange={(e) => setColorMode(e.target.value)}
-        >
-          <option value="speed">Colors: Speed</option>
-          <option value="event">Colors: Event</option>
-          <option value="cube-model">Colors: Cube Model</option>
-          <option value="cross-color">Colors: Start Color</option>
-          <option value="timer-input">Colors: Timer Input</option>
-        </select>
-
-        <button
-          type="button"
-          className={`statsToggleBtn ${scaleToActiveHours ? "is-active" : ""}`}
-          onClick={() => setScaleToActiveHours((value) => !value)}
-          title={scaleToActiveHours ? "Click to show all 24 hours" : "Click to scale to active hours"}
-        >
-          Scale: {scaleToActiveHours ? "Active Hours" : "All Hours"}
-        </button>
-
-        <div className="chartControlGroup chartControlGroup--timePeriod chartControlGroup--timePeriodRange">
-          <span className="chartControlValue chartControlValue--timePeriodRange">{rangeLabel}</span>
+      <div className="tpcControls">
+        <div className="tpcSegmented" role="group" aria-label="Chart view">
+          <button
+            type="button"
+            className={chartMode === "hour-bars" ? "is-active" : ""}
+            onClick={() => setChartMode("hour-bars")}
+          >
+            Per hour
+          </button>
+          <button
+            type="button"
+            className={chartMode === "segments" ? "is-active" : ""}
+            onClick={() => setChartMode("segments")}
+          >
+            Each solve
+          </button>
         </div>
 
-        <div className="chartControlGroup chartControlGroup--timePeriod">
-          <span className="chartControlLabel chartControlLabel--timePeriod">Solves</span>
-          <span className="chartControlValue chartControlValue--timePeriod">{timeline.totalSolves}</span>
-        </div>
+        <label className="tpcField">
+          <span>Color</span>
+          <select value={effectiveColorMode} onChange={(e) => setColorMode(e.target.value)}>
+            <option value="event">Event</option>
+            <option value="speed">Speed</option>
+            <option value="cube-model">Cube</option>
+            <option value="cross-color">Start color</option>
+            <option value="timer-input">Input</option>
+          </select>
+        </label>
 
-        <div className="chartControlGroup chartControlGroup--timePeriod">
-          <span className="chartControlLabel chartControlLabel--timePeriod">Hours</span>
-          <span className="chartControlValue chartControlValue--timePeriod">{timeline.activeHours}</span>
-        </div>
+        {chartMode === "segments" && (
+          <label className="tpcField">
+            <span>Stack</span>
+            <select value={segmentSort} onChange={(e) => setSegmentSort(e.target.value)}>
+              <option value="chronological">By time</option>
+              <option value="fastest">Fastest first</option>
+              <option value="slowest">Slowest first</option>
+            </select>
+          </label>
+        )}
 
-        <div className="chartControlGroup chartControlGroup--timePeriod">
-          <span className="chartControlLabel chartControlLabel--timePeriod">{chartMode === "hour-bars" ? "Peak" : "Stack"}</span>
-          <span className="chartControlValue chartControlValue--timePeriod">{peakHourCount}</span>
-        </div>
+        <label className="tpcCheck">
+          <input
+            type="checkbox"
+            checked={!scaleToActiveHours}
+            onChange={() => setScaleToActiveHours((value) => !value)}
+          />
+          <span>Full 24h</span>
+        </label>
       </div>
 
       <div ref={canvasRef} className="timeLineChartCanvas">
@@ -553,13 +592,6 @@ function TimePeriodChart({
         >
           {hourGuides.map((guide) => (
             <g key={`guide-${guide.hour}`}>
-              <rect
-                x={guide.x}
-                y={CHART_PADDING_TOP}
-                width={columnWidth}
-                height={chartHeight - CHART_PADDING_BOTTOM - CHART_PADDING_TOP}
-                className={guide.hour % 2 === 0 ? "timeLineHourBand" : "timeLineHourBand timeLineHourBand--alt"}
-              />
               <line
                 x1={guide.x}
                 y1={CHART_PADDING_TOP}
@@ -567,6 +599,21 @@ function TimePeriodChart({
                 y2={chartHeight - CHART_PADDING_BOTTOM}
                 className="timeLineGuide"
               />
+            </g>
+          ))}
+
+          {yTicks.map((tick) => (
+            <g key={`ytick-${tick.value}`}>
+              <line
+                x1={CHART_PADDING_X}
+                y1={tick.y}
+                x2={chartWidth - CHART_PADDING_X}
+                y2={tick.y}
+                className="timeLineGridY"
+              />
+              <text x={CHART_PADDING_X + 2} y={tick.y - 4} className="timeLineYLabel">
+                {tick.value}
+              </text>
             </g>
           ))}
 
@@ -578,7 +625,7 @@ function TimePeriodChart({
             className="timeLineAxis"
           />
 
-          {hourGuides.map((guide) => (
+          {hourGuides.filter((guide) => columnWidth >= 40 || guide.hour % 3 === 0).map((guide) => (
             <text
               key={`label-${guide.hour}`}
               x={guide.x + columnWidth / 2}
@@ -603,8 +650,8 @@ function TimePeriodChart({
                   y={segment.y}
                   width={segment.width}
                   height={segment.height}
-                  rx={4}
-                  ry={4}
+                  rx={2}
+                  ry={2}
                   fill={segment.color}
                   className="timeLineSegment"
                   onClick={() => setSelectedSolve(segment.solve)}
@@ -626,10 +673,10 @@ function TimePeriodChart({
                     y={segment.y}
                     width={segment.width}
                     height={Math.max(2, segment.height)}
-                    rx={4}
-                    ry={4}
+                    rx={2}
+                    ry={2}
                     fill={segment.color}
-                    className="timeLineSegment"
+                    className="timeLineSegment timeLineSegment--bar"
                   >
                     <title>
                       {formatHourLabel(bar.hour)} | {segment.value} | {segment.count} solve{segment.count === 1 ? "" : "s"}
@@ -646,7 +693,7 @@ function TimePeriodChart({
               textAnchor="middle"
               className="timeLineEmptyText"
             >
-              No solves available for the selected day
+              No solves in this range
             </text>
           )}
         </svg>

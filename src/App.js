@@ -8251,6 +8251,10 @@ function App() {
                     onJoinLiveRoom={joinLiveRoom}
                     liveRoomBusy={liveRoomBusy}
                     liveRoomError={liveRoomError}
+                    onOpenSettings={(section = "profile") => {
+                      setSettingsInitialSection(section);
+                      setShowSettingsPopup(true);
+                    }}
                   />
                 ) : (
                   renderSignedOutScreen("Profile")
@@ -8271,6 +8275,10 @@ function App() {
                     onJoinLiveRoom={joinLiveRoom}
                     liveRoomBusy={liveRoomBusy}
                     liveRoomError={liveRoomError}
+                    onOpenSettings={(section = "profile") => {
+                      setSettingsInitialSection(section);
+                      setShowSettingsPopup(true);
+                    }}
                   />
                 ) : (
                   renderSignedOutScreen("Profile")

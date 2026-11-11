@@ -960,11 +960,11 @@ function Settings({
       setIsSaving(true);
       await persistCurrentSettings();
 
-      setStatusMessage("✅ Settings saved.");
+      setStatusMessage("Settings saved.");
       setTimeout(() => setStatusMessage(""), 2200);
     } catch (err) {
       console.error("❌ Error updating settings/profile:", err);
-      setStatusMessage("❌ Failed to save settings.");
+      setStatusMessage("Failed to save settings.");
       setTimeout(() => setStatusMessage(""), 2200);
     } finally {
       setIsSaving(false);
@@ -981,7 +981,7 @@ function Settings({
     } catch (err) {
       console.error("❌ Error updating settings/profile:", err);
       setShowUnsavedPrompt(false);
-      setStatusMessage("❌ Failed to save settings.");
+      setStatusMessage("Failed to save settings.");
       setTimeout(() => setStatusMessage(""), 2200);
     } finally {
       setIsSaving(false);
@@ -1107,7 +1107,7 @@ function Settings({
   const handleWcaSync = async () => {
     if (!userID || isSyncingWca) return;
     if (!String(profileData.WCAID || "").trim()) {
-      setStatusMessage("❌ Add your WCA ID first.");
+      setStatusMessage("Add your WCA ID first.");
       setTimeout(() => setStatusMessage(""), 2200);
       return;
     }
@@ -1152,7 +1152,7 @@ function Settings({
       setWcaSyncSummary(
         `Imported ${importedCount} solves across ${importedEventCount} events.${competitionText}${skippedText}`
       );
-      setStatusMessage("✅ WCA import finished.");
+      setStatusMessage("WCA import finished.");
       setTimeout(() => setStatusMessage(""), 2200);
     } catch (err) {
       console.error("❌ Error syncing WCA import:", err);
@@ -1161,7 +1161,7 @@ function Settings({
       const friendlyMessage = rawMessage.includes("Cannot POST /api/wca/import")
         ? "Backend is missing /api/wca/import. Restart or redeploy the server."
         : rawMessage;
-      setStatusMessage(`❌ ${friendlyMessage}`);
+      setStatusMessage(`${friendlyMessage}`);
       setTimeout(() => setStatusMessage(""), 3200);
     } finally {
       setIsSyncingWca(false);

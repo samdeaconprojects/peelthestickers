@@ -1701,6 +1701,19 @@ function withStatsRangeParams(search, rangeParams) {
   return text ? `?${text}` : "";
 }
 
+// The Overall view opens on the current month. Small accounts (few solves in
+// total) get the whole year instead, so the view isn't nearly empty.
+const OVERALL_YEAR_MAX_SOLVES = 2000;
+function getDefaultOverallRange(sessionsList) {
+  const today = getTodayLocalDayKey();
+  const total = (sessionsList || []).reduce((sum, s) => sum + (Number(s?.Stats?.SolveCountTotal) || 0), 0);
+  if (total > 0 && total <= OVERALL_YEAR_MAX_SOLVES) {
+    const year = String(today).slice(0, 4);
+    return { start: `${year}-01-01`, end: `${year}-12-31` };
+  }
+  return getMonthRangeFromDayKey(today);
+}
+
 function getInclusiveDaySpan(startDay, endDay) {
   const start = getDayKeyDate(startDay);
   const end = getDayKeyDate(endDay);
@@ -2743,7 +2756,19 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     ));
   }, [compareSelection, compareSessionId, compareSessionsForEvent]);
 
+  // The timer event/session the scope was last reset to. On the render where
+  // the timer's event changes (e.g. an event key binding), the scope still
+  // names the old event until the reset below lands; the URL writer must not
+  // record that stale scope, or the URL reader would restore the old event.
+  const timerScopeKey = `${String(currentEvent || "333").toUpperCase()}|${currentSession || "main"}`;
+  const lastTimerScopeKeyRef = useRef(timerScopeKey);
+  // The session scope the Overall view was opened from, so "Session" returns to it.
+  const zoomOutScopeRef = useRef(null);
+  const timerScopeResetPending = lastTimerScopeKeyRef.current !== timerScopeKey;
+
   useEffect(() => {
+    lastTimerScopeKeyRef.current = timerScopeKey;
+    zoomOutScopeRef.current = null;
     setScopeEvents([String(currentEvent || "333").toUpperCase()]);
     setScopeSessions(makeInitialScopeSessions(currentEvent, currentSession));
 
@@ -3495,8 +3520,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     user?.UserID,
   ]);
 
+  // All time needs no scan: each event's stored all-time stats fill the matrix.
   const wantsPeriodAwareEventMatrix =
-    statsViewMode === "time" && isAllEventsMode && hasActiveDateFilter && !compareEnabled;
+    statsViewMode === "time" && isAllEventsMode && hasActiveDateFilter && !isAllTimeDateFilter && !compareEnabled;
   const wantsRawTimeScope =
     statsViewMode === "time" &&
     (rawRangeViewActive || hasActiveTagFilter || wantsPeriodAwareEventMatrix);
@@ -4078,8 +4104,8 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const allEventsOverall = useMemo(() => {
     return aggregateStatsList(allEventsBreakdown.map((row) => row.stats));
   }, [allEventsBreakdown]);
-  const timeViewEventMatrixItems = useMemo(() => {
-    if (hasActiveDateFilter || hasMultiIndexSolves) {
+  const timeViewEventMatrixActiveItems = useMemo(() => {
+    if ((hasActiveDateFilter && dateFilterStart !== ALL_TIME_START_DAY) || hasMultiIndexSolves) {
       const solvesByEvent = new Map();
 
       for (const solve of allLoadedFilteredRawSolves || []) {
@@ -4172,11 +4198,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     scopeSessions.mode,
     allLoadedFilteredRawSolves,
     cachedEventMatrixStats,
+    dateFilterStart,
     hasActiveDateFilter,
     sessionsList,
     timeViewMainSessionsOnly,
     user,
   ]);
+  // The matrix shows only the events with solves in the current range.
+  const timeViewEventMatrixItems = timeViewEventMatrixActiveItems;
   const useCachedOverallStats = statsViewMode === "standard" && !hasActiveDateFilter && !hasActiveTagFilter;
   const effectiveOverallStats = useCachedOverallStats ? overallStatsForEvent : null;
   const activeBucketItems = useMemo(
@@ -4824,7 +4853,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         isAllSessionsMode: targetSession === ALL_SESSIONS,
         sessionId: targetSession,
       });
-    if (hasUrlRange && !bucketScopeOk && !isShortRange) {
+    // The Overall view's own default window opens without a prompt in the app,
+    // so a link (or back / reload) to it is restored too.
+    const overallDefault = getDefaultOverallRange(sessionsList);
+    const isOverallDefaultRange =
+      parsedView === "time" && parsed.start === overallDefault.start && parsed.end === overallDefault.end;
+    if (hasUrlRange && !bucketScopeOk && !isShortRange && !isOverallDefaultRange) {
       navigate(
         { search: withStatsRangeParams(location.search, new URLSearchParams(statsRangeKey)) },
         { replace: true }
@@ -4854,6 +4888,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   useEffect(() => {
     const sync = urlRangeSyncRef.current;
     if (!isStatsRoute || !sync.initialized) return;
+    if (timerScopeResetPending) return;
     if (sync.staleKey !== null) {
       if (statsRangeKey === sync.staleKey) return;
       sync.staleKey = null;
@@ -4867,9 +4902,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       { search: withStatsRangeParams(location.search, new URLSearchParams(statsRangeKey)) },
       isFirstWrite ? { replace: true, state: location.state } : { state: { ptsStatsRange: true } }
     );
-    // Written only when the range itself changes.
+    // Written only when the range itself changes (or a pending timer-event
+    // scope reset lands).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isStatsRoute, statsRangeKey]);
+  }, [isStatsRoute, statsRangeKey, timerScopeResetPending]);
 
   const canStepBackInStatsHistory = location.state?.ptsStatsRange === true;
   const handleStatsRangeBack = useCallback(() => {
@@ -4890,7 +4926,9 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   // single-scope and multi-scope layouts the way the old view toggle did:
   // short ranges always survive, wider ones only when they stay bucket-backed.
   const applyScope = useCallback(
-    async ({ events = scopeEvents, sessions = scopeSessions } = {}) => {
+    // range: "solves" drops the date window (last N solves); { start, end }
+    // opens that window; omitted carries the current range across as below.
+    async ({ events = scopeEvents, sessions = scopeSessions, range = null } = {}) => {
       const nextList = events === ALL_EVENTS ? getEventsFromSessionsList(sessionsList) : events;
       if (!nextList.length && events !== ALL_EVENTS) return;
       const nextPairs = resolveScopePairs(nextList, sessions, sessionsList);
@@ -4924,16 +4962,24 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       setShowAllActive(false);
       setTagFilterSelection(makeEmptyTagSelection());
 
+      if (range) {
+        setPreferRawDateRangeView(false);
+        setSelectedTimeDay("");
+        setDateFilterStart(range === "solves" ? "" : range.start);
+        setDateFilterEnd(range === "solves" ? "" : range.end);
+        return;
+      }
       if (nextView === statsViewMode) return;
       const span = getInclusiveDaySpan(dateFilterStart, dateFilterEnd);
       const isShortRange = span > 0 && span <= MAX_RAW_INDEX_RANGE_DAYS;
       if (nextView === "time") {
         setPreferRawDateRangeView(false);
-        // Multi scopes open in the Time view: keep a short range, otherwise this week.
+        // Multi scopes open in the Overall view: keep a short range, otherwise
+        // the default overall window (this month, or this year for small accounts).
         if (!isShortRange) {
-          const week = getWeekRangeFromDayKey(getTodayLocalDayKey());
-          setDateFilterStart(week.start);
-          setDateFilterEnd(week.end);
+          const overall = getDefaultOverallRange(sessionsList);
+          setDateFilterStart(overall.start);
+          setDateFilterEnd(overall.end);
           setSelectedTimeDay("");
         }
         return;
@@ -8628,7 +8674,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       ...(typeof onPaletteChange === "function" ? [{ key: "color", label: "Color" }] : []),
     ];
     // Several events: the date-window view is the multi-event view.
-    const timeViewName = isMultiScope ? "Multi-event" : "Time";
+    const timeViewName = isMultiScope ? "Overall" : "Time";
     const viewName = view === "time" ? timeViewName : "Solves";
     const viewOptions = [
       {
@@ -9307,10 +9353,10 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     // Primary row (no compare): multi-scope labels, the quick All-events hop,
     // and no tag button when several events are in scope.
     scopeLabels = null,
-    // Solves | Time view toggle (every row); with several events, Time reads "Multi-event".
+    // Session | Overall level switch (primary row).
     view = null,
     onViewChange = null,
-    timeViewLabel = "Time",
+    sessionViewLabel = "Session",
   }) => {
     const meta = getEventDisplayMeta(scopeLabels ? scopeLabels.iconEvent : eventValue);
     const eventLabel = scopeLabels ? scopeLabels.events : meta.label;
@@ -9352,6 +9398,40 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         {leadContent ? <div className="statsScopeLead">{leadContent}</div> : null}
 
         <div className="statsScopeSummary">
+          {/* Leads the row: which level (Session | Overall) is in view. */}
+          {view && typeof onViewChange === "function" ? (
+            <div className="statsScopeLayoutToggle" role="group" aria-label="View by">
+              {[
+                {
+                  value: "session",
+                  label: sessionViewLabel,
+                  title:
+                    sessionViewLabel === "Session"
+                      ? "Session view: one session, counted back by solves"
+                      : "Sessions view: the selected events' latest solves together",
+                },
+                {
+                  value: "overall",
+                  label: "Overall",
+                  title: "Overall view: every event side by side over a window of days",
+                },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`statsScopeLayoutBtn ${view === option.value ? "is-active" : ""}`}
+                  aria-pressed={view === option.value}
+                  title={option.title}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (view !== option.value) onViewChange(option.value);
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
           {puzzleEvent ? (
             <button
               type="button"
@@ -9388,21 +9468,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               {eventLabel}
             </span>
           </button>
-
-          {scopeLabels ? (
-            <button
-              type="button"
-              className="statsScopeAllEventsBtn"
-              onClick={(e) => {
-                e.stopPropagation();
-                scopeLabels.onAllEventsToggle();
-              }}
-              title={scopeLabels.allEventsTitle}
-              aria-label={scopeLabels.allEventsTitle}
-            >
-              {scopeLabels.allEventsText}
-            </button>
-          ) : null}
 
           <button
             type="button"
@@ -9484,35 +9549,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
         </div>
 
         <div className="statsScopeRowActions">
-          {view && typeof onViewChange === "function" ? (
-            <div className="statsScopeLayoutToggle" role="group" aria-label="View by">
-              {[
-                { value: "solves", label: "Solves", title: "View by solves: your last N solves" },
-                {
-                  value: "time",
-                  label: timeViewLabel,
-                  title:
-                    timeViewLabel === "Time"
-                      ? "View by time: a window of days"
-                      : "Multi-event view: each event side by side over a window of days",
-                },
-              ].map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`statsScopeLayoutBtn ${view === option.value ? "is-active" : ""}`}
-                  aria-pressed={view === option.value}
-                  title={option.title}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (view !== option.value) onViewChange(option.value);
-                  }}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
           {renderViewportControls(scopeModalKey)}
         </div>
       </div>
@@ -9586,9 +9622,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     // Several (but not all) events show the first one's puzzle; all events show none.
     iconEvent: scopeEvents === ALL_EVENTS ? ALL_EVENTS : scopeEventList[0] || homeEvent,
     hideTags: isMultiEventScope,
-    allEventsText: scopeEvents === ALL_EVENTS ? homeEventLabel : "All",
-    allEventsTitle: primaryViewSwitchChip.title,
-    onAllEventsToggle: primaryViewSwitchChip.onClick,
   };
 
   // Solves | Time: Solves drops the date window (back to the last N solves),
@@ -9605,7 +9638,52 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       });
       return;
     }
-    void applyTimeRangePreset("week");
+    const overall = getDefaultOverallRange(sessionsList);
+    setSelectedTimeDay("");
+    void applyPrimaryDateRange(overall.start, overall.end, {
+      onApply: () => {
+        setPreferRawDateRangeView(false);
+        setCurrentPage(0);
+      },
+    });
+  };
+
+  // Session | Overall: the two levels of the page. Session is one session (or
+  // a picked group) counted back by solves; Overall is every event side by
+  // side over a window of days. A picked group of events keeps both views.
+  const primaryLevel = layoutViewMode === "time" ? "overall" : "session";
+  const handlePrimaryLevelChange = (next) => {
+    if (next === primaryLevel) return;
+    if (next === "overall") {
+      if (statsViewMode === "time") {
+        handlePrimaryViewChange("time");
+        return;
+      }
+      zoomOutScopeRef.current = { events: scopeEvents, sessions: scopeSessions };
+      void applyScope({
+        events: ALL_EVENTS,
+        sessions: { mode: "main", keys: [] },
+        range: getDefaultOverallRange(sessionsList),
+      });
+      return;
+    }
+    if (scopeEvents === ALL_EVENTS) {
+      const previous = zoomOutScopeRef.current;
+      zoomOutScopeRef.current = null;
+      void applyScope({
+        events: previous?.events || [homeEvent],
+        sessions: previous?.sessions || makeInitialScopeSessions(currentEvent, currentSession),
+        range: "solves",
+      });
+      return;
+    }
+    handlePrimaryViewChange("solves");
+  };
+  // Overall → one event: its main session, last N solves.
+  const handleOverallEventSelect = (eventKey) => {
+    const ev = String(eventKey || "").toUpperCase();
+    if (!ev) return;
+    void applyScope({ events: [ev], sessions: { mode: "main", keys: [] }, range: "solves" });
   };
   const compareScopeView =
     effectiveCompareDateFilterStart || effectiveCompareDateFilterEnd ? "time" : "solves";
@@ -9722,10 +9800,11 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                 dateSummary: primaryDateSummary,
                 scopeModalKey: "primary",
                 scopeLabels: compareEnabled ? null : primaryScopeLabels,
-                // Only multi-event scopes switch between Solves and Multi-event.
-                view: statsViewMode === "time" ? primaryScopeView : null,
-                onViewChange: handlePrimaryViewChange,
-                timeViewLabel: "Multi-event",
+                view: compareEnabled && statsViewMode !== "time" ? null : primaryLevel,
+                onViewChange: handlePrimaryLevelChange,
+                // All events steps back into a single session; a picked group stays a group.
+                sessionViewLabel:
+                  statsViewMode === "time" && scopeEvents !== ALL_EVENTS ? "Sessions" : "Session",
               })}
 
               {compareEnabled &&
@@ -10343,7 +10422,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               <AllEventsTimeMatrix
                 items={timeViewEventMatrixItems}
                 loading={
-                  hasActiveDateFilter
+                  hasActiveDateFilter && !isAllTimeDateFilter
                     ? loadingTimeScope
                     : loadingEventMatrixStats
                 }
@@ -10352,6 +10431,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                   void applyScope({ sessions: { mode: mainOnly ? "main" : "all", keys: [] } })
                 }
                 onStatSelect={handleEventMatrixStatSelect}
+                onEventSelect={handleOverallEventSelect}
               />
             </div>
           )}

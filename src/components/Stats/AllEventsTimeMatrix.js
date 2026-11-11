@@ -187,6 +187,8 @@ export default function AllEventsTimeMatrix({
   mainOnly = false,
   onToggleMainOnly = null,
   onStatSelect = null,
+  // Click an event's header to open that event on its own.
+  onEventSelect = null,
   orientation = "horizontal",
   showSessionToggle = true,
 }) {
@@ -201,20 +203,41 @@ export default function AllEventsTimeMatrix({
     );
   }, [sourceItems, sortByCount]);
   const isVertical = orientation === "vertical";
-  const matrixRowHeight = showWorst ? 62 : 52;
+  // Horizontal (Overall card) rows are kept short; many events switch to the
+  // dense type scale so every column fits a laptop-width card without scrolling.
+  const matrixRowHeight = isVertical ? (showWorst ? 62 : 52) : showWorst ? 50 : 38;
+  const isDense = !isVertical && items.length > 9;
+  const eventHeadProps = (item) =>
+    typeof onEventSelect === "function"
+      ? {
+          role: "button",
+          tabIndex: 0,
+          title: `Open ${formatEventLabel(item.event)} session view`,
+          style: { cursor: "pointer" },
+          onClick: () => onEventSelect(item.event),
+          onKeyDown: (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onEventSelect(item.event);
+            }
+          },
+        }
+      : {};
   const gridStyle = isVertical
     ? {
         gridTemplateColumns: "minmax(96px, 1.05fr) repeat(3, minmax(0, 1fr))",
         gridTemplateRows: `auto repeat(${Math.max(1, items.length)}, ${matrixRowHeight}px)`,
       }
     : {
-        gridTemplateColumns: `96px repeat(${Math.max(1, items.length)}, minmax(92px, 1fr))`,
+        gridTemplateColumns: `96px repeat(${Math.max(1, items.length)}, minmax(${isDense ? 44 : 72}px, 1fr))`,
         gridTemplateRows: `auto repeat(3, ${matrixRowHeight}px)`,
       };
 
   return (
     <div
-      className={`statsEventMatrix ${isVertical ? "statsEventMatrix--vertical" : ""} ${showWorst ? "statsEventMatrix--showWorst" : ""} ${loading ? "is-loading" : ""}`}
+      className={`statsEventMatrix ${isVertical ? "statsEventMatrix--vertical" : "statsEventMatrix--compact"} ${
+        isDense ? "statsEventMatrix--dense" : ""
+      } ${showWorst ? "statsEventMatrix--showWorst" : ""} ${loading ? "is-loading" : ""}`}
       aria-busy={loading}
     >
       {isVertical && (
@@ -242,7 +265,10 @@ export default function AllEventsTimeMatrix({
 
               {items.map((item) => (
                 <React.Fragment key={`row-${item.event}`}>
-                  <div className="statsEventMatrixEventHead statsEventMatrixFirstCol statsEventMatrixEventHead--vertical">
+                  <div
+                    className="statsEventMatrixEventHead statsEventMatrixFirstCol statsEventMatrixEventHead--vertical"
+                    {...eventHeadProps(item)}
+                  >
                     <div className="statsEventMatrixEventTitle">
                       <span
                         className={`statsEventMatrixEventIcon ${
@@ -303,7 +329,11 @@ export default function AllEventsTimeMatrix({
                 onToggleSortByCount={() => setSortByCount((current) => !current)}
               />
               {items.map((item) => (
-                <div key={`head-${item.event}`} className="statsEventMatrixEventHead">
+                <div
+                  key={`head-${item.event}`}
+                  className="statsEventMatrixEventHead"
+                  {...eventHeadProps(item)}
+                >
                   <div className="statsEventMatrixEventTitle">
                     <span
                       className={`statsEventMatrixEventIcon ${
