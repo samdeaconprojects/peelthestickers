@@ -87,7 +87,7 @@ export function ResetPasswordPage({ onRequestSignIn }) {
   const submit = async (e) => {
     e?.preventDefault?.();
     if (busy || !token) return;
-    if (password.length < 8) return setError("Password must be at least 8 characters");
+    if (password.length < 10) return setError("Password must be at least 10 characters");
     if (password !== confirm) return setError("The two passwords don't match");
     setBusy(true);
     setError("");
@@ -118,11 +118,15 @@ export function ResetPasswordPage({ onRequestSignIn }) {
 
   return (
     <Shell title="Choose a new password">
+      <p className="accountPage__hint">
+        Use 10 or more characters. A few unrelated words work well, like "blue cube orange tuesday".
+        Changing your password signs you out on your other devices.
+      </p>
       <form className="accountPage__form" onSubmit={submit}>
         <input
           type="password"
           className="accountPage__input"
-          placeholder="New password (8+ characters)"
+          placeholder="New password (10+ characters)"
           autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}

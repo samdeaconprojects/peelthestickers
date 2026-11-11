@@ -305,3 +305,12 @@
     font-size: 13px;
     opacity: 0.75;
   }
+
+  .signInHint {
+    width: 90%;
+    margin: -2px auto 6px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.55);
+    text-align: left;
+  }

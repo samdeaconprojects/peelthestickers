@@ -85,6 +85,8 @@ const {
   validateUsername,
   validatePassword,
   normalizeUsername,
+  usernameKey,
+  setTokensValidAfterLookup,
   hashPassword,
   verifyPassword,
   signToken,
@@ -5808,6 +5810,102 @@ const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 const emailSendLimiter = createRateLimiter({ windowMs: 15 * 60000, max: 3 });
 
+// USERNAME#<lowercase> -> UserID keeps usernames unique regardless of case
+// ("Sam" can't be registered next to "sam") and lets people sign in with any
+// capitalisation. The UserID keeps the case it was registered with.
+function usernameIndexKey(username) {
+  return { PK: `USERNAME#${usernameKey(username)}`, SK: "USERNAME" };
+}
+
+async function getUserIDForUsername(username) {
+  const out = await ddb.send(new GetCommand({ TableName: TABLE, Key: usernameIndexKey(username) }));
+  return out.Item?.UserID || null;
+}
+
+// Signing in by username: the registered spelling, falling back to the exact
+// text for accounts made before the index existed.
+async function resolveUsername(identifier) {
+  const typed = normalizeUsername(identifier);
+  const indexed = await getUserIDForUsername(typed);
+  if (!indexed || indexed === typed) return indexed || typed;
+  // Two old accounts that differ only by case: the exact spelling wins.
+  return (await getAuthItem(typed)) ? typed : indexed;
+}
+
+async function claimUsername(username) {
+  try {
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: { ...usernameIndexKey(username), ItemType: "USERNAME_INDEX", UserID: username, CreatedAt: nowIso() },
+        ConditionExpression: "attribute_not_exists(PK) OR UserID = :u",
+        ExpressionAttributeValues: { ":u": username },
+      })
+    );
+    return true;
+  } catch (e) {
+    if (e?.name === "ConditionalCheckFailedException") return false;
+    throw e;
+  }
+}
+
+async function releaseUsername(username) {
+  await ddb
+    .send(
+      new DeleteCommand({
+        TableName: TABLE,
+        Key: usernameIndexKey(username),
+        ConditionExpression: "UserID = :u",
+        ExpressionAttributeValues: { ":u": username },
+      })
+    )
+    .catch((e) => {
+      if (e?.name !== "ConditionalCheckFailedException") throw e;
+    });
+}
+
+// Tokens issued before an account's last password change are refused
+// (lib/auth.js). Cached briefly so this isn't a read per request; this
+// process updates its own cache when a password changes, and it's the only
+// API process.
+const TOKEN_CUTOFF_TTL_MS = 60 * 1000;
+const tokenCutoffCache = new Map(); // userID -> { cutoff, expiresAt }
+
+async function getTokensValidAfter(userID) {
+  const cached = tokenCutoffCache.get(userID);
+  if (cached && cached.expiresAt > Date.now()) return cached.cutoff;
+  const out = await ddb.send(
+    new GetCommand({
+      TableName: TABLE,
+      Key: authItemKey(userID),
+      ProjectionExpression: "TokensValidAfter",
+    })
+  );
+  const cutoff = Number(out.Item?.TokensValidAfter || 0);
+  tokenCutoffCache.set(userID, { cutoff, expiresAt: Date.now() + TOKEN_CUTOFF_TTL_MS });
+  if (tokenCutoffCache.size > 50000) tokenCutoffCache.clear();
+  return cutoff;
+}
+setTokensValidAfterLookup(getTokensValidAfter);
+
+// Saves a new password and signs out every other device. Returns a fresh
+// token for the device that made the change.
+async function setPasswordAndRevokeSessions(userID, newPassword) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const ts = nowIso();
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: authItemKey(userID),
+      UpdateExpression: "SET PasswordHash = :h, PasswordChangedAt = :ts, TokensValidAfter = :cut, UpdatedAt = :ts",
+      ConditionExpression: "attribute_exists(PK)",
+      ExpressionAttributeValues: { ":h": await hashPassword(newPassword), ":ts": ts, ":cut": nowSec },
+    })
+  );
+  tokenCutoffCache.set(userID, { cutoff: nowSec, expiresAt: Date.now() + TOKEN_CUTOFF_TTL_MS });
+  return signToken(userID);
+}
+
 function emailIndexKey(email) {
   return { PK: `EMAIL#${email}`, SK: "EMAIL" };
 }
@@ -5878,6 +5976,18 @@ async function createEmailToken({ purpose, userID, email, ttlMs }) {
   return token;
 }
 
+// Reads a link without using it up (to validate input first).
+async function peekEmailToken(token, purpose) {
+  const raw = String(token || "").trim();
+  if (!raw || raw.length > 200) return null;
+  const out = await ddb.send(
+    new GetCommand({ TableName: TABLE, Key: { PK: `EMAILTOKEN#${hashEmailToken(raw)}`, SK: "TOKEN" } })
+  );
+  const item = out.Item;
+  if (!item || item.Purpose !== purpose || Number(item.ExpiresAt) < Date.now()) return null;
+  return item;
+}
+
 // Single use: the delete is the redeem, so a link can't be used twice.
 async function redeemEmailToken(token, purpose) {
   const raw = String(token || "").trim();
@@ -5925,6 +6035,7 @@ app.post("/api/auth/signup", async (req, res) => {
   if (!requirePkSk(res)) return;
 
   let claimedEmail = "";
+  let claimedUsername = false;
   let username = "";
   try {
     username = normalizeUsername(req.body?.username ?? req.body?.userID);
@@ -5935,8 +6046,8 @@ app.post("/api/auth/signup", async (req, res) => {
     if (usernameError) return res.status(400).json({ error: usernameError });
     const emailError = validateEmail(email);
     if (emailError) return res.status(400).json({ error: emailError, code: "INVALID_EMAIL" });
-    const passwordError = validatePassword(password);
-    if (passwordError) return res.status(400).json({ error: passwordError });
+    const passwordError = validatePassword(password, { username });
+    if (passwordError) return res.status(400).json({ error: passwordError, code: "WEAK_PASSWORD" });
     if (req.body?.acceptTerms !== true) {
       return res.status(400).json({
         error: "You must be 13 or older and agree to the Terms and Privacy Policy",
@@ -5962,7 +6073,14 @@ app.post("/api/auth/signup", async (req, res) => {
       });
     }
 
+    if (!(await claimUsername(username))) {
+      return res.status(409).json({ error: "That username is taken", code: "USERNAME_TAKEN" });
+    }
+    claimedUsername = true;
+
     if (!(await claimEmail(email, username))) {
+      await releaseUsername(username).catch(() => {});
+      claimedUsername = false;
       return res.status(409).json({
         error: "That email is already used by another account. Try signing in or resetting your password.",
         code: "EMAIL_TAKEN",
@@ -5991,11 +6109,13 @@ app.post("/api/auth/signup", async (req, res) => {
       })
     );
     claimedEmail = "";
+    claimedUsername = false;
 
     await sendVerificationFor(username, email);
     return res.json({ ...publicAuthResponse(username, profile), email, emailVerified: false });
   } catch (e) {
     if (claimedEmail) await releaseEmail(claimedEmail, username).catch(() => {});
+    if (claimedUsername) await releaseUsername(username).catch(() => {});
     if (e?.name === "ConditionalCheckFailedException") {
       return res.status(409).json({ error: "That username is taken", code: "USERNAME_TAKEN" });
     }
@@ -6016,7 +6136,7 @@ app.post("/api/auth/signin", async (req, res) => {
 
     const username = identifier.includes("@")
       ? await getUserIDForEmail(normalizeEmail(identifier))
-      : normalizeUsername(identifier);
+      : await resolveUsername(identifier);
     if (!username) {
       return res.status(401).json({ error: "Invalid username, email or password", code: "INVALID_CREDENTIALS" });
     }
@@ -6114,7 +6234,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 
     const userID = identifier.includes("@")
       ? await getUserIDForEmail(normalizeEmail(identifier))
-      : normalizeUsername(identifier);
+      : await resolveUsername(identifier);
     if (!userID) return done();
     const authItem = await getAuthItem(userID);
     if (!authItem?.Email || !authItem.EmailVerified) return done();
@@ -6139,23 +6259,22 @@ app.post("/api/auth/reset-password", async (req, res) => {
   if (!requirePkSk(res)) return;
   try {
     const newPassword = req.body?.newPassword;
-    const passwordError = validatePassword(newPassword);
-    if (passwordError) return res.status(400).json({ error: passwordError });
+    // Strength is checked before the link is used up, so a weak attempt
+    // doesn't burn it. The username check needs the token's account, which is
+    // only known after redeeming, so it runs on a peek first.
+    const basicError = validatePassword(newPassword);
+    if (basicError) return res.status(400).json({ error: basicError, code: "WEAK_PASSWORD" });
+    const peek = await peekEmailToken(req.body?.token, "reset");
+    if (peek) {
+      const nameError = validatePassword(newPassword, { username: peek.UserID });
+      if (nameError) return res.status(400).json({ error: nameError, code: "WEAK_PASSWORD" });
+    }
 
     const item = await redeemEmailToken(req.body?.token, "reset");
     if (!item) {
       return res.status(400).json({ error: "This reset link is invalid or has expired. Ask for a new one.", code: "BAD_TOKEN" });
     }
-    const ts = nowIso();
-    await ddb.send(
-      new UpdateCommand({
-        TableName: TABLE,
-        Key: authItemKey(item.UserID),
-        UpdateExpression: "SET PasswordHash = :h, PasswordChangedAt = :ts, UpdatedAt = :ts",
-        ConditionExpression: "attribute_exists(PK)",
-        ExpressionAttributeValues: { ":h": await hashPassword(newPassword), ":ts": ts },
-      })
-    );
+    await setPasswordAndRevokeSessions(item.UserID, newPassword);
     return res.json({ ok: true, username: item.UserID });
   } catch (e) {
     if (e?.name === "ConditionalCheckFailedException") {
@@ -6237,23 +6356,17 @@ app.post("/api/auth/password", async (req, res) => {
     const userID = req.auth.userID;
     const currentPassword = req.body?.currentPassword;
     const newPassword = req.body?.newPassword;
-    const passwordError = validatePassword(newPassword);
-    if (passwordError) return res.status(400).json({ error: passwordError });
+    const passwordError = validatePassword(newPassword, { username: userID });
+    if (passwordError) return res.status(400).json({ error: passwordError, code: "WEAK_PASSWORD" });
 
     const authItem = await getAuthItem(userID);
     if (!authItem || !(await verifyPassword(currentPassword, authItem.PasswordHash))) {
       return res.status(401).json({ error: "Current password is incorrect", code: "INVALID_CREDENTIALS" });
     }
 
-    await ddb.send(
-      new UpdateCommand({
-        TableName: TABLE,
-        Key: authItemKey(userID),
-        UpdateExpression: "SET PasswordHash = :h, UpdatedAt = :u",
-        ExpressionAttributeValues: { ":h": await hashPassword(newPassword), ":u": nowIso() },
-      })
-    );
-    return res.json({ ok: true, token: signToken(userID) });
+    // Signs out every other device; this one gets a fresh token.
+    const token = await setPasswordAndRevokeSessions(userID, newPassword);
+    return res.json({ ok: true, token });
   } catch (e) {
     console.error("POST /api/auth/password error:", e);
     return sendServerError(res, e);

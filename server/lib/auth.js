@@ -7,12 +7,11 @@
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { checkPassword } = require("./passwordStrength");
 
 const BCRYPT_ROUNDS = 10;
 const TOKEN_TTL = process.env.PTS_TOKEN_TTL || "30d";
 const USERNAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{2,31}$/;
-const MIN_PASSWORD_LENGTH = 8;
-const MAX_PASSWORD_LENGTH = 200;
 
 // Names nobody can sign up with, so no one can pose as the site or its staff.
 // Matched case-insensitively and ignoring dots, dashes and underscores.
@@ -65,13 +64,14 @@ function validateUsername(username) {
   return null;
 }
 
-function validatePassword(password) {
-  const pw = typeof password === "string" ? password : "";
-  if (pw.length < MIN_PASSWORD_LENGTH) {
-    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
-  }
-  if (pw.length > MAX_PASSWORD_LENGTH) return "Password is too long";
-  return null;
+// For passwords being set (signup, reset, change). Sign-in never checks
+// strength, so older passwords keep working.
+function validatePassword(password, { username = "" } = {}) {
+  return checkPassword(password, { username });
+}
+
+function usernameKey(username) {
+  return normalizeUsername(username).toLowerCase();
 }
 
 async function hashPassword(password) {
@@ -103,6 +103,14 @@ function verifyToken(token) {
   } catch {
     return null;
   }
+}
+
+// Changing or resetting a password signs out every other device: tokens
+// issued before the change are refused. `getTokensValidAfter(userID)` returns
+// that cutoff (epoch seconds, 0 when none) and is cached by the caller.
+let tokensValidAfterLookup = null;
+function setTokensValidAfterLookup(fn) {
+  tokensValidAfterLookup = typeof fn === "function" ? fn : null;
 }
 
 function isAdmin(userID) {
@@ -148,27 +156,48 @@ function buildAuthMiddleware() {
     const verified = verifyToken(token);
     if (!verified) return res.status(401).json({ error: "Session expired", code: "UNAUTHENTICATED" });
 
-    req.auth = { userID: verified.userID, isAdmin: isAdmin(verified.userID) };
+    if (tokensValidAfterLookup) {
+      Promise.resolve(tokensValidAfterLookup(verified.userID))
+        .then((cutoff) => {
+          const issuedAt = Number(verified.payload?.iat || 0);
+          if (Number(cutoff) > 0 && issuedAt < Number(cutoff)) {
+            return res
+              .status(401)
+              .json({ error: "Your password was changed. Please sign in again.", code: "UNAUTHENTICATED" });
+          }
+          return continueWithAuth(req, res, next, verified);
+        })
+        .catch((err) => {
+          console.error("Session check failed:", err?.name || err);
+          return res.status(503).json({ error: "Please try again in a moment." });
+        });
+      return undefined;
+    }
+    return continueWithAuth(req, res, next, verified);
+  };
+}
 
-    if (req.method !== "GET" && req.body && typeof req.body === "object" && !Array.isArray(req.body)) {
-      for (const field of ACTOR_BODY_FIELDS) {
-        if (!(field in req.body)) continue;
-        const value = String(req.body[field] ?? "").trim();
-        if (!value) {
-          req.body[field] = req.auth.userID;
-          continue;
-        }
-        if (value !== req.auth.userID && !req.auth.isAdmin) {
-          return res.status(403).json({
-            error: `${field} does not match the signed-in user`,
-            code: "FORBIDDEN",
-          });
-        }
+function continueWithAuth(req, res, next, verified) {
+  req.auth = { userID: verified.userID, isAdmin: isAdmin(verified.userID) };
+
+  if (req.method !== "GET" && req.body && typeof req.body === "object" && !Array.isArray(req.body)) {
+    for (const field of ACTOR_BODY_FIELDS) {
+      if (!(field in req.body)) continue;
+      const value = String(req.body[field] ?? "").trim();
+      if (!value) {
+        req.body[field] = req.auth.userID;
+        continue;
+      }
+      if (value !== req.auth.userID && !req.auth.isAdmin) {
+        return res.status(403).json({
+          error: `${field} does not match the signed-in user`,
+          code: "FORBIDDEN",
+        });
       }
     }
+  }
 
-    return next();
-  };
+  return next();
 }
 
 // Mutating routes with a :userID param where the param is the *target* user,
@@ -214,6 +243,8 @@ module.exports = {
   validateUsername,
   isReservedUsername,
   validatePassword,
+  usernameKey,
+  setTokensValidAfterLookup,
   normalizeUsername,
   hashPassword,
   verifyPassword,

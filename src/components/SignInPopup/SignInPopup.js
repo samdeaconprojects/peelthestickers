@@ -133,7 +133,7 @@ function SignInPopup({
         {!isForgot ? (
           <input
             type="password"
-            placeholder="Password"
+            placeholder={isSignUp ? "Password (10+ characters)" : "Password"}
             autoComplete={isSignUp ? "new-password" : "current-password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -142,6 +142,11 @@ function SignInPopup({
           />
         ) : null}
 
+        {isSignUp ? (
+          <p className="signInHint">
+            Tip: a few unrelated words make a strong password, like "blue cube orange tuesday".
+          </p>
+        ) : null}
         {isSignUp ? (
           <label className="signInTerms">
             <input
