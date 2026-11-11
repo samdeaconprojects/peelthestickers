@@ -11,8 +11,9 @@
   font-family: 'Jost', sans-serif;
   font-weight: bold;
   margin-right: 70px;
-  width: min(100%, 780px);
-  max-width: 780px;
+  /* Width cap grows with the font scale so wide-screen sizes don't ellipsize. */
+  width: min(100%, calc(780px * var(--home-averages-scale, 1)));
+  max-width: calc(780px * var(--home-averages-scale, 1));
   margin-bottom: 30px;
   position: relative;
   z-index: 4;

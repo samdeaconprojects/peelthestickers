@@ -207,7 +207,22 @@ const PieChartBuilder = ({
     // With an inner outline the slice is a ring segment whose inner edge sits
     // just outside the center disc, so its stroke stays visible around the hole.
     const innerRadius = showInnerOutline && showCenterLabel ? CENTER_RADIUS + sliceStrokeWidth / 2 : 0;
-    const pathData = innerRadius
+    // A slice spanning the whole pie has identical start/end points, so a
+    // single arc command degenerates to nothing; draw it as a full circle
+    // (two half arcs), or a full ring when there is an inner hole.
+    const isFullCircle = endAngle - startAngle >= 2 * Math.PI - 1e-6;
+    const circlePath = (r, sweep) =>
+      [
+        `M ${chartCenter} ${chartCenter - r}`,
+        `A ${r} ${r} 0 1 ${sweep} ${chartCenter} ${chartCenter + r}`,
+        `A ${r} ${r} 0 1 ${sweep} ${chartCenter} ${chartCenter - r}`,
+        "Z",
+      ].join(" ");
+    const pathData = isFullCircle
+      ? innerRadius
+        ? `${circlePath(chartRadius, 1)} ${circlePath(innerRadius, 0)}`
+        : circlePath(chartRadius, 1)
+      : innerRadius
       ? [
           `M ${chartCenter + innerRadius * Math.cos(startAngle)} ${chartCenter + innerRadius * Math.sin(startAngle)}`,
           `L ${startX} ${startY}`,
