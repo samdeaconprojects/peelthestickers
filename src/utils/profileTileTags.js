@@ -12,7 +12,11 @@ export const TILE_TAG_NONE = "__none";
 const ALG_KEY = "__Alg";
 const ALG_FIELDS = ["Alg_PLL", "Alg_OLL", "Alg_CMLL", "Alg_CLL"];
 const ALG_LABEL = { Alg_OLL: "OLL", Alg_PLL: "PLL", Alg_CMLL: "CMLL", Alg_CLL: "CLL" };
-const FLAG_LABEL = { Parity_OLL: "OLL Parity", Parity_PLL: "PLL Parity" };
+const FLAG_LABEL = {
+  Parity_OLL: "OLL Parity",
+  Parity_PLL: "PLL Parity",
+  Parity_Edge: "Edge Parity",
+};
 const CUSTOM_FIELDS = ["Custom1", "Custom2", "Custom3", "Custom4", "Custom5"];
 
 export const TILE_TAG_DEFAULT_ORDER = [
@@ -22,6 +26,7 @@ export const TILE_TAG_DEFAULT_ORDER = [
   "Method",
   "Parity_OLL",
   "Parity_PLL",
+  "Parity_Edge",
   ...CUSTOM_FIELDS,
 ];
 

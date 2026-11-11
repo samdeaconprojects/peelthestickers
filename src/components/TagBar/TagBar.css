@@ -528,6 +528,21 @@
   opacity: 0.58;
 }
 
+/* With no tags set, the add button is the only thing in the strip: keep it
+   visible and labeled instead of a hover-only circle. */
+.tagHomeAddButton.tagHomeAddButton--labeled {
+  width: auto;
+  padding: 0 12px;
+  gap: 6px;
+  opacity: 0.58;
+}
+
+.tagHomeAddButtonText {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .tagHomeAddButton:hover {
   opacity: 1;
   transform: translateY(-1px);

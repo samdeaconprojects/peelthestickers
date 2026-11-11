@@ -6,6 +6,7 @@ import {
   getEventScopedAlgorithmFields,
   getAlgorithmTagDisplayValue,
   getTagChipStyle,
+  isParityTagField,
   getSharedTagFieldMeta,
   getVisibleSharedTagFields,
   makeEmptyTagSelection,
@@ -17,6 +18,11 @@ import {
 
 const ALG_TAG_FIELDS = new Set(["Alg_OLL", "Alg_PLL", "Alg_CMLL", "Alg_CLL"]);
 const ALG_TAG_FIELD_ORDER = ["Alg_PLL", "Alg_OLL", "Alg_CMLL", "Alg_CLL"];
+// Fields whose stored value is shown through getAlgorithmTagDisplayValue.
+function usesDisplayValue(field) {
+  const key = String(field || "").trim();
+  return ALG_TAG_FIELDS.has(key) || isParityTagField(key);
+}
 
 function EditorField({
   field,
@@ -50,9 +56,7 @@ function EditorField({
     onSelectValue(next);
   };
   const displayValue =
-    ALG_TAG_FIELDS.has(String(field || "").trim()) && value
-      ? getAlgorithmTagDisplayValue(field, value)
-      : value;
+    usesDisplayValue(field) && value ? getAlgorithmTagDisplayValue(field, value) : value;
 
   return (
     <div className={`tagEditorField ${isActive ? "is-active" : ""}`}>
@@ -92,7 +96,7 @@ function EditorField({
                 </span>
                 <span className="tagHomeChipText">
                   <span className="tagHomeChipValue">
-                    {ALG_TAG_FIELDS.has(String(field || "").trim())
+                    {usesDisplayValue(field)
                       ? getAlgorithmTagDisplayValue(field, option)
                       : option}
                   </span>
@@ -333,10 +337,8 @@ export default function TagBar({
         : false;
     if (hasExplicitVisibility) return summaryVisibility[field] === true;
 
-    if (field === "CubeModel" || field === "CrossColor" || field === "Method") return true;
-    const value = String(safeTags[item.field] || "").trim();
-    if (field.startsWith("Alg_")) return !!value;
-    return !!value;
+    // Only tags that are actually set; empty fields live behind the add button.
+    return !!String(safeTags[item.field] || "").trim();
   });
   const activeAlgorithmSummary = useMemo(() => {
     const parts = methodScopedFieldMeta
@@ -505,7 +507,7 @@ export default function TagBar({
               const displayValue =
                 isAlgorithmSummary
                   ? value
-                  : ALG_TAG_FIELDS.has(String(item.field || "").trim()) && value
+                  : usesDisplayValue(item.field) && value
                   ? getAlgorithmTagDisplayValue(item.field, value)
                   : value;
               return (
@@ -538,7 +540,9 @@ export default function TagBar({
               <div className="tagHomeItem tagHomeItem--add is-automatic">
                 <button
                   type="button"
-                  className="tagHomeAddButton"
+                  className={`tagHomeAddButton ${
+                    homeSummaryItems.length === 0 ? "tagHomeAddButton--labeled" : ""
+                  }`}
                   onClick={() => {
                     const nextField = displayFieldMeta.find(
                       (item) =>
@@ -552,6 +556,9 @@ export default function TagBar({
                   <span className="tagHomeAddButtonPlus" aria-hidden="true">
                     +
                   </span>
+                  {homeSummaryItems.length === 0 && (
+                    <span className="tagHomeAddButtonText">Add Tag</span>
+                  )}
                 </button>
               </div>
             )}

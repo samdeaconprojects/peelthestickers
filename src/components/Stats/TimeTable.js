@@ -329,7 +329,7 @@ const TimeTable = ({
       } else if (explicit === false) {
         return null;
       }
-      const display = field.startsWith("Alg_")
+      const display = field.startsWith("Alg_") || field.startsWith("Parity_")
         ? getAlgorithmTagDisplayValue(field, value) || value
         : value;
       return { field, value, display };

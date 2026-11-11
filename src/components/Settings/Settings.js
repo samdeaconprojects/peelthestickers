@@ -128,6 +128,10 @@ const DEFAULT_TAG_CONFIG = {
       label: "PLL Parity",
       options: ["Yes"],
     },
+    Parity_Edge: {
+      label: "Edge Parity",
+      options: ["Yes"],
+    },
     Alg_OLL: {
       label: "OLL",
       options: ["Skip", ...Array.from({ length: 57 }, (_, index) => `OLL #${index + 1}`)],
@@ -198,6 +202,7 @@ const TAG_KEY_OPTIONS = [
   { value: "Method", label: "Method" },
   { value: "Parity_OLL", label: "OLL Parity" },
   { value: "Parity_PLL", label: "PLL Parity" },
+  { value: "Parity_Edge", label: "Edge Parity" },
   { value: "Alg_OLL", label: "OLL" },
   { value: "Alg_PLL", label: "PLL" },
   { value: "Alg_CMLL", label: "CMLL" },
@@ -461,6 +466,24 @@ function normalizeTagConfig(input) {
         options: Array.isArray(fixed?.Method?.options)
           ? fixed.Method.options
           : DEFAULT_TAG_CONFIG.Fixed.Method.options,
+      },
+      Parity_OLL: {
+        label: fixed?.Parity_OLL?.label || "OLL Parity",
+        options: Array.isArray(fixed?.Parity_OLL?.options)
+          ? fixed.Parity_OLL.options
+          : DEFAULT_TAG_CONFIG.Fixed.Parity_OLL.options,
+      },
+      Parity_PLL: {
+        label: fixed?.Parity_PLL?.label || "PLL Parity",
+        options: Array.isArray(fixed?.Parity_PLL?.options)
+          ? fixed.Parity_PLL.options
+          : DEFAULT_TAG_CONFIG.Fixed.Parity_PLL.options,
+      },
+      Parity_Edge: {
+        label: fixed?.Parity_Edge?.label || "Edge Parity",
+        options: Array.isArray(fixed?.Parity_Edge?.options)
+          ? fixed.Parity_Edge.options
+          : DEFAULT_TAG_CONFIG.Fixed.Parity_Edge.options,
       },
       Alg_OLL: {
         label: fixed?.Alg_OLL?.label || "OLL",
@@ -2224,6 +2247,17 @@ function Settings({
                 Navigation uses <strong>{primaryModifierLabel}</strong>. Solve edits use
                 <strong> Ctrl+Shift</strong>. Scramble navigation defaults to
                 <strong> Option+Left/Right</strong>.
+              </div>
+            </div>
+            <div className="setting-item">
+              <label>Quick Tags (last solve)</label>
+              <div>
+                Hold <strong>,</strong> then press: a PLL letter (<strong>T</strong>,
+                <strong> J</strong>+<strong>A</strong>, …), an OLL number
+                (<strong>0</strong> = skip), <strong>O</strong> for OLL parity,
+                <strong> P</strong> for PLL parity, or <strong>X</strong> for edge parity.
+                Works on 3x3 through 7x7; parity keys toggle and only apply to big cubes
+                (edge parity on 5x5–7x7).
               </div>
             </div>
 

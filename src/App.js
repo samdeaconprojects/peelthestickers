@@ -123,6 +123,7 @@ import {
   collectTagSelectionOptions,
   DEFAULT_TAG_CONFIG,
   getCubeModelOptionsForEvent as getConfiguredCubeModelOptionsForEvent,
+  getEventScopedAlgorithmFields,
   getTagCatalogOptionsForEvent,
   getTagColorMapForEvent,
   getTagScopeEventKey,
@@ -354,6 +355,19 @@ const POST_SOLVE_PLL_DIRECT_BINDINGS = {
   Y: "Y Perm",
   Z: "Z Perm",
 };
+// Hold "," then one of these to toggle a big-cube parity tag on the last solve.
+const POST_SOLVE_PARITY_BINDINGS = {
+  O: "Parity_OLL",
+  P: "Parity_PLL",
+  X: "Parity_Edge",
+};
+const POST_SOLVE_PARITY_LABELS = {
+  Parity_OLL: "OLL Parity",
+  Parity_PLL: "PLL Parity",
+  Parity_Edge: "Edge Parity",
+};
+// Events where the quick tag keys apply. Big cubes reach OLL/PLL via reduction.
+const POST_SOLVE_TAG_EVENTS = new Set(["333", "444", "555", "666", "777"]);
 const POST_SOLVE_PLL_CHORD_BINDINGS = {
   A: {
     A: "Aa Perm",
@@ -419,6 +433,11 @@ function getPlainDigitKey(event) {
 }
 
 function formatPostSolveTagToastLabel(updates = {}) {
+  for (const [field, label] of Object.entries(POST_SOLVE_PARITY_LABELS)) {
+    if (!Object.prototype.hasOwnProperty.call(updates, field)) continue;
+    return updates[field] ? `Tagged: ${label}` : `Cleared: ${label}`;
+  }
+
   const pll = String(updates?.Alg_PLL || "").trim();
   if (pll) {
     if (/^skip$/i.test(pll)) return "Tagged: PLL Skip";
@@ -486,18 +505,16 @@ function tokenProgressToStepProgress(scramble, tokenProgress) {
 function getCubeCollectionOptionsForEvent(cubeCollection, eventCode) {
   const ev = String(eventCode || "").trim().toUpperCase();
   const scopedEvents = new Set([ev, getTagScopeEventKey(ev)].filter(Boolean));
-  const globalOptions = new Set();
   const scopedOptions = new Set();
 
   for (const rawEntry of Array.isArray(cubeCollection) ? cubeCollection : []) {
     const entry = String(rawEntry || "").trim();
     if (!entry) continue;
 
+    // Unscoped legacy entries can't be tied to an event, so they're left out —
+    // the cube picker only lists hardware for the current puzzle.
     const match = entry.match(/^([A-Za-z0-9]+)\s*:\s*(.+)$/);
-    if (!match) {
-      globalOptions.add(entry);
-      continue;
-    }
+    if (!match) continue;
 
     const [, rawScope, rawValue] = match;
     const scope = String(rawScope || "").trim().toUpperCase();
@@ -507,7 +524,7 @@ function getCubeCollectionOptionsForEvent(cubeCollection, eventCode) {
     if (scopedEvents.has(scope)) scopedOptions.add(value);
   }
 
-  return Array.from(new Set([...scopedOptions, ...globalOptions])).sort((a, b) =>
+  return Array.from(scopedOptions).sort((a, b) =>
     a.localeCompare(b)
   );
 }
@@ -6255,7 +6272,15 @@ function App() {
         !timerSurfaceActive ||
         (sharedSession && !isHostedSharedSession(sharedSession)) ||
         isRelayActive ||
-        tagScopeEventKey !== "333"
+        !POST_SOLVE_TAG_EVENTS.has(tagScopeEventKey)
+      ) {
+        return false;
+      }
+
+      const parityField = String(updates?.toggleParity || "").trim();
+      if (
+        parityField &&
+        !getEventScopedAlgorithmFields(tagScopeEventKey).includes(parityField)
       ) {
         return false;
       }
@@ -6268,8 +6293,16 @@ function App() {
           : null) || visibleSolves[visibleSolves.length - 1];
       if (!latestSolve?.solveRef) return false;
 
+      const currentParityValue = parityField
+        ? String(latestSolve?.tags?.[parityField] || "").trim()
+        : "";
+
       const normalizedUpdates = {
-        ...(updates?.Method ? { Method: String(updates.Method || "").trim() } : {}),
+        // Method is only implied on 3x3 (OLL/PLL => CFOP); big cubes keep theirs.
+        ...(updates?.Method && tagScopeEventKey === "333"
+          ? { Method: String(updates.Method || "").trim() }
+          : {}),
+        ...(parityField ? { [parityField]: currentParityValue ? "" : "Yes" } : {}),
         ...(updates?.Alg_PLL
           ? { Alg_PLL: normalizeAlgorithmTagValue("Alg_PLL", updates.Alg_PLL) }
           : {}),
@@ -6591,6 +6624,14 @@ function App() {
             });
             return;
           }
+        }
+
+        const parityField = POST_SOLVE_PARITY_BINDINGS[plainLetterKey];
+        if (parityField) {
+          clearPendingPostSolveTagChord();
+          consumePostSolveTagEvent(event);
+          applyPostSolveTagBinding({ toggleParity: parityField });
+          return;
         }
 
         const directValue = POST_SOLVE_PLL_DIRECT_BINDINGS[plainLetterKey];

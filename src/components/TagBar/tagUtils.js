@@ -47,6 +47,10 @@ export const DEFAULT_TAG_CONFIG = {
       label: "PLL Parity",
       options: ["Yes"],
     },
+    Parity_Edge: {
+      label: "Edge Parity",
+      options: ["Yes"],
+    },
     Alg_OLL: {
       label: "OLL",
       options: OLL_CASE_OPTIONS,
@@ -87,6 +91,7 @@ export const SHARED_TAG_FIELDS = [
   "Method",
   "Parity_OLL",
   "Parity_PLL",
+  "Parity_Edge",
   "Alg_PLL",
   "Alg_OLL",
   "Alg_CMLL",
@@ -106,11 +111,26 @@ function normalizeCrossColorLabel(label) {
   return value;
 }
 
+const BIG_CUBE_EVENTS = ["444", "555", "666", "777"];
+const ODD_BIG_CUBE_EVENTS = ["555", "666", "777"];
+
+// `methods` gates a field on the selected Method. `methodsByEvent` overrides that
+// per event — big cubes reach OLL/PLL through Redux, Yau, Hoya, etc., so the alg
+// fields stay available there regardless of method.
 const METHOD_SCOPED_TAG_RULES = {
-  Parity_OLL: { methods: [], eventScopes: ["444", "555", "666", "777"] },
-  Parity_PLL: { methods: [], eventScopes: ["444", "555", "666", "777"] },
-  Alg_PLL: { methods: ["CFOP"], eventScopes: ["333"] },
-  Alg_OLL: { methods: ["CFOP"], eventScopes: ["333"] },
+  Parity_OLL: { methods: [], eventScopes: BIG_CUBE_EVENTS },
+  Parity_PLL: { methods: [], eventScopes: BIG_CUBE_EVENTS },
+  Parity_Edge: { methods: [], eventScopes: ODD_BIG_CUBE_EVENTS },
+  Alg_PLL: {
+    methods: ["CFOP"],
+    eventScopes: ["333", ...BIG_CUBE_EVENTS],
+    methodsByEvent: Object.fromEntries(BIG_CUBE_EVENTS.map((ev) => [ev, []])),
+  },
+  Alg_OLL: {
+    methods: ["CFOP"],
+    eventScopes: ["333", ...BIG_CUBE_EVENTS],
+    methodsByEvent: Object.fromEntries(BIG_CUBE_EVENTS.map((ev) => [ev, []])),
+  },
   Alg_CMLL: { methods: ["Roux"], eventScopes: ["333"] },
   Alg_CLL: { methods: [], eventScopes: ["222"] },
 };
@@ -184,8 +204,24 @@ export function normalizeAlgorithmTagValue(field, value) {
   return raw;
 }
 
+// Parity tags are on/off flags stored as "Yes"; show the tag's name instead.
+export const PARITY_TAG_LABELS = {
+  Parity_OLL: "OLL Parity",
+  Parity_PLL: "PLL Parity",
+  Parity_Edge: "Edge Parity",
+};
+
+export function isParityTagField(field) {
+  return Object.prototype.hasOwnProperty.call(PARITY_TAG_LABELS, String(field || "").trim());
+}
+
 export function getAlgorithmTagDisplayValue(field, value) {
   const key = String(field || "").trim();
+  if (isParityTagField(key)) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    return /^yes$/i.test(raw) ? PARITY_TAG_LABELS[key] : raw;
+  }
   const canonical = normalizeAlgorithmTagValue(key, value);
   if (!canonical) return "";
 
@@ -254,7 +290,10 @@ export function getTagCatalogOptionsForEvent(tagCatalog, eventKey) {
       field,
       Array.from(
         new Set([
-          ...(Array.isArray(safe.Global?.[field]) ? safe.Global[field] : []),
+          // Cube models are hardware for one puzzle — never leak them across events.
+          ...(field !== "CubeModel" && Array.isArray(safe.Global?.[field])
+            ? safe.Global[field]
+            : []),
           ...scopedKeys.flatMap((key) =>
             Array.isArray(safe.ByEvent?.[key]?.[field]) ? safe.ByEvent[key][field] : []
           ),
@@ -263,6 +302,12 @@ export function getTagCatalogOptionsForEvent(tagCatalog, eventKey) {
     ])
   );
 }
+
+// Events that have their own cube-model group in Settings.
+const CUBE_MODEL_GROUP_EVENTS = new Set([
+  "222", "333", "444", "555", "666", "777",
+  "CLOCK", "MEGAMINX", "PYRAMINX", "SKEWB", "SQ1", "FMC",
+]);
 
 export function getCubeModelOptionsForEvent(tagConfig, eventKey) {
   const cfg = normalizeTagConfig(tagConfig);
@@ -273,25 +318,29 @@ export function getCubeModelOptionsForEvent(tagConfig, eventKey) {
       ? cfg.Fixed.CubeModel.optionsByEvent
       : null;
 
-  if (!byEvent) {
+  const hasGroupedModels =
+    !!byEvent &&
+    Object.values(byEvent).some((values) => Array.isArray(values) && values.length > 0);
+
+  // Legacy configs that never grouped cubes by event: nothing to scope by.
+  if (!hasGroupedModels) {
     return Array.isArray(cfg?.Fixed?.CubeModel?.options)
       ? cfg.Fixed.CubeModel.options
       : [];
   }
 
-  const scopedOptions = Array.from(
+  // Only this event's cubes. The "Other / Shared" bucket applies only to events
+  // that have no dedicated cube group (FMC, unofficial puzzles, ...).
+  const scopeEvent = getTagScopeEventKey(eventKey);
+  const lookupKeys = CUBE_MODEL_GROUP_EVENTS.has(scopeEvent)
+    ? scopedKeys
+    : [...scopedKeys, "OTHER"];
+
+  return Array.from(
     new Set(
-      scopedKeys.flatMap((key) =>
-        Array.isArray(byEvent?.[key]) ? byEvent[key] : []
-      )
+      lookupKeys.flatMap((key) => (Array.isArray(byEvent?.[key]) ? byEvent[key] : []))
     )
   ).sort((a, b) => a.localeCompare(b));
-
-  if (scopedOptions.length > 0) return scopedOptions;
-
-  return Array.isArray(cfg?.Fixed?.CubeModel?.options)
-    ? cfg.Fixed.CubeModel.options
-    : [];
 }
 
 export function addTagCatalogValue(tagCatalog, eventKey, field, value) {
@@ -451,6 +500,12 @@ export function normalizeTagConfig(input) {
           ? fixed.Parity_PLL.options
           : DEFAULT_TAG_CONFIG.Fixed.Parity_PLL.options,
       },
+      Parity_Edge: {
+        label: fixed?.Parity_Edge?.label || "Edge Parity",
+        options: Array.isArray(fixed?.Parity_Edge?.options)
+          ? fixed.Parity_Edge.options
+          : DEFAULT_TAG_CONFIG.Fixed.Parity_Edge.options,
+      },
       Alg_OLL: {
         label: fixed?.Alg_OLL?.label || "OLL",
         options: Array.isArray(fixed?.Alg_OLL?.options)
@@ -506,6 +561,7 @@ export function makeEmptyTagSelection() {
     Method: "",
     Parity_OLL: "",
     Parity_PLL: "",
+    Parity_Edge: "",
     Alg_OLL: "",
     Alg_PLL: "",
     Alg_CMLL: "",
@@ -569,6 +625,7 @@ export function getSharedTagLabels(tagConfig) {
     Method: cfg.Fixed.Method.label || "Method",
     Parity_OLL: cfg.Fixed.Parity_OLL.label || "OLL Parity",
     Parity_PLL: cfg.Fixed.Parity_PLL.label || "PLL Parity",
+    Parity_Edge: cfg.Fixed.Parity_Edge.label || "Edge Parity",
     Alg_OLL: cfg.Fixed.Alg_OLL.label || "OLL",
     Alg_PLL: cfg.Fixed.Alg_PLL.label || "PLL",
     Alg_CMLL: cfg.Fixed.Alg_CMLL.label || "CMLL",
@@ -611,6 +668,11 @@ export function getSharedTagFieldMeta(tagConfig) {
       field: "Parity_PLL",
       label: cfg.Fixed.Parity_PLL.label || "PLL Parity",
       options: cfg.Fixed.Parity_PLL.options || [],
+    },
+    {
+      field: "Parity_Edge",
+      label: cfg.Fixed.Parity_Edge.label || "Edge Parity",
+      options: cfg.Fixed.Parity_Edge.options || [],
     },
     {
       field: "Alg_PLL",
@@ -658,10 +720,12 @@ export function isMethodScopedTagFieldVisible(field, selection = {}, eventKey = 
   const method = String(selection?.Method || "").trim();
   const scopeEvent = getTagScopeEventKey(eventKey);
 
+  const methods =
+    rule.methodsByEvent && Array.isArray(rule.methodsByEvent[scopeEvent])
+      ? rule.methodsByEvent[scopeEvent]
+      : rule.methods;
   const methodMatches =
-    !Array.isArray(rule.methods) || rule.methods.length === 0
-      ? true
-      : rule.methods.includes(method);
+    !Array.isArray(methods) || methods.length === 0 ? true : methods.includes(method);
   const eventMatches =
     !Array.isArray(rule.eventScopes) || rule.eventScopes.length === 0
       ? true
@@ -742,6 +806,9 @@ export function collectTagSelectionOptions(solves, tagConfig, cubeModelOptions =
     ]),
     CrossColor: new Set(cfg.Fixed.CrossColor.options || []),
     Method: new Set(cfg.Fixed.Method.options || []),
+    Parity_OLL: new Set(cfg.Fixed.Parity_OLL.options || []),
+    Parity_PLL: new Set(cfg.Fixed.Parity_PLL.options || []),
+    Parity_Edge: new Set(cfg.Fixed.Parity_Edge.options || []),
     Alg_OLL: new Set(cfg.Fixed.Alg_OLL.options || []),
     Alg_PLL: new Set(cfg.Fixed.Alg_PLL.options || []),
     Alg_CMLL: new Set(cfg.Fixed.Alg_CMLL.options || []),

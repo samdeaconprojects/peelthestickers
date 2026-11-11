@@ -2043,6 +2043,9 @@ function sanitizeTags(input = {}) {
     Alg_PLL: normalizeAlgorithmTagValue("Alg_PLL", input?.Alg_PLL || input?.PLL),
     Alg_CMLL: normalizeAlgorithmTagValue("Alg_CMLL", input?.Alg_CMLL || input?.CMLL),
     Alg_CLL: normalizeAlgorithmTagValue("Alg_CLL", input?.Alg_CLL || input?.CLL),
+    Parity_OLL: cleanTagValue(input?.Parity_OLL),
+    Parity_PLL: cleanTagValue(input?.Parity_PLL),
+    Parity_Edge: cleanTagValue(input?.Parity_Edge),
     TimerInput: cleanTagValue(input?.TimerInput || input?.InputType),
     SolveSource: derivedSolveSource,
     Custom1: cleanTagValue(input?.Custom1),
@@ -2134,6 +2137,9 @@ function buildSolveItem({
     Tag_Alg_PLL: canonicalTags.Alg_PLL,
     Tag_Alg_CMLL: canonicalTags.Alg_CMLL,
     Tag_Alg_CLL: canonicalTags.Alg_CLL,
+    Tag_Parity_OLL: canonicalTags.Parity_OLL,
+    Tag_Parity_PLL: canonicalTags.Parity_PLL,
+    Tag_Parity_Edge: canonicalTags.Parity_Edge,
     Tag_TimerInput: canonicalTags.TimerInput,
     Tag_SolveSource: canonicalTags.SolveSource,
     Tag_Custom1: canonicalTags.Custom1,
@@ -2156,6 +2162,9 @@ function buildSolveItem({
       Alg_PLL: canonicalTags.Alg_PLL,
       Alg_CMLL: canonicalTags.Alg_CMLL,
       Alg_CLL: canonicalTags.Alg_CLL,
+      Parity_OLL: canonicalTags.Parity_OLL,
+      Parity_PLL: canonicalTags.Parity_PLL,
+      Parity_Edge: canonicalTags.Parity_Edge,
       TimerInput: canonicalTags.TimerInput,
       SolveSource: canonicalTags.SolveSource,
       Custom1: canonicalTags.Custom1,
@@ -2233,6 +2242,9 @@ function getSolveTagPairsFromItem(solveItem) {
   add("Alg_PLL", firstNonEmpty(solveItem?.Tag_Alg_PLL, nestedTags?.Alg_PLL, nestedTags?.PLL));
   add("Alg_CMLL", firstNonEmpty(solveItem?.Tag_Alg_CMLL, nestedTags?.Alg_CMLL, nestedTags?.CMLL));
   add("Alg_CLL", firstNonEmpty(solveItem?.Tag_Alg_CLL, nestedTags?.Alg_CLL, nestedTags?.CLL));
+  add("Parity_OLL", firstNonEmpty(solveItem?.Tag_Parity_OLL, nestedTags?.Parity_OLL));
+  add("Parity_PLL", firstNonEmpty(solveItem?.Tag_Parity_PLL, nestedTags?.Parity_PLL));
+  add("Parity_Edge", firstNonEmpty(solveItem?.Tag_Parity_Edge, nestedTags?.Parity_Edge));
   add(
     "TimerInput",
     firstNonEmpty(

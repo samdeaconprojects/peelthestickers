@@ -213,6 +213,9 @@ function Detail({
       "Alg_PLL" in tagStateValue ||
       "Alg_CMLL" in tagStateValue ||
       "Alg_CLL" in tagStateValue ||
+      "Parity_OLL" in tagStateValue ||
+      "Parity_PLL" in tagStateValue ||
+      "Parity_Edge" in tagStateValue ||
       "SolveSource" in tagStateValue ||
       "TimerInput" in tagStateValue ||
       "Custom1" in tagStateValue ||
@@ -246,6 +249,9 @@ function Detail({
       Alg_PLL: t?.Alg_PLL ? String(t.Alg_PLL) : "",
       Alg_CMLL: t?.Alg_CMLL ? String(t.Alg_CMLL) : "",
       Alg_CLL: t?.Alg_CLL ? String(t.Alg_CLL) : "",
+      Parity_OLL: t?.Parity_OLL ? String(t.Parity_OLL) : "",
+      Parity_PLL: t?.Parity_PLL ? String(t.Parity_PLL) : "",
+      Parity_Edge: t?.Parity_Edge ? String(t.Parity_Edge) : "",
       SolveSource: t?.SolveSource ? String(t.SolveSource) : "",
       TimerInput: t?.TimerInput ? String(t.TimerInput) : "",
       Custom1: t?.Custom1 ? String(t.Custom1) : "",
@@ -456,6 +462,10 @@ function Detail({
     if (algPll) payload.Alg_PLL = algPll;
     if (algCmll) payload.Alg_CMLL = algCmll;
     if (algCll) payload.Alg_CLL = algCll;
+    for (const field of ["Parity_OLL", "Parity_PLL", "Parity_Edge"]) {
+      const value = String(tState?.[field] || "").trim();
+      if (value) payload[field] = value;
+    }
     if (solveSource) payload.SolveSource = solveSource;
     if (timerInput) payload.TimerInput = timerInput;
     if (String(tState?.Custom1 || "").trim()) payload.Custom1 = String(tState.Custom1).trim();

@@ -103,7 +103,7 @@ function formatBucketExtreme(bucket, value) {
 
 function formatBucketLabel(field, value) {
   if (!value) return "Unknown";
-  if (String(field || "").startsWith("Alg_")) {
+  if (/^(Alg_|Parity_)/.test(String(field || ""))) {
     return getAlgorithmTagDisplayValue(field, value) || value;
   }
   return value;
