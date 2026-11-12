@@ -1,6 +1,7 @@
 import { randomScrambleForEvent } from "cubing/scramble";
 import { generateScramble as legacyGenerateScramble } from "../components/scrambleUtils";
 import { getCubingEventId, normalizePTSEventKey } from "./scrambleEventMap";
+import { generateWcaScramble, hasWcaScrambler } from "./wcaScramblers";
 
 const DEFAULT_TARGET_SIZE = 10;
 const DEFAULT_LOW_WATER = 5;
@@ -107,6 +108,12 @@ export function clearScrambleQueue(event = null, modeOverride = null) {
 }
 
 async function generateCubingScramble(event) {
+  // 2x2, Skewb and Pyraminx use our TNoodle-equivalent scrambler (minimum
+  // distance + fixed 11 moves), which cubing.js does not fully match.
+  if (hasWcaScrambler(normalizePTSEventKey(event))) {
+    return generateWcaScramble(normalizePTSEventKey(event));
+  }
+
   const cubingEventId = getCubingEventId(event);
 
   if (!cubingEventId) {
