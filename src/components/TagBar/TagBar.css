@@ -200,6 +200,7 @@
   --tag-home-toggle-width: 28px;
   --tag-home-toggle-gap: 6px;
   --tag-home-toggle-top: 52px;
+  --tag-home-toggle-height: 92px;
   --tag-home-max-width: min(200px, 28vw);
   position: relative;
   z-index: 220;
@@ -257,7 +258,7 @@
   top: var(--tag-home-toggle-top);
   right: -6px;
   width: var(--tag-home-toggle-width);
-  min-height: 92px;
+  min-height: var(--tag-home-toggle-height);
   border: none;
   border-radius: 999px;
   background: transparent;
@@ -528,19 +529,43 @@
   opacity: 0.58;
 }
 
-/* With no tags set, the add button is the only thing in the strip: keep it
-   visible and labeled instead of a hover-only circle. */
-.tagHomeAddButton.tagHomeAddButton--labeled {
-  width: auto;
-  padding: 0 12px;
-  gap: 6px;
+/* With no tags set, "Add Tag" renders as a real chip (.tagHomeChip--empty)
+   so it matches a tag's size and border, just dimmer. */
+.tagHomeItem--add .tagHomeChip.tagHomeChip--empty {
+  opacity: 0.42;
+}
+
+.tagHomeItem--add .tagHomeChip.tagHomeChip--empty:hover {
+  opacity: 0.85;
+}
+
+.tagHomeChipAddPlus {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* Round "+" sits in the collapse arrow's column (see homeToggleLayout). */
+.tagHomeItem--addBeside {
+  position: absolute;
+  top: calc(var(--tag-home-add-center) - 14px);
+  left: calc(100% + var(--tag-home-toggle-width) + var(--tag-home-toggle-gap) - 22px);
+  width: 28px;
+  min-width: 0;
+  z-index: 1;
+}
+
+.tagHomeItem--addBeside .tagHomeAddButton {
+  align-self: center;
+}
+
+.tagHomeWrap:hover .tagHomeItem--addBeside .tagHomeAddButton {
   opacity: 0.58;
 }
 
-.tagHomeAddButtonText {
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
+.tagHomeWrap .tagHomeItem--addBeside .tagHomeAddButton:hover {
+  opacity: 1;
 }
 
 .tagHomeAddButton:hover {
@@ -597,13 +622,14 @@
   .tagHomeWrap--collapsible {
     --tag-home-toggle-width: 24px;
     --tag-home-toggle-top: 40px;
+    --tag-home-toggle-height: 72px;
   }
 
   .tagHomeCollapseToggle {
     top: var(--tag-home-toggle-top);
     right: -4px;
     width: 24px;
-    min-height: 72px;
+    min-height: var(--tag-home-toggle-height);
   }
 
   .tagHomeWrap.is-collapsed {

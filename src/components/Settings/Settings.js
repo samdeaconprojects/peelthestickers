@@ -618,7 +618,6 @@ function Settings({
   onStatsImport,
   onStatsExport,
   onSessionsRefresh,
-  onOpenTutorial,
   accountEmail = null,
   onAccountEmailChanged,
   initialSection = "",
@@ -2348,7 +2347,7 @@ function Settings({
           <h2>Profile Settings</h2>
           <div className="settings-container">
             <div className="setting-item">
-              <label>Name:</label>
+              <label>Username:</label>
               <input
                 value={profileData.Name}
                 onChange={(e) => handleProfileChange("Name", e.target.value)}
@@ -2412,18 +2411,6 @@ function Settings({
               />
             </div>
 
-            <div className="setting-item settingsActionsRow">
-              <label>Tutorial:</label>
-              <div className="settingsActionGroup">
-                <button
-                  type="button"
-                  className="settingsActionButton settingsActionButtonSecondary"
-                  onClick={onOpenTutorial}
-                >
-                  Open Tutorial
-                </button>
-              </div>
-            </div>
           </div>
         </section>
 

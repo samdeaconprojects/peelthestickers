@@ -36,7 +36,6 @@ import EmailBanner from "./components/Account/EmailBanner";
 import { VerifyEmailPage, ResetPasswordPage } from "./components/Account/EmailActionPages";
 import {
   ProfileSetupModal,
-  TutorialModal,
 } from "./components/Onboarding/OnboardingModal";
 import NameTag from "./components/Profile/NameTag";
 import Detail from "./components/Detail/Detail";
@@ -1716,7 +1715,7 @@ function App() {
   const [sessions, setSessions] = useState(sessionsWithGuestSolves);
   const currentSessionLoadTokenRef = useRef(0);
   const deletedSolveRefsRef = useRef(new Set());
-  // Penalties/deletes made on a solve whose create request is still in flight
+  // Penalties/deletes/tag edits made on a solve whose create request is still in flight
   // (solveRef PENDING#...). The server doesn't know that ref yet, so the edit is
   // held here and replayed against the saved solve once the create resolves.
   const pendingSolveEditsRef = useRef(new Map());
@@ -1739,6 +1738,13 @@ function App() {
     if (!isLegalPage) setLegalPlayerBarOpen(false);
   }, [isLegalPage]);
   const playerBarVisible = isLegalPage ? legalPlayerBarOpen : showPlayerBar;
+  // Pages that only show a sign-in screen when signed out (shared stats is
+  // handled where isViewingSharedStats is known).
+  const isSignedInOnlyPage =
+    location.pathname === "/social" ||
+    location.pathname === "/profile" ||
+    location.pathname.startsWith("/profile/") ||
+    location.pathname.startsWith("/competition/");
   const setPlayerBarVisible = isLegalPage ? setLegalPlayerBarOpen : setShowPlayerBar;
   const [navPrefs, setNavPrefs] = useState(DEFAULT_NAV_PREFS);
   const [showDetail, setShowDetail] = useState(false);
@@ -1780,7 +1786,6 @@ function App() {
   const [showSignInPopup, setShowSignInPopup] = useState(false);
   const [showSettingsPopup, setShowSettingsPopup] = useState(false);
   const [showPostSignUpProfileSetup, setShowPostSignUpProfileSetup] = useState(false);
-  const [showTutorialModal, setShowTutorialModal] = useState(false);
   const [showManualSolveModal, setShowManualSolveModal] = useState(false);
   const [showOfflineSolvesModal, setShowOfflineSolvesModal] = useState(false);
   const [guestSolvesToReview, setGuestSolvesToReview] = useState(false);
@@ -1861,13 +1866,13 @@ function App() {
   }, []);
 
   // Open the review popup once nothing else is in the way (a new account sees
-  // profile setup and the tutorial first).
+  // profile setup first).
   useEffect(() => {
     if (!guestSolvesToReview || !isSignedIn) return;
-    if (showPostSignUpProfileSetup || showTutorialModal) return;
+    if (showPostSignUpProfileSetup) return;
     setGuestSolvesToReview(false);
     setShowOfflineSolvesModal(true);
-  }, [guestSolvesToReview, isSignedIn, showPostSignUpProfileSetup, showTutorialModal]);
+  }, [guestSolvesToReview, isSignedIn, showPostSignUpProfileSetup]);
   const [manualSolveTime, setManualSolveTime] = useState("");
   const [manualSolveScramble, setManualSolveScramble] = useState("");
   const [manualSolveError, setManualSolveError] = useState("");
@@ -1979,6 +1984,8 @@ function App() {
   }, [location.pathname, location.search]);
 
   const isViewingSharedStats = !!statsSharedUserID && statsSharedUserID !== String(user?.UserID || "").trim();
+  const hidePlayerBarSignedOut =
+    !isSignedIn && (isSignedInOnlyPage || isViewingSharedStats);
 
   const sharedReturnTargetRef = useRef(null);
   const sharedSessionRef = useRef(sharedSession);
@@ -2003,6 +2010,7 @@ function App() {
   const pendingPostSolveTagChordRef = useRef("");
   const pendingPostSolveOllDigitsRef = useRef("");
   const pendingPostSolveTagSavesRef = useRef(new Map());
+  const postSolveTagFlushChainRef = useRef(Promise.resolve());
   const currentSolvesRef = useRef([]);
   const latestCreatedSolveRef = useRef({ event: "", solveRef: "" });
   const lastSavedSettingsJsonRef = useRef("");
@@ -3961,7 +3969,11 @@ function App() {
     }
   };
 
-  const handleSignUp = async (username, password, { acceptTerms = false, email = "" } = {}) => {
+  const handleSignUp = async (
+    username,
+    password,
+    { acceptTerms = false, email = "", name = "" } = {}
+  ) => {
     try {
       let signup;
       try {
@@ -3977,7 +3989,7 @@ function App() {
       if (!signup?.profileExists) await runDb("Creating account", async () => {
         await createUser({
           userID: username,
-          name: username,
+          name: String(name || "").trim() || username,
           username: username,
           color: "#0E171D",
           profileEvent: "333",
@@ -4036,19 +4048,35 @@ function App() {
       setIsSignedIn(true);
       setShowSignInPopup(false);
       setShowPostSignUpProfileSetup(true);
-      setShowTutorialModal(false);
 
       const restoredNavPrefs = readNavPrefs(userID, profile?.Settings || {});
       setNavPrefs(restoredNavPrefs);
-      setCurrentEvent(restoredNavPrefs.lastEvent || "333");
-      setCurrentSession(
-        restoredNavPrefs.lastSessionByEvent?.[restoredNavPrefs.lastEvent || "333"] || "main"
-      );
+      const restoredEvent = restoredNavPrefs.lastEvent || "333";
+      setCurrentEvent(restoredEvent);
+      setCurrentSession(restoredNavPrefs.lastSessionByEvent?.[restoredEvent] || "main");
       setShowPlayerBar(
         typeof restoredNavPrefs.showPlayerBar === "boolean"
           ? restoredNavPrefs.showPlayerBar
           : true
       );
+
+      // Same post-auth load as sign-in: the new account's sessions, then a
+      // scramble on Home without needing "next solve".
+      const sessionItems = await getSessions(userID);
+      setSessionsList(sessionItems);
+      setCustomEvents([]);
+      const statsByEvent = {};
+      for (const event of DEFAULT_EVENTS) statsByEvent[event] = {};
+      for (const session of sessionItems) {
+        const ev = (session.Event || "").toUpperCase();
+        if (!statsByEvent[ev]) statsByEvent[ev] = {};
+        statsByEvent[ev][session.SessionID || "main"] = session.Stats || null;
+      }
+      setSessionStats(statsByEvent);
+
+      syncScrambleQueue(restoredEvent, 10).catch((err) => {
+        console.error(`Failed to warm scramble queue for ${restoredEvent}:`, err);
+      });
     } catch (error) {
       console.error("Error signing up:", error);
       alert("An error occurred during sign-up.");
@@ -4186,6 +4214,7 @@ function App() {
     if (!user?.UserID) return;
 
     const updates = {
+      Name: String(draft?.name || "").trim() || user.UserID,
       Color: String(draft?.color || "#0E171D").trim() || "#0E171D",
       ProfileEvent: String(draft?.profileEvent || "333").trim().toUpperCase() || "333",
       ProfileScramble: String(draft?.profileScramble || "").trim(),
@@ -4194,17 +4223,10 @@ function App() {
     const fresh = await runDb("Saving profile setup", () => updateUser(user.UserID, updates));
     setUser((prev) => ({ ...(prev || {}), ...fresh }));
     setShowPostSignUpProfileSetup(false);
-    setShowTutorialModal(true);
   };
 
   const handleClosePostSignUpProfileSetup = () => {
     setShowPostSignUpProfileSetup(false);
-    setShowTutorialModal(true);
-  };
-
-  const openTutorialFromSettings = () => {
-    setShowSettingsPopup(false);
-    setShowTutorialModal(true);
   };
 
   const addSolve = async (newTime, smartMeta = null, options = {}) => {
@@ -4297,15 +4319,21 @@ function App() {
       }
 
       const hasPenaltyEdit = !!edits && "penalty" in edits;
+      const tagUpdates =
+        edits?.tagUpdates && Object.keys(edits.tagUpdates).length ? edits.tagUpdates : null;
       const penaltyPatch = (solve) =>
         hasPenaltyEdit ? withPenaltyFields(solve, edits.penalty, solve?.rawTimeMs) : solve;
-      const savedWithEdits = savedSolve ? penaltyPatch(savedSolve) : savedSolve;
+      const tagPatch = (solve) =>
+        tagUpdates && solve ? { ...solve, tags: { ...(solve.tags || {}), ...tagUpdates } } : solve;
+      const savedWithEdits = savedSolve ? tagPatch(penaltyPatch(savedSolve)) : savedSolve;
 
       setSessions((prev) => ({
         ...prev,
         [ev]: mergeSolveIntoListByIdentity(
           (prev?.[ev] || []).map((solve) =>
-            solve?.solveRef === pendingRef ? penaltyPatch({ ...solve, ...pendingSolve }) : solve
+            solve?.solveRef === pendingRef
+              ? tagPatch(penaltyPatch({ ...solve, ...pendingSolve }))
+              : solve
           ),
           savedWithEdits,
           true
@@ -4316,6 +4344,10 @@ function App() {
         String(savedSolve?.penalty ?? "").trim().toUpperCase() || null;
       if (hasPenaltyEdit && savedRef && savedPenalty !== (edits.penalty || null)) {
         persistSolvePenalty(ev, savedRef, savedWithEdits.rawTimeMs, edits.penalty || null);
+      }
+      // Quick-tag keybinds pressed while the create was in flight.
+      if (tagUpdates && savedRef) {
+        schedulePostSolveTagSave(ev, savedRef, savedWithEdits.tags || {});
       }
     };
 
@@ -4371,7 +4403,7 @@ function App() {
           scramble: saveArgs.scramble ?? "",
           note: saveArgs.note ?? "",
           createdAt: saveArgs.createdAt,
-          tags: saveArgs.tags ?? {},
+          tags: { ...(saveArgs.tags ?? {}), ...(edits?.tagUpdates || {}) },
         });
         localId = queued?.localId || null;
       } catch (queueErr) {
@@ -5851,6 +5883,11 @@ function App() {
     setRelayLegTimes([]);
     setRelayScrambles([]);
     setRelayLegs([]);
+    // The queue was just cleared; if the event was already 333 the
+    // currentEvent-driven sync effect won't re-run, so refill it here.
+    syncScrambleQueue("333", 10).catch((err) => {
+      console.error("Failed to sync scramble queue after sign-out:", err);
+    });
   };
 
   // Restore the session on reload from the stored token, and drop to
@@ -6205,7 +6242,30 @@ function App() {
 
     if (!pendingEntries.length || !isSignedIn || !user?.UserID) return;
 
-    for (const pendingSave of pendingEntries) {
+    // Serialize with any earlier flush so an older tag set can't land after a newer one.
+    const previousFlush = postSolveTagFlushChainRef.current;
+    let releaseFlush;
+    postSolveTagFlushChainRef.current = new Promise((resolve) => {
+      releaseFlush = resolve;
+    });
+    try {
+      await previousFlush;
+    } catch (_) {}
+
+    try {
+    for (const rawPendingSave of pendingEntries) {
+      const resolvedRef =
+        resolvedPendingRefsRef.current.get(rawPendingSave.solveRef) || rawPendingSave.solveRef;
+      // Still being created: hold the tags; replacePendingSolve saves them.
+      if (isPendingSolveRef(resolvedRef)) {
+        const prevEdits = pendingSolveEditsRef.current.get(resolvedRef) || {};
+        pendingSolveEditsRef.current.set(resolvedRef, {
+          ...prevEdits,
+          tagUpdates: { ...(prevEdits.tagUpdates || {}), ...(rawPendingSave.tags || {}) },
+        });
+        continue;
+      }
+      const pendingSave = { ...rawPendingSave, solveRef: resolvedRef };
       try {
         const res = await runDb(
           "Updating solve tags",
@@ -6240,6 +6300,9 @@ function App() {
       } catch (err) {
         console.error("Failed to update solve tags:", err);
       }
+    }
+    } finally {
+      releaseFlush();
     }
   }, [isSignedIn, rememberLatestCreatedSolve, runDb, user?.UserID]);
 
@@ -6361,20 +6424,33 @@ function App() {
         latestSolve?.event || latestSolveMarker?.event || eventKey || ""
       ).toUpperCase();
 
+      const targetRef =
+        resolvedPendingRefsRef.current.get(latestSolve.solveRef) || latestSolve.solveRef;
+
       setSessions((prev) => ({
         ...(prev || {}),
         [normalizedEvent]: (prev?.[normalizedEvent] || []).map((solve) =>
-          solve?.solveRef === latestSolve.solveRef
+          solve?.solveRef === latestSolve.solveRef || solve?.solveRef === targetRef
             ? {
                 ...solve,
-                tags: nextSolveTags,
+                tags: { ...(solve?.tags || {}), ...nextSolveTags },
               }
             : solve
         ),
       }));
       setStatsMutationTick((tick) => tick + 1);
 
-      schedulePostSolveTagSave(normalizedEvent, latestSolve.solveRef, nextSolveTags);
+      if (isPendingSolveRef(targetRef)) {
+        // The create request is still in flight, so the server can't find this
+        // ref yet. Hold the tag change; replacePendingSolve applies and saves it.
+        const prevEdits = pendingSolveEditsRef.current.get(targetRef) || {};
+        pendingSolveEditsRef.current.set(targetRef, {
+          ...prevEdits,
+          tagUpdates: { ...(prevEdits.tagUpdates || {}), ...normalizedUpdates },
+        });
+      } else {
+        schedulePostSolveTagSave(normalizedEvent, targetRef, nextSolveTags);
+      }
 
       queuePostSolveTagToast(toastLabel);
       return true;
@@ -7619,7 +7695,7 @@ function App() {
             setShowOfflineSolvesModal(true);
           }}
         />
-        {isSignedIn && !showPostSignUpProfileSetup && !showTutorialModal ? (
+        {isSignedIn && !showPostSignUpProfileSetup ? (
           <EmailBanner
             accountEmail={accountEmail}
             onAddEmail={() => {
@@ -8300,8 +8376,6 @@ function App() {
                   </div>
                 ) : !isSignedIn && isViewingSharedStats ? (
                   renderSignedOutScreen("Shared Stats")
-                ) : !isSignedIn ? (
-                  renderSignedOutScreen("Stats")
                 ) : isViewingSharedStats && sharedStatsDeniedReason ? (
                   <div className="Page">
                     <div style={{ padding: "24px" }}>{sharedStatsDeniedReason}</div>
@@ -8329,9 +8403,9 @@ function App() {
                         ? async () => {}
                         : (eventKeyParam, index) => deleteTime(eventKeyParam, index)
                     }
-                    addPost={isViewingSharedStats ? null : addPost}
-                    saveToProfile={isViewingSharedStats ? null : addPostToProfile}
-                    saveStatToProfile={isViewingSharedStats ? null : saveItemToProfile}
+                    addPost={isViewingSharedStats || !isSignedIn ? null : addPost}
+                    saveToProfile={isViewingSharedStats || !isSignedIn ? null : addPostToProfile}
+                    saveStatToProfile={isViewingSharedStats || !isSignedIn ? null : saveItemToProfile}
                     onTagColorsChange={
                       isViewingSharedStats
                         ? null
@@ -8358,11 +8432,11 @@ function App() {
                           }
                     }
                     onSettingsContextChange={setStatsSettingsContext}
-                    recomputeRequest={isViewingSharedStats ? 0 : statsRecomputeRequest}
-                    importRequest={isViewingSharedStats ? 0 : statsImportRequest}
-                    exportRequest={isViewingSharedStats ? 0 : statsExportRequest}
-                    forceShowImportModal={isViewingSharedStats ? false : showStatsImportModal}
-                    forceShowExportModal={isViewingSharedStats ? false : showStatsExportModal}
+                    recomputeRequest={isViewingSharedStats || !isSignedIn ? 0 : statsRecomputeRequest}
+                    importRequest={isViewingSharedStats || !isSignedIn ? 0 : statsImportRequest}
+                    exportRequest={isViewingSharedStats || !isSignedIn ? 0 : statsExportRequest}
+                    forceShowImportModal={isViewingSharedStats || !isSignedIn ? false : showStatsImportModal}
+                    forceShowExportModal={isViewingSharedStats || !isSignedIn ? false : showStatsExportModal}
                     onImportModalOpenHandled={() => setShowStatsImportModal(false)}
                     onExportModalOpenHandled={() => setShowStatsExportModal(false)}
                     onSessionsListRefresh={isViewingSharedStats ? null : setSessionsList}
@@ -8467,7 +8541,7 @@ function App() {
         </div>
       </div>
 
-      {!isHomePage && playerBarVisible && (
+      {!isHomePage && !hidePlayerBarSignedOut && playerBarVisible && (
         <PlayerBar
           isSignedIn={isSignedIn}
           sessions={sessions}
@@ -8542,7 +8616,7 @@ function App() {
         />
       )}
 
-      {!isHomePage && !playerBarVisible && (
+      {!isHomePage && !hidePlayerBarSignedOut && !playerBarVisible && (
         <div className="toggle-bar" style={{ bottom: "12px" }}>
           <button
             className="toggle-button"
@@ -8565,7 +8639,9 @@ function App() {
 
       <ProfileSetupModal
         open={showPostSignUpProfileSetup}
+        userID={user?.UserID}
         initialValues={{
+          name: user?.Name || user?.UserID || "",
           color: user?.Color || user?.color || "#0E171D",
           profileEvent: user?.ProfileEvent || user?.profileEvent || "333",
           profileScramble: user?.ProfileScramble || user?.profileScramble || "",
@@ -8573,11 +8649,6 @@ function App() {
         onGenerateScramble={generateScrambleForEvent}
         onSave={handleCompletePostSignUpProfileSetup}
         onClose={handleClosePostSignUpProfileSetup}
-      />
-
-      <TutorialModal
-        open={showTutorialModal}
-        onClose={() => setShowTutorialModal(false)}
       />
 
       {showSettingsPopup && (
@@ -8607,7 +8678,6 @@ function App() {
             setStatsExportRequest((prev) => prev + 1);
             setShowStatsExportModal(true);
           }}
-          onOpenTutorial={openTutorialFromSettings}
           onProfileUpdate={(fresh) => {
             setUser((prev) => ({ ...prev, ...fresh }));
             if (fresh?.Settings && typeof fresh.Settings === "object") {

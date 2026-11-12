@@ -31,7 +31,10 @@ function NameTag({
   const derivedId =
     u?.UserID || u?.userID || (typeof u?.PK === "string" ? u.PK.split("#")[1] : null);
 
+  // The tag shows the @handle (the account ID); the username (Name) is the
+  // screen name and only shows on hover.
   const displayName = u?.Name || name || derivedId || "user";
+  const handle = derivedId || displayName;
   const profileColor = u?.Color || u?.color || "#FFFFFF";
   const linkTo = to || (derivedId ? `/profile/${derivedId}` : "/profile");
 
@@ -47,7 +50,7 @@ function NameTag({
     variant === "profile-corner" ? "name-tag-link--profileCorner" : "",
     reverse ? "name-tag-link--reverse" : "",
   ].filter(Boolean).join(" ");
-  const displayNameLength = String(displayName).length;
+  const displayNameLength = String(handle).length;
   const nameLengthClass =
     displayNameLength >= 18
       ? "name-tag--name-xl"
@@ -73,7 +76,7 @@ function NameTag({
         className={linkClassName}
         style={linkStyle}
         aria-label={`Open ${displayName}'s profile`}
-        title={`@${displayName}`}
+        title={displayName === handle ? `@${handle}` : `${displayName} (@${handle})`}
       >
         <div
           className="name-tag-cubeFrame"
@@ -91,7 +94,7 @@ function NameTag({
 
         {!hideName ? (
           <div className="nametagText">
-            <span className="name-tag-text">@{displayName}</span>
+            <span className="name-tag-text">@{handle}</span>
           </div>
         ) : null}
       </Link>

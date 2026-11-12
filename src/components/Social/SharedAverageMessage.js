@@ -1601,7 +1601,7 @@ function SharedAverageMessage({
           />
         </span>
         <span className="nametagText">
-          <span className="name-tag-text">@{member.name}</span>
+          <span className="name-tag-text" title={member.name}>@{member.id || member.name}</span>
         </span>
         {parsed?.participantPlans && (
           <span className="sharedAverageGroupPlanTag">
@@ -2169,7 +2169,7 @@ function SharedAverageMessage({
 
                           <span className="sharedAverageGroupHeaderPopover" role="tooltip">
                             <span className="sharedAverageGroupHeaderPopoverName">
-                              @{member.name}
+                              @{member.id || member.name}
                             </span>
                             <span className="sharedAverageGroupHeaderPopoverGrid">
                               <span>

@@ -26,6 +26,12 @@ import {
   isRelayEventId,
 } from "../defaultEvents";
 
+// Mirrors the server's CORE_EVENT_IDS: these always keep their Main session.
+const isCoreEventId = (eventId) => {
+  const ev = String(eventId || "").trim().toUpperCase();
+  return ev === "RELAY" || DEFAULT_EVENTS.includes(ev);
+};
+
 const slugify = (s) =>
   String(s || "")
     .trim()
@@ -542,13 +548,16 @@ const EventSelector = forwardRef(function EventSelector(
     [activeEvent, activeSession, sessions]
   );
   const activeEventIsCustom = customEventIds.has(normalizeEventId(activeEvent));
+  // Any non-core event can be deleted whole, including orphans whose custom-event
+  // record is missing (they only exist as sessions/solves).
+  const activeEventIsDeletable = !isCoreEventId(activeEvent);
   const canDeleteActiveSession =
     !!activeSessionObj &&
-    (String(activeSessionObj.SessionID || "main") !== "main" || activeEventIsCustom);
+    (String(activeSessionObj.SessionID || "main") !== "main" || activeEventIsDeletable);
   const deletingMainDeletesEvent =
     !!activeSessionObj &&
     String(activeSessionObj.SessionID || "main") === "main" &&
-    activeEventIsCustom;
+    activeEventIsDeletable;
 
   // -----------------------------
   // Handlers
@@ -613,10 +622,10 @@ const EventSelector = forwardRef(function EventSelector(
         activeSessionObj?.Stats?.solveCount ??
         0
     );
-    const isCustomEvent = customEventIds.has(eventId);
-    const willDeleteWholeEvent = sessionId === "main" && isCustomEvent;
+    const isDeletableEvent = !isCoreEventId(eventId);
+    const willDeleteWholeEvent = sessionId === "main" && isDeletableEvent;
 
-    if (sessionId === "main" && !isCustomEvent) {
+    if (sessionId === "main" && !isDeletableEvent) {
       alert("Core events always keep their Main session. You can delete added sessions, but not the built-in main one.");
       return;
     }
@@ -688,7 +697,6 @@ const EventSelector = forwardRef(function EventSelector(
     activeEvent,
     activeSessionObj,
     currentEvent,
-    customEventIds,
     eventLookup,
     handleEventChange,
     onSelectSessionObj,

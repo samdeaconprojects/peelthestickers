@@ -314,3 +314,34 @@
     color: rgba(255, 255, 255, 0.55);
     text-align: left;
   }
+
+  .signInPasswordWrap {
+    position: relative;
+    /* .signInInput is 90% content-box + 8px padding + 1px border per side */
+    width: calc(90% + 18px);
+    margin: 0 auto;
+  }
+
+  .signInPasswordWrap .signInInput--password {
+    width: 100%;
+    box-sizing: border-box;
+    padding-right: 72px;
+  }
+
+  .signInPasswordToggle {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    transform: translateY(-50%);
+    padding: 6px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .signInPasswordToggle:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+  }

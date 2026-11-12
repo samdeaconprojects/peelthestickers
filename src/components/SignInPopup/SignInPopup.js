@@ -14,7 +14,10 @@ function SignInPopup({
   const [mode, setMode] = useState("signin");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
+  // Username (screen name, stored as Name); blank means "same as handle".
+  const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [notice, setNotice] = useState("");
@@ -42,11 +45,15 @@ function SignInPopup({
     if (isSubmitting || !acceptedTerms) return;
     setIsSubmitting(true);
     try {
-      await onSignUp(username, password, { acceptTerms: true, email: email.trim() });
+      await onSignUp(username, password, {
+        acceptTerms: true,
+        email: email.trim(),
+        name: name.trim() || username.trim(),
+      });
     } finally {
       setIsSubmitting(false);
     }
-  }, [acceptedTerms, email, isSubmitting, onSignUp, password, username]);
+  }, [acceptedTerms, email, isSubmitting, name, onSignUp, password, username]);
 
   const handleForgot = useCallback(async () => {
     if (isSubmitting || !username.trim()) return;
@@ -105,20 +112,32 @@ function SignInPopup({
 
         {isForgot ? (
           <p className="signInHelp">
-            Enter your username or email. If your account has a confirmed email, we'll send you a
+            Enter your handle or email. If your account has a confirmed email, we'll send you a
             link to choose a new password.
           </p>
         ) : null}
 
         <input
           type="text"
-          placeholder={isSignUp ? "Username" : "Username or email"}
+          placeholder={isSignUp ? "Handle (your @, can't be changed)" : "Handle or email"}
           autoComplete={isSignUp ? "username" : "username email"}
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           className="signInInput"
           disabled={isSubmitting}
         />
+        {isSignUp ? (
+          <input
+            type="text"
+            placeholder={username.trim() ? `Username (${username.trim()})` : "Username (defaults to handle)"}
+            autoComplete="nickname"
+            value={name}
+            maxLength={24}
+            onChange={(e) => setName(e.target.value)}
+            className="signInInput"
+            disabled={isSubmitting}
+          />
+        ) : null}
         {isSignUp ? (
           <input
             type="email"
@@ -131,15 +150,27 @@ function SignInPopup({
           />
         ) : null}
         {!isForgot ? (
-          <input
-            type="password"
-            placeholder={isSignUp ? "Password (10+ characters)" : "Password"}
-            autoComplete={isSignUp ? "new-password" : "current-password"}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="signInInput"
-            disabled={isSubmitting}
-          />
+          <div className="signInPasswordWrap">
+            <input
+              type={showPassword ? "text" : "password"}
+              placeholder={isSignUp ? "Password (10+ characters)" : "Password"}
+              autoComplete={isSignUp ? "new-password" : "current-password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="signInInput signInInput--password"
+              disabled={isSubmitting}
+            />
+            <button
+              type="button"
+              className="signInPasswordToggle"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              aria-pressed={showPassword}
+              disabled={isSubmitting}
+            >
+              {showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
         ) : null}
 
         {isSignUp ? (

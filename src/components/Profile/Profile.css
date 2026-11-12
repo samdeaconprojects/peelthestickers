@@ -451,19 +451,77 @@
   min-height: 0;
 }
 
+/* The pie card sizes itself from its own width, not the window: the chart
+   fits the smaller of its cell's width and height, and the legend tightens
+   as the card narrows so the pie keeps most of the room. */
+.profileStatsItem--pie {
+  container-type: inline-size;
+  container-name: profilePie;
+}
+
 .profileStatsItem--pie .pieChartRoot {
-  grid-template-columns: minmax(0, 1.08fr) minmax(118px, 0.8fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 10px;
 }
 
 .profileStatsItem--pie .pieChartCanvas {
-  padding: 6px;
-  box-sizing: border-box;
+  align-self: stretch;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  container-type: size;
 }
 
 .profileStatsItem--pie .pieChartSvg {
-  width: 84%;
-  height: 84%;
+  flex: none;
+  width: min(100cqw, 100cqh);
+  height: min(100cqw, 100cqh);
+}
+
+.profileStatsItem--pie .pieChartLegend {
+  max-height: 100%;
+}
+
+@container profilePie (max-width: 360px) {
+  .profileStatsItem--pie .pieChartRoot {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+    gap: 6px;
+  }
+
+  .profileStatsItem--pie .pieChartLegend {
+    gap: 4px;
+  }
+
+  .profileStatsItem--pie .pieChartLegendItem {
+    grid-template-columns: 8px minmax(0, 1fr) auto;
+    gap: 4px;
+    padding: 3px 5px;
+    border-radius: 8px;
+  }
+
+  .profileStatsItem--pie .pieChartLegendSwatch {
+    width: 8px;
+    height: 8px;
+  }
+
+  .profileStatsItem--pie .pieChartLegendText {
+    font-size: 10px;
+  }
+
+  .profileStatsItem--pie .pieChartLegendMeta {
+    font-size: 9px;
+  }
+}
+
+@container profilePie (max-width: 260px) {
+  .profileStatsItem--pie .pieChartLegendText {
+    font-size: 9px;
+  }
+
+  .profileStatsItem--pie .pieChartLegendMeta {
+    font-size: 8px;
+  }
 }
 
 .statsEditorStaticValue {

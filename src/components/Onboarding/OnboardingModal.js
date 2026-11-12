@@ -1,15 +1,41 @@
-import React, { useEffect, useState } from "react";
-import QuickSetupPanel from "../QuickSetup/QuickSetupPanel";
+import React, { useEffect, useRef, useState } from "react";
+import NameTag from "../Profile/NameTag";
+import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
+import { PROFILE_CUBE_TRANSFORMS } from "../Profile/ProfileHeader";
 import "./OnboardingModal.css";
+
+export const PROFILE_EVENT_OPTIONS = [
+  { value: "222", label: "2x2" },
+  { value: "333", label: "3x3" },
+  { value: "444", label: "4x4" },
+  { value: "555", label: "5x5" },
+  { value: "666", label: "6x6" },
+  { value: "777", label: "7x7" },
+  { value: "333OH", label: "3x3 OH" },
+  { value: "333BLD", label: "3x3 BLD" },
+  { value: "444BLD", label: "4x4 BLD" },
+  { value: "555BLD", label: "5x5 BLD" },
+  { value: "CLOCK", label: "Clock" },
+  { value: "MEGAMINX", label: "Megaminx" },
+  { value: "PYRAMINX", label: "Pyraminx" },
+  { value: "SKEWB", label: "Skewb" },
+  { value: "SQ1", label: "Square-1" },
+];
+
+const NAME_MAX_LENGTH = 24;
+
+const cleanName = (value) => String(value || "").slice(0, NAME_MAX_LENGTH);
 
 export function ProfileSetupModal({
   open,
+  userID,
   initialValues,
   onGenerateScramble,
   onSave,
   onClose,
 }) {
   const [draft, setDraft] = useState({
+    name: "",
     color: "#0E171D",
     profileEvent: "333",
     profileScramble: "",
@@ -17,26 +43,34 @@ export function ProfileSetupModal({
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // Seed the draft once per open; App passes a fresh initialValues object on
+  // every render, which would otherwise wipe what the user typed.
+  const seededRef = useRef(false);
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
     setDraft({
+      name: cleanName(initialValues?.name || userID || ""),
       color: initialValues?.color || "#0E171D",
       profileEvent: initialValues?.profileEvent || "333",
       profileScramble: initialValues?.profileScramble || "",
     });
-  }, [initialValues, open]);
+  }, [initialValues, open, userID]);
 
   if (!open) return null;
 
-  const handleGenerate = async (eventCode) => {
+  const busy = isSaving || isGenerating;
+
+  const handleGenerate = async () => {
     if (!onGenerateScramble) return;
     setIsGenerating(true);
     try {
-      const scramble = await onGenerateScramble(eventCode || draft.profileEvent || "333");
-      setDraft((prev) => ({
-        ...prev,
-        profileScramble: String(scramble || "").trim(),
-      }));
+      const scramble = await onGenerateScramble(draft.profileEvent || "333");
+      setDraft((prev) => ({ ...prev, profileScramble: String(scramble || "").trim() }));
     } finally {
       setIsGenerating(false);
     }
@@ -46,40 +80,136 @@ export function ProfileSetupModal({
     if (isSaving) return;
     setIsSaving(true);
     try {
-      await onSave?.(draft);
+      await onSave?.({ ...draft, name: draft.name.trim() || userID || "" });
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const previewUser = {
+    UserID: userID,
+    Name: draft.name.trim() || userID || "you",
+    Color: draft.color,
+    ProfileEvent: draft.profileEvent,
+    ProfileScramble: draft.profileScramble,
   };
 
   return (
     <div className="onboardingModal" onMouseDown={isSaving ? undefined : onClose}>
       <div className="onboardingModalCard" onMouseDown={(e) => e.stopPropagation()}>
         <div className="onboardingModalHeader">
-          <div className="onboardingModalEyebrow">Welcome</div>
           <h2>Set up your profile</h2>
-          <p>Pick your profile color, cube, and scramble before the walkthrough starts.</p>
+          <p>Pick your username, profile color, event, and scramble.</p>
+          <p className="onboardingModalSubtle">This can be changed anytime.</p>
         </div>
 
-        <QuickSetupPanel
-          color={draft.color}
-          profileEvent={draft.profileEvent}
-          profileScramble={draft.profileScramble}
-          onColorChange={(value) => setDraft((prev) => ({ ...prev, color: value }))}
-          onProfileEventChange={(value) =>
-            setDraft((prev) => ({
-              ...prev,
-              profileEvent: value,
-              profileScramble: value === prev.profileEvent ? prev.profileScramble : "",
-            }))
-          }
-          onProfileScrambleChange={(value) =>
-            setDraft((prev) => ({ ...prev, profileScramble: value }))
-          }
-          onGenerateScramble={handleGenerate}
-          disabled={isSaving || isGenerating}
-          helperText="This runs right after sign up, and you can still adjust these later in Settings."
-        />
+        <div className="onboardingPreview" aria-label="Profile preview">
+          <div className="onboardingIdentity">
+            <div
+              className="onboardingIdentityPicture"
+              style={{ border: `2px solid ${draft.color}` }}
+            >
+              <div
+                className="profileCube"
+                style={{
+                  transform: PROFILE_CUBE_TRANSFORMS[draft.profileEvent] || "scale(0.6)",
+                }}
+              >
+                <PuzzleSVG
+                  className="profileCube"
+                  event={draft.profileEvent}
+                  scramble={draft.profileScramble}
+                  isMusicPlayer={false}
+                  isProfileCube={true}
+                  isTimerCube={false}
+                />
+              </div>
+            </div>
+            <div className="onboardingIdentityText">
+              <div className="onboardingIdentityName">{previewUser.Name}</div>
+              <div className="onboardingIdentityHandle">@{userID || "handle"}</div>
+            </div>
+          </div>
+          <div className="onboardingPreviewTag">
+            <NameTag isSignedIn={true} user={previewUser} />
+          </div>
+        </div>
+
+        <div className="onboardingFields">
+          <label className="onboardingField">
+            <span>Username</span>
+            <div className="onboardingHandleInput">
+              <input
+                type="text"
+                value={draft.name}
+                maxLength={NAME_MAX_LENGTH}
+                onChange={(e) =>
+                  setDraft((prev) => ({ ...prev, name: cleanName(e.target.value) }))
+                }
+                placeholder={userID || "Username"}
+                disabled={busy}
+              />
+            </div>
+          </label>
+
+          <div className="onboardingFieldRow">
+            <label className="onboardingField onboardingField--color">
+              <span>Color</span>
+              <input
+                type="color"
+                value={draft.color}
+                onChange={(e) => setDraft((prev) => ({ ...prev, color: e.target.value }))}
+                disabled={busy}
+              />
+            </label>
+
+            <label className="onboardingField">
+              <span>Event</span>
+              <select
+                value={draft.profileEvent}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setDraft((prev) => ({
+                    ...prev,
+                    profileEvent: value,
+                    profileScramble: value === prev.profileEvent ? prev.profileScramble : "",
+                  }));
+                }}
+                disabled={busy}
+              >
+                {PROFILE_EVENT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label className="onboardingField">
+            <span>Scramble</span>
+            <textarea
+              value={draft.profileScramble}
+              onChange={(e) =>
+                setDraft((prev) => ({ ...prev, profileScramble: e.target.value }))
+              }
+              rows={3}
+              disabled={busy}
+              placeholder="Type your own scramble or generate one"
+            />
+          </label>
+
+          <div>
+            <button
+              type="button"
+              className="onboardingModalButton onboardingModalButtonSecondary"
+              onClick={handleGenerate}
+              disabled={busy}
+            >
+              {isGenerating ? "Generating..." : "Generate Scramble"}
+            </button>
+          </div>
+        </div>
 
         <div className="onboardingModalActions">
           <button
@@ -88,68 +218,15 @@ export function ProfileSetupModal({
             onClick={onClose}
             disabled={isSaving}
           >
-            Close
+            Skip
           </button>
           <button
             type="button"
             className="onboardingModalButton"
             onClick={handleSave}
-            disabled={isSaving}
+            disabled={busy}
           >
-            {isSaving ? "Saving..." : "Continue to Tutorial"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export function TutorialModal({ open, onClose }) {
-  if (!open) return null;
-
-  return (
-    <div className="onboardingModal" onMouseDown={onClose}>
-      <div className="onboardingModalCard onboardingModalCard--tutorial" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="onboardingModalHeader">
-          <div className="onboardingModalEyebrow">Quick Tutorial</div>
-          <h2>Here’s the fast rundown</h2>
-          <p>These are the main things new users need to know to get moving quickly.</p>
-        </div>
-
-        <div className="tutorialSteps">
-          <div className="tutorialStep">
-            <div className="tutorialStepNumber">1</div>
-            <div>
-              <strong>Start solving on Home.</strong>
-              <div>The timer, scramble, and averages all live there.</div>
-            </div>
-          </div>
-          <div className="tutorialStep">
-            <div className="tutorialStepNumber">2</div>
-            <div>
-              <strong>Use Settings to tune your experience.</strong>
-              <div>Theme, timer input, profile details, cube collection, and stats live there.</div>
-            </div>
-          </div>
-          <div className="tutorialStep">
-            <div className="tutorialStepNumber">3</div>
-            <div>
-              <strong>Profile and Stats grow as you solve.</strong>
-              <div>Your profile card, sessions, and charts update from the solves you log.</div>
-            </div>
-          </div>
-          <div className="tutorialStep">
-            <div className="tutorialStepNumber">4</div>
-            <div>
-              <strong>Social is there when you want shared solves.</strong>
-              <div>You can post, message, and join shared scramble sessions later.</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="onboardingModalActions">
-          <button type="button" className="onboardingModalButton" onClick={onClose}>
-            Start Solving
+            {isSaving ? "Saving..." : "Done"}
           </button>
         </div>
       </div>

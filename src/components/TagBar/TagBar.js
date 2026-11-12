@@ -278,6 +278,58 @@ export default function TagBar({
     setHomeEditorOpen(false);
   }, [homeTagsCollapsed]);
 
+  // Vertically center the collapse arrow on the visible tag chips (midpoint of
+  // first and last chip), and park the round "+" add button in the arrow's
+  // column: beside the bottom tag, or one tag-row below the arrow when there
+  // are only 1-2 tags. Keeps the last measured values while collapsed.
+  const [homeToggleLayout, setHomeToggleLayout] = useState(null);
+  useEffect(() => {
+    if (variant !== "home" || !collapsible) return undefined;
+    const wrap = wrapRef.current;
+    if (!wrap) return undefined;
+    const measure = () => {
+      if (wrap.classList.contains("is-collapsed")) return;
+      const chips = [...wrap.querySelectorAll(".tagHomeSummary .tagHomeChip")].filter(
+        (el) => el.getClientRects().length > 0
+      );
+      if (!chips.length) {
+        setHomeToggleLayout(null);
+        return;
+      }
+      const wrapTop = wrap.getBoundingClientRect().top;
+      const content = wrap.querySelector(".tagHomeContent");
+      const contentTop = content ? content.getBoundingClientRect().top : wrapTop;
+      const first = chips[0].getBoundingClientRect();
+      const last = chips[chips.length - 1].getBoundingClientRect();
+      const centerOf = (r) => (r.top + r.bottom) / 2;
+      const center = (first.top + last.bottom) / 2;
+      let pitch;
+      if (chips.length > 1) {
+        pitch = centerOf(chips[1].getBoundingClientRect()) - centerOf(first);
+      } else {
+        const item = chips[0].closest(".tagHomeItem");
+        const summary = wrap.querySelector(".tagHomeSummary");
+        const gap = summary ? parseFloat(getComputedStyle(summary).rowGap) || 0 : 0;
+        pitch = (item ? item.getBoundingClientRect().height : first.height) + gap;
+      }
+      const addCenter = Math.max(centerOf(last), center + pitch);
+      const next = {
+        center: Math.round(center - wrapTop),
+        addCenter: Math.round(addCenter - contentTop),
+      };
+      setHomeToggleLayout((prev) =>
+        prev && prev.center === next.center && prev.addCenter === next.addCenter ? prev : next
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    const summary = wrap.querySelector(".tagHomeSummary");
+    if (summary) ro.observe(summary);
+    return () => ro.disconnect();
+  });
+
   const optionsByField = useMemo(() => {
     return fieldMeta.reduce((acc, item) => {
       const discovered = Array.isArray(discoveredOptions?.[item.field])
@@ -480,7 +532,12 @@ export default function TagBar({
         }`}
         ref={wrapRef}
         style={
-          collapseToggleTop
+          homeToggleLayout
+            ? {
+                "--tag-home-toggle-top": `calc(${homeToggleLayout.center}px - var(--tag-home-toggle-height) / 2)`,
+                "--tag-home-add-center": `${homeToggleLayout.addCenter}px`,
+              }
+            : collapseToggleTop
             ? { "--tag-home-toggle-top": String(collapseToggleTop).trim() }
             : undefined
         }
@@ -536,13 +593,37 @@ export default function TagBar({
               );
             })}
 
-            {homeSummaryItems.length < displayFieldMeta.length && (
-              <div className="tagHomeItem tagHomeItem--add is-automatic">
+            {homeSummaryItems.length === 0 && displayFieldMeta.length > 0 && (
+              <div className="tagHomeItem tagHomeItem--add">
+                <span className="tagHomeItemLabel">Tag</span>
                 <button
                   type="button"
-                  className={`tagHomeAddButton ${
-                    homeSummaryItems.length === 0 ? "tagHomeAddButton--labeled" : ""
-                  }`}
+                  className="tagHomeChip tagHomeChip--add tagHomeChip--empty"
+                  onClick={() => {
+                    setActiveField(displayFieldMeta[0]?.field || "CubeModel");
+                    setHomeEditorOpen(true);
+                  }}
+                  aria-label="Add tag"
+                >
+                  <span className="tagHomeChipIconWrap tagHomeChipAddPlus" aria-hidden="true">
+                    +
+                  </span>
+                  <span className="tagHomeChipText">
+                    <span className="tagHomeChipValue">Add Tag</span>
+                  </span>
+                </button>
+              </div>
+            )}
+
+            {homeSummaryItems.length > 0 && homeSummaryItems.length < displayFieldMeta.length && (
+              <div
+                className={`tagHomeItem tagHomeItem--add is-automatic ${
+                  collapsible && homeToggleLayout ? "tagHomeItem--addBeside" : ""
+                }`}
+              >
+                <button
+                  type="button"
+                  className="tagHomeAddButton"
                   onClick={() => {
                     const nextField = displayFieldMeta.find(
                       (item) =>
@@ -556,9 +637,6 @@ export default function TagBar({
                   <span className="tagHomeAddButtonPlus" aria-hidden="true">
                     +
                   </span>
-                  {homeSummaryItems.length === 0 && (
-                    <span className="tagHomeAddButtonText">Add Tag</span>
-                  )}
                 </button>
               </div>
             )}

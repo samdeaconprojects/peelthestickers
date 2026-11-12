@@ -4535,6 +4535,38 @@ async function deleteItemsByKey(keys) {
   return batchWriteRequestsWithRetry(requests);
 }
 
+// Removes every per-event item (sessions, stats, ranks, day buckets, dirty
+// markers, the CUSTOMEVENT record) for a whole-event delete. Solves and their
+// SOLVETAG rows are deleted by the caller first.
+async function deleteEventScopedItems(userID, event) {
+  const ev = normalizeEvent(event);
+  if (!userID || !ev) return 0;
+
+  const prefixDeletes = [
+    `SESSION#${ev}#`,
+    `SESSIONSTATS#${ev}#`,
+    `TAGSTATS#${ev}#`,
+    `TAGSTATSDIRTY#${ev}#`,
+    `SINGLERANK#EVENT#${ev}#`,
+    `SINGLERANK#SESSION#${ev}#`,
+    `DAYBUCKET#EVENT#${ev}#`,
+    `DAYBUCKETDIRTY#EVENT#${ev}#`,
+  ];
+
+  const prefixItems = await Promise.all(
+    prefixDeletes.map((prefix) => queryUserItemsByPrefix(userID, prefix))
+  );
+
+  const keys = [
+    // Exact keys: a prefix here would also catch e.g. EVENTSTATS#ROUX2.
+    { PK: `USER#${userID}`, SK: `EVENTSTATS#${ev}` },
+    { PK: `USER#${userID}`, SK: `CUSTOMEVENT#${ev}` },
+    ...prefixItems.flat().map((item) => ({ PK: item?.PK, SK: item?.SK })),
+  ];
+  await deleteItemsByKey(keys);
+  return keys.length;
+}
+
 async function getCustomEventItem(userID, event) {
   const ev = normalizeEvent(event);
   if (!userID || !ev) return null;
@@ -7063,17 +7095,14 @@ app.delete("/api/session/:userID/:event/:sessionID", async (req, res) => {
   if (!sessionID) return res.status(400).json({ error: "Missing sessionID" });
 
   try {
-    const customEventItem = await getCustomEventItem(userID, event);
-    const isCustomEvent = !!customEventItem;
     const isMainSession = sessionID === "main";
-    const deleteWholeEvent = isMainSession && isCustomEvent;
+    // Any non-core event can be removed whole, including orphans whose
+    // CUSTOMEVENT record is missing (sessions/solves left under an event id
+    // that was never registered as a custom event).
+    const deleteWholeEvent = isMainSession && !isCoreEvent(event);
 
-    if (isMainSession && !isCustomEvent) {
-      return res.status(403).json({
-        error: isCoreEvent(event)
-          ? "Main session for core events cannot be deleted."
-          : "Main session can only be deleted for custom events and custom relays.",
-      });
+    if (isMainSession && isCoreEvent(event)) {
+      return res.status(403).json({ error: "Main session for core events cannot be deleted." });
     }
 
     const sessionItem = await ddb.send(
@@ -7096,45 +7125,23 @@ app.delete("/api/session/:userID/:event/:sessionID", async (req, res) => {
       await deleteSolveAndTagItems(ddb, TABLE, solve);
     }
 
-    if (solves.length === 0) {
-      if (deleteWholeEvent) {
-        const [sessionItems, sessionStatsItems] = await Promise.all([
-          queryUserItemsByPrefix(userID, `SESSION#${event}#`),
-          queryUserItemsByPrefix(userID, `SESSIONSTATS#${event}#`),
-        ]);
-
-        await deleteItemsByKey([
-          { PK: `USER#${userID}`, SK: `CUSTOMEVENT#${event}` },
-          { PK: `USER#${userID}`, SK: `EVENTSTATS#${event}` },
-          ...sessionItems.map((item) => ({ PK: item?.PK, SK: item?.SK })),
-          ...sessionStatsItems.map((item) => ({ PK: item?.PK, SK: item?.SK })),
-        ]);
-      } else {
-        await deleteItemsByKey([
-          { PK: `USER#${userID}`, SK: `SESSION#${event}#${sessionID}` },
-          { PK: `USER#${userID}`, SK: `SESSIONSTATS#${event}#${sessionID}` },
-        ]);
+    if (deleteWholeEvent) {
+      await deleteEventScopedItems(userID, event);
+      if (solves.length) {
+        // The all-events day buckets still count the removed solves.
+        const timeZone = await getUserDayBucketTimeZone(userID);
+        const dayKeys = new Set(
+          solves.map((solve) => getDayKey(solve?.CreatedAt, { timeZone })).filter(Boolean)
+        );
+        runInBackground(`sessionDelete:eventCleanup:${userID}:${event}`, () =>
+          Promise.all(Array.from(dayKeys).map((dayKey) => recomputeAllEventsDayBucket(userID, dayKey)))
+        );
       }
-    } else if (deleteWholeEvent) {
-      const prefixDeletes = [
-        `SESSION#${event}#`,
-        `SESSIONSTATS#${event}#`,
-        `EVENTSTATS#${event}`,
-        `TAGSTATS#${event}#`,
-        `SINGLERANK#EVENT#${event}#`,
-        `SINGLERANK#SESSION#${event}#`,
-        `DAYBUCKET#EVENT#${event}#`,
-        `CUSTOMEVENT#${event}`,
-      ];
-
-      const prefixItems = await Promise.all(
-        prefixDeletes.map((prefix) => queryUserItemsByPrefix(userID, prefix))
-      );
-
-      await deleteItemsByKey(prefixItems.flat().map((item) => ({ PK: item?.PK, SK: item?.SK })));
-      runInBackground(`sessionDelete:eventCleanup:${userID}:${event}`, () =>
-        recomputeAllDayBucketsForEvent(userID, event)
-      );
+    } else if (solves.length === 0) {
+      await deleteItemsByKey([
+        { PK: `USER#${userID}`, SK: `SESSION#${event}#${sessionID}` },
+        { PK: `USER#${userID}`, SK: `SESSIONSTATS#${event}#${sessionID}` },
+      ]);
     } else {
       const sessionTagStatsItems = await queryUserItemsByPrefix(
         userID,
