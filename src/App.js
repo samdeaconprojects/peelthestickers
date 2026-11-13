@@ -62,7 +62,10 @@ import { getUser } from "./services/getUser";
 import { getProfiles } from "./services/getProfiles";
 import { createSocialEventSource } from "./services/socialEvents";
 import { updateUser } from "./services/updateUser";
-import { getSessions } from "./services/getSessions";
+import { getSessions, invalidateSessionsCache } from "./services/getSessions";
+import { invalidateSolveMutationCaches } from "./services/solveMutationCache";
+import { CLIENT_TAB_ID } from "./services/clientTab";
+import { isTimerBusy, onTimerIdle } from "./utils/timerActivity";
 import { getLastNSolvesBySession, getSolvesBySession } from "./services/getSolvesBySession";
 import {
   signUp as authSignUp,
@@ -2816,6 +2819,399 @@ function App() {
     statsMutationTick,
     location.pathname,
   ]);
+
+  // ---------------------------------------------------------------------------
+  // Multi-device sync. The server pushes "sync" events on the user's notification
+  // stream whenever solves or sessions change (see publishSolveSync in server.js).
+  // Changes from this tab are ignored (X-PTS-Client echo). Everything is batched,
+  // and held while the timer is mid-solve so the screen never shifts during a solve.
+  // A tab coming back into view, or the stream reconnecting, re-checks the current
+  // session to catch anything missed while asleep.
+  // ---------------------------------------------------------------------------
+  const syncContextRef = useRef({});
+  syncContextRef.current = {
+    userID: isSignedIn ? user?.UserID || null : null,
+    eventKey,
+    currentSession: String(currentSession || "main"),
+  };
+  const pendingSyncRef = useRef(null);
+  const syncFlushTimerRef = useRef(null);
+  const lastCatchUpAtRef = useRef(0);
+
+  const getPendingSync = () => {
+    if (!pendingSyncRef.current) {
+      pendingSyncRef.current = {
+        all: false,
+        sessions: false,
+        reconcileScopes: new Map(),
+        items: [],
+        statsByScope: new Map(),
+        refreshStats: false,
+      };
+    }
+    return pendingSyncRef.current;
+  };
+
+  // Re-reads the current session (newest 200 + stats) and makes local state match:
+  // adds/updates what the server has and drops solves in that window the server no
+  // longer has (deleted or moved elsewhere). Unsaved local solves are never dropped.
+  const reconcileCurrentSessionFromServer = useCallback(async () => {
+    const ctx = syncContextRef.current;
+    const userID = ctx.userID;
+    if (!userID) return;
+    const evKey = ctx.eventKey;
+    const normalizedEvent = String(evKey || "").toUpperCase();
+    const sessionId = ctx.currentSession;
+
+    invalidateSolveMutationCaches(userID, [{ event: normalizedEvent, sessionID: sessionId }]);
+
+    let stats;
+    let fetched;
+    try {
+      [stats, fetched] = await Promise.all([
+        getSessionStats(userID, normalizedEvent, sessionId),
+        getLastNSolvesBySession(userID, normalizedEvent, sessionId, 200),
+      ]);
+    } catch (err) {
+      console.warn("Sync: failed to refresh current session:", err);
+      return;
+    }
+
+    const after = syncContextRef.current;
+    if (after.userID !== userID || after.eventKey !== evKey || after.currentSession !== sessionId) {
+      return;
+    }
+
+    const totalCount =
+      stats?.SolveCountTotal ?? stats?.solveCountTotal ?? stats?.SolveCount ?? stats?.solveCount ?? null;
+
+    setSessionStats((prev) => ({
+      ...(prev || {}),
+      [normalizedEvent]: {
+        ...(prev?.[normalizedEvent] || {}),
+        [sessionId]: stats || null,
+      },
+    }));
+
+    const fetchedSolves = (Array.isArray(fetched) ? fetched : [])
+      .map(normalizeSolve)
+      .filter((solve) => !deletedSolveRefsRef.current.has(String(solve?.solveRef || "").trim()));
+    const fetchedRefs = new Set(fetchedSolves.map((solve) => String(solve?.solveRef || "")).filter(Boolean));
+    const fetchedKeys = new Set(fetchedSolves.map(getSolveMergeKey).filter(Boolean));
+    const timeOf = (solve) => new Date(solve?.datetime || "").getTime();
+    const fetchedTimes = fetchedSolves.map(timeOf).filter(Number.isFinite);
+    const newestFetched = fetchedTimes.length ? Math.max(...fetchedTimes) : -Infinity;
+    // Fewer than asked for means this is the whole session.
+    const oldestCovered =
+      fetchedSolves.length >= 200 && fetchedTimes.length ? Math.min(...fetchedTimes) : -Infinity;
+    const sessionOf = (solve) => String(solve?.sessionID || solve?.SessionID || "main");
+
+    setSessions((prev) => {
+      const existing = Array.isArray(prev?.[evKey]) ? prev[evKey] : [];
+      const others = existing.filter((solve) => sessionOf(solve) !== sessionId);
+      const kept = existing.filter((solve) => {
+        if (sessionOf(solve) !== sessionId) return false;
+        const ref = String(solve?.solveRef || "");
+        if (!ref.startsWith("SOLVE#")) return true; // still saving / offline: keep
+        if (fetchedRefs.has(ref) || fetchedKeys.has(getSolveMergeKey(solve))) return true;
+        const t = timeOf(solve);
+        if (!Number.isFinite(t)) return true;
+        if (t > newestFetched) return true; // saved after the server read
+        if (t < oldestCovered) return true; // older than the window we checked
+        return false; // the server no longer has it here
+      });
+
+      let merged = kept;
+      fetchedSolves.forEach((solve) => {
+        merged = mergeSolveIntoListByIdentity(merged, solve, true);
+      });
+      merged.sort((a, b) => timeOf(a) - timeOf(b));
+      const indexed = assignExplicitSolveIndices(merged, totalCount);
+
+      return {
+        ...(prev || {}),
+        [evKey]: [...others, ...indexed].sort((a, b) => timeOf(a) - timeOf(b)),
+      };
+    });
+  }, []);
+
+  const flushPendingSync = useCallback(async () => {
+    if (syncFlushTimerRef.current) {
+      clearTimeout(syncFlushTimerRef.current);
+      syncFlushTimerRef.current = null;
+    }
+    const pending = pendingSyncRef.current;
+    if (!pending) return;
+    // Mid-solve: try again when the timer goes idle (see onTimerIdle below).
+    if (isTimerBusy()) return;
+    pendingSyncRef.current = null;
+
+    const ctx = syncContextRef.current;
+    const userID = ctx.userID;
+    if (!userID) return;
+    const currentEvent = String(ctx.eventKey || "").toUpperCase();
+    const currentSid = ctx.currentSession;
+    const currentScopeKey = `${currentEvent}|${currentSid}`;
+
+    if (pending.all) {
+      invalidateSolveMutationCaches(userID);
+    } else {
+      const scopes = [
+        ...pending.reconcileScopes.values(),
+        ...pending.items.map((item) => ({ event: item.Event, sessionID: item.SessionID })),
+        ...Array.from(pending.statsByScope.keys()).map((key) => {
+          const [event, sessionID] = key.split("|");
+          return { event, sessionID };
+        }),
+      ];
+      if (scopes.length) invalidateSolveMutationCaches(userID, scopes);
+    }
+
+    // Session list (new / renamed / deleted sessions or events).
+    if (pending.sessions) {
+      invalidateSessionsCache(userID);
+      try {
+        const items = await getSessions(userID, { force: true });
+        if (syncContextRef.current.userID === userID && Array.isArray(items)) {
+          setSessionsList(items);
+          setSessionStats((prev) => {
+            const next = { ...(prev || {}) };
+            for (const session of items) {
+              const ev = String(session?.Event || "").toUpperCase();
+              const sid = String(session?.SessionID || "main");
+              if (!ev) continue;
+              next[ev] = { ...(next[ev] || {}), [sid]: session?.Stats ?? next[ev]?.[sid] ?? null };
+            }
+            return next;
+          });
+        }
+      } catch (err) {
+        console.warn("Sync: failed to refresh sessions:", err);
+      }
+    }
+
+    // Stats that arrived with new solves: no read needed.
+    if (pending.statsByScope.size) {
+      setSessionStats((prev) => {
+        const next = { ...(prev || {}) };
+        for (const [key, stats] of pending.statsByScope) {
+          const [ev, sid] = key.split("|");
+          next[ev] = { ...(next[ev] || {}), [sid]: stats };
+        }
+        return next;
+      });
+      setSessionsList((prev) =>
+        Array.isArray(prev)
+          ? prev.map((session) => {
+              const key = `${String(session?.Event || "").toUpperCase()}|${String(session?.SessionID || "main")}`;
+              return pending.statsByScope.has(key) ? { ...session, Stats: pending.statsByScope.get(key) } : session;
+            })
+          : prev
+      );
+    }
+
+    const needsCurrentReconcile = pending.all || pending.reconcileScopes.has(currentScopeKey);
+
+    // Scopes that aren't on screen: forget their cached solves so the next visit loads
+    // them fresh (they may have lost solves to a delete or move).
+    const staleScopeKeys = new Set(
+      pending.all
+        ? []
+        : Array.from(pending.reconcileScopes.keys()).filter((key) => key !== currentScopeKey)
+    );
+
+    // New / edited solve items sent with the event.
+    const items = needsCurrentReconcile ? [] : pending.items;
+
+    if (pending.all || staleScopeKeys.size || items.length) {
+      setSessions((prev) => {
+        const next = { ...(prev || {}) };
+        for (const key of Object.keys(next)) {
+          const ev = String(key).toUpperCase();
+          const list = Array.isArray(next[key]) ? next[key] : null;
+          if (!list) continue;
+
+          let updated = list;
+          if (pending.all) {
+            if (ev !== currentEvent) {
+              updated = [];
+            } else {
+              updated = list.filter(
+                (solve) => String(solve?.sessionID || solve?.SessionID || "main") === currentSid
+              );
+            }
+          } else if (staleScopeKeys.size) {
+            updated = list.filter(
+              (solve) =>
+                !staleScopeKeys.has(`${ev}|${String(solve?.sessionID || solve?.SessionID || "main")}`) ||
+                !String(solve?.solveRef || "").startsWith("SOLVE#")
+            );
+          }
+
+          const itemsForEvent = items.filter((item) => String(item?.Event || "").toUpperCase() === ev);
+          if (itemsForEvent.length) {
+            itemsForEvent.forEach((item) => {
+              const solve = normalizeSolve(item);
+              const ref = String(solve?.solveRef || "");
+              if (ref && deletedSolveRefsRef.current.has(ref)) return;
+              updated = mergeSolveIntoListByIdentity(updated, solve, true);
+            });
+            updated = [...updated].sort(
+              (a, b) => new Date(a?.datetime || "").getTime() - new Date(b?.datetime || "").getTime()
+            );
+            // New solves in the session on screen get explicit indices from the fresh count.
+            if (ev === currentEvent) {
+              const stats = pending.statsByScope.get(currentScopeKey);
+              const total =
+                stats?.SolveCountTotal ?? stats?.solveCountTotal ?? stats?.SolveCount ?? stats?.solveCount;
+              if (Number.isFinite(Number(total))) {
+                const inSession = (solve) =>
+                  String(solve?.sessionID || solve?.SessionID || "main") === currentSid;
+                const indexed = assignExplicitSolveIndices(updated.filter(inSession), Number(total));
+                updated = [...updated.filter((solve) => !inSession(solve)), ...indexed].sort(
+                  (a, b) => new Date(a?.datetime || "").getTime() - new Date(b?.datetime || "").getTime()
+                );
+              }
+            }
+          }
+
+          if (updated !== list) next[key] = updated;
+        }
+        return next;
+      });
+    }
+
+    if (needsCurrentReconcile) {
+      await reconcileCurrentSessionFromServer();
+    }
+
+    // Stats page, tag stats, home overall stats: refetch through the invalidated caches.
+    setStatsMutationTick((t) => t + 1);
+  }, [reconcileCurrentSessionFromServer]);
+
+  const scheduleSyncFlush = useCallback(
+    (delayMs = 250) => {
+      if (syncFlushTimerRef.current) clearTimeout(syncFlushTimerRef.current);
+      syncFlushTimerRef.current = setTimeout(() => {
+        syncFlushTimerRef.current = null;
+        flushPendingSync();
+      }, delayMs);
+    },
+    [flushPendingSync]
+  );
+
+  const handleSyncEvent = useCallback(
+    (payload) => {
+      if (!payload || typeof payload !== "object") return;
+      if (payload.sourceClientID && payload.sourceClientID === CLIENT_TAB_ID) return;
+
+      const pending = getPendingSync();
+
+      if (payload.type === "sessions.changed") {
+        pending.sessions = true;
+        scheduleSyncFlush();
+        return;
+      }
+      if (payload.type !== "solves.changed") return;
+
+      const op = String(payload.op || "");
+      const scopes = Array.isArray(payload.scopes) ? payload.scopes : [];
+      const items = Array.isArray(payload.items) ? payload.items : [];
+
+      if (payload.allScopes) pending.all = true;
+
+      if (op === "delete") {
+        (Array.isArray(payload.solveRefs) ? payload.solveRefs : []).forEach((ref) => {
+          if (ref) deletedSolveRefsRef.current.add(String(ref));
+        });
+      }
+
+      const itemsUsable = (op === "add" || op === "update") && items.length > 0 && !payload.itemsOmitted;
+      if (itemsUsable) {
+        pending.items.push(...items);
+        if (op === "add" && payload.sessionStats && scopes[0]) {
+          pending.statsByScope.set(
+            `${String(scopes[0].event).toUpperCase()}|${String(scopes[0].sessionID || "main")}`,
+            payload.sessionStats
+          );
+        }
+      } else {
+        scopes.forEach((scope) => {
+          const key = `${String(scope?.event || "").toUpperCase()}|${String(scope?.sessionID || "main")}`;
+          pending.reconcileScopes.set(key, scope);
+        });
+        if (!scopes.length) pending.all = true;
+      }
+
+      scheduleSyncFlush();
+    },
+    [scheduleSyncFlush]
+  );
+
+  // Catch up after sleep / a backgrounded tab / a dropped stream (at most every 5s).
+  const requestSyncCatchUp = useCallback(() => {
+    const now = Date.now();
+    if (now - lastCatchUpAtRef.current < 5000) return;
+    lastCatchUpAtRef.current = now;
+    const ctx = syncContextRef.current;
+    if (!ctx.userID) return;
+    const pending = getPendingSync();
+    pending.sessions = true;
+    pending.reconcileScopes.set(`${String(ctx.eventKey || "").toUpperCase()}|${ctx.currentSession}`, {
+      event: String(ctx.eventKey || "").toUpperCase(),
+      sessionID: ctx.currentSession,
+    });
+    scheduleSyncFlush(0);
+  }, [scheduleSyncFlush]);
+
+  useEffect(() => {
+    if (!isSignedIn || !user?.UserID) return undefined;
+
+    let source = null;
+    let connectedOnce = false;
+    let closed = false;
+
+    const open = () => {
+      if (closed) return;
+      if (source) source.close();
+      source = createSocialEventSource(user.UserID, {
+        onSync: handleSyncEvent,
+        onEvent: (payload) => {
+          if (payload?.type !== "stream.connected") return;
+          // The first connect is the normal page load; later ones mean we were away.
+          if (connectedOnce) requestSyncCatchUp();
+          connectedOnce = true;
+        },
+      });
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      // EventSource gives up after an HTTP error; reopen it.
+      if (!source || source.readyState === 2) open();
+      requestSyncCatchUp();
+    };
+
+    open();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("online", onVisibility);
+    const stopIdle = onTimerIdle(() => {
+      if (pendingSyncRef.current) scheduleSyncFlush(0);
+    });
+
+    return () => {
+      closed = true;
+      if (source) source.close();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", onVisibility);
+      stopIdle();
+      if (syncFlushTimerRef.current) {
+        clearTimeout(syncFlushTimerRef.current);
+        syncFlushTimerRef.current = null;
+      }
+      pendingSyncRef.current = null;
+    };
+  }, [isSignedIn, user?.UserID, handleSyncEvent, requestSyncCatchUp, scheduleSyncFlush]);
 
   const adjustSessionSolveCount = useCallback((eventCode, sessionID, delta, fallbackBase = 0) => {
     const ev = String(eventCode || "").toUpperCase();

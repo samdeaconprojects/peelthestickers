@@ -1,7 +1,7 @@
 import { toApiUrl } from "./api";
 import { getAuthToken } from "./auth";
 
-export function createSocialEventSource(userID, { onEvent, onOpen, onError } = {}) {
+export function createSocialEventSource(userID, { onEvent, onSync, onOpen, onError } = {}) {
   const id = String(userID || "").trim();
   if (!id || typeof window === "undefined" || typeof EventSource === "undefined") {
     return null;
@@ -28,6 +28,17 @@ export function createSocialEventSource(userID, { onEvent, onOpen, onError } = {
       console.warn("Failed to parse social event payload:", error);
     }
   });
+
+  // Solve/session changes made on the user's other devices (see publishSolveSync).
+  if (typeof onSync === "function") {
+    source.addEventListener("sync", (event) => {
+      try {
+        onSync(JSON.parse(event.data || "{}"));
+      } catch (error) {
+        console.warn("Failed to parse sync event payload:", error);
+      }
+    });
+  }
 
   source.addEventListener("connected", (event) => {
     try {

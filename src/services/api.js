@@ -1,6 +1,7 @@
 // src/services/api.js
 import { reportNetworkFailure, reportNetworkSuccess } from "./connectivity.js";
 import { getAuthToken, handleAuthExpired } from "./auth.js";
+import { CLIENT_TAB_ID } from "./clientTab.js";
 
 // If REACT_APP_API_BASE is set (e.g. "https://api.ptstimer.com"), use it.
 // Otherwise, use relative URLs so CRA proxy works in dev.
@@ -90,7 +91,8 @@ async function request(method, path, body) {
   const startedAt = Date.now();
   const options = {
     method,
-    headers: { Accept: "application/json" },
+    // X-PTS-Client lets this tab recognise (and skip) sync echoes of its own changes.
+    headers: { Accept: "application/json", "X-PTS-Client": CLIENT_TAB_ID },
   };
 
   const token = getAuthToken();

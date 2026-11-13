@@ -3,6 +3,13 @@
   --stats-accent-worst-bold: #ff0000;
 }
 
+/* The canvas shows behind Safari's status bar and floating toolbar (and in overscroll),
+   so it must match the app, not default to white. --primary-color follows the theme. */
+html,
+body {
+  background-color: var(--primary-color, #0E171D);
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',

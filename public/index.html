@@ -7,7 +7,12 @@
     <link rel="icon" href="%PUBLIC_URL%/ptsobg.svg" type="image/svg+xml">
 
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
+    <!-- Safari tints its status bar and toolbar from this and the page background;
+         SettingsContext keeps it in step with the user's theme colour. -->
+    <meta name="theme-color" content="#0E171D" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <!-- Paint the page dark before the CSS loads, so no white flashes or white bars. -->
+    <style>html,body{background-color:#0E171D;}</style>
     <meta
       name="description"
       content="Web site created using create-react-app"

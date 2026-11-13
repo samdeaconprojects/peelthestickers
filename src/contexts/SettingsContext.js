@@ -442,6 +442,9 @@ export const SettingsProvider = ({ children }) => {
       "--primary-color",
       primaryColor
     );
+    // Browser chrome (Safari's bars, Android's address bar) matches the theme colour.
+    const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeColorMeta) themeColorMeta.setAttribute("content", primaryColor);
     document.documentElement.style.setProperty(
       "--secondary-color",
       settings.secondaryColor || defaultSettings.secondaryColor

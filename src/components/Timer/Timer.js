@@ -4,6 +4,7 @@ import './Timer.css';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useGanTimer } from '../../contexts/GanTimerContext';
 import useMediaQuery from '../../hooks/useMediaQuery';
+import { setTimerBusy } from '../../utils/timerActivity';
 
 import { createSmartCubeClient } from '../../smart/createSmartCubeClient';
 import { getSmartCubeProviderLabel } from '../../smart/smartCubeProviderMeta';
@@ -1451,6 +1452,17 @@ function Timer({
   };
 
   const effectiveTimerOn = isGanMode ? ganTimerOn : timerOn;
+
+  // Let background updates (e.g. solves synced from another device) wait until idle.
+  const timerBusy = !inPlayerBar && (effectiveTimerOn || isInspecting || isSpacebarHeld);
+  useEffect(() => {
+    if (inPlayerBar) return undefined;
+    setTimerBusy(timerBusy);
+    return undefined;
+  }, [inPlayerBar, timerBusy]);
+  useEffect(() => () => {
+    if (!inPlayerBar) setTimerBusy(false);
+  }, [inPlayerBar]);
   const effectiveElapsedTime = isGanMode ? ganElapsedTime : elapsedTime;
   const effectiveLastTime = isGanMode ? ganLastTime : lastTime;
   const effectiveLastPenalty = isGanMode ? ganLastPenalty : lastPenalty;

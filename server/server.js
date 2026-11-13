@@ -306,6 +306,79 @@ function publishNotification(userID, payload, eventName = "social") {
   }
 }
 
+// -------------------- Multi-device solve sync --------------------
+// Tells the user's other open tabs/devices that their solves or sessions changed, so
+// they update without a reload. Rides the existing per-user notification stream as
+// "sync" events. The tab that made the change sends X-PTS-Client and ignores its own
+// echo. New/edited solve items travel in the message so other devices don't need an
+// extra read; deletes and bulk changes carry refs/scopes and the client refetches.
+const SOLVE_SYNC_MAX_ITEMS = 50;
+const SOLVE_SYNC_MAX_REFS = 500;
+
+function solveSyncScope(event, sessionID) {
+  const ev = normalizeEvent(event);
+  if (!ev) return null;
+  return { event: ev, sessionID: normalizeSessionID(sessionID || "main") };
+}
+
+function uniqueSolveSyncScopes(scopes = []) {
+  const map = new Map();
+  for (const scope of scopes) {
+    const normalized = scope ? solveSyncScope(scope.event ?? scope.Event, scope.sessionID ?? scope.SessionID) : null;
+    if (normalized) map.set(`${normalized.event}|${normalized.sessionID}`, normalized);
+  }
+  return Array.from(map.values());
+}
+
+function publishSolveSync(req, userID, { op, scopes = [], items = [], solveRefs = [], sessionStats = null, allScopes = false } = {}) {
+  try {
+    const id = String(userID || "").trim();
+    if (!id || !notificationClientsByUser.get(id)?.size) return;
+
+    const safeItems = Array.isArray(items) ? items.filter(Boolean) : [];
+    const itemScopes = safeItems.map((item) => ({ event: item.Event, sessionID: item.SessionID }));
+    const tooManyItems = safeItems.length > SOLVE_SYNC_MAX_ITEMS;
+    const refs = Array.isArray(solveRefs) ? solveRefs.filter(Boolean).map(String) : [];
+
+    publishNotification(
+      id,
+      {
+        type: "solves.changed",
+        op: String(op || "update"),
+        sourceClientID: String(req?.get?.("x-pts-client") || "").slice(0, 80) || null,
+        allScopes: !!allScopes,
+        scopes: uniqueSolveSyncScopes([...scopes, ...itemScopes]),
+        // Too many to send: the receiver refetches the scopes instead.
+        items: tooManyItems ? [] : safeItems,
+        itemsOmitted: tooManyItems,
+        solveRefs: refs.length > SOLVE_SYNC_MAX_REFS ? [] : refs,
+        sessionStats: sessionStats || null,
+      },
+      "sync"
+    );
+  } catch (err) {
+    console.warn("publishSolveSync failed:", err?.message || err);
+  }
+}
+
+function publishSessionsSync(req, userID, detail = {}) {
+  try {
+    const id = String(userID || "").trim();
+    if (!id || !notificationClientsByUser.get(id)?.size) return;
+    publishNotification(
+      id,
+      {
+        type: "sessions.changed",
+        sourceClientID: String(req?.get?.("x-pts-client") || "").slice(0, 80) || null,
+        ...detail,
+      },
+      "sync"
+    );
+  } catch (err) {
+    console.warn("publishSessionsSync failed:", err?.message || err);
+  }
+}
+
 function publishNotificationToUsers(userIDs, payload, eventName = "social") {
   const uniqueUserIDs = Array.from(
     new Set((Array.isArray(userIDs) ? userIDs : []).map((id) => String(id || "").trim()).filter(Boolean))
@@ -4420,6 +4493,9 @@ async function finalizeImportJob(userID, jobID) {
       UpdatedAt: nowIso(),
       Recompute: { ...recomputeState },
     });
+    // Background job: no request, so every open device (the importer included) refreshes.
+    publishSolveSync(null, userID, { op: "bulk", allScopes: true });
+    publishSessionsSync(null, userID, { reason: "import" });
   } catch (err) {
     const failed = await getImportJobItem(userID, jobID);
     await putImportJobItem({
@@ -5734,6 +5810,28 @@ app.use(
   )
 );
 app.param("userID", userIDParamGuard);
+
+// Session/event list changes and WCA imports reach the user's other devices once the
+// request succeeds (see publishSolveSync). Solve routes publish from their handlers.
+const SESSIONS_SYNC_ROUTES = [/^\/api\/session(\/|$)/, /^\/api\/customEvent(\/|$)/];
+app.use("/api", (req, res, next) => {
+  if (req.method === "GET") return next();
+  const url = `/api${req.path}`;
+  const isSessionsRoute = SESSIONS_SYNC_ROUTES.some((pattern) => pattern.test(url));
+  const isWcaImport = url === "/api/wca/import";
+  if (!isSessionsRoute && !isWcaImport) return next();
+
+  res.on("finish", () => {
+    const userID = req.auth?.userID;
+    if (!userID || res.statusCode >= 300) return;
+    publishSessionsSync(req, userID, { reason: isWcaImport ? "wca-import" : "sessions" });
+    // Deleting a session removes its solves; an import adds many.
+    if (isWcaImport || req.method === "DELETE") {
+      publishSolveSync(req, userID, { op: "bulk", allScopes: true });
+    }
+  });
+  next();
+});
 
 // -------------------- Visibility --------------------
 // GET routes that read another user's data, keyed by the privacy section that
@@ -8009,6 +8107,8 @@ app.post("/api/solve", async (req, res) => {
       })
     );
 
+    publishSolveSync(req, userID, { op: "add", items: [solveItem], sessionStats });
+
     return res.json({
       ok: true,
       item: solveItem,
@@ -8507,6 +8607,14 @@ app.post("/api/importSolvesBatch", async (req, res) => {
       ]);
     }
 
+    if (addedSolves.length > 0) {
+      publishSolveSync(req, userID, {
+        op: "import",
+        scopes: [{ event, sessionID }],
+        sessionStats,
+      });
+    }
+
     return res.json({ ok: true, addedSolves, wrote, sessionStats, eventStats, dayBuckets });
   } catch (e) {
     console.error("POST /api/importSolvesBatch error:", e);
@@ -8952,6 +9060,16 @@ app.post("/api/solves/move-session", async (req, res) => {
       tagScopeMutations
     );
 
+    publishSolveSync(req, userID, {
+      op: "move",
+      scopes: [
+        ...Array.from(sessionScopes.values()),
+        { event: fromEvent, sessionID: fromSessionID },
+        { event: toEvent, sessionID: toSessionID },
+      ],
+      solveRefs,
+    });
+
     return res.json({
       ok: true,
       requested: solveRefs.length,
@@ -9071,6 +9189,8 @@ app.post("/api/solves/bulk-tags", async (req, res) => {
       markTagStatsScopesDirty(userID, tagScopeMutations),
       markDayBucketScopesDirty(userID, dayBucketDirtyScopes),
     ]);
+
+    publishSolveSync(req, userID, { op: "update", items: updatedItems });
 
     return res.json({
       ok: true,
@@ -9224,6 +9344,7 @@ app.put("/api/solve/:userID/:solveRef", async (req, res) => {
         );
       }
 
+      publishSolveSync(req, userID, { op: "update", items: [rebuilt] });
       return res.json({ ok: true, item: rebuilt });
     }
 
@@ -9252,6 +9373,11 @@ app.put("/api/solve/:userID/:solveRef", async (req, res) => {
       })
     );
 
+    publishSolveSync(req, userID, {
+      op: "update",
+      scopes: [{ event: existing.Event, sessionID: existing.SessionID }],
+      items: [rebuilt],
+    });
     return res.json({ ok: true, item: rebuilt });
   } catch (e) {
     console.error("PUT /api/solve error:", e);
@@ -9329,6 +9455,7 @@ app.put("/api/solvePenalty/:userID/:solveRef", async (req, res) => {
       })
     );
 
+    publishSolveSync(req, userID, { op: "update", items: [updated] });
     return res.json({ ok: true, item: updated });
   } catch (e) {
     console.error("PUT /api/solvePenalty error:", e);
@@ -9371,6 +9498,11 @@ app.delete("/api/solve/:userID/:solveRef", async (req, res) => {
       })
     );
 
+    publishSolveSync(req, userID, {
+      op: "delete",
+      scopes: [{ event: existing.Event, sessionID: existing.SessionID }],
+      solveRefs: [solveRef],
+    });
     return res.json({ ok: true });
   } catch (e) {
     console.error("DELETE /api/solve error:", e);
