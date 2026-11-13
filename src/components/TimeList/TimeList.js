@@ -6,6 +6,7 @@ import { useSettings } from "../../contexts/SettingsContext";
 import { formatTime, calculateAverage, getOveralls, getExtremeIndexes } from "./TimeUtils";
 
 import useSolveSelection from "../../hooks/useSolveSelection";
+import { useIsMobileLayout } from "../../hooks/useMediaQuery";
 import useBulkSolveActions from "../../hooks/useBulkSolveActions";
 import BulkSolveControls from "../SolveBulk/BulkSolveControls";
 import { normalizeEventCode } from "../SolveBulk/solveBulkUtils";
@@ -261,6 +262,9 @@ function TimeList({
   const timeColorMode = timeColorModeRaw === "spectrum" ? "bucket" : timeColorModeRaw;
 
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  // Phones only ever fit 5 solves per row, whatever the column setting says.
+  const isMobileLayout = useIsMobileLayout();
+  const forceFiveCols = isMobileLayout && !inPlayerBar;
   const [selectedSolve, setSelectedSolve] = useState(null);
   const [selectedSolveIndex, setSelectedSolveIndex] = useState(null);
   const [selectedSolveList, setSelectedSolveList] = useState(null);
@@ -350,7 +354,9 @@ function TimeList({
 
   const horizontalColsSetting = String(settings?.horizontalTimeListCols || "auto").toLowerCase();
   const horizontalCount =
-    horizontalColsSetting === "12"
+    forceFiveCols
+      ? 5
+      : horizontalColsSetting === "12"
       ? 12
       : horizontalColsSetting === "5"
       ? 5
@@ -362,7 +368,9 @@ function TimeList({
     settings?.nonRollingTimeListCols || "auto"
   ).toLowerCase();
   const nonRollingColsPerRow =
-    nonRollingColsSetting === "12"
+    forceFiveCols
+      ? 5
+      : nonRollingColsSetting === "12"
       ? 12
       : nonRollingColsSetting === "5"
       ? 5
@@ -388,7 +396,9 @@ function TimeList({
     window.addEventListener("resize", handleResize);
 
     const resolvedColsPerRow =
-      nonRollingColsSetting === "12"
+      forceFiveCols
+        ? 5
+        : nonRollingColsSetting === "12"
         ? 12
         : nonRollingColsSetting === "5"
         ? 5
@@ -402,6 +412,7 @@ function TimeList({
     return () => window.removeEventListener("resize", handleResize);
   }, [
     inPlayerBar,
+    forceFiveCols,
     nonRollingColsSetting,
     nonRollingRowsToDisplay,
     nonRollingAutoColsBreakpointPx,
@@ -510,7 +521,9 @@ function TimeList({
   }, [canonicalSessionBestSingleMs, overallMin, practiceMode, solvesSafe]);
 
   const colsPerRow = isHorizontal
-    ? windowWidth > horizontalAutoColsBreakpointPx
+    ? forceFiveCols
+      ? 5
+      : windowWidth > horizontalAutoColsBreakpointPx
       ? 12
       : 5
     : nonRollingColsPerRow;
@@ -1336,7 +1349,7 @@ function TimeList({
                 return (
                   <div
                     key={index}
-                    className={`ao12 TimeItem ${textClass}`}
+                    className={`ao12 TimeItem ${textClass} ${timeLengthClass(formatTime(avg, true))}`}
                     onClick={() => openAverageWindow(slice)}
                   >
                     {formatTime(avg, true)}
@@ -1365,7 +1378,7 @@ function TimeList({
                 return (
                   <div
                     key={index}
-                    className={`ao5 TimeItem ${textClass}`}
+                    className={`ao5 TimeItem ${textClass} ${timeLengthClass(formatTime(avg, true))}`}
                     onClick={() => openAverageWindow(slice)}
                   >
                     {formatTime(avg, true)}
@@ -1418,7 +1431,7 @@ function TimeList({
                         : ""
                     } ${beatSessionSingle ? "session-single-beaten" : ""} ${
                       offlineRunStartRefs.has(solve?.solveRef) ? "offline-run-start" : ""
-                    }`}
+                    } ${timeLengthClass(formatTime(tval, false, solve?.penalty))}`}
                     data-bulk-select-item="true"
                     style={{ ...(perfStyle || {}), ...(selectStyleInline || {}) }}
                     title={offlineRunStartRefs.has(solve?.solveRef) ? "Offline solves start here - not yet synced to your profile" : undefined}

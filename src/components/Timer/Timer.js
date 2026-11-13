@@ -1,8 +1,9 @@
 // src/components/Timer/Timer.js
-import React, { useState, useEffect, useRef, Suspense } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, Suspense } from 'react';
 import './Timer.css';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useGanTimer } from '../../contexts/GanTimerContext';
+import useMediaQuery from '../../hooks/useMediaQuery';
 
 import { createSmartCubeClient } from '../../smart/createSmartCubeClient';
 import { getSmartCubeProviderLabel } from '../../smart/smartCubeProviderMeta';
@@ -217,6 +218,22 @@ function renderTimerValue(value, timerFont, showPenaltySuffix) {
   );
 }
 
+// How long a touch must be held before release starts the timer (stops brushes and
+// taps from starting a solve by accident).
+const TOUCH_HOLD_MS = 300;
+
+const TOUCH_TIMER_EXCLUDE =
+  'button, a, input, textarea, select, label, [role="button"], [contenteditable="true"], .gan-side-controls, .home-timer-side';
+
+// Touches start the timer only on the home timer area (or the fullscreen inspection
+// overlay), never on a control inside it.
+function isTouchTimerZone(target) {
+  if (typeof Element === "undefined" || !(target instanceof Element)) return false;
+  if (target.closest(".timer-inspection-overlay")) return true;
+  if (!target.closest(".home-timer-row")) return false;
+  return !target.closest(TOUCH_TIMER_EXCLUDE);
+}
+
 function Timer({
   addTime,
   inPlayerBar = false,
@@ -254,6 +271,9 @@ function Timer({
   const [timerOn, setTimerOn] = useState(false);
   const [isSpacebarHeld, setIsSpacebarHeld] = useState(false);
   const [canStart, setCanStart] = useState(true);
+  // Touch hold in progress but not yet held long enough to start (shown in red).
+  const [touchArming, setTouchArming] = useState(false);
+  const prefersTouch = useMediaQuery('(pointer: coarse)');
 
   // -------------------------
   // GAN TIMER
@@ -1284,6 +1304,115 @@ function Timer({
     };
   }, [settings.timerInput, manualTime, timerOn, isInspecting, settings.inspectionEnabled, isSpacebarHeld, canStart, isGanMode, isCubeMode]);
 
+  // -------------------------
+  // Touch timing (phones / tablets) — mirrors the spacebar:
+  // hold the timer area until the time turns green, release to start (or to begin /
+  // end inspection), touch anywhere to stop. Desktop mice never fire touch events.
+  // -------------------------
+  const touchActiveRef = useRef(false);
+  const touchHandlersRef = useRef(null);
+
+  const releaseHold = () => {
+    setIsSpacebarHeld(false);
+    setTouchArming(false);
+
+    if (holdTimeoutRef.current) {
+      clearTimeout(holdTimeoutRef.current);
+      holdTimeoutRef.current = null;
+    }
+  };
+
+  touchHandlersRef.current = {
+    start(event) {
+      if (inPlayerBar || isGanMode || isCubeMode || settings.timerInput !== 'Keyboard') return;
+
+      if (timerOn) {
+        // Any touch stops a running solve; swallow it so nothing underneath gets tapped.
+        if (event.cancelable) event.preventDefault();
+        touchActiveRef.current = true;
+        stopTimer();
+        return;
+      }
+
+      // Extra fingers while already holding just join the hold.
+      if (touchActiveRef.current) {
+        if (event.cancelable) event.preventDefault();
+        return;
+      }
+
+      if (!isTouchTimerZone(event.target)) return;
+
+      if (event.cancelable) event.preventDefault();
+      touchActiveRef.current = true;
+
+      setIsSpacebarHeld(true);
+      setCanStart(false);
+      setTouchArming(true);
+
+      if (holdTimeoutRef.current) clearTimeout(holdTimeoutRef.current);
+      holdTimeoutRef.current = setTimeout(
+        () => {
+          holdTimeoutRef.current = null;
+          setTouchArming(false);
+          setCanStart(true);
+        },
+        // Inspection is already a deliberate state, so its release starts at once.
+        isInspecting ? 0 : TOUCH_HOLD_MS
+      );
+    },
+
+    end(event) {
+      if (!touchActiveRef.current) return;
+      // Wait until the last finger lifts.
+      if (event.touches && event.touches.length > 0) return;
+
+      if (event.cancelable) event.preventDefault();
+      touchActiveRef.current = false;
+      releaseHold();
+
+      if (ignoreNextKeyUp.current) {
+        ignoreNextKeyUp.current = false;
+        return;
+      }
+
+      if (!timerOn && canStart) {
+        const inspectionOn = !!settings.inspectionEnabled;
+        if (!inspectionOn) startTimer();
+        else {
+          if (!isInspecting) startInspection();
+          else commitInspectionAndStartTimer();
+        }
+      }
+
+      setCanStart(false);
+    },
+
+    cancel() {
+      if (!touchActiveRef.current) return;
+      touchActiveRef.current = false;
+      ignoreNextKeyUp.current = false;
+      releaseHold();
+      setCanStart(false);
+    },
+  };
+
+  useEffect(() => {
+    // Registered once; the handlers ref always holds this render's closures.
+    // passive: false so preventDefault can stop scrolling, zoom and synthetic clicks.
+    const onStart = (e) => touchHandlersRef.current?.start(e);
+    const onEnd = (e) => touchHandlersRef.current?.end(e);
+    const onCancel = (e) => touchHandlersRef.current?.cancel(e);
+
+    document.addEventListener('touchstart', onStart, { passive: false });
+    document.addEventListener('touchend', onEnd, { passive: false });
+    document.addEventListener('touchcancel', onCancel);
+    return () => {
+      document.removeEventListener('touchstart', onStart);
+      document.removeEventListener('touchend', onEnd);
+      document.removeEventListener('touchcancel', onCancel);
+    };
+  }, []);
+
   useEffect(() => {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -1349,8 +1478,11 @@ function Timer({
   const fullscreenInspectionOn = !!settings.inspectionFullscreen;
 
   const readyGreen = isSpacebarHeld && canStart && !timerOn && !isInspecting;
+  const touchHoldingNotReady = touchArming && isSpacebarHeld && !canStart && !timerOn;
 
-  const timerColorStyle = isInspecting
+  const timerColorStyle = touchHoldingNotReady
+    ? { color: "#ff5c6c", transition: "color 80ms linear" }
+    : isInspecting
     ? { color: getInspectionColor(), transition: "color 120ms linear" }
     : readyGreen
     ? { color: "#2EC4B6", transition: "color 120ms linear" }
@@ -1376,11 +1508,75 @@ function Timer({
   const showKeyboardOrGanOrCube =
     settings.timerInput === 'Keyboard' || forceKeyboardView || isGanMode || isCubeMode;
 
+  // Keep the Bluetooth connect controls in the gap between the scramble and the timer
+  // digits. Long scrambles (6x6/7x7) grow down into the timer area, so a fixed offset
+  // ends up overlapping the scramble text.
+  const sideControlsRef = useRef(null);
+  const timerTextRef = useRef(null);
+  const hasSideControls = showGanControls || showCubeControls;
+
+  useLayoutEffect(() => {
+    const controls = sideControlsRef.current;
+    const wrap = controls?.parentElement;
+    if (!hasSideControls || !controls || !wrap) return undefined;
+
+    const root = wrap.closest(".home-screen") || document;
+    let frame = 0;
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const timerEl = timerTextRef.current;
+        const scrambleEl = root.querySelector(".scramble-select-container .scramble-text");
+        if (!timerEl || !scrambleEl) {
+          controls.classList.remove("gan-side-controls--measured");
+          return;
+        }
+        const wrapRect = wrap.getBoundingClientRect();
+        const timerRect = timerEl.getBoundingClientRect();
+        const fontSize = parseFloat(getComputedStyle(timerEl).fontSize) || 0;
+        // Approximate top of the digit glyphs inside the line box (cap height ~0.72em).
+        const digitsTop = timerRect.top + Math.max(0, (timerRect.height - fontSize * 0.72) / 2);
+        const scrambleRect = scrambleEl.getBoundingClientRect();
+        const scrambleBottom = scrambleRect.bottom;
+        const h = controls.offsetHeight;
+        const gap = 8;
+        let top = (scrambleBottom + digitsTop) / 2 - h / 2;
+        // Never above the scramble's bottom edge; if the gap is tight, hug the scramble.
+        top = Math.max(top, scrambleBottom + gap);
+        controls.style.setProperty("--gan-controls-top", `${Math.round(top - wrapRect.top)}px`);
+        controls.style.setProperty(
+          "--gan-controls-left",
+          // Line up with the scramble (centered on the page) rather than the timer text,
+          // which is deliberately nudged left by its margin-right.
+          `${Math.round(scrambleRect.left + scrambleRect.width / 2 - wrapRect.left)}px`
+        );
+        controls.classList.add("gan-side-controls--measured");
+      });
+    };
+
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(update) : null;
+    observer?.observe(wrap);
+    observer?.observe(controls);
+    if (timerTextRef.current) observer?.observe(timerTextRef.current);
+    const scrambleContainer = root.querySelector(".scramble-select-container");
+    if (scrambleContainer) observer?.observe(scrambleContainer);
+    const scrambleText = root.querySelector(".scramble-select-container .scramble-text");
+    if (scrambleText) observer?.observe(scrambleText);
+    window.addEventListener("resize", update);
+    update();
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  });
+
   return (
     <div className={`timer-display ${compact ? "timer-display--compact" : ""} ${inPlayerBar ? "timer-display--playerbar" : ""}`}>
       {showKeyboardOrGanOrCube ? (
         <div className={`timer-center-wrap ${inPlayerBar ? "timer-center-wrap--playerbar" : ""}`}>
-          <div className="gan-side-controls">
+          <div className="gan-side-controls" ref={sideControlsRef}>
             {/* GAN Timer controls */}
             {showGanControls && (
               <div className="gan-controls">
@@ -1464,6 +1660,7 @@ function Timer({
           {/* FULLSCREEN INSPECTION */}
           {isInspecting && fullscreenInspectionOn && !isGanMode && !isCubeMode ? (
             <div
+              className="timer-inspection-overlay"
               style={{
                 position: "fixed",
                 inset: 0,
@@ -1496,13 +1693,14 @@ function Timer({
                   marginRight: "60px"
                 }}
               >
-                Inspection — press Space to start
+                Inspection — {prefersTouch ? "hold and release to start" : "press Space to start"}
                 {inspectionElapsed >= 15000 ? " (+2)" : ""}
               </div>
             </div>
           ) : (
             <>
               <p
+                ref={timerTextRef}
                 className={`Timer ${displayHasMinutes ? "Timer--with-minutes" : ""} ${useCondensedTimerLayout ? "Timer--home-long" : ""} ${(isGanMode || isCubeMode || settings.timerInput === "Keyboard") ? "Timer--static" : ""} ${compact ? "Timer--compact" : ""} ${inPlayerBar ? "Timer--playerbar" : ""} ${!inPlayerBar ? `Timer--size-${timerSize}` : ""} Timer--font-${timerFont}`}
                 style={
                   isGanMode

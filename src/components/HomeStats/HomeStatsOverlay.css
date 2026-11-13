@@ -859,3 +859,20 @@
     display: none;
   }
 }
+
+/* Phone layout: no room for the side cards; the background chart stays centered. */
+@media (max-width: 640px) {
+  .homeStatsOverlay {
+    transform: none;
+  }
+
+  .homeStatsSlot--left,
+  .homeStatsSlot--right {
+    display: none;
+  }
+
+  .homeStatsSlot--background {
+    transform: translate(-50%, -50%);
+    width: calc(100vw - 24px);
+  }
+}

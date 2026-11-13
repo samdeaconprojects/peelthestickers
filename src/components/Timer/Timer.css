@@ -239,6 +239,7 @@
 
 /* GAN controls shown subtly above timer */
 .gan-controls {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -246,18 +247,18 @@
 
   margin-bottom: 6px;
 
-  opacity: 0.35;
+  opacity: 0.6;
   transition: opacity 0.2s ease;
 }
 
 .gan-controls:hover {
-  opacity: 0.8;
+  opacity: 1;
 }
 
 /* small subtle connect button */
 .gan-controls button {
   background: transparent;
-  border: 1px solid rgba(255,255,255,0.25);
+  border: 1px solid rgba(255,255,255,0.4);
   color: white;
   padding: 4px 10px;
   font-size: 12px;
@@ -271,6 +272,11 @@
 
 /* status dot */
 .gan-dot {
+  /* Out of flow so the button itself stays centered; the dot hangs off its right side. */
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
   width: 8px;
   height: 8px;
   border-radius: 999px;
@@ -359,4 +365,51 @@
   pointer-events: auto;
   z-index: 20;
   width: max-content;
+}
+
+/* Placed by Timer.js between the scramble's bottom edge and the timer digits. */
+.gan-side-controls--measured {
+  left: var(--gan-controls-left);
+  top: var(--gan-controls-top);
+  transform: translateX(-50%);
+  margin-top: 0;
+}
+
+/* Phone layout: centered timer, keypad that fits the screen width. */
+@media (max-width: 640px) {
+  .manual-entry-container {
+    width: 100%;
+    margin-right: 0;
+    margin-bottom: 12px;
+  }
+
+  .manual-display {
+    font-size: calc(min(20vw, 11vh) * var(--timer-size-scale, 1));
+  }
+
+  .keypad-grid {
+    width: 100%;
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  .keypad-grid button {
+    height: 44px;
+    padding: 0;
+    font-size: 1.05rem;
+    opacity: 0.85;
+  }
+}
+
+/* Touch timing: holding the timer area must not select text, open the iOS callout
+   or start a scroll/zoom gesture. */
+@media (hover: none) {
+  .home-timer-row,
+  .timer-inspection-overlay {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: none;
+  }
 }

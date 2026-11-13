@@ -9,7 +9,7 @@ import "./App.css";
 import Timer from "./components/Timer/Timer";
 import TimeList from "./components/TimeList/TimeList";
 import AveragesDisplay from "./components/AveragesDisplay/AveragesDisplay";
-import useMediaQuery from "./hooks/useMediaQuery";
+import useMediaQuery, { HIDE_PLAYER_BAR_QUERY } from "./hooks/useMediaQuery";
 import HomeTimerSide from "./components/HomeTimerSide/HomeTimerSide";
 import AverageDetailModal from "./components/Detail/AverageDetailModal";
 import Profile from "./components/Profile/Profile";
@@ -1902,6 +1902,8 @@ function App() {
   // Beside-the-timer placement needs room on the left (the column shrinks via CSS zoom
   // down to 900px); narrower screens keep both below.
   const canPlaceBesideTimer = useMediaQuery("(min-width: 900px)");
+  // Phones (and phone-width windows) drop the player bar entirely; pages get the full height.
+  const playerBarSuppressed = useMediaQuery(HIDE_PLAYER_BAR_QUERY);
   const homeLeftOfTimer = canPlaceBesideTimer ? settings?.homeLeftOfTimer || "none" : "none";
   const [selectedAverageSolve, setSelectedAverageSolve] = useState(null);
   const [sharedSession, setSharedSession] = useState(null);
@@ -6334,7 +6336,7 @@ function App() {
     async (updates = {}) => {
       // Tag bindings work on the home timer and in player-bar mode (the bar's timer
       // feeds the same current session).
-      const timerSurfaceActive = isHomePage || playerBarVisible;
+      const timerSurfaceActive = isHomePage || (playerBarVisible && !playerBarSuppressed);
       if (
         !timerSurfaceActive ||
         (sharedSession && !isHostedSharedSession(sharedSession)) ||
@@ -6466,6 +6468,7 @@ function App() {
       settings?.timerInput,
       sharedSession,
       playerBarVisible,
+      playerBarSuppressed,
       tagScopeEventKey,
     ]
   );
@@ -7726,7 +7729,7 @@ function App() {
         ) : null}
         <div
           className={`navAndPage ${
-            isHomePage || !playerBarVisible ? "fullHeight" : "reducedHeight"
+            isHomePage || !playerBarVisible || playerBarSuppressed ? "fullHeight" : "reducedHeight"
           }`}
         >
           <Navigation
@@ -7827,6 +7830,7 @@ function App() {
 
                       <div className="event-hud">
                         <div
+                          className="event-hud-inner"
                           style={{
                             position: "relative",
                             display: "flex",
@@ -7839,6 +7843,7 @@ function App() {
                           }}
                         >
                           <div
+                            className="event-hud-controls"
                             style={{
                               display: "flex",
                               flexDirection: "column",
@@ -7994,6 +7999,7 @@ function App() {
 
                           {liveRoomFollow ? (
                             <div
+                              className="home-live-status"
                               onMouseDown={(e) => e.stopPropagation()}
                               onClick={(e) => e.stopPropagation()}
                               style={{ position: "absolute", top: "110px", left: "12px", zIndex: 200 }}
@@ -8015,6 +8021,7 @@ function App() {
 
                           {liveRoomError ? (
                             <div
+                              className="home-live-status"
                               onMouseDown={(e) => e.stopPropagation()}
                               onClick={(e) => e.stopPropagation()}
                               style={{
@@ -8102,6 +8109,7 @@ function App() {
 
                           {hostedRoomMeta?.active ? (
                             <div
+                              className="home-live-status"
                               style={{
                                 position: "absolute",
                                 top: "18px",
@@ -8541,7 +8549,7 @@ function App() {
         </div>
       </div>
 
-      {!isHomePage && !hidePlayerBarSignedOut && playerBarVisible && (
+      {!isHomePage && !hidePlayerBarSignedOut && !playerBarSuppressed && playerBarVisible && (
         <PlayerBar
           isSignedIn={isSignedIn}
           sessions={sessions}
@@ -8616,7 +8624,7 @@ function App() {
         />
       )}
 
-      {!isHomePage && !hidePlayerBarSignedOut && !playerBarVisible && (
+      {!isHomePage && !hidePlayerBarSignedOut && !playerBarSuppressed && !playerBarVisible && (
         <div className="toggle-bar" style={{ bottom: "12px" }}>
           <button
             className="toggle-button"

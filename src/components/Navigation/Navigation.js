@@ -1,6 +1,7 @@
 // Navigation.js
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { useIsMobileLayout } from '../../hooks/useMediaQuery';
 import './Navigation.css';
 import statsIcon from '../../assets/Stats.svg';
 import socialIcon from '../../assets/Social.svg';
@@ -36,7 +37,12 @@ import { hexToRgbString } from '../../utils/colorUtils';
 //   );
 // }
 
-function NavItem({ to, isActive, onClick, children, activeClassName = '', activeDotColor }) {
+// Text labels only show in the mobile drawer (hidden by CSS on desktop).
+function NavLabel({ children }) {
+  return <span className="nav-label">{children}</span>;
+}
+
+function NavItem({ to, isActive, onClick, children, label, activeClassName = '', activeDotColor }) {
   if (isActive) {
     const activeDotGlowColor = activeDotColor
       ? `rgba(${hexToRgbString(activeDotColor, '255, 255, 255')}, 0.82)`
@@ -57,6 +63,7 @@ function NavItem({ to, isActive, onClick, children, activeClassName = '', active
         }
       >
         <i className="nav-icon nav-icon--active">{children}</i>
+        {label ? <NavLabel>{label}</NavLabel> : null}
       </span>
     );
   }
@@ -64,6 +71,7 @@ function NavItem({ to, isActive, onClick, children, activeClassName = '', active
   return (
     <Link to={to} onClick={onClick}>
       <i className="nav-icon">{children}</i>
+      {label ? <NavLabel>{label}</NavLabel> : null}
     </Link>
   );
 }
@@ -82,14 +90,65 @@ function Navigation({
   const isSocialPage = location.pathname === '/social';
   const profileColor = user?.Color || user?.color || '#2EC4B6';
 
+  // Phones: the sidebar becomes a slide-in drawer opened from a floating menu button.
+  const isMobileLayout = useIsMobileLayout();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const closeDrawer = () => setDrawerOpen(false);
+
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [location.pathname, isMobileLayout]);
+
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setDrawerOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [drawerOpen]);
+
+  const navClassName = [
+    'Navigation',
+    isMobileLayout ? 'Navigation--mobile' : '',
+    isMobileLayout && drawerOpen ? 'is-open' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <nav className="Navigation">
+    <>
+    {isMobileLayout ? (
+      <button
+        type="button"
+        className={`nav-mobile-toggle${drawerOpen ? ' is-open' : ''}`}
+        aria-label={drawerOpen ? 'Close menu' : 'Open menu'}
+        aria-expanded={drawerOpen}
+        onClick={(e) => {
+          // Drop focus so a later spacebar press goes to the timer, not this button.
+          e.currentTarget.blur();
+          setDrawerOpen((open) => !open);
+        }}
+      >
+        <span className="nav-mobile-toggle__bar" />
+        <span className="nav-mobile-toggle__bar" />
+        <span className="nav-mobile-toggle__bar" />
+      </button>
+    ) : null}
+    {isMobileLayout && drawerOpen ? (
+      <div className="nav-mobile-backdrop" onClick={closeDrawer} aria-hidden="true" />
+    ) : null}
+    <nav className={navClassName} aria-hidden={isMobileLayout && !drawerOpen ? true : undefined}>
       <Link
         to="/"
-        onClick={onMainLogoClick}
-        className="nav-logo-link"
+        onClick={(e) => {
+          closeDrawer();
+          onMainLogoClick?.(e);
+        }}
+        className={`nav-logo-link${location.pathname === '/' ? ' is-current' : ''}`}
       >
         <PTSStatusLogo status={dbStatus} />
+        <NavLabel>Timer</NavLabel>
       </Link>
 
       <ul>
@@ -98,6 +157,7 @@ function Navigation({
             to="/profile"
             onClick={onNavClick}
             isActive={isProfilePage}
+            label="Profile"
             activeClassName="nav-item-current--profile"
             activeDotColor={profileColor}
           >
@@ -126,6 +186,7 @@ function Navigation({
             to="/stats"
             onClick={onNavClick}
             isActive={isStatsPage}
+            label="Stats"
             activeClassName="nav-item-current--stats"
             activeDotColor="#F4C542"
           >
@@ -138,6 +199,7 @@ function Navigation({
             to="/social"
             onClick={onNavClick}
             isActive={isSocialPage}
+            label="Social"
             activeClassName="nav-item-current--social"
             activeDotColor="#5DA9FF"
           >
@@ -157,15 +219,24 @@ function Navigation({
             <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
               <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
             </svg>
+            <NavLabel>Admin</NavLabel>
           </Link>
         ) : null}
-        <button onClick={handleSettingsClick} className="settings-button">
+        <button
+          onClick={(e) => {
+            closeDrawer();
+            handleSettingsClick?.(e);
+          }}
+          className="settings-button"
+        >
           <i className="nav-icon">
             <img src={settingsIcon} alt="Settings" className="settings" />
           </i>
+          <NavLabel>Settings</NavLabel>
         </button>
       </div>
     </nav>
+    </>
   );
 }
 

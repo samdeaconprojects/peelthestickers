@@ -195,3 +195,40 @@
     display: none;
   }
 }
+
+/* Phone layout: four columns that always fit the screen width. */
+@media (max-width: 640px) {
+  .averages-table {
+    grid-template-columns: 56px repeat(var(--avg-cols, 4), minmax(0, 1fr));
+    column-gap: 6px;
+    row-gap: 4px;
+    width: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+
+  .averages-table--labels-right {
+    grid-template-columns: repeat(var(--avg-cols, 4), minmax(0, 1fr)) 56px;
+  }
+
+  .averages-table .cell {
+    text-overflow: clip;
+  }
+
+  .cell.current {
+    font-size: calc(19pt * var(--home-averages-scale, 1));
+  }
+
+  .cell.current.avg-col--ao5 {
+    font-size: calc(21pt * var(--home-averages-scale, 1));
+  }
+
+  .cell.bpa-wpa {
+    column-gap: 4px;
+    font-size: calc(13pt * var(--home-averages-scale, 1));
+  }
+
+  .row-title.bpa-wpa-row {
+    font-size: calc(10pt * var(--home-averages-scale, 1));
+  }
+}

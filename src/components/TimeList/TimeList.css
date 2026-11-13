@@ -572,3 +572,135 @@
     font-size: 16px;
   }
 }
+
+/* =========================
+   Phone layout: 5 solves per row, cells sized from the screen width so the
+   whole list fits without sideways scrolling.
+   ========================= */
+@media (max-width: 640px) {
+  .time-list-container {
+    /* 24px page gutters, 2 x 26px arrows, 40px row labels, 5 column gaps */
+    --mobile-cell-width: clamp(44px, calc((100vw - 24px - 52px - 8px - 40px - 20px) / 5), 78px);
+    --home-horizontal-cell-width: var(--mobile-cell-width);
+    --home-horizontal-cell-height: 34px;
+    padding-bottom: 0;
+  }
+
+  .horizontal-shell {
+    --nav-hit-size: 26px;
+    gap: 4px;
+    width: 100%;
+  }
+
+  .horizontal-shell > .horizontal-nav-btn:first-child {
+    margin-right: 0;
+  }
+
+  .horizontal-nav-btn {
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    opacity: 0.5;
+  }
+
+  .horizontal-time-list {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  .horizontal-row {
+    grid-template-columns: repeat(var(--cols), var(--home-horizontal-cell-width)) 40px;
+  }
+
+  .horizontal-row > .TimeItem {
+    font-size: 15px;
+    letter-spacing: -0.01em;
+  }
+
+  .horizontal-row > .ao12,
+  .horizontal-row > .ao5 {
+    font-size: 13px;
+  }
+
+  .horizontal-row > .row-label {
+    width: 40px;
+    font-size: 10px;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  .horizontal-row.count-row > .row-label {
+    font-size: 8.5px;
+    letter-spacing: 0;
+  }
+
+  .horizontal-row > .solve-count {
+    font-size: 11px;
+  }
+
+  .horizontal-row > .TimeItem.time-len-lg,
+  .TimeList td.time-len-lg {
+    font-size: 12px;
+    letter-spacing: -0.02em;
+  }
+
+  .horizontal-row > .TimeItem.time-len-xl,
+  .TimeList td.time-len-xl {
+    font-size: 10.5px;
+    letter-spacing: -0.03em;
+  }
+
+  /* Grid (non-rolling) list: full width, arrows in a slim column on the right. */
+  .time-list-container:has(.pagination-buttons) {
+    padding-right: 30px;
+    box-sizing: border-box;
+  }
+
+  .TimeList,
+  .TimeList--nonRolling {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .TimeList tr {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(52px, auto);
+    gap: 4px;
+  }
+
+  .TimeList td {
+    padding: 7px 2px;
+    font-size: 14px;
+    letter-spacing: -0.01em;
+  }
+
+  .TimeList--nonRolling td {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .TimeList--nonRolling tr + tr {
+    margin-top: 6px;
+  }
+
+  .pagination-buttons {
+    right: -4px;
+  }
+
+  .pagination-buttons button {
+    width: 30px;
+    height: 30px;
+    padding: 2px;
+  }
+}
+
+/* Touch screens have no hover: a tap would leave the lift and delete badge stuck on.
+   Delete stays available from the solve detail sheet. */
+@media (hover: none) {
+  .TimeItem:hover {
+    transform: none;
+  }
+
+  .TimeItem:hover .delete-icon {
+    display: none;
+  }
+}

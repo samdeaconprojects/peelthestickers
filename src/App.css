@@ -814,3 +814,228 @@ select {
   border-color: rgba(46, 196, 182, 0.85) !important;
   background: rgba(46, 196, 182, 0.14) !important;
 }
+
+/* =====================================================================
+   Phone layout (max-width: 640px — keep in sync with MOBILE_LAYOUT_QUERY
+   in hooks/useMediaQuery.js). Nothing above this width is affected.
+   ===================================================================== */
+@media (max-width: 640px) {
+  .App {
+    height: 100vh;
+    /* Mobile Safari's 100vh runs under the toolbar; dvh is the visible height. */
+    height: 100dvh;
+  }
+
+  .main-content {
+    padding-left: 12px;
+    padding-right: 12px;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Room for the floating menu button on every page except the timer, whose
+     header row already leaves a gap for it. */
+  .main-content:not(.main-content--home) {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 56px);
+  }
+
+  .main-content--home {
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .home-screen {
+    --home-side-slot-width: auto;
+    --home-scramble-max-width: 100%;
+    --home-scramble-scale: 0.86;
+    --home-scramble-nav-scale: 0.9;
+    --home-averages-scale: 0.74;
+    --home-timelist-scale: 0.86;
+    --home-timelist-padding-scale: 0.8;
+    min-height: 100%;
+    height: auto;
+    /* The 3D cube preview's faces overhang its box; clip (not hidden) so nothing can
+       scroll the page sideways. */
+    overflow-x: clip;
+  }
+
+  /* ---- Header: [menu gap + sign in] ........ [event + pills] [cube]
+          then the scramble and the tag chips, each across the full width. ---- */
+  .scramble-select-container {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "auth controls cube"
+      "scramble scramble scramble"
+      "tags tags tags";
+    column-gap: 8px;
+    row-gap: 4px;
+    align-items: center;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
+    padding-bottom: 0;
+  }
+
+  .left-slot-auth {
+    grid-area: auth;
+    align-self: center;
+    max-width: none;
+    min-width: 0;
+    padding-left: 50px;
+    box-sizing: border-box;
+    transform: none;
+  }
+
+  /* Signed in: the profile lives in the menu, so the header slot stays empty. */
+  .left-slot-auth .name-tag--signedIn {
+    display: none;
+  }
+
+  .left-slot-auth .name-tag--signedOut .auth-button {
+    min-width: 0;
+    height: 32px;
+    padding: 0 12px;
+    font-size: 14px;
+  }
+
+  .scrambleRelayContainer {
+    grid-area: scramble;
+    padding-top: 0;
+  }
+
+  .cube-and-event,
+  .cube-and-event .event-hud,
+  .cube-and-event .event-hud-inner {
+    display: contents !important;
+  }
+
+  .cube-and-event .puzzle-hud {
+    grid-area: cube;
+    width: auto;
+    padding: 0;
+    align-self: center;
+    justify-content: center;
+    /* zoom (not transform) so the flip button's hit area shrinks with it */
+    zoom: 0.4;
+  }
+
+  .cube-and-event .event-hud-controls {
+    grid-area: controls;
+    margin-left: 0 !important;
+    gap: 4px !important;
+    align-self: center;
+  }
+
+  .cube-and-event .event-hud-controls .event-selector-trigger {
+    zoom: 0.8;
+  }
+
+  /* Tag chips: one wrapped row under the scramble instead of a column over the timer. */
+  .home-tag-dock {
+    grid-area: tags;
+    position: static !important;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    margin-top: 2px;
+    /* The scramble's add-solve "+" hangs into this row on the right; mirror the
+       inset on the left so the chips stay centered. */
+    padding: 0 34px;
+    box-sizing: border-box;
+  }
+
+  /* Room / live status pills flow into the header instead of floating over it. */
+  .home-live-status {
+    position: static !important;
+    grid-column: 1 / -1;
+    justify-self: center;
+    margin-top: 4px;
+  }
+
+  /* ---- Timer: takes the free space between the header and the stats, centered ---- */
+  .home-timer-row {
+    max-height: none;
+    flex: 1 0 auto;
+    justify-content: center;
+    min-height: clamp(120px, 24vh, 240px);
+  }
+
+  .home-timer-row > .timer-display {
+    flex: 0 0 auto;
+  }
+
+  .home-timer-row .Timer {
+    font-size: calc(min(25vw, 13vh) * var(--timer-size-scale, 1));
+    letter-spacing: calc(4px * var(--timer-letter-spacing-scale, 1));
+    margin: 0;
+    transform: none;
+  }
+
+  .home-timer-row .Timer.Timer--with-minutes,
+  .home-timer-row .Timer.Timer--home-long {
+    font-size: calc(min(19vw, 11vh) * var(--timer-size-scale, 1));
+    letter-spacing: calc(2px * var(--timer-letter-spacing-scale, 1));
+  }
+
+  .home-timer-row .Timer.Timer--compact {
+    font-size: calc(min(17vw, 9vh) * var(--timer-size-scale, 1));
+  }
+
+  .home-timer-row .timer-center-wrap {
+    width: 100%;
+    display: grid;
+    place-items: center;
+  }
+
+  /* ---- Averages + time list share whatever height is left ---- */
+  .home-bottom-stack {
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    gap: 18px;
+    padding-bottom: 14px;
+  }
+
+  .home-bottom-stack .averages-table {
+    margin-top: 0;
+    margin-bottom: 0;
+    transform: none;
+  }
+
+  .home-bottom-stack > .time-list-container:first-child {
+    margin-top: 0;
+  }
+
+  /* Shared (head-to-head) home view */
+  .home-screen--shared {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+  }
+
+  .home-screen--shared .scramble-select-container {
+    margin-bottom: 0;
+  }
+
+  .home-screen--shared .timer-display {
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+
+  .home-tag-dock--shared {
+    width: 100%;
+    max-width: none;
+  }
+
+  /* Manual-solve modal fits the phone */
+  .manualSolvePopupContent {
+    width: calc(100vw - 24px);
+    padding: 18px 14px 14px;
+    box-sizing: border-box;
+  }
+
+  .deleteUndoToast {
+    left: 12px;
+    right: 12px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    justify-content: space-between;
+  }
+}
