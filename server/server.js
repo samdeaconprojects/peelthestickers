@@ -1748,6 +1748,9 @@ async function mapWithConcurrency(items, limit, fn) {
 }
 
 const DAY_BUCKET_RECOMPUTE_CONCURRENCY = 8;
+// Parallel batch calls per import chunk. One user's items share a partition key, so going much
+// higher mostly buys throttling once DynamoDB's per-partition write limit is reached.
+const IMPORT_DDB_CONCURRENCY = Math.max(1, Number(process.env.PTS_IMPORT_DDB_CONCURRENCY || 6));
 
 async function recomputeAllEventsDayBucket(userID, dayKey, { timeZone: knownTimeZone, events: knownEvents } = {}) {
   const day = String(dayKey || "").trim();
@@ -2066,7 +2069,19 @@ async function queryUserItemsByRange(userID, start, end) {
   return items;
 }
 
-async function recomputeAllDayBucketsForEvent(userID, event) {
+async function recomputeAllEventsDayBuckets(userID, dayKeys, { timeZone } = {}) {
+  const days = Array.from(dayKeys || []).sort();
+  if (!days.length) return;
+  const zone = timeZone || (await getUserDayBucketTimeZone(userID));
+  const events = await listUserEvents(userID);
+  await mapWithConcurrency(days, DAY_BUCKET_RECOMPUTE_CONCURRENCY, (dayKey) =>
+    recomputeAllEventsDayBucket(userID, dayKey, { timeZone: zone, events })
+  );
+}
+
+// `allEvents: false` leaves the all-events buckets for the caller, which can rebuild them once
+// for several events (an import touching eleven events would otherwise redo each day eleven times).
+async function recomputeAllDayBucketsForEvent(userID, event, { allEvents = true } = {}) {
   const ev = normalizeEvent(event);
   if (!ev) return { event: null, daysAffected: [] };
 
@@ -2091,6 +2106,8 @@ async function recomputeAllDayBucketsForEvent(userID, event) {
     (solve) => getDayKey(solve?.CreatedAt, { timeZone })
   );
 
+  const inFlight = new Set();
+  let writeError = null;
   for await (const { dayKey, solves: daySolves, repeat } of days) {
     allDaysAffected.add(dayKey);
     daysWithAll.add(dayKey);
@@ -2101,15 +2118,23 @@ async function recomputeAllDayBucketsForEvent(userID, event) {
     const mainSolves = daySolves.filter((solve) => normalizeSessionID(solve?.SessionID) === "main");
     if (mainSolves.length) daysWithMain.add(dayKey);
 
-    await Promise.all([
-      writeDayBucketItem(buildDayBucketItem({ userID, dayKey, event: ev, timeZone, solves: daySolves })),
-      mainSolves.length
-        ? writeDayBucketItem(
-            buildDayBucketItem({ userID, dayKey, event: ev, mainOnly: true, timeZone, solves: mainSolves })
-          )
-        : null,
-    ]);
+    // Items are built now so the day's solves can be let go; the writes overlap with reading on,
+    // a bounded number at a time (years of history is thousands of days).
+    const items = [buildDayBucketItem({ userID, dayKey, event: ev, timeZone, solves: daySolves })];
+    if (mainSolves.length) {
+      items.push(buildDayBucketItem({ userID, dayKey, event: ev, mainOnly: true, timeZone, solves: mainSolves }));
+    }
+    for (const item of items) {
+      const write = writeDayBucketItem(item)
+        .catch((err) => { writeError ||= err; })
+        .finally(() => inFlight.delete(write));
+      inFlight.add(write);
+    }
+    while (inFlight.size >= DAY_BUCKET_RECOMPUTE_CONCURRENCY * 2) await Promise.race(inFlight);
+    if (writeError) break;
   }
+  await Promise.all(inFlight);
+  if (writeError) throw writeError;
 
   const writes = [];
 
@@ -2136,10 +2161,7 @@ async function recomputeAllDayBucketsForEvent(userID, event) {
 
   await mapWithConcurrency(writes, DAY_BUCKET_RECOMPUTE_CONCURRENCY, (write) => write());
 
-  const events = await listUserEvents(userID);
-  await mapWithConcurrency(Array.from(allDaysAffected).sort(), DAY_BUCKET_RECOMPUTE_CONCURRENCY, (dayKey) =>
-    recomputeAllEventsDayBucket(userID, dayKey, { timeZone, events })
-  );
+  if (allEvents) await recomputeAllEventsDayBuckets(userID, allDaysAffected, { timeZone });
 
   return {
     event: ev,
@@ -4469,13 +4491,15 @@ async function finalizeImportJob(userID, jobID) {
       });
     }
 
+    const importDaysAffected = new Set();
     for (const event of affectedEvents) {
       const latest = await getImportJobItem(userID, jobID);
       if (normalizeImportJobStatus(latest?.Status) === "CANCELED") return;
       const ev = normalizeEvent(event);
       if (!ev) continue;
       await recomputeEventStats(ddb, TABLE, userID, ev);
-      await recomputeAllDayBucketsForEvent(userID, ev);
+      const { daysAffected } = await recomputeAllDayBucketsForEvent(userID, ev, { allEvents: false });
+      for (const dayKey of daysAffected) importDaysAffected.add(dayKey);
       recomputeState.eventsCompleted += 1;
       await putImportJobItem({
         ...(await getImportJobItem(userID, jobID)),
@@ -4483,6 +4507,8 @@ async function finalizeImportJob(userID, jobID) {
         UpdatedAt: nowIso(),
       });
     }
+
+    await recomputeAllEventsDayBuckets(userID, importDaysAffected);
 
     const finished = await getImportJobItem(userID, jobID);
     await putImportJobItem({
@@ -4510,7 +4536,7 @@ async function finalizeImportJob(userID, jobID) {
   }
 }
 
-async function batchGetItems(keys, { projection = null, names = null } = {}) {
+async function batchGetItems(keys, { projection = null, names = null, concurrency = 1 } = {}) {
   if (!Array.isArray(keys) || keys.length === 0) return [];
 
   const out = [];
@@ -4519,7 +4545,7 @@ async function batchGetItems(keys, { projection = null, names = null } = {}) {
     chunks.push(keys.slice(i, i + 100));
   }
 
-  for (const chunk of chunks) {
+  await mapWithConcurrency(chunks, concurrency, async (chunk) => {
     let requestKeys = chunk;
 
     while (requestKeys.length > 0) {
@@ -4545,12 +4571,16 @@ async function batchGetItems(keys, { projection = null, names = null } = {}) {
         await new Promise((r) => setTimeout(r, 150));
       }
     }
-  }
+  });
 
   return out;
 }
 
-async function batchWriteRequestsWithRetry(requests) {
+// Batches run one after another unless `concurrency` says otherwise; callers that rely on one
+// batch landing before the next (deletes before puts of the same key) keep the default.
+// A hot partition (one user's import) answers with UnprocessedItems rather than an error, so
+// those are retried with jittered backoff for up to about a minute before giving up.
+async function batchWriteRequestsWithRetry(requests, { concurrency = 1, stats = null } = {}) {
   if (!Array.isArray(requests) || requests.length === 0) return 0;
 
   const chunks = [];
@@ -4560,7 +4590,7 @@ async function batchWriteRequestsWithRetry(requests) {
 
   let wrote = 0;
 
-  for (const chunk of chunks) {
+  await mapWithConcurrency(chunks, concurrency, async (chunk) => {
     let unprocessed = chunk;
     let attempt = 0;
 
@@ -4579,15 +4609,19 @@ async function batchWriteRequestsWithRetry(requests) {
 
       if (!unprocessed.length) break;
 
+      if (stats) {
+        stats.retries += 1;
+        stats.unprocessedItems += unprocessed.length;
+      }
       attempt += 1;
-      if (attempt > 8) {
+      if (attempt > 12) {
         throw new Error(`batch write exceeded retries; unprocessed=${unprocessed.length}`);
       }
 
-      const delay = Math.round(80 * Math.pow(2, attempt));
-      await new Promise((r) => setTimeout(r, delay));
+      const delay = Math.min(8000, 80 * Math.pow(2, attempt)) * (0.5 + Math.random() * 0.5);
+      await new Promise((r) => setTimeout(r, Math.round(delay)));
     }
-  }
+  });
 
   return wrote;
 }
@@ -8381,7 +8415,8 @@ app.post("/api/importJobs/:userID/:jobID/chunk", async (req, res) => {
     // Solves already in the table (an earlier import of the same data, or a retried chunk) are
     // left as they are, so edits made since aren't overwritten.
     const existingSolveItems = await batchGetItems(
-      solveItems.map((item) => ({ PK: item.PK, SK: item.SK }))
+      solveItems.map((item) => ({ PK: item.PK, SK: item.SK })),
+      { projection: "#pk, #sk", names: { "#pk": "PK", "#sk": "SK" }, concurrency: IMPORT_DDB_CONCURRENCY }
     );
     const existingSolveKeys = new Set(existingSolveItems.map((item) => `${item?.PK}|${item?.SK}`));
     const newSolveItems = solveItems.filter(
@@ -8389,26 +8424,28 @@ app.post("/api/importJobs/:userID/:jobID/chunk", async (req, res) => {
     );
     const accepted = newSolveItems.length;
 
-    // Index items go first and the solves last: a solve that exists then implies its tag and
-    // rank items were written, which is what lets a retry skip it.
-    const requests = [];
+    // Index items are all written before any solve: a solve that exists then implies its tag and
+    // rank items were written, which is what lets a retry skip it. Within each phase the batches
+    // run in parallel, since one at a time leaves a big import waiting on round trips.
+    const indexRequests = [];
     for (const solveItem of newSolveItems) {
       for (const tagItem of buildSolveTagItems(solveItem)) {
-        requests.push({ PutRequest: { Item: tagItem } });
+        indexRequests.push({ PutRequest: { Item: tagItem } });
       }
       for (const rankItem of buildSingleRankItemsForSolve(userID, solveItem)) {
-        requests.push({ PutRequest: { Item: rankItem } });
+        indexRequests.push({ PutRequest: { Item: rankItem } });
       }
     }
-    for (const solveItem of newSolveItems) {
-      requests.push({ PutRequest: { Item: solveItem } });
-    }
+    const solveRequests = newSolveItems.map((solveItem) => ({ PutRequest: { Item: solveItem } }));
 
     await reserveImportSolveAllowance(userID, accepted);
 
     let wrote = 0;
+    // How often DynamoDB pushed back (UnprocessedItems), reported so imports can be tuned.
+    const throttle = { retries: 0, unprocessedItems: 0 };
     try {
-      wrote = await batchWriteRequestsWithRetry(requests);
+      wrote += await batchWriteRequestsWithRetry(indexRequests, { concurrency: IMPORT_DDB_CONCURRENCY, stats: throttle });
+      wrote += await batchWriteRequestsWithRetry(solveRequests, { concurrency: IMPORT_DDB_CONCURRENCY, stats: throttle });
     } catch (err) {
       await releaseImportSolveAllowance(userID, accepted);
       throw err;
@@ -8433,6 +8470,7 @@ app.post("/api/importJobs/:userID/:jobID/chunk", async (req, res) => {
       wrote,
       accepted,
       skipped: Math.max(0, solves.length - accepted),
+      throttle,
       job: publicImportJob(next),
     });
   } catch (e) {

@@ -37,11 +37,32 @@ If 4567/5099 are already taken by an older sandbox, start a second pair and poin
 
 ## Solve import at scale
 
-`importScale.mjs` generates a csTimer export, runs it through the real parsers, uploads, finalizes,
-then checks the stored stats against the generator. Point it at a sandbox API with `SIM_API`, and
-raise `PTS_FREE_IMPORT_SOLVE_LIMIT` on that sandbox to go past the free allowance.
+`genCsTimer.mjs` writes a realistic csTimer export: 12 sessions across 11 events with csTimer's
+scrTypes, practice sittings spread over years, +2/DNF rates per event, multi-phase splits and the
+odd comment. The same file can be imported through the app's Import modal.
 
-    SIM_API=http://localhost:5099 N=500000 SESSIONS=4 RERUN=1 node --max-old-space-size=8000 docs/loadtest/importScale.mjs
+    N=100000 OUT=/tmp/cstimer-100k.txt node docs/loadtest/genCsTimer.mjs
+    N=1000000 PROFILE=heavy333 OUT=/tmp/cstimer-1m-333.txt node docs/loadtest/genCsTimer.mjs
+
+`importScale.mjs` takes that file (or a real export) through the same detect, parse, dedupe and
+chunk steps as the modal and Stats.js, uploads, finalizes, checks every event's stored stats
+against the parsed solves, and with `RERUN=1` imports it again expecting nothing new. Raise
+`PTS_FREE_IMPORT_SOLVE_LIMIT` on the sandbox API to go past the free allowance. `PREP_ONLY=1`
+stops after the client-side steps (time and memory, no API needed).
+
+    SIM_API=http://localhost:5199 FILE=/tmp/cstimer-100k.txt RERUN=1 \
+      node --max-old-space-size=8000 docs/loadtest/importScale.mjs
+
+dynalite answers in well under a millisecond, which hides what real DynamoDB costs per call. Put
+`latencyProxy.mjs` between the sandbox API and dynalite to add a fixed delay per call:
+
+    SIM_DDB=http://localhost:4667 PORT=4767 LATENCY_MS=15 node docs/loadtest/latencyProxy.mjs &
+    # then start the sandbox API with AWS_ENDPOINT_URL_DYNAMODB=http://localhost:4767
+
+`PTS_IMPORT_DDB_CONCURRENCY` (default 6) is how many batch calls one import chunk runs at once.
+
+For a million solves, start dynalite on disk rather than in memory
+(`dynalite({ path: "/some/dir" })`), or the emulator runs out of heap.
 
 `SANDBOX_API_PORT` picks the API that `uiproxy.mjs` forwards to.
 

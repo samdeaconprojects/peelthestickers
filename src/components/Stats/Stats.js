@@ -5943,13 +5943,17 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
   const sendImportChunk = useCallback(
     async (jobID, payload) => {
       const userID = user?.UserID;
+      // A big import sends hundreds of chunks over the better part of an hour, so ride out a
+      // dropped connection or a busy server for about two minutes. Chunks are safe to resend:
+      // solves already written are skipped.
       for (let attempt = 0; ; attempt += 1) {
         try {
           return await appendImportJobChunk(userID, jobID, payload);
         } catch (err) {
-          const retryable = err?.isNetworkError || !err?.status || Number(err.status) >= 500;
-          if (!retryable || attempt >= 2) throw err;
-          await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+          const status = Number(err?.status);
+          const retryable = err?.isNetworkError || !status || status >= 500 || status === 429;
+          if (!retryable || attempt >= 6) throw err;
+          await new Promise((resolve) => setTimeout(resolve, Math.min(30000, 2000 * 2 ** attempt)));
         }
       }
     },
