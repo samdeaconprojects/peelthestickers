@@ -1748,9 +1748,10 @@ async function mapWithConcurrency(items, limit, fn) {
 }
 
 const DAY_BUCKET_RECOMPUTE_CONCURRENCY = 8;
-// Parallel batch calls per import chunk. One user's items share a partition key, so going much
-// higher mostly buys throttling once DynamoDB's per-partition write limit is reached.
-const IMPORT_DDB_CONCURRENCY = Math.max(1, Number(process.env.PTS_IMPORT_DDB_CONCURRENCY || 6));
+// Parallel batch calls per import chunk. One user's items share a partition key, and on real
+// DynamoDB that key tops out near 1,000 writes/s (~240 imported solves/s, measured on PTSDev
+// 2026-11-14), so more than a few only buys throttling.
+const IMPORT_DDB_CONCURRENCY = Math.max(1, Number(process.env.PTS_IMPORT_DDB_CONCURRENCY || 3));
 
 async function recomputeAllEventsDayBucket(userID, dayKey, { timeZone: knownTimeZone, events: knownEvents } = {}) {
   const day = String(dayKey || "").trim();
@@ -4548,18 +4549,27 @@ async function batchGetItems(keys, { projection = null, names = null, concurrenc
   await mapWithConcurrency(chunks, concurrency, async (chunk) => {
     let requestKeys = chunk;
 
+    let attempt = 0;
     while (requestKeys.length > 0) {
-      const res = await ddb.send(
-        new BatchGetCommand({
-          RequestItems: {
-            [TABLE]: {
-              Keys: requestKeys,
-              ...(projection ? { ProjectionExpression: projection } : {}),
-              ...(names ? { ExpressionAttributeNames: names } : {}),
+      let res;
+      try {
+        res = await ddb.send(
+          new BatchGetCommand({
+            RequestItems: {
+              [TABLE]: {
+                Keys: requestKeys,
+                ...(projection ? { ProjectionExpression: projection } : {}),
+                ...(names ? { ExpressionAttributeNames: names } : {}),
+              },
             },
-          },
-        })
-      );
+          })
+        );
+      } catch (err) {
+        if (!isDynamoThrottleError(err) || attempt >= 12) throw err;
+        attempt += 1;
+        await new Promise((r) => setTimeout(r, Math.round(Math.min(8000, 80 * 2 ** attempt) * (0.5 + Math.random() * 0.5))));
+        continue;
+      }
 
       const got = res?.Responses?.[TABLE] || [];
       out.push(...got);
@@ -4574,6 +4584,15 @@ async function batchGetItems(keys, { projection = null, names = null, concurrenc
   });
 
   return out;
+}
+
+const DYNAMO_THROTTLE_ERRORS = new Set([
+  "ThrottlingException",
+  "ProvisionedThroughputExceededException",
+  "RequestLimitExceeded",
+]);
+function isDynamoThrottleError(err) {
+  return DYNAMO_THROTTLE_ERRORS.has(String(err?.name || err?.Code || "")) || Boolean(err?.$retryable?.throttling);
 }
 
 // Batches run one after another unless `concurrency` says otherwise; callers that rely on one
@@ -4595,13 +4614,21 @@ async function batchWriteRequestsWithRetry(requests, { concurrency = 1, stats = 
     let attempt = 0;
 
     while (unprocessed.length > 0) {
-      const out = await ddb.send(
-        new BatchWriteCommand({
-          RequestItems: {
-            [TABLE]: unprocessed,
-          },
-        })
-      );
+      let out;
+      try {
+        out = await ddb.send(
+          new BatchWriteCommand({
+            RequestItems: {
+              [TABLE]: unprocessed,
+            },
+          })
+        );
+      } catch (err) {
+        // A hot key can also be refused outright (after the SDK's own retries); that is the
+        // same back-pressure as UnprocessedItems, so it waits its turn the same way.
+        if (!isDynamoThrottleError(err)) throw err;
+        out = { UnprocessedItems: { [TABLE]: unprocessed } };
+      }
 
       const next = out?.UnprocessedItems?.[TABLE] || [];
       wrote += unprocessed.length - next.length;

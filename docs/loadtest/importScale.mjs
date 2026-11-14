@@ -156,10 +156,20 @@ let next = 0;
 let lastLog = 0;
 let throttleRetries = 0;
 let throttledItems = 0;
+let chunkRetries = 0;
 async function worker() {
   while (!failure && next < queue.length) {
     const chunk = queue[next++];
-    const c = await api(token, "POST", `/api/importJobs/${USER}/${jobID}/chunk`, { solves: chunk });
+    // Retried like Stats.sendImportChunk: about two minutes for 5xx, 429 and network errors.
+    let c;
+    for (let attempt = 0; ; attempt += 1) {
+      c = await api(token, "POST", `/api/importJobs/${USER}/${jobID}/chunk`, { solves: chunk }).catch((e) => ({ status: 0, json: { error: e.message }, ms: 0 }));
+      const retryable = !c.status || c.status >= 500 || c.status === 429;
+      if (c.status === 200 || !retryable || attempt >= 6) break;
+      chunkRetries += 1;
+      console.log(`  chunk retry ${attempt + 1}: HTTP ${c.status} ${String(c.json?.error || "").slice(0, 80)}`);
+      await new Promise((res) => setTimeout(res, Math.min(30000, 2000 * 2 ** attempt)));
+    }
     chunkMs.push(c.ms);
     if (c.status !== 200) { failure = `chunk at ${sent}: HTTP ${c.status} ${JSON.stringify(c.json)}`; return; }
     sent += chunk.length;
@@ -175,7 +185,7 @@ async function worker() {
 await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 const uploadS = (Date.now() - started) / 1000;
 console.log(`upload: ${sent} sent, ${accepted} accepted in ${uploadS.toFixed(0)}s; chunk p50=${pct(chunkMs, 0.5)}ms p95=${pct(chunkMs, 0.95)}ms max=${pct(chunkMs, 1)}ms`);
-console.log(`throttling: ${throttleRetries} retry rounds, ${throttledItems} items sent back by DynamoDB`);
+console.log(`throttling: ${throttleRetries} retry rounds, ${throttledItems} items sent back by DynamoDB, ${chunkRetries} chunk resends`);
 if (failure) console.log("UPLOAD FAILED:", failure);
 
 const fin0 = Date.now();
