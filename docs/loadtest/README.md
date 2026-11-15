@@ -59,7 +59,21 @@ dynalite answers in well under a millisecond, which hides what real DynamoDB cos
     SIM_DDB=http://localhost:4667 PORT=4767 LATENCY_MS=15 node docs/loadtest/latencyProxy.mjs &
     # then start the sandbox API with AWS_ENDPOINT_URL_DYNAMODB=http://localhost:4767
 
-`PTS_IMPORT_DDB_CONCURRENCY` (default 6) is how many batch calls one import chunk runs at once.
+`PTS_IMPORT_DDB_CONCURRENCY` (default 3) is how many batch calls one import chunk runs at once.
+
+### Background imports (what the app uses)
+
+The app uploads gzipped chunks to `/stage`, calls `/queue` and is done; a worker in the API writes
+the solves at `PTS_IMPORT_BG_ITEMS_PER_SEC` (default 700 items/s, about 170 solves/s, leaving ~30%
+of the user's partition for their own saves), finalizes, and catches up stats for anything the user
+saved meanwhile. `BACKGROUND=1` runs the harness that way; `LIVE_SOLVES=1` saves a solve every 2s
+during the import and reports how long each save took.
+
+    BACKGROUND=1 LIVE_SOLVES=1 SIM_DDB=http://localhost:4667 SIM_API=http://localhost:5199 \
+      FILE=/tmp/cstimer-100k.txt node --max-old-space-size=8000 docs/loadtest/importScale.mjs
+
+Kill the API part way and start it again to check the job resumes (it should within seconds when
+the old process is gone). Raise `PTS_IMPORT_BG_ITEMS_PER_SEC` on the sandbox for quicker runs.
 
 For a million solves, start dynalite on disk rather than in memory
 (`dynalite({ path: "/some/dir" })`), or the emulator runs out of heap.

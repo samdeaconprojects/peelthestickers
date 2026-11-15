@@ -3,8 +3,12 @@
 // and verifies the stored per-event stats against the parsed solves.
 //   FILE=/path/cstimer.txt node --max-old-space-size=8000 docs/loadtest/importScale.mjs
 //   N=200000 SESSIONS=4 node docs/loadtest/importScale.mjs        (old synthetic 3x3-only file)
-// CONCURRENCY uploads that many chunks at once (the app sends one at a time).
+// CONCURRENCY uploads that many chunks at once. BACKGROUND=1 uses the app's background path
+// (gzipped chunks to /stage, then /queue, then the server's worker) instead of /chunk + /finalize.
+// LIVE_SOLVES=1 keeps saving a 3x3 solve every 2s while the import runs, timing each save and
+// counting them into the expected stats.
 import { readFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import { parseCsTimer, dedupeAndStabilize, detectFormat, chunkImportSolves } from "../../src/utils/importParsers.js";
 
 const API = process.env.SIM_API || "http://localhost:5098";
@@ -60,12 +64,17 @@ function generate() {
   return { raw: JSON.stringify(out), expected };
 }
 
-async function api(token, method, path, body) {
+async function api(token, method, path, body, { gzip = false } = {}) {
   const t0 = performance.now();
+  const json0 = body ? JSON.stringify(body) : undefined;
   const res = await fetch(API + path, {
     method,
-    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
+    headers: {
+      "content-type": "application/json",
+      ...(gzip ? { "content-encoding": "gzip" } : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: json0 && gzip ? gzipSync(json0) : json0,
   });
   const json = await res.json().catch(() => null);
   return { status: res.status, json, ms: performance.now() - t0 };
@@ -146,7 +155,26 @@ console.log("create job:", job.status, job.status === 200 ? "" : JSON.stringify(
 const jobID = job.json?.job?.jobID;
 if (!jobID) { probing = false; process.exit(1); }
 
+const BACKGROUND = !!process.env.BACKGROUND;
 const started = Date.now();
+
+// Someone solving while their import runs: a save every 2s, each one timed.
+const live = { saved: 0, failed: 0, ms: [], dnf: 0, best: Infinity, sum: 0, running: !!process.env.LIVE_SOLVES };
+const liveSolver = (async () => {
+  while (live.running) {
+    const ms = 9000 + ((Math.random() * 4000) | 0);
+    const r = await api(token, "POST", "/api/solve", {
+      userID: USER, event: "333", sessionID: "main", rawTimeMs: ms, scramble: "R U R' U'", note: "", tags: {},
+    }).catch(() => ({ status: 0, ms: 0 }));
+    if (r.status === 200) {
+      live.saved += 1; live.ms.push(r.ms); live.sum += ms; live.best = Math.min(live.best, ms);
+    } else {
+      live.failed += 1;
+    }
+    await new Promise((res) => setTimeout(res, 2000));
+  }
+})();
+
 const chunkMs = [];
 let sent = 0;
 let accepted = 0;
@@ -159,11 +187,15 @@ let throttledItems = 0;
 let chunkRetries = 0;
 async function worker() {
   while (!failure && next < queue.length) {
-    const chunk = queue[next++];
+    const index = next++;
+    const chunk = queue[index];
     // Retried like Stats.sendImportChunk: about two minutes for 5xx, 429 and network errors.
     let c;
     for (let attempt = 0; ; attempt += 1) {
-      c = await api(token, "POST", `/api/importJobs/${USER}/${jobID}/chunk`, { solves: chunk }).catch((e) => ({ status: 0, json: { error: e.message }, ms: 0 }));
+      c = await (BACKGROUND
+        ? api(token, "POST", `/api/importJobs/${USER}/${jobID}/stage`, { index, solves: chunk }, { gzip: true })
+        : api(token, "POST", `/api/importJobs/${USER}/${jobID}/chunk`, { solves: chunk })
+      ).catch((e) => ({ status: 0, json: { error: e.message }, ms: 0 }));
       const retryable = !c.status || c.status >= 500 || c.status === 429;
       if (c.status === 200 || !retryable || attempt >= 6) break;
       chunkRetries += 1;
@@ -173,7 +205,7 @@ async function worker() {
     chunkMs.push(c.ms);
     if (c.status !== 200) { failure = `chunk at ${sent}: HTTP ${c.status} ${JSON.stringify(c.json)}`; return; }
     sent += chunk.length;
-    accepted += c.json.accepted;
+    accepted += c.json.accepted || 0;
     throttleRetries += c.json.throttle?.retries || 0;
     throttledItems += c.json.throttle?.unprocessedItems || 0;
     if (Date.now() - lastLog > 15000) {
@@ -189,15 +221,45 @@ console.log(`throttling: ${throttleRetries} retry rounds, ${throttledItems} item
 if (failure) console.log("UPLOAD FAILED:", failure);
 
 const fin0 = Date.now();
-await api(token, "POST", `/api/importJobs/${USER}/${jobID}/finalize`, {});
+if (BACKGROUND) {
+  const q = await api(token, "POST", `/api/importJobs/${USER}/${jobID}/queue`, { totalChunks: queue.length });
+  console.log(`queue: HTTP ${q.status} ${q.status === 202 ? "" : JSON.stringify(q.json)}`);
+} else {
+  await api(token, "POST", `/api/importJobs/${USER}/${jobID}/finalize`, {});
+}
 let status = "";
 let last = null;
+let pollErrors = 0;
+let lastPhase = "";
+let lastBgLog = 0;
 for (;;) {
-  const j = await api(token, "GET", `/api/importJobs/${USER}/${jobID}`).catch((e) => { console.log("poll error:", e.message, e.cause?.code || ""); return { status: 0, json: { error: e.message } }; });
+  const j = await api(token, "GET", `/api/importJobs/${USER}/${jobID}`).catch((e) => ({ status: 0, json: { error: e.message } }));
+  // The API restarting under a background import is expected to be survivable; keep asking.
+  if (j.status !== 200) {
+    pollErrors += 1;
+    if (pollErrors % 10 === 1) console.log(`  poll error ${pollErrors}: HTTP ${j.status}`);
+    if (pollErrors > 400) break;
+    await new Promise((res) => setTimeout(res, 1500));
+    continue;
+  }
   last = j.json?.job;
-  status = String(last?.status || `HTTP${j.status}`).toUpperCase();
-  if (["COMPLETED", "FAILED", "CANCELED"].includes(status) || j.status === 0) break;
+  status = String(last?.status || "").toUpperCase();
+  if (BACKGROUND && (status !== lastPhase || Date.now() - lastBgLog > 15000)) {
+    lastPhase = status;
+    lastBgLog = Date.now();
+    const el = (Date.now() - fin0) / 1000;
+    console.log(`  [${el.toFixed(0)}s] ${status} scanned=${last.scannedSolves}/${last.stagedSolves} new=${last.processedSolves} ${Math.round(last.scannedSolves / Math.max(1, el))}/s live saves=${live.saved}`);
+  }
+  if (["COMPLETED", "FAILED", "CANCELED"].includes(status)) break;
   await new Promise((res) => setTimeout(res, 1500));
+}
+if (BACKGROUND) accepted = Number(last?.processedSolves || 0);
+live.running = false;
+await liveSolver;
+if (live.saved || live.failed) {
+  console.log(`live solves during import: saved=${live.saved} failed=${live.failed} p50=${pct(live.ms, 0.5)}ms p95=${pct(live.ms, 0.95)}ms max=${pct(live.ms, 1)}ms`);
+  const e = (expectedByEvent["333"] ||= { total: 0, dnf: 0, plus2: 0, best: Infinity, sumFinal: 0 });
+  e.total += live.saved; e.sumFinal += live.sum; e.best = Math.min(e.best, live.best);
 }
 const finalizeS = ((Date.now() - fin0) / 1000).toFixed(0);
 console.log(`finalize: ${status} in ${finalizeS}s ${last?.error ? `error=${last.error}` : ""}`);
@@ -242,7 +304,7 @@ if (process.env.SIM_DDB) {
     }
     cursor = out.LastEvaluatedKey;
   } while (cursor);
-  let bucketsOk = (sums.ALL?.total || 0) === solves.length;
+  let bucketsOk = (sums.ALL?.total || 0) === solves.length + live.saved;
   for (const [ev, e] of Object.entries(expectedByEvent)) {
     bucketsOk &&= sums[ev]?.total === e.total && sums[ev]?.dnf === e.dnf;
   }

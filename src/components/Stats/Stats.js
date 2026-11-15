@@ -43,12 +43,7 @@ import ImportSolvesModal from "./ImportSolvesModal";
 import { chunkImportSolves } from "../../utils/importParsers";
 import { buildExportJsonParts, serializeSolvesPage } from "../../utils/exportJson";
 import ExportDataModal from "./ExportDataModal";
-import {
-  appendImportJobChunk,
-  createImportJob,
-  finalizeImportJob,
-  getImportJob,
-} from "../../services/importJobs";
+import { createImportJob, queueImportJob, stageImportChunk } from "../../services/importJobs";
 import { createSession } from "../../services/createSession";
 import { getUser } from "../../services/getUser";
 import { getCustomEvents } from "../../services/getCustomEvents";
@@ -5939,16 +5934,14 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     [runDb, user?.UserID]
   );
 
-  // Chunk uploads are idempotent on the server, so a dropped request is safe to repeat.
+  // Staging a chunk is idempotent on the server, so a dropped request is safe to repeat; ride out
+  // a dropped connection or a busy server for about two minutes.
   const sendImportChunk = useCallback(
-    async (jobID, payload) => {
+    async (jobID, index, solves) => {
       const userID = user?.UserID;
-      // A big import sends hundreds of chunks over the better part of an hour, so ride out a
-      // dropped connection or a busy server for about two minutes. Chunks are safe to resend:
-      // solves already written are skipped.
       for (let attempt = 0; ; attempt += 1) {
         try {
-          return await appendImportJobChunk(userID, jobID, payload);
+          return await stageImportChunk(userID, jobID, index, solves);
         } catch (err) {
           const status = Number(err?.status);
           const retryable = err?.isNetworkError || !status || status >= 500 || status === 429;
@@ -6112,106 +6105,42 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           const jobID = createRes?.job?.jobID;
           if (!jobID) throw new Error("Failed to create import job");
 
-          let overallCompleted = 0;
-          for (const group of preparedGroups) {
-            for (const chunk of group.chunks) {
+          // Upload every chunk to the server's staging area, a few at a time, then queue the job.
+          // From there the server writes and finalizes on its own (about 170 solves a second on
+          // DynamoDB), so the user can keep solving or close the page; ImportBanner shows progress.
+          const allChunks = preparedGroups.flatMap((group) => group.chunks);
+          let uploaded = 0;
+          let nextChunk = 0;
+          let uploadError = null;
+          const uploadWorker = async () => {
+            while (!uploadError && nextChunk < allChunks.length) {
+              const index = nextChunk++;
               try {
-                await sendImportChunk(jobID, { sourceKey, solves: chunk });
-              } catch (chunkError) {
-                // Recompute stats for what did land, so the sessions aren't left stale.
-                if (overallCompleted > 0) {
-                  try {
-                    await finalizeImportJob(userID, jobID);
-                  } catch (_) {}
-                }
-                // Running it again can't get past the import allowance, so don't suggest it.
-                throw new Error(
-                  Number(chunkError?.status) === 403
-                    ? `Import stopped after ${overallCompleted} of ${overallTotal} solves. ${
-                        chunkError?.message || "Import limit reached."
-                      } The solves before that point were kept.`
-                    : `Import stopped after ${overallCompleted} of ${overallTotal} solves: ${
-                        chunkError?.message || "upload failed"
-                      }. Run the same import again to continue - solves already imported are skipped.`
-                );
+                await sendImportChunk(jobID, index, allChunks[index]);
+              } catch (err) {
+                uploadError = err;
+                return;
               }
-              overallCompleted += chunk.length;
+              uploaded += allChunks[index].length;
               setImportProgress({
-                phase: "writing",
-                completed: overallCompleted,
+                phase: "uploading",
+                completed: uploaded,
                 total: overallTotal,
-                label: `Importing solves... (${overallCompleted}/${overallTotal})`,
+                label: `Uploading solves... (${uploaded}/${overallTotal})`,
               });
             }
+          };
+          await Promise.all(Array.from({ length: Math.min(3, allChunks.length) }, uploadWorker));
+          if (uploadError) {
+            throw new Error(
+              `Upload stopped after ${uploaded} of ${overallTotal} solves: ${
+                uploadError?.message || "upload failed"
+              }. Nothing was imported; run the import again.`
+            );
           }
 
-          setImportProgress({
-            phase: "finalizing",
-            completed: overallCompleted,
-            total: overallTotal,
-            label: `Finalizing import... (${overallCompleted}/${overallTotal})`,
-          });
-
-          await finalizeImportJob(userID, jobID);
-
-          // Finalizing runs on the server in the background; poll until it settles.
-          const pollStartedAt = Date.now();
-          let pollFailures = 0;
-          let lastJobUpdate = "";
-          let lastJobUpdateSeenAt = Date.now();
-          while (true) {
-            let statusRes = null;
-            try {
-              statusRes = await getImportJob(userID, jobID);
-              pollFailures = 0;
-            } catch (pollError) {
-              pollFailures += 1;
-              if (pollFailures >= 10) throw pollError;
-              await new Promise((resolve) => setTimeout(resolve, 3000));
-              continue;
-            }
-            const job = statusRes?.job || null;
-            const status = String(job?.status || "").toUpperCase();
-
-            // No progress for a while usually means the server restarted mid-finalize; ask again.
-            if (String(job?.updatedAt || "") !== lastJobUpdate) {
-              lastJobUpdate = String(job?.updatedAt || "");
-              lastJobUpdateSeenAt = Date.now();
-            } else if (status === "FINALIZING" && Date.now() - lastJobUpdateSeenAt > 5 * 60 * 1000) {
-              lastJobUpdateSeenAt = Date.now();
-              try {
-                await finalizeImportJob(userID, jobID);
-              } catch (_) {}
-            }
-            const recompute = job?.recompute || {};
-            const recomputeTotal =
-              Number(recompute.totalSessions || 0) + Number(recompute.totalEvents || 0);
-            const recomputeDone =
-              Number(recompute.sessionsCompleted || 0) + Number(recompute.eventsCompleted || 0);
-
-            setImportProgress({
-              phase: status.toLowerCase() || "finalizing",
-              completed: overallCompleted,
-              total: overallTotal,
-              label:
-                status === "COMPLETED"
-                  ? `Import complete (${overallCompleted}/${overallTotal})`
-                  : recomputeTotal > 0
-                    ? `Finalizing import... (${recomputeDone}/${recomputeTotal})`
-                    : `Finalizing import... (${overallCompleted}/${overallTotal})`,
-            });
-
-            if (status === "COMPLETED") break;
-            if (status === "FAILED" || status === "CANCELED") {
-              throw new Error(job?.error || `Import job ${status.toLowerCase()}`);
-            }
-
-            if (Date.now() - pollStartedAt > 30 * 60 * 1000) {
-              throw new Error("Import finalization timed out");
-            }
-
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-          }
+          await queueImportJob(userID, jobID, allChunks.length);
+          window.dispatchEvent(new CustomEvent("pts:import-queued", { detail: { jobID } }));
 
           try {
             const refreshedSessions = await fetchSessionsList(userID);
@@ -6220,23 +6149,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
             console.warn("Failed to refresh sessions list after import", err);
           }
 
-          try {
-            if (!isAllSessionsMode) {
-              const item = await getSessionStats(
-                userID,
-                String(statsEvent || "").toUpperCase(),
-                String(sessionId || "main")
-              );
-              setOverallStatsForEvent(item || null);
-            } else {
-              const refreshedSessions = await fetchSessionsList(userID);
-              onSessionsListRefresh?.(refreshedSessions);
-              const aggregated = getEventAggregateFromSessionsList(refreshedSessions, statsEvent);
-              setOverallStatsForEvent(aggregated || null);
-            }
-          } catch (_) {}
-
-          await loadInitialSolves();
+          // The solves themselves arrive as the server writes them; it sends a sync when done.
           setShowImport(false);
         });
       } catch (e) {
@@ -6256,7 +6169,6 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       sendImportChunk,
       isAllEventsMode,
       isAllSessionsMode,
-      loadInitialSolves,
       onSessionsListRefresh,
       sessionsList,
       runDb,

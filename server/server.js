@@ -1,5 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
+const os = require("os");
+const zlib = require("zlib");
 const { AsyncLocalStorage } = require("async_hooks");
 require("dotenv").config();
 
@@ -331,6 +333,12 @@ function uniqueSolveSyncScopes(scopes = []) {
 }
 
 function publishSolveSync(req, userID, { op, scopes = [], items = [], solveRefs = [], sessionStats = null, allScopes = false } = {}) {
+  // A user's own change (there is a request) while their import is running; see noteLiveSolveWrite.
+  if (req) {
+    try {
+      noteLiveSolveWrite(userID, { scopes, items, allScopes });
+    } catch (_) {}
+  }
   try {
     const id = String(userID || "").trim();
     if (!id || !notificationClientsByUser.get(id)?.size) return;
@@ -1030,7 +1038,7 @@ function buildImportJobSK(jobID) {
 
 function normalizeImportJobStatus(value) {
   const status = String(value || "").trim().toUpperCase();
-  if (["PENDING", "RUNNING", "FINALIZING", "COMPLETED", "FAILED", "CANCELED"].includes(status)) {
+  if (["PENDING", "QUEUED", "RUNNING", "FINALIZING", "COMPLETED", "FAILED", "CANCELED"].includes(status)) {
     return status;
   }
   return "PENDING";
@@ -1344,6 +1352,11 @@ function publicImportJob(job) {
     sourceKey: String(job.SourceKey || "").trim() || "",
     totalSolves: Number(job.TotalSolves || 0),
     processedSolves: Number(job.ProcessedSolves || 0),
+    // Background imports: how many staged solves the worker has been through (new or not).
+    mode: String(job.Mode || "").toLowerCase() || "upload",
+    stagedSolves: Number(job.StagedSolves || 0),
+    scannedSolves: Number(job.ScannedSolves || 0),
+    queuedAt: job.QueuedAt || null,
     totalChunks: Number(job.TotalChunks || 0),
     receivedChunks: Number(job.ReceivedChunks || 0),
     finalizedAt: job.FinalizedAt || null,
@@ -4453,7 +4466,489 @@ function runInBackground(label, fn) {
 
 const runningImportFinalizations = new Set();
 
-async function finalizeImportJob(userID, jobID) {
+// ---------- Background imports ----------
+// The browser uploads every chunk into a staging area (quick: staged chunks sit under their own
+// key, not the user's, so the user's write limit doesn't apply), queues the job and is free to go.
+// A worker in this process then writes the solves at a pace that leaves room for the user's own
+// saves, and finalizes. A lease on the job keeps two processes (a deploy overlap) off one job, and
+// IMPORTQUEUE lists unfinished jobs so a restart picks them up again.
+const IMPORT_BG_ITEMS_PER_SEC = Math.max(25, Number(process.env.PTS_IMPORT_BG_ITEMS_PER_SEC || 700));
+const IMPORT_STAGE_MAX_BYTES = 350 * 1024;
+const IMPORT_WORKER_LEASE_MS = 3 * 60 * 1000;
+const IMPORT_STAGING_ABANDONED_MS = 24 * 60 * 60 * 1000;
+const IMPORT_WORKER_MAX_FAILURES = 15;
+const IMPORT_QUEUE_PK = "IMPORTQUEUE";
+const IMPORT_WORKER_ID = `${os.hostname()}:${process.pid}:${crypto.randomBytes(3).toString("hex")}`;
+const runningImportWorkers = new Set();
+const importWriteLimiters = new Map();
+const liveSolveTrackers = new Map();
+const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+
+function importStagePK(userID, jobID) {
+  return `IMPORTSTAGE#${userID}#${jobID}`;
+}
+
+function importStageSK(index, part) {
+  return `CHUNK#${String(index).padStart(6, "0")}#${String(part).padStart(2, "0")}`;
+}
+
+function importQueueKey(userID, jobID) {
+  return { PK: IMPORT_QUEUE_PK, SK: `${userID}#${jobID}` };
+}
+
+// Items per second for one user's import writes. On real DynamoDB one user's partition takes
+// about 1,000 writes/s, so the default leaves roughly 30% for their own saves.
+function getImportWriteLimiter(userID) {
+  let limiter = importWriteLimiters.get(userID);
+  if (!limiter) {
+    limiter = { tokens: IMPORT_BG_ITEMS_PER_SEC, last: Date.now(), holdUntil: 0 };
+    importWriteLimiters.set(userID, limiter);
+  }
+  return limiter;
+}
+
+async function takeImportWriteTokens(userID, count) {
+  const limiter = getImportWriteLimiter(userID);
+  const need = Math.min(count, IMPORT_BG_ITEMS_PER_SEC);
+  for (;;) {
+    const now = Date.now();
+    if (now < limiter.holdUntil) {
+      await sleepMs(limiter.holdUntil - now);
+      continue;
+    }
+    limiter.tokens = Math.min(
+      IMPORT_BG_ITEMS_PER_SEC,
+      limiter.tokens + ((now - limiter.last) / 1000) * IMPORT_BG_ITEMS_PER_SEC
+    );
+    limiter.last = now;
+    if (limiter.tokens >= need) {
+      limiter.tokens -= need;
+      return;
+    }
+    await sleepMs(Math.ceil(((need - limiter.tokens) / IMPORT_BG_ITEMS_PER_SEC) * 1000));
+  }
+}
+
+// Called for every solve change made through a request (see publishSolveSync).
+function noteLiveSolveWrite(userID, { scopes = [], items = [], allScopes = false } = {}) {
+  const id = String(userID || "").trim();
+  if (!id) return;
+  // A save gets the partition to itself for a moment instead of queueing behind import writes.
+  const limiter = importWriteLimiters.get(id);
+  if (limiter) limiter.holdUntil = Date.now() + 750;
+
+  const tracker = liveSolveTrackers.get(id);
+  if (!tracker) return;
+  if (allScopes) tracker.all = true;
+  for (const item of Array.isArray(items) ? items : []) {
+    const event = normalizeEvent(item?.Event);
+    if (!event) continue;
+    tracker.scopes.set(`${event}|${normalizeSessionID(item?.SessionID)}`, {
+      event,
+      sessionID: normalizeSessionID(item?.SessionID),
+    });
+    if (item?.CreatedAt) tracker.dated.push({ event, createdAt: String(item.CreatedAt) });
+    else tracker.undatedEvents.add(event);
+  }
+  for (const scope of Array.isArray(scopes) ? scopes : []) {
+    const event = normalizeEvent(scope?.event || scope?.Event);
+    if (!event) continue;
+    const sessionID = normalizeSessionID(scope?.sessionID || scope?.SessionID);
+    tracker.scopes.set(`${event}|${sessionID}`, { event, sessionID });
+    // A scope without its solves (a delete, a move) could touch any day.
+    tracker.undatedEvents.add(event);
+  }
+}
+
+function emptyLiveSolveTracker(refs = 1) {
+  return { refs, all: false, scopes: new Map(), dated: [], undatedEvents: new Set() };
+}
+
+function beginLiveSolveTracking(userID) {
+  const existing = liveSolveTrackers.get(userID);
+  if (existing) {
+    existing.refs += 1;
+    return existing;
+  }
+  const tracker = emptyLiveSolveTracker();
+  liveSolveTrackers.set(userID, tracker);
+  return tracker;
+}
+
+function endLiveSolveTracking(userID, tracker) {
+  if (!tracker) return;
+  tracker.refs -= 1;
+  if (tracker.refs <= 0 && liveSolveTrackers.get(userID) === tracker) liveSolveTrackers.delete(userID);
+}
+
+// Redoes the stats a finalize may have overwritten for solves changed while it ran. Repeats while
+// more arrive, a few times at most; anything after that updates stats the normal way.
+async function catchUpLiveSolveWrites(userID, tracker) {
+  if (!tracker) return;
+  for (let round = 0; round < 3; round += 1) {
+    const snap = {
+      all: tracker.all,
+      scopes: Array.from(tracker.scopes.values()),
+      dated: tracker.dated,
+      undatedEvents: tracker.undatedEvents,
+    };
+    if (!snap.all && !snap.scopes.length && !snap.dated.length && !snap.undatedEvents.size) return;
+    Object.assign(tracker, { all: false, scopes: new Map(), dated: [], undatedEvents: new Set() });
+
+    if (snap.all) {
+      for (const event of await listUserEvents(userID)) {
+        await recomputeEventStats(ddb, TABLE, userID, event);
+        await recomputeAllDayBucketsForEvent(userID, event);
+      }
+      continue;
+    }
+
+    const events = new Set([...snap.scopes.map((s) => s.event), ...snap.undatedEvents]);
+    for (const scope of snap.scopes) {
+      await recomputeSessionStats(ddb, TABLE, userID, scope.event, scope.sessionID);
+    }
+    for (const event of events) await recomputeEventStats(ddb, TABLE, userID, event);
+    for (const event of snap.undatedEvents) await recomputeAllDayBucketsForEvent(userID, event);
+
+    const timeZone = await getUserDayBucketTimeZone(userID);
+    const days = new Map();
+    for (const { event, createdAt } of snap.dated) {
+      if (snap.undatedEvents.has(event)) continue;
+      const dayKey = getDayKey(createdAt, { timeZone });
+      if (dayKey) days.set(`${event}|${dayKey}`, { event, dayKey });
+    }
+    for (const { event, dayKey } of days.values()) {
+      await recomputeEventDayBucket(userID, event, dayKey);
+      await recomputeEventDayBucket(userID, event, dayKey, { mainOnly: true });
+    }
+    await recomputeAllEventsDayBuckets(userID, new Set(Array.from(days.values()).map((d) => d.dayKey)), { timeZone });
+  }
+}
+
+// Compresses a chunk for staging, halving it until each part fits a DynamoDB item.
+function splitImportChunkForStaging(solves) {
+  const parts = [];
+  const pending = [solves];
+  while (pending.length) {
+    const group = pending.shift();
+    const data = zlib.gzipSync(Buffer.from(JSON.stringify(group), "utf8"));
+    if (data.length <= IMPORT_STAGE_MAX_BYTES) {
+      parts.push({ data, count: group.length });
+      continue;
+    }
+    if (group.length <= 1) {
+      const err = new Error("A solve in this import is too large to store (its note or scramble is too long)");
+      err.statusCode = 413;
+      throw err;
+    }
+    const mid = Math.ceil(group.length / 2);
+    pending.unshift(group.slice(0, mid), group.slice(mid));
+  }
+  return parts;
+}
+
+async function listImportStageKeys(userID, jobID) {
+  const out = [];
+  let cursor;
+  do {
+    const page = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk",
+        ExpressionAttributeValues: { ":pk": importStagePK(userID, jobID) },
+        ProjectionExpression: "PK, SK, SolveCount",
+        ExclusiveStartKey: cursor,
+      })
+    );
+    out.push(...(page.Items || []));
+    cursor = page.LastEvaluatedKey;
+  } while (cursor);
+  return out;
+}
+
+async function deleteImportStaging(userID, jobID) {
+  const keys = await listImportStageKeys(userID, jobID);
+  if (keys.length) await deleteItemsByKey(keys.map(({ PK, SK }) => ({ PK, SK })));
+}
+
+async function removeFromImportQueue(userID, jobID) {
+  await ddb.send(new DeleteCommand({ TableName: TABLE, Key: importQueueKey(userID, jobID) }));
+}
+
+// A lease held by a process on this machine that no longer exists (the API restarted) is free
+// at once rather than when it runs out.
+function isDeadLocalImportWorker(workerID) {
+  const [host, pid] = String(workerID || "").split(":");
+  if (host !== os.hostname() || !Number(pid) || Number(pid) === process.pid) return false;
+  try {
+    process.kill(Number(pid), 0);
+    return false;
+  } catch (err) {
+    return err?.code === "ESRCH";
+  }
+}
+
+async function claimImportLease(userID, jobID, holder = null) {
+  const now = Date.now();
+  const stale = holder && holder !== IMPORT_WORKER_ID && isDeadLocalImportWorker(holder);
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${userID}`, SK: buildImportJobSK(jobID) },
+        UpdateExpression: "SET WorkerID = :me, WorkerLeaseUntil = :until",
+        ConditionExpression:
+          "attribute_exists(PK) AND (attribute_not_exists(WorkerLeaseUntil) OR WorkerLeaseUntil < :now OR WorkerID = :me" +
+          (stale ? " OR WorkerID = :stale)" : ")"),
+        ExpressionAttributeValues: {
+          ":me": IMPORT_WORKER_ID,
+          ":until": now + IMPORT_WORKER_LEASE_MS,
+          ":now": now,
+          ...(stale ? { ":stale": holder } : {}),
+        },
+      })
+    );
+    return true;
+  } catch (err) {
+    if (err?.name === "ConditionalCheckFailedException") return false;
+    throw err;
+  }
+}
+
+// Records one staged part as done. False when the job was canceled or another worker took over.
+async function recordImportWorkerProgress(userID, jobID, { accepted, scanned, cursor, events, sessions, startedAt }) {
+  const ts = nowIso();
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `USER#${userID}`, SK: buildImportJobSK(jobID) },
+        UpdateExpression:
+          "SET #s = :running, StageCursor = :cursor, AffectedEvents = :events, AffectedSessions = :sessions, " +
+          "StartedAt = :startedAt, UpdatedAt = :ts, WorkerLeaseUntil = :until, WorkerFailures = :zero, #e = :null " +
+          "ADD ProcessedSolves :accepted, ScannedSolves :scanned, ReceivedChunks :one",
+        ConditionExpression: "#s <> :canceled AND WorkerID = :me",
+        ExpressionAttributeNames: { "#s": "Status", "#e": "Error" },
+        ExpressionAttributeValues: {
+          ":running": "RUNNING",
+          ":canceled": "CANCELED",
+          ":cursor": cursor,
+          ":events": Array.from(events).sort((a, b) => a.localeCompare(b)),
+          ":sessions": Array.from(sessions).sort((a, b) => a.localeCompare(b)),
+          ":startedAt": startedAt,
+          ":ts": ts,
+          ":until": Date.now() + IMPORT_WORKER_LEASE_MS,
+          ":zero": 0,
+          ":null": null,
+          ":accepted": accepted,
+          ":scanned": scanned,
+          ":one": 1,
+          ":me": IMPORT_WORKER_ID,
+        },
+      })
+    );
+    return true;
+  } catch (err) {
+    if (err?.name === "ConditionalCheckFailedException") return false;
+    throw err;
+  }
+}
+
+async function failImportJob(userID, jobID, message) {
+  const job = await getImportJobItem(userID, jobID);
+  if (job) {
+    await putImportJobItem({ ...job, Status: "FAILED", Error: message, FailedAt: nowIso(), UpdatedAt: nowIso() });
+  }
+  await deleteImportStaging(userID, jobID);
+  await removeFromImportQueue(userID, jobID);
+  publishSolveSync(null, userID, { op: "bulk", allScopes: true });
+}
+
+async function runImportWorker(userID, jobID) {
+  let job = await getImportJobItem(userID, jobID);
+  if (!job) return removeFromImportQueue(userID, jobID);
+
+  let status = normalizeImportJobStatus(job.Status);
+  if (status === "PENDING") {
+    // Still uploading. Staging nobody finished within a day is dropped.
+    if (Date.now() - Date.parse(job.CreatedAt || 0) > IMPORT_STAGING_ABANDONED_MS) {
+      await putImportJobItem({ ...job, Status: "CANCELED", Error: "Upload was not finished", UpdatedAt: nowIso() });
+      await deleteImportStaging(userID, jobID);
+      await removeFromImportQueue(userID, jobID);
+    }
+    return;
+  }
+  if (status === "COMPLETED" || status === "FAILED") {
+    await deleteImportStaging(userID, jobID);
+    return removeFromImportQueue(userID, jobID);
+  }
+  if (!(await claimImportLease(userID, jobID, job.WorkerID))) return;
+  const renewLease = setInterval(() => {
+    ddb
+      .send(
+        new UpdateCommand({
+          TableName: TABLE,
+          Key: { PK: `USER#${userID}`, SK: buildImportJobSK(jobID) },
+          UpdateExpression: "SET WorkerLeaseUntil = :until",
+          ConditionExpression: "WorkerID = :me",
+          ExpressionAttributeValues: { ":until": Date.now() + IMPORT_WORKER_LEASE_MS, ":me": IMPORT_WORKER_ID },
+        })
+      )
+      .catch(() => {});
+  }, 60 * 1000);
+  try {
+    await runClaimedImportWorker(userID, jobID, job, status);
+  } finally {
+    clearInterval(renewLease);
+  }
+}
+
+async function runClaimedImportWorker(userID, jobID, job, status) {
+  if (status === "CANCELED") {
+    // Whatever landed before the cancel still needs its stats.
+    if ((job.AffectedSessions || []).length) await finalizeImportJob(userID, jobID, { keepCanceled: true });
+    await deleteImportStaging(userID, jobID);
+    return removeFromImportQueue(userID, jobID);
+  }
+
+  let phase = status === "FINALIZING" ? "finalize" : "write";
+  try {
+    if (status !== "FINALIZING") {
+      const events = new Set(job.AffectedEvents || []);
+      const sessions = new Set(job.AffectedSessions || []);
+      const startedAt = job.StartedAt || nowIso();
+      const beforeBatch = (count) => takeImportWriteTokens(userID, count);
+      let cursor = job.StageCursor || null;
+
+      for (;;) {
+        const page = await ddb.send(
+          new QueryCommand({
+            TableName: TABLE,
+            KeyConditionExpression: cursor ? "PK = :pk AND SK > :cursor" : "PK = :pk",
+            ExpressionAttributeValues: { ":pk": importStagePK(userID, jobID), ...(cursor ? { ":cursor": cursor } : {}) },
+            Limit: 4,
+          })
+        );
+        const staged = page.Items || [];
+        if (!staged.length) break;
+
+        for (const part of staged) {
+          const solves = JSON.parse(zlib.gunzipSync(Buffer.from(part.Data)).toString("utf8"));
+          const result = await writeImportSolves(
+            userID,
+            { AffectedEvents: Array.from(events), AffectedSessions: Array.from(sessions) },
+            solves,
+            { beforeBatch }
+          );
+          for (const event of result.eventSet) events.add(event);
+          for (const scope of result.sessionScopeKeys) sessions.add(scope);
+          cursor = part.SK;
+          const ok = await recordImportWorkerProgress(userID, jobID, {
+            accepted: result.accepted,
+            scanned: solves.length,
+            cursor,
+            events,
+            sessions,
+            startedAt,
+          });
+          if (!ok) {
+            // Canceled (picked up again just below) or taken over by another process. This part
+            // was written either way, so it still counts.
+            await ddb.send(
+              new UpdateCommand({
+                TableName: TABLE,
+                Key: { PK: `USER#${userID}`, SK: buildImportJobSK(jobID) },
+                UpdateExpression: "ADD ProcessedSolves :accepted, ScannedSolves :scanned",
+                ExpressionAttributeValues: { ":accepted": result.accepted, ":scanned": solves.length },
+              })
+            );
+            const latest = await getImportJobItem(userID, jobID);
+            if (normalizeImportJobStatus(latest?.Status) === "CANCELED" && latest?.WorkerID === IMPORT_WORKER_ID) {
+              await finalizeImportJob(userID, jobID, { keepCanceled: true });
+              await deleteImportStaging(userID, jobID);
+              await removeFromImportQueue(userID, jobID);
+            }
+            return;
+          }
+          await deleteItemsByKey([{ PK: part.PK, SK: part.SK }]);
+        }
+      }
+    }
+
+    phase = "finalize";
+    await finalizeImportJob(userID, jobID);
+    await deleteImportStaging(userID, jobID);
+    await removeFromImportQueue(userID, jobID);
+  } catch (err) {
+    if (Number(err?.statusCode) === 403 || Number(err?.statusCode) === 413) {
+      // Over the import allowance (or a solve too big to store): keep what landed, with stats.
+      try {
+        await finalizeImportJob(userID, jobID);
+      } catch (_) {}
+      return failImportJob(userID, jobID, err.message);
+    }
+    const latest = await getImportJobItem(userID, jobID);
+    const failures = Number(latest?.WorkerFailures || 0) + 1;
+    if (failures >= IMPORT_WORKER_MAX_FAILURES) {
+      return failImportJob(userID, jobID, `Import stopped: ${err?.message || "server error"}`);
+    }
+    // finalizeImportJob marks the job FAILED on an error; in the background it gets another go.
+    if (latest) {
+      await putImportJobItem({
+        ...latest,
+        ...(phase === "finalize" ? { Status: "FINALIZING", Error: null } : {}),
+        WorkerFailures: failures,
+        UpdatedAt: nowIso(),
+      });
+    }
+    console.error(`import-worker:${jobID} attempt ${failures} failed, retrying:`, err?.message || err);
+    // After this worker has returned, so the start isn't skipped as already running.
+    setTimeout(() => startImportWorker(userID, jobID), Math.min(5 * 60 * 1000, 15000 * failures)).unref?.();
+  }
+}
+
+function startImportWorker(userID, jobID, delayMs = 0) {
+  const key = `${userID}|${jobID}`;
+  if (runningImportWorkers.has(key)) return;
+  runningImportWorkers.add(key);
+  setTimeout(() => {
+    runInBackground(`import-worker:${jobID}`, async () => {
+      try {
+        await runImportWorker(userID, jobID);
+      } finally {
+        runningImportWorkers.delete(key);
+      }
+    });
+  }, delayMs);
+}
+
+// On start-up and every few minutes: restart queued jobs whose worker is gone.
+async function resumeQueuedImports() {
+  if (!USE_PK_SK) return;
+  try {
+    let cursor;
+    do {
+      const page = await ddb.send(
+        new QueryCommand({
+          TableName: TABLE,
+          KeyConditionExpression: "PK = :pk",
+          ExpressionAttributeValues: { ":pk": IMPORT_QUEUE_PK },
+          ExclusiveStartKey: cursor,
+        })
+      );
+      for (const entry of page.Items || []) {
+        if (entry.UserID && entry.JobID) startImportWorker(entry.UserID, entry.JobID);
+      }
+      cursor = page.LastEvaluatedKey;
+    } while (cursor);
+  } catch (err) {
+    console.error("resumeQueuedImports failed:", err?.message || err);
+  }
+}
+
+// `keepCanceled` recomputes stats for whatever a canceled import already wrote and leaves the job
+// CANCELED; otherwise a cancel seen part way stops here.
+async function finalizeImportJob(userID, jobID, { keepCanceled = false } = {}) {
   const current = await getImportJobItem(userID, jobID);
   if (!current) throw new Error("Import job not found");
 
@@ -4469,7 +4964,7 @@ async function finalizeImportJob(userID, jobID) {
 
   const started = {
     ...current,
-    Status: "FINALIZING",
+    Status: keepCanceled ? "CANCELED" : "FINALIZING",
     Error: null,
     FinalizedAt: nowIso(),
     UpdatedAt: nowIso(),
@@ -4477,10 +4972,13 @@ async function finalizeImportJob(userID, jobID) {
   };
   await putImportJobItem(started);
 
+  // Solves the user saves or edits meanwhile update stats themselves, but a recompute that read
+  // past them and writes after would undo that, so they are noted and redone at the end.
+  const liveWrites = beginLiveSolveTracking(userID);
   try {
     for (const rawScope of affectedSessions) {
       const latest = await getImportJobItem(userID, jobID);
-      if (normalizeImportJobStatus(latest?.Status) === "CANCELED") return;
+      if (!keepCanceled && normalizeImportJobStatus(latest?.Status) === "CANCELED") return;
       const scope = parseImportSessionScopeKey(rawScope);
       if (!scope) continue;
       await recomputeSessionStats(ddb, TABLE, userID, scope.event, scope.sessionID);
@@ -4495,7 +4993,7 @@ async function finalizeImportJob(userID, jobID) {
     const importDaysAffected = new Set();
     for (const event of affectedEvents) {
       const latest = await getImportJobItem(userID, jobID);
-      if (normalizeImportJobStatus(latest?.Status) === "CANCELED") return;
+      if (!keepCanceled && normalizeImportJobStatus(latest?.Status) === "CANCELED") return;
       const ev = normalizeEvent(event);
       if (!ev) continue;
       await recomputeEventStats(ddb, TABLE, userID, ev);
@@ -4510,11 +5008,12 @@ async function finalizeImportJob(userID, jobID) {
     }
 
     await recomputeAllEventsDayBuckets(userID, importDaysAffected);
+    await catchUpLiveSolveWrites(userID, liveWrites);
 
     const finished = await getImportJobItem(userID, jobID);
     await putImportJobItem({
       ...(finished || started),
-      Status: "COMPLETED",
+      Status: keepCanceled ? "CANCELED" : "COMPLETED",
       Error: null,
       CompletedAt: nowIso(),
       UpdatedAt: nowIso(),
@@ -4534,6 +5033,8 @@ async function finalizeImportJob(userID, jobID) {
       Recompute: { ...recomputeState },
     });
     throw err;
+  } finally {
+    endLiveSolveTracking(userID, liveWrites);
   }
 }
 
@@ -4599,7 +5100,7 @@ function isDynamoThrottleError(err) {
 // batch landing before the next (deletes before puts of the same key) keep the default.
 // A hot partition (one user's import) answers with UnprocessedItems rather than an error, so
 // those are retried with jittered backoff for up to about a minute before giving up.
-async function batchWriteRequestsWithRetry(requests, { concurrency = 1, stats = null } = {}) {
+async function batchWriteRequestsWithRetry(requests, { concurrency = 1, stats = null, beforeBatch = null } = {}) {
   if (!Array.isArray(requests) || requests.length === 0) return 0;
 
   const chunks = [];
@@ -4614,6 +5115,7 @@ async function batchWriteRequestsWithRetry(requests, { concurrency = 1, stats = 
     let attempt = 0;
 
     while (unprocessed.length > 0) {
+      if (beforeBatch) await beforeBatch(unprocessed.length);
       let out;
       try {
         out = await ddb.send(
@@ -8325,12 +8827,275 @@ app.post("/api/importJobs/:userID/:jobID/cancel", async (req, res) => {
       UpdatedAt: nowIso(),
     };
     await putImportJobItem(next);
+    // A background job's worker stops at its next chunk, recomputes stats for what landed and
+    // clears the staged chunks; this starts one if none is running here.
+    if (item.Mode === "BACKGROUND" || status === "PENDING") startImportWorker(userID, jobID);
     return res.json({ ok: true, job: publicImportJob(next) });
   } catch (e) {
     console.error("POST /api/importJobs/:userID/:jobID/cancel error:", e);
     return res.status(500).json({ error: e?.message || "Server error" });
   }
 });
+
+// Background import, step 1: store one chunk (any order, resendable) without writing solves yet.
+app.post("/api/importJobs/:userID/:jobID/stage", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const userID = String(req.params.userID || "").trim();
+    const jobID = String(req.params.jobID || "").trim();
+    const index = Number(req.body?.index);
+    const solves = Array.isArray(req.body?.solves) ? req.body.solves : [];
+
+    if (!Number.isInteger(index) || index < 0 || index > 999999) {
+      return res.status(400).json({ error: "Invalid chunk index" });
+    }
+    if (solves.length === 0) return res.status(400).json({ error: "Empty chunk" });
+    if (solves.length > 5000) return res.status(400).json({ error: "Too many solves in one chunk (max 5000)" });
+
+    const job = await getImportJobItem(userID, jobID);
+    if (!job) return res.status(404).json({ error: "Import job not found" });
+    const status = normalizeImportJobStatus(job.Status);
+    if (status !== "PENDING") {
+      return res.status(409).json({ error: `Import job is ${status.toLowerCase()}` });
+    }
+
+    const parts = splitImportChunkForStaging(solves);
+    // A resend may have split differently, so its old parts go first.
+    const pk = importStagePK(userID, jobID);
+    const prefix = `CHUNK#${String(index).padStart(6, "0")}#`;
+    const old = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :prefix)",
+        ExpressionAttributeValues: { ":pk": pk, ":prefix": prefix },
+        ProjectionExpression: "PK, SK",
+      })
+    );
+    const stale = (old.Items || []).filter((item) => Number(item.SK.slice(prefix.length)) >= parts.length);
+    if (stale.length) await deleteItemsByKey(stale);
+
+    const ts = nowIso();
+    await batchWriteRequestsWithRetry(
+      parts.map((part, i) => ({
+        PutRequest: {
+          Item: {
+            PK: pk,
+            SK: importStageSK(index, i),
+            ItemType: "IMPORTSTAGE",
+            UserID: userID,
+            JobID: jobID,
+            SolveCount: part.count,
+            Data: part.data,
+            CreatedAt: ts,
+          },
+        },
+      }))
+    );
+    // Listed from the first chunk on, so staging that is never queued gets cleaned up.
+    if (index === 0) {
+      await ddb.send(
+        new PutCommand({
+          TableName: TABLE,
+          Item: { ...importQueueKey(userID, jobID), ItemType: "IMPORTQUEUE", UserID: userID, JobID: jobID, CreatedAt: ts },
+        })
+      );
+    }
+
+    return res.json({ ok: true, index, parts: parts.length, bytes: parts.reduce((n, p) => n + p.data.length, 0) });
+  } catch (e) {
+    console.error("POST /api/importJobs/:userID/:jobID/stage error:", e);
+    return res.status(Number(e?.statusCode) || 500).json({ error: e?.message || "Server error" });
+  }
+});
+
+// Background import, step 2: every chunk is staged; hand the job to the worker.
+app.post("/api/importJobs/:userID/:jobID/queue", async (req, res) => {
+  if (!requirePkSk(res)) return;
+
+  try {
+    const userID = String(req.params.userID || "").trim();
+    const jobID = String(req.params.jobID || "").trim();
+    const totalChunks = Number(req.body?.totalChunks);
+    if (!Number.isInteger(totalChunks) || totalChunks < 1) {
+      return res.status(400).json({ error: "Invalid totalChunks" });
+    }
+
+    const job = await getImportJobItem(userID, jobID);
+    if (!job) return res.status(404).json({ error: "Import job not found" });
+    const status = normalizeImportJobStatus(job.Status);
+    if (status !== "PENDING") {
+      // Queued twice (a retried request) is fine.
+      if (job.Mode === "BACKGROUND" && ["QUEUED", "RUNNING", "FINALIZING", "COMPLETED"].includes(status)) {
+        return res.status(202).json({ ok: true, job: publicImportJob(job) });
+      }
+      return res.status(409).json({ error: `Import job is ${status.toLowerCase()}` });
+    }
+
+    const staged = await listImportStageKeys(userID, jobID);
+    const have = new Set(staged.map((item) => Number(String(item.SK).split("#")[1])));
+    const missing = [];
+    for (let i = 0; i < totalChunks && missing.length < 50; i += 1) if (!have.has(i)) missing.push(i);
+    if (missing.length) {
+      return res.status(409).json({ error: "Some chunks were not uploaded", code: "CHUNKS_MISSING", missing });
+    }
+
+    const ts = nowIso();
+    const next = {
+      ...job,
+      Status: "QUEUED",
+      Mode: "BACKGROUND",
+      TotalChunks: totalChunks,
+      StagedSolves: staged.reduce((n, item) => n + Number(item.SolveCount || 0), 0),
+      ScannedSolves: 0,
+      QueuedAt: ts,
+      UpdatedAt: ts,
+      Error: null,
+    };
+    await putImportJobItem(next);
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: { ...importQueueKey(userID, jobID), ItemType: "IMPORTQUEUE", UserID: userID, JobID: jobID, CreatedAt: job.CreatedAt || ts, QueuedAt: ts },
+      })
+    );
+    startImportWorker(userID, jobID);
+    return res.status(202).json({ ok: true, job: publicImportJob(next) });
+  } catch (e) {
+    console.error("POST /api/importJobs/:userID/:jobID/queue error:", e);
+    return res.status(Number(e?.statusCode) || 500).json({ error: e?.message || "Server error" });
+  }
+});
+
+// Writes one chunk of imported solves (shared by the upload route and the background worker).
+// Solves already in the table are skipped, so a chunk can be resent safely. `beforeBatch(n)` is
+// awaited before each batch call of n items, which is how the background worker paces itself.
+async function writeImportSolves(userID, job, solves, { beforeBatch = null } = {}) {
+  const solveItems = [];
+  const seenSolveKeys = new Set();
+  const sessionScopeKeys = new Set(Array.isArray(job.AffectedSessions) ? job.AffectedSessions : []);
+  const eventSet = new Set(Array.isArray(job.AffectedEvents) ? job.AffectedEvents : []);
+  const ensuredSessions = new Set();
+  let validSolves = 0;
+
+  for (const rawSolve of solves) {
+    const event = normalizeEvent(rawSolve?.event || rawSolve?.Event);
+    const sessionID = normalizeSessionID(
+      rawSolve?.sessionID || rawSolve?.SessionID || rawSolve?._importSessionID || "main"
+    );
+
+    if (!event) continue;
+
+    const sessionScopeKey = buildImportSessionScopeKey(event, sessionID);
+    if (!sessionScopeKey) continue;
+
+    if (!ensuredSessions.has(sessionScopeKey)) {
+      await ensureSessionRecordExists(
+        userID,
+        event,
+        sessionID,
+        rawSolve?._importSessionName || rawSolve?.sessionName || rawSolve?.SessionName || null
+      );
+      ensuredSessions.add(sessionScopeKey);
+    }
+
+    let rawTimeMs = Number(
+      rawSolve?.rawTimeMs ??
+        rawSolve?.RawTimeMs ??
+        rawSolve?.originalTime ??
+        rawSolve?.OriginalTime ??
+        rawSolve?.time ??
+        rawSolve?.Time
+    );
+    if (!Number.isFinite(rawTimeMs) || rawTimeMs < 0) continue;
+
+    const penalty = normalizePenalty(rawSolve?.penalty ?? rawSolve?.Penalty ?? null);
+    if (
+      penalty === "+2" &&
+      typeof rawSolve?.originalTime === "undefined" &&
+      typeof rawSolve?.OriginalTime === "undefined" &&
+      typeof rawSolve?.rawTimeMs === "undefined" &&
+      typeof rawSolve?.RawTimeMs === "undefined"
+    ) {
+      rawTimeMs = Math.max(0, rawTimeMs - 2000);
+    }
+
+    const createdAt = resolveImportedCreatedAt(rawSolve, Date.now() + validSolves);
+    const scramble = rawSolve?.scramble ?? rawSolve?.Scramble ?? "";
+    const solveID = buildDeterministicImportedSolveID({
+      userID,
+      event,
+      sessionID,
+      createdAt,
+      rawTimeMs,
+      scramble,
+    });
+
+    const solveItem = buildSolveItem({
+      userID,
+      event,
+      sessionID,
+      rawTimeMs,
+      penalty,
+      scramble,
+      note: rawSolve?.note ?? rawSolve?.Note ?? "",
+      tags: rawSolve?.tags ?? rawSolve?.Tags ?? {},
+      createdAt,
+      solveID,
+    });
+
+    sessionScopeKeys.add(sessionScopeKey);
+    eventSet.add(event);
+    validSolves += 1;
+
+    // BatchWrite rejects repeated keys, and a repeat here is the same solve twice.
+    const solveKey = `${solveItem.PK}|${solveItem.SK}`;
+    if (seenSolveKeys.has(solveKey)) continue;
+    seenSolveKeys.add(solveKey);
+    solveItems.push(solveItem);
+  }
+
+  // Solves already in the table (an earlier import of the same data, or a retried chunk) are
+  // left as they are, so edits made since aren't overwritten.
+  const existingSolveItems = await batchGetItems(
+    solveItems.map((item) => ({ PK: item.PK, SK: item.SK })),
+    { projection: "#pk, #sk", names: { "#pk": "PK", "#sk": "SK" }, concurrency: IMPORT_DDB_CONCURRENCY }
+  );
+  const existingSolveKeys = new Set(existingSolveItems.map((item) => `${item?.PK}|${item?.SK}`));
+  const newSolveItems = solveItems.filter(
+    (item) => !existingSolveKeys.has(`${item.PK}|${item.SK}`)
+  );
+  const accepted = newSolveItems.length;
+
+  // Index items are all written before any solve: a solve that exists then implies its tag and
+  // rank items were written, which is what lets a retry skip it. Within each phase the batches
+  // run in parallel, since one at a time leaves a big import waiting on round trips.
+  const indexRequests = [];
+  for (const solveItem of newSolveItems) {
+    for (const tagItem of buildSolveTagItems(solveItem)) {
+      indexRequests.push({ PutRequest: { Item: tagItem } });
+    }
+    for (const rankItem of buildSingleRankItemsForSolve(userID, solveItem)) {
+      indexRequests.push({ PutRequest: { Item: rankItem } });
+    }
+  }
+  const solveRequests = newSolveItems.map((solveItem) => ({ PutRequest: { Item: solveItem } }));
+
+  await reserveImportSolveAllowance(userID, accepted);
+
+  let wrote = 0;
+  // How often DynamoDB pushed back (UnprocessedItems), reported so imports can be tuned.
+  const throttle = { retries: 0, unprocessedItems: 0 };
+  try {
+    wrote += await batchWriteRequestsWithRetry(indexRequests, { concurrency: IMPORT_DDB_CONCURRENCY, stats: throttle, beforeBatch });
+    wrote += await batchWriteRequestsWithRetry(solveRequests, { concurrency: IMPORT_DDB_CONCURRENCY, stats: throttle, beforeBatch });
+  } catch (err) {
+    await releaseImportSolveAllowance(userID, accepted);
+    throw err;
+  }
+
+  return { accepted, wrote, throttle, eventSet, sessionScopeKeys };
+}
 
 app.post("/api/importJobs/:userID/:jobID/chunk", async (req, res) => {
   if (!requirePkSk(res)) return;
@@ -8355,128 +9120,7 @@ app.post("/api/importJobs/:userID/:jobID/chunk", async (req, res) => {
       return res.status(409).json({ error: `Import job is ${status.toLowerCase()}` });
     }
 
-    const solveItems = [];
-    const seenSolveKeys = new Set();
-    const sessionScopeKeys = new Set(Array.isArray(job.AffectedSessions) ? job.AffectedSessions : []);
-    const eventSet = new Set(Array.isArray(job.AffectedEvents) ? job.AffectedEvents : []);
-    const ensuredSessions = new Set();
-    let validSolves = 0;
-
-    for (const rawSolve of solves) {
-      const event = normalizeEvent(rawSolve?.event || rawSolve?.Event);
-      const sessionID = normalizeSessionID(
-        rawSolve?.sessionID || rawSolve?.SessionID || rawSolve?._importSessionID || "main"
-      );
-
-      if (!event) continue;
-
-      const sessionScopeKey = buildImportSessionScopeKey(event, sessionID);
-      if (!sessionScopeKey) continue;
-
-      if (!ensuredSessions.has(sessionScopeKey)) {
-        await ensureSessionRecordExists(
-          userID,
-          event,
-          sessionID,
-          rawSolve?._importSessionName || rawSolve?.sessionName || rawSolve?.SessionName || null
-        );
-        ensuredSessions.add(sessionScopeKey);
-      }
-
-      let rawTimeMs = Number(
-        rawSolve?.rawTimeMs ??
-          rawSolve?.RawTimeMs ??
-          rawSolve?.originalTime ??
-          rawSolve?.OriginalTime ??
-          rawSolve?.time ??
-          rawSolve?.Time
-      );
-      if (!Number.isFinite(rawTimeMs) || rawTimeMs < 0) continue;
-
-      const penalty = normalizePenalty(rawSolve?.penalty ?? rawSolve?.Penalty ?? null);
-      if (
-        penalty === "+2" &&
-        typeof rawSolve?.originalTime === "undefined" &&
-        typeof rawSolve?.OriginalTime === "undefined" &&
-        typeof rawSolve?.rawTimeMs === "undefined" &&
-        typeof rawSolve?.RawTimeMs === "undefined"
-      ) {
-        rawTimeMs = Math.max(0, rawTimeMs - 2000);
-      }
-
-      const createdAt = resolveImportedCreatedAt(rawSolve, Date.now() + validSolves);
-      const scramble = rawSolve?.scramble ?? rawSolve?.Scramble ?? "";
-      const solveID = buildDeterministicImportedSolveID({
-        userID,
-        event,
-        sessionID,
-        createdAt,
-        rawTimeMs,
-        scramble,
-      });
-
-      const solveItem = buildSolveItem({
-        userID,
-        event,
-        sessionID,
-        rawTimeMs,
-        penalty,
-        scramble,
-        note: rawSolve?.note ?? rawSolve?.Note ?? "",
-        tags: rawSolve?.tags ?? rawSolve?.Tags ?? {},
-        createdAt,
-        solveID,
-      });
-
-      sessionScopeKeys.add(sessionScopeKey);
-      eventSet.add(event);
-      validSolves += 1;
-
-      // BatchWrite rejects repeated keys, and a repeat here is the same solve twice.
-      const solveKey = `${solveItem.PK}|${solveItem.SK}`;
-      if (seenSolveKeys.has(solveKey)) continue;
-      seenSolveKeys.add(solveKey);
-      solveItems.push(solveItem);
-    }
-
-    // Solves already in the table (an earlier import of the same data, or a retried chunk) are
-    // left as they are, so edits made since aren't overwritten.
-    const existingSolveItems = await batchGetItems(
-      solveItems.map((item) => ({ PK: item.PK, SK: item.SK })),
-      { projection: "#pk, #sk", names: { "#pk": "PK", "#sk": "SK" }, concurrency: IMPORT_DDB_CONCURRENCY }
-    );
-    const existingSolveKeys = new Set(existingSolveItems.map((item) => `${item?.PK}|${item?.SK}`));
-    const newSolveItems = solveItems.filter(
-      (item) => !existingSolveKeys.has(`${item.PK}|${item.SK}`)
-    );
-    const accepted = newSolveItems.length;
-
-    // Index items are all written before any solve: a solve that exists then implies its tag and
-    // rank items were written, which is what lets a retry skip it. Within each phase the batches
-    // run in parallel, since one at a time leaves a big import waiting on round trips.
-    const indexRequests = [];
-    for (const solveItem of newSolveItems) {
-      for (const tagItem of buildSolveTagItems(solveItem)) {
-        indexRequests.push({ PutRequest: { Item: tagItem } });
-      }
-      for (const rankItem of buildSingleRankItemsForSolve(userID, solveItem)) {
-        indexRequests.push({ PutRequest: { Item: rankItem } });
-      }
-    }
-    const solveRequests = newSolveItems.map((solveItem) => ({ PutRequest: { Item: solveItem } }));
-
-    await reserveImportSolveAllowance(userID, accepted);
-
-    let wrote = 0;
-    // How often DynamoDB pushed back (UnprocessedItems), reported so imports can be tuned.
-    const throttle = { retries: 0, unprocessedItems: 0 };
-    try {
-      wrote += await batchWriteRequestsWithRetry(indexRequests, { concurrency: IMPORT_DDB_CONCURRENCY, stats: throttle });
-      wrote += await batchWriteRequestsWithRetry(solveRequests, { concurrency: IMPORT_DDB_CONCURRENCY, stats: throttle });
-    } catch (err) {
-      await releaseImportSolveAllowance(userID, accepted);
-      throw err;
-    }
+    const { accepted, wrote, throttle, eventSet, sessionScopeKeys } = await writeImportSolves(userID, job, solves);
 
     const ts = nowIso();
     const next = {
@@ -11556,4 +12200,7 @@ process.on("unhandledRejection", (reason) => {
 app.listen(port, () => {
   console.log(`PTS API running on http://localhost:${port}`);
   console.log(`Dynamo region=${REGION}, table=${TABLE}, pk/sk=${USE_PK_SK}`);
+  // Background imports interrupted by a restart or deploy carry on.
+  setTimeout(resumeQueuedImports, 3000);
+  setInterval(resumeQueuedImports, 5 * 60 * 1000).unref();
 });

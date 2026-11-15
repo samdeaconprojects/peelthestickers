@@ -85,7 +85,19 @@ function logApiRequest(stage, meta) {
   console.log(prefix, meta);
 }
 
-async function request(method, path, body) {
+// Gzips a JSON body where the browser can (CompressionStream); the API inflates it. Import
+// chunks shrink about 5x, which is most of an import's upload time on a slow connection.
+async function gzipJson(value) {
+  if (typeof CompressionStream === "undefined" || typeof Blob === "undefined") return null;
+  try {
+    const stream = new Blob([JSON.stringify(value)]).stream().pipeThrough(new CompressionStream("gzip"));
+    return await new Response(stream).arrayBuffer();
+  } catch {
+    return null;
+  }
+}
+
+async function request(method, path, body, { gzip = false } = {}) {
   const url = toApiUrl(path);
   const requestID = `${method}-${Date.now()}-${++apiRequestCounter}`;
   const startedAt = Date.now();
@@ -100,7 +112,13 @@ async function request(method, path, body) {
 
   if (typeof body !== "undefined") {
     options.headers["Content-Type"] = "application/json";
-    options.body = JSON.stringify(body ?? {});
+    const compressed = gzip ? await gzipJson(body ?? {}) : null;
+    if (compressed) {
+      options.headers["Content-Encoding"] = "gzip";
+      options.body = compressed;
+    } else {
+      options.body = JSON.stringify(body ?? {});
+    }
   }
 
   let res;
@@ -195,8 +213,8 @@ export async function apiGet(path) {
   return request("GET", path);
 }
 
-export async function apiPost(path, body) {
-  return request("POST", path, body);
+export async function apiPost(path, body, options) {
+  return request("POST", path, body, options);
 }
 
 export async function apiPut(path, body) {

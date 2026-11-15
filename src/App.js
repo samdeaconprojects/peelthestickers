@@ -33,6 +33,7 @@ import SignInPopup from "./components/SignInPopup/SignInPopup";
 import { PrivacyPage, TermsPage } from "./components/Legal/Legal";
 import AdminMetricsPage from "./components/Admin/AdminMetricsPage";
 import EmailBanner from "./components/Account/EmailBanner";
+import ImportBanner from "./components/Account/ImportBanner";
 import { VerifyEmailPage, ResetPasswordPage } from "./components/Account/EmailActionPages";
 import {
   ProfileSetupModal,
@@ -8094,6 +8095,7 @@ function App() {
             setShowOfflineSolvesModal(true);
           }}
         />
+        <ImportBanner userID={user?.UserID} isSignedIn={isSignedIn} />
         {isSignedIn && !showPostSignUpProfileSetup ? (
           <EmailBanner
             accountEmail={accountEmail}
