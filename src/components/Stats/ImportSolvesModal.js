@@ -84,13 +84,12 @@ export default function ImportSolvesModal({
     return list.length ? list : [{ SessionID: "main", SessionName: "Main" }];
   }, [sessionsForEvent]);
 
-  // The viewed session can be the "all sessions" pseudo-session, which is not a real target.
+  // Imports go to Main unless another session is picked: that's where people keep their history.
   const existingSessionID = useMemo(() => {
     const ids = existingSessionOptions.map((s) => s.SessionID);
     if (ids.includes(destSessionID)) return destSessionID;
-    if (ids.includes(String(sessionID))) return String(sessionID);
     return ids.includes("main") ? "main" : ids[0];
-  }, [destSessionID, existingSessionOptions, sessionID]);
+  }, [destSessionID, existingSessionOptions]);
 
   const eventChoices = useMemo(() => {
     const seen = new Set();
@@ -177,9 +176,11 @@ Example:
 
   /* ------------------------------ IMPORT PLAN ------------------------------ */
 
+  // Main (an existing session) unless the user picks otherwise; keeping csTimer's own sessions
+  // is a csTimer-only choice.
   const resolveDestKind = (fmt) => {
-    if (fmt === "cstimer") return destTouched ? destKind : "separate";
-    if (destKind === "separate") return defaultDestination?.kind === "new" ? "new" : "existing";
+    if (!destTouched) return "existing";
+    if (destKind === "separate" && fmt !== "cstimer") return "existing";
     return destKind;
   };
 
@@ -570,22 +571,6 @@ Example:
           <div className="importDestWrap">
             <div className="importDestTitle">Destination</div>
 
-            {sources.length > 0 ? (
-              <div className="importDestRow">
-                <label className="importDestLabel">
-                  <input
-                    type="radio"
-                    name="importDestKind"
-                    checked={activeDestKind === "separate"}
-                    disabled={busy}
-                    onChange={() => chooseDestKind("separate")}
-                  />
-                  Keep csTimer sessions
-                </label>
-                <div className="importDestHint">One session per csTimer session, under its puzzle.</div>
-              </div>
-            ) : null}
-
             <div className="importDestRow">
               <label className="importDestLabel">
                 <input
@@ -608,6 +593,22 @@ Example:
                 ))}
               </select>
             </div>
+
+            {sources.length > 0 ? (
+              <div className="importDestRow">
+                <label className="importDestLabel">
+                  <input
+                    type="radio"
+                    name="importDestKind"
+                    checked={activeDestKind === "separate"}
+                    disabled={busy}
+                    onChange={() => chooseDestKind("separate")}
+                  />
+                  Keep csTimer sessions
+                </label>
+                <div className="importDestHint">One session per csTimer session, under its puzzle.</div>
+              </div>
+            ) : null}
 
             <div className="importDestRow">
               <label className="importDestLabel">
@@ -633,7 +634,9 @@ Example:
 
             {activeDestKind === "existing" ? (
               <div className="importDestHint">
-                Applies to {event} solves. Solves for other puzzles go to that puzzle's Main session.
+                {existingSessionID === "main"
+                  ? "Each puzzle's solves go into its Main session, in date order alongside the solves already there."
+                  : `Applies to ${event} solves. Solves for other puzzles go to that puzzle's Main session.`}
               </div>
             ) : null}
           </div>
@@ -651,8 +654,10 @@ Example:
             </div>
             {meta.undated > 0 ? (
               <div className="importWarning">
-                {meta.undated} solve{meta.undated === 1 ? " has" : "s have"} no date and will be
-                stamped with the time of this import.
+                {meta.undated} solve{meta.undated === 1 ? " has" : "s have"} no date.{" "}
+                {meta.detected === "cstimer"
+                  ? "They're placed just before the oldest dated solve from the same csTimer session, in file order."
+                  : "They will be stamped with the time of this import."}
               </div>
             ) : null}
             {(meta.unknownEvents || []).length > 0 ? (

@@ -266,10 +266,41 @@ const parseCsTimerComment = (commentRaw) => {
   return { note: raw, tags: {} };
 };
 
+// Very old csTimer exports have no dates. Stamping those "now" would put years-old solves among
+// today's (and in Main's current averages), so instead they go just before the earliest dated
+// solve from the same csTimer session, a second apart in file order, or before 2000 when that
+// session has no dates at all. The stamps depend only on the file, so re-imports dedupe.
+const UNDATED_FALLBACK_MS = Date.UTC(2000, 0, 1);
+const UNDATED_STEP_MS = 1000;
+
+const datesForUndatedSourceSolves = (solves) => {
+  const bySource = new Map();
+  for (const s of solves) {
+    const key = s?._importSourceKey;
+    if (!key) continue;
+    const entry = bySource.get(key) || { earliest: Infinity, undated: 0, seen: 0 };
+    if (s._undated) entry.undated += 1;
+    else {
+      const ms = normalizeDate(s.datetime);
+      if (ms) entry.earliest = Math.min(entry.earliest, ms);
+    }
+    bySource.set(key, entry);
+  }
+  return (s) => {
+    if (!s?._undated || !s._importSourceKey) return null;
+    const entry = bySource.get(s._importSourceKey);
+    const anchor = Number.isFinite(entry.earliest) ? entry.earliest : UNDATED_FALLBACK_MS;
+    const ms = anchor - (entry.undated - entry.seen) * UNDATED_STEP_MS;
+    entry.seen += 1;
+    return ms;
+  };
+};
+
 export const dedupeAndStabilize = (solves, event) => {
+  const undatedMs = datesForUndatedSourceSolves(solves);
   // Dates are read once up front: parsing them inside the comparator costs seconds on a big import.
   const sorted = solves
-    .map((solve) => ({ solve, ms: normalizeDate(solve.datetime) ?? 0 }))
+    .map((solve) => ({ solve, ms: undatedMs(solve) ?? normalizeDate(solve.datetime) ?? 0 }))
     .sort((a, b) => a.ms - b.ms);
 
   const seen = new Set();

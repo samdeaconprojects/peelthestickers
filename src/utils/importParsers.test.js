@@ -124,6 +124,24 @@ describe("dedupeAndStabilize", () => {
     expect(out).toHaveLength(2);
   });
 
+  test("dates undated csTimer solves just before the session's oldest dated one, in file order", () => {
+    const out = dedupeAndStabilize(
+      parse({ session1: [[[0, 1000], "A", ""], [[0, 1001], "B", ""], row(2000, 1500000000), row(3000, 1500000100)] }),
+      "333"
+    );
+    expect(out.map((s) => s.time)).toEqual([1000, 1001, 2000, 3000]);
+    expect(out[0].datetime).toBe(new Date(1500000000 * 1000 - 2000).toISOString());
+    expect(out[1].datetime).toBe(new Date(1500000000 * 1000 - 1000).toISOString());
+  });
+
+  test("dates a csTimer session with no dates at all before 2000, the same way every time", () => {
+    const rows = { session1: [[[0, 1000], "A", ""], [[0, 1001], "B", ""]] };
+    const first = dedupeAndStabilize(parse(rows), "333");
+    const again = dedupeAndStabilize(parse(rows), "333");
+    expect(first.map((s) => s.datetime)).toEqual(again.map((s) => s.datetime));
+    expect(Date.parse(first[1].datetime)).toBeLessThan(Date.UTC(2000, 0, 1));
+  });
+
   test("gives solves in the same second distinct stamps", () => {
     const out = dedupeAndStabilize(
       parse({ session1: [row(1000, 1500000000), row(1001, 1500000000), row(1002, 1500000000)] }),

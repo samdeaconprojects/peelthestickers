@@ -6,7 +6,7 @@
 // CONCURRENCY uploads that many chunks at once. BACKGROUND=1 uses the app's background path
 // (gzipped chunks to /stage, then /queue, then the server's worker) instead of /chunk + /finalize.
 // LIVE_SOLVES=1 keeps saving a 3x3 solve every 2s while the import runs, timing each save and
-// counting them into the expected stats.
+// counting them into the expected stats. DEST=main imports into each puzzle's Main session.
 import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { parseCsTimer, dedupeAndStabilize, detectFormat, chunkImportSolves } from "../../src/utils/importParsers.js";
@@ -109,8 +109,10 @@ const groups = stage("group+chunk", () => {
     });
   }
   return [...byKey.values()].map((g) => {
-    const sessionID = `import_${slug(g.name)}_${g.ev.toLowerCase()}`;
-    const clean = g.solves.map((solve, i) => ({ ...solve, sessionID, _importSessionName: g.name, importOrdinal: i }));
+    // DEST=main sends everything to each puzzle's Main session, the app's default.
+    const toMain = process.env.DEST === "main";
+    const sessionID = toMain ? "main" : `import_${slug(g.name)}_${g.ev.toLowerCase()}`;
+    const clean = g.solves.map((solve, i) => ({ ...solve, sessionID, ...(toMain ? {} : { _importSessionName: g.name }), importOrdinal: i }));
     return { ...g, sessionID, chunks: chunkImportSolves(clean) };
   });
 });

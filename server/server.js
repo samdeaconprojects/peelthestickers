@@ -3937,11 +3937,12 @@ async function applyIncrementalStatsForScope({
   const sid = sessionID ? normalizeSessionID(sessionID) : null;
 
   // The writer we lost to may be a background rebuild (queued by a solve
-  // move). Rebuilding inline here would put that same full scan -- ~25s on a
-  // 50k-solve event -- back on this request. Ask the background job for one
-  // more pass instead (it re-reads every solve, this one included) and answer
-  // with the row as it stands now.
-  if (hasRecentBackgroundStatsRebuild(userID, ev, sid)) {
+  // move) or an import's finalize recomputing this scope. Rebuilding inline
+  // here would put that same full scan -- ~25s on a 50k-solve event -- back on
+  // this request. Ask the background job for one more pass instead (it
+  // re-reads every solve, this one included) and answer with the row as it
+  // stands now.
+  if (hasRecentBackgroundStatsRebuild(userID, ev, sid) || liveSolveTrackers.has(String(userID))) {
     queueBackgroundStatsRebuild(userID, ev, sid);
     const current = await ddb.send(
       new GetCommand({

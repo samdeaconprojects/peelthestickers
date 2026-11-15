@@ -10762,7 +10762,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
           importProgress={importProgress}
           sessionsForEvent={sessionsForEvent.filter((s) => s.SessionID !== ALL_SESSIONS)}
           eventOptions={baseEventOptions}
-          defaultDestination={{ kind: "new", sessionName: "" }}
+          defaultDestination={{ kind: "existing", sessionName: "" }}
         />
       )}
 
