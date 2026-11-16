@@ -8029,6 +8029,7 @@ function App() {
       applyPenalty={applyPenalty}
       solves={currentSolves}
       sessionBestSingleMs={currentSessionStatsForEvent?.BestSingleMs}
+      sessionWorstSingleMs={currentSessionStatsForEvent?.WorstSingleMs}
       horizontalAutoColsBreakpointPx={1200}
       nonRollingAutoColsBreakpointPx={1050}
       compactHorizontalLargeMinWidthPx={880}

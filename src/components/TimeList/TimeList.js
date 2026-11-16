@@ -192,6 +192,7 @@ function TimeList({
   applyPenalty,
   solves = [],
   sessionBestSingleMs,
+  sessionWorstSingleMs,
   deleteTime,
   rowsToShow = 3,
   inPlayerBar,
@@ -490,21 +491,45 @@ function TimeList({
   }, [times]);
 
   const overallMin = overallCalc.minIdx;
-  const overallMinValue = overallCalc.minVal;
-  const overallMaxValue = overallCalc.maxVal;
-  // Session-wide best/worst single, matched by value so tied solves all get the fill.
-  const isOverallBestTime = (value) =>
-    typeof value === "number" && overallMinValue != null && value === overallMinValue;
-  const isOverallWorstTime = (value) =>
-    typeof value === "number" &&
-    overallMaxValue != null &&
-    overallMaxValue !== overallMinValue &&
-    value === overallMaxValue;
 
   const canonicalSessionBestSingleMs = useMemo(() => {
     const value = Number(sessionBestSingleMs);
     return Number.isFinite(value) ? value : null;
   }, [sessionBestSingleMs]);
+  const canonicalSessionWorstSingleMs = useMemo(() => {
+    const value = Number(sessionWorstSingleMs);
+    return Number.isFinite(value) ? value : null;
+  }, [sessionWorstSingleMs]);
+
+  // `solves` is often only the recently loaded window of a large session, so the
+  // fills use the whole-session best/worst when we have them. Practice-mode
+  // solves are all loaded (and the session stats describe the real session), so
+  // practice keeps using the loaded min/max. A fresh solve that beats the cached
+  // stat still wins via min/max until the stats refresh.
+  // The color gradient keeps using the loaded min/max below.
+  const overallMinValue = overallCalc.minVal;
+  const overallMaxValue = overallCalc.maxVal;
+  const useCanonicalExtremes = !practiceMode;
+  const fillMinValue =
+    useCanonicalExtremes && canonicalSessionBestSingleMs != null
+      ? overallCalc.minVal == null
+        ? canonicalSessionBestSingleMs
+        : Math.min(canonicalSessionBestSingleMs, overallCalc.minVal)
+      : overallCalc.minVal;
+  const fillMaxValue =
+    useCanonicalExtremes && canonicalSessionWorstSingleMs != null
+      ? overallCalc.maxVal == null
+        ? canonicalSessionWorstSingleMs
+        : Math.max(canonicalSessionWorstSingleMs, overallCalc.maxVal)
+      : overallCalc.maxVal;
+  // Session-wide best/worst single, matched by value so tied solves all get the fill.
+  const isOverallBestTime = (value) =>
+    typeof value === "number" && fillMinValue != null && value === fillMinValue;
+  const isOverallWorstTime = (value) =>
+    typeof value === "number" &&
+    fillMaxValue != null &&
+    fillMaxValue !== fillMinValue &&
+    value === fillMaxValue;
 
   const sessionSingleBeatByIndex = useMemo(() => {
     if (canonicalSessionBestSingleMs != null) {
