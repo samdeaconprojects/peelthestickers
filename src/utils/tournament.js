@@ -294,6 +294,8 @@ export function computeMatchResult(tournament, match, roundResults) {
       loserId: st.winner === "a" ? bId : st.winner === "b" ? aId : null,
       aScore: st.aSets,
       bScore: st.bSets,
+      aDone,
+      bDone,
       scoreLabel: `${st.aSets}–${st.bSets} sets`,
     };
   }
@@ -314,6 +316,8 @@ export function computeMatchResult(tournament, match, roundResults) {
       loserId: winner === "a" ? bId : winner === "b" ? aId : null,
       aScore: a,
       bScore: b,
+      aDone,
+      bDone,
       scoreLabel: `${a}–${b}`,
     };
   }
@@ -334,6 +338,8 @@ export function computeMatchResult(tournament, match, roundResults) {
     loserId: winner === "a" ? bId : winner === "b" ? aId : null,
     aScore: aMean,
     bScore: bMean,
+    aDone,
+    bDone,
     scoreLabel:
       aMean != null && bMean != null
         ? `${(aMean / 1000).toFixed(2)} vs ${(bMean / 1000).toFixed(2)}`

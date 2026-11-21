@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import "./PlayerBar.css";
 import "../TagBar/TagBar.css";
 import Timer from "../Timer/Timer";
@@ -8,6 +8,7 @@ import Scramble from "../Scramble/Scramble";
 import PuzzleSVG from "../PuzzleSVGs/PuzzleSVG";
 import TagBar from "../TagBar/TagBar";
 import { useLocation } from "react-router-dom";
+import { useSettings } from "../../contexts/SettingsContext";
 
 function PlayerBar({
   isSignedIn,
@@ -50,6 +51,9 @@ function PlayerBar({
 }) {
   const location = useLocation();
   const { pathname } = location;
+  const { settings } = useSettings();
+  // Slot in the event line where the Timer portals its Bluetooth connect chip.
+  const [bluetoothSlot, setBluetoothSlot] = useState(null);
 
   const borderColor = {
     "/": "blue",
@@ -108,6 +112,7 @@ function PlayerBar({
             onSessionChange={onSessionChange}
             onSelectSessionObj={onSelectSessionObj}
           />
+          <span className="playerbar-bt-slot" ref={setBluetoothSlot} />
           {practiceMode ? (
             <span
               className="playerbar-mode-chip playerbar-mode-chip--practice"
@@ -169,6 +174,7 @@ function PlayerBar({
           <Timer
             addTime={addTime}
             inPlayerBar={true}
+            bluetoothSlot={bluetoothSlot}
             latestSolve={currentSolves[currentSolves.length - 1] || null}
           />
         </div>
@@ -260,6 +266,7 @@ function PlayerBar({
               scramble={scramble}
               isMusicPlayer={true}
               isTimerCube={false}
+              netView={settings?.homePuzzleSvgView === "net"}
             />
           </div>
         </div>

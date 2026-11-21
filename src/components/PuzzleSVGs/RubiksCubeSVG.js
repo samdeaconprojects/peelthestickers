@@ -1,6 +1,7 @@
 // src/components/PuzzleSVGs/RubiksCubeSVG.js
 import React from "react";
 import "./RubiksCubeSVG.css";
+import { useCubeColors } from "../../utils/cubeColors";
 
 const RubiksCubeSVG = ({
   n,
@@ -11,6 +12,7 @@ const RubiksCubeSVG = ({
   isProfileCube,
   showFront = true,
 }) => {
+  const cubeColors = useCubeColors();
   // console.log(faces);
 
   // Convert event string -> numeric N
@@ -145,12 +147,14 @@ const RubiksCubeSVG = ({
     for (let row = 0; row < n; row++) {
       for (let col = 0; col < n; col++) {
         switch (face[row][col]) {
-          case "yellow": stickerColor = "#FFFF00"; break;
-          case "white": stickerColor = "#FFFFFF"; break;
-          case "red": stickerColor = "#F64258"; break;
-          case "orange": stickerColor = "#FF8F0C"; break;
-          case "blue": stickerColor = "#50B6FF"; break;
-          case "green": stickerColor = "#12EA68"; break;
+          case "yellow":
+          case "white":
+          case "red":
+          case "orange":
+          case "blue":
+          case "green":
+            stickerColor = cubeColors[face[row][col]];
+            break;
           default: break;
         }
 

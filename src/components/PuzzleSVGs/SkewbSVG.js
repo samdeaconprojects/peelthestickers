@@ -1,15 +1,8 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import { ReactComponent as SkewbTemplate } from "../../assets/ptsskewb.svg";
 import "./SkewbSVG.css";
+import { useCubeColors } from "../../utils/cubeColors";
 
-const colorMap = {
-  white: "#FFFFFF",
-  green: "#12EA68",
-  red: "#F64258",
-  blue: "#50B6FF",
-  orange: "#FF8F0C",
-  yellow: "#FFFF00",
-};
 
 const cornerTemplates = [
   ["white", "orange", "blue"],
@@ -187,7 +180,8 @@ function applyMove(face, mod, corners, centers) {
   }
 }
 
-function getFaces(scramble) {
+// faces[i] = [center, s1, s2, s3, s4]; face order U F R B L D.
+export function getSkewbFaces(scramble) {
   const corners = cornerTemplates.map((corner) => [...corner]);
   const centers = [...centerTemplates];
   const moves = String(scramble || "").trim().split(/\s+/).filter(Boolean);
@@ -205,7 +199,8 @@ export default function SkewbSVG({
   showFront = true,
 }) {
   const containerRef = useRef(null);
-  const faces = useMemo(() => getFaces(scramble), [scramble]);
+  const colorMap = useCubeColors();
+  const faces = useMemo(() => getSkewbFaces(scramble), [scramble]);
 
   useEffect(() => {
     const root = containerRef.current;
@@ -233,7 +228,7 @@ export default function SkewbSVG({
         }
       });
     });
-  }, [faces, showFront]);
+  }, [faces, showFront, colorMap]);
 
   const px = Math.round(size * 2.45);
 

@@ -27,6 +27,7 @@ import {
 } from "./components/LiveRoom/LiveRoomBar";
 import HomeStatsOverlay from "./components/HomeStats/HomeStatsOverlay";
 import EventSelector from "./components/EventSelector";
+import { setReconPool } from "./smart/recon/stepStats";
 import Scramble from "./components/Scramble/Scramble";
 import PuzzleSVG from "./components/PuzzleSVGs/PuzzleSVG";
 import SignInPopup from "./components/SignInPopup/SignInPopup";
@@ -110,6 +111,7 @@ import {
   generateRelayScrambles,
   generateScrambleForEvent,
   getScrambleQueueSnapshot,
+  insertScramble,
   prependScramble,
   replaceHeadScramble,
   warmScrambleQueue,
@@ -1631,7 +1633,13 @@ function toFiniteNumber(value) {
 }
 
 function normalizeSolve(item) {
-  const baseTags = item?.Tags || {};
+  // The server keeps smart-cube reconstruction data beside the tags; the client
+  // carries it as tags.SmartCube (that's how it's sent on save).
+  const storedTags = item?.Tags || {};
+  const baseTags =
+    item?.SmartCube && !storedTags.SmartCube
+      ? { ...storedTags, SmartCube: item.SmartCube }
+      : storedTags;
 
   const relayLegsLocal = item?.RelayLegs || baseTags?.RelayLegs || null;
   const relayScramblesLocal =
@@ -1717,6 +1725,10 @@ function App() {
 
   const [scrambles, setScrambles] = useState({});
   const [sessions, setSessions] = useState(sessionsWithGuestSolves);
+  // Other smart-cube solves, for colouring reconstruction steps by how they compare.
+  useEffect(() => {
+    setReconPool(sessions);
+  }, [sessions]);
   const currentSessionLoadTokenRef = useRef(0);
   const deletedSolveRefsRef = useRef(new Set());
   // Penalties/deletes/tag edits made on a solve whose create request is still in flight
@@ -1975,6 +1987,8 @@ function App() {
 
   const [scrambleProgress, setScrambleProgress] = useState(0);
   const [scrambleProgressTotal, setScrambleProgressTotal] = useState(0);
+  // Smart cube went off the scramble: the moves that put it back on track.
+  const [scrambleFix, setScrambleFix] = useState([]);
   const [scrambleCopyFeedback, setScrambleCopyFeedback] = useState("idle");
 
   const [dbStatus, setDbStatus] = useState({
@@ -1998,6 +2012,9 @@ function App() {
   const hostedRoomPromptDismissRef = useRef("");
   const currentEventRef = useRef(currentEvent);
   const displayedScrambleRef = useRef("");
+  // "event::scramble" keys for scrambles loaded through the Add Solve popup, so
+  // the solve done on them is tagged SolveSource "Custom Load".
+  const customLoadedScramblesRef = useRef(new Set());
   const scrambleModeRef = useRef(settings?.scrambleMode || "random-state");
   const scrambleCopyTimeoutRef = useRef(null);
 
@@ -2366,6 +2383,8 @@ function App() {
 
       setScrambleProgress(Number.isFinite(stepP) ? stepP : 0);
       setScrambleProgressTotal(Number.isFinite(totalSteps) ? totalSteps : 0);
+      const fix = Array.isArray(d.fix) ? d.fix.filter((m) => typeof m === "string") : [];
+      setScrambleFix((prev) => (prev.join(" ") === fix.join(" ") ? prev : fix));
     };
 
     window.addEventListener("pts:cubeScrambleProgress", onProg);
@@ -2375,6 +2394,7 @@ function App() {
   useEffect(() => {
     setScrambleProgress(0);
     setScrambleProgressTotal(expandScrambleToSteps(displayedScramble).length);
+    setScrambleFix([]);
   }, [displayedScramble]);
 
   useEffect(() => {
@@ -5056,6 +5076,7 @@ function App() {
     }
 
     let scramble;
+    let usedCustomLoadedScramble = false;
     let activeSharedID = null;
     let solveIndexForBroadcast = null;
     let shouldCompleteSharedSession = false;
@@ -5099,6 +5120,9 @@ function App() {
         scramble = manualScramble;
       } else if (shownScramble) {
         scramble = smartMeta?.scramble ? String(smartMeta.scramble).trim() : shownScramble;
+        usedCustomLoadedScramble =
+          !liveRoomFollow &&
+          customLoadedScramblesRef.current.has(`${solveEvent}::${shownScramble}`);
 
         getNextScramble(solveEvent).catch((err) => {
           console.error(`Failed to advance scramble queue for ${solveEvent}:`, err);
@@ -5114,17 +5138,10 @@ function App() {
       smartMeta?.startedAtISO ||
       new Date().toISOString();
 
-    const smartTagPayload = smartMeta
-      ? {
-          SmartCube: {
-            Reason: smartMeta.reason || "",
-            StartedAtHostTs: smartMeta.startedAtHostTs ?? null,
-            EndedAtHostTs: smartMeta.endedAtHostTs ?? null,
-            Moves: smartMeta.moves || [],
-            FinalFacelets: smartMeta.finalFacelets || null,
-            Splits: smartMeta.splits || null,
-          },
-        }
+    // Start state + timestamped moves: everything the solve detail needs to
+    // rebuild the reconstruction (see src/smart/recon/solveRecord.js).
+    const smartTagPayload = smartMeta?.record
+      ? { SmartCube: smartMeta.record }
       : {};
 
     const newTags = sharedSession
@@ -5160,6 +5177,7 @@ function App() {
         })
       : buildTagPayload({
           ...(manualTimerInput ? { TimerInput: manualTimerInput } : {}),
+          ...(usedCustomLoadedScramble ? { SolveSource: "Custom Load" } : {}),
           ...smartTagPayload,
         });
 
@@ -5400,6 +5418,35 @@ function App() {
     } finally {
       setManualSolveSaving(false);
     }
+  };
+
+  // The timer only reads the scramble queue outside shared sessions, live rooms
+  // and relays, so loading a custom scramble is only possible there.
+  const canLoadCustomScramble = !sharedSession && !liveRoomFollow && !isRelayActive;
+
+  const loadManualScrambleIntoTimer = () => {
+    const scramble = String(manualSolveScramble || "").trim();
+    if (!scramble) {
+      setManualSolveError("Enter a scramble to load.");
+      return;
+    }
+    if (!canLoadCustomScramble) {
+      setManualSolveError("Custom scrambles can't be loaded during a shared session, live room or relay.");
+      return;
+    }
+
+    const ev = currentEventRef.current;
+    const { queue } = insertScramble(ev, scramble);
+    customLoadedScramblesRef.current.add(`${ev}::${scramble}`);
+    setScrambles((prev) => ({
+      ...(prev || {}),
+      [ev]: queue,
+    }));
+
+    setShowManualSolveModal(false);
+    setManualSolveError("");
+    setManualSolveTime("");
+    setManualSolveScramble("");
   };
 
   const persistSolvePenalty = useCallback(
@@ -8173,6 +8220,7 @@ function App() {
                         }
                         scrambleProgress={scrambleProgress}
                         scrambleProgressTotal={scrambleProgressTotal}
+                        scrambleFix={scrambleFix}
                       />
 
                       {isRelayActive && (
@@ -8219,11 +8267,14 @@ function App() {
                         onClick={openEventSelector}
                         style={{ cursor: "pointer" }}
                       >
+                        {/* Live smart-cube view goes here while a cube is connected (Timer portals it in). */}
+                        <div id="pts-smartcube-hud-slot" className="smartcube-hud-slot" />
                         <PuzzleSVG
                           event={displayedSvgEvent}
                           scramble={displayedScramble}
                           isMusicPlayer={!isHomePage}
                           isTimerCube={true}
+                          netView={settings?.homePuzzleSvgView === "net"}
                         />
                       </div>
 
@@ -9246,6 +9297,7 @@ function App() {
             <h2>Add Solve</h2>
             <p className="manualSolvePopupSubtext">
               Save a solve to the current event and session with just a time, or add a scramble too.
+              Or enter a scramble and load it into the timer as your next solve.
             </p>
 
             <label className="manualSolveFieldLabel" htmlFor="manual-solve-time">
@@ -9281,6 +9333,22 @@ function App() {
             <div className="manualSolveActions">
               <button type="button" onClick={closeManualSolveModal} disabled={manualSolveSaving}>
                 Cancel
+              </button>
+              <button
+                type="button"
+                onClick={loadManualScrambleIntoTimer}
+                disabled={
+                  manualSolveSaving ||
+                  !canLoadCustomScramble ||
+                  !String(manualSolveScramble || "").trim()
+                }
+                title={
+                  canLoadCustomScramble
+                    ? "Load this scramble into the timer as the next solve"
+                    : "Not available during a shared session, live room or relay"
+                }
+              >
+                Load Scramble
               </button>
               <button
                 type="button"

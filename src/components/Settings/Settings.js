@@ -39,6 +39,7 @@ import {
   getPrimaryModifierLabel,
 } from "../../utils/keybindings";
 import AccountEmailSettings from "../Account/AccountEmailSettings";
+import CubeColorSettings from "./CubeColorSettings";
 
 // Derived from the live trim rule rather than hardcoded, so the table shown to users can
 // never drift from what calculateAverage actually does. Mo3 is a straight mean.
@@ -96,6 +97,11 @@ const SCRAMBLE_MODE_OPTIONS = [
 const NAVIGATION_ARROW_STYLE_OPTIONS = [
   { value: "scramble", label: "Scramble arrows" },
   { value: "classic", label: "Classic triangles" },
+];
+
+const HOME_PUZZLE_SVG_VIEW_OPTIONS = [
+  { value: "3d", label: "3D cube" },
+  { value: "net", label: "Cube map (flat)" },
 ];
 
 const TIMER_SIZE_OPTIONS = [
@@ -177,7 +183,7 @@ const DEFAULT_TAG_CONFIG = {
     },
     SolveSource: {
       label: "Solve Source",
-      options: ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA"],
+      options: ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA", "Custom Load"],
     },
   },
   CustomSlots: [
@@ -519,7 +525,7 @@ function normalizeTagConfig(input) {
         label: fixed?.SolveSource?.label || "Solve Source",
         options: Array.isArray(fixed?.SolveSource?.options)
           ? fixed.SolveSource.options
-          : ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA"],
+          : ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA", "Custom Load"],
       },
     },
     CustomSlots: Array.from({ length: 5 }, (_, i) => {
@@ -1372,6 +1378,24 @@ function Settings({
             </div>
 
             <div className="setting-item">
+              <label>Home Puzzle View:</label>
+              <SettingsChoice
+                value={settings.homePuzzleSvgView === "net" ? "net" : "3d"}
+                onChange={(e) =>
+                  updateSettings({
+                    homePuzzleSvgView: e.target.value === "net" ? "net" : "3d",
+                  })
+                }
+              >
+                {HOME_PUZZLE_SVG_VIEW_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </SettingsChoice>
+            </div>
+
+            <div className="setting-item">
               <label>Best Time Matrix Puzzle Icons</label>
               <SettingsChoice
                 value={settings.matrixPuzzleSvgStyle || "color"}
@@ -1567,6 +1591,13 @@ function Settings({
                 <option value="hard">Hard edges (no blend)</option>
               </SettingsChoice>
             </div>
+
+            <h3 className="settingsSectionSubheading">Cube Colours</h3>
+            <CubeColorSettings
+              value={settings.cubeColors}
+              onChange={(cubeColors) => updateSettings({ cubeColors })}
+              Choice={SettingsChoice}
+            />
           </div>
         </section>
 

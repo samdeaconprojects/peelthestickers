@@ -1,5 +1,6 @@
 // src/components/PuzzleSVGs/Square1SVG.js
 import React, { useRef, useEffect, useState } from 'react';
+import { useCubeColors } from "../../utils/cubeColors";
 
 const sin15 = Math.sin(Math.PI / 180 * 15);
 const createSolvedSquare1 = () => ({
@@ -17,6 +18,8 @@ export default function Square1SVG({
   showFront = true, // ✅ controlled by PuzzleSVG (true = show top, false = show bottom)
 }) {
   const square1 = useRef(createSolvedSquare1());
+  const cubeColors = useCubeColors();
+  const hex = (name) => cubeColors[name] || name;
 
   const [, setVersion] = useState(0);
 
@@ -173,12 +176,12 @@ export default function Square1SVG({
           <g key={i} transform={`rotate(${rot})`}>
             <path
               d={`M0 0 L${-size*sin15} ${-size} L${size*sin15} ${-size}Z`}
-              fill={piece[0]} stroke="#000"
+              fill={hex(piece[0])} stroke="#000"
             />
             <path
               d={`M${-size*sin15} ${-size} L${size*sin15} ${-size}
                   L${size*sin15} ${-size-backThickness} L${-size*sin15} ${-size-backThickness}Z`}
-              fill={piece[1]} stroke="#000"
+              fill={hex(piece[1])} stroke="#000"
             />
           </g>
         );
@@ -188,17 +191,17 @@ export default function Square1SVG({
         <g key={i} transform={`rotate(${rot})`}>
           <path
             d={`M0 0 L${size*sin15} ${-size} L${size} ${-size} L${size} ${-size*sin15}Z`}
-            fill={piece[0]} stroke="#000"
+            fill={hex(piece[0])} stroke="#000"
           />
           <path
             d={`M${size*sin15} ${-size} L${size} ${-size}
                 L${size} ${-size-backThickness} L${size*sin15} ${-size-backThickness}Z`}
-            fill={piece[1]} stroke="#000"
+            fill={hex(piece[1])} stroke="#000"
           />
           <path
             d={`M${size} ${-size*sin15} L${size} ${-size}
                 L${size+backThickness} ${-size} L${size+backThickness} ${-size*sin15}Z`}
-            fill={piece[2]} stroke="#000"
+            fill={hex(piece[2])} stroke="#000"
           />
         </g>
       );

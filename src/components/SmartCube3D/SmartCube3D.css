@@ -26,17 +26,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  will-change: transform;
-}
-
-.smart-cube-3d__mount {
-  width: 100%;
-  height: 100%;
-}
-
-.smart-cube-3d__player {
-  width: 100%;
-  height: 100%;
 }
 
 .smart-cube-3d__home {
@@ -57,4 +46,32 @@
 .smart-cube-3d--compact .smart-cube-3d__stage {
   width: 110px;
   height: 110px;
+}
+
+/* Top-right slot on the home page (in place of the scramble image). */
+.smart-cube-3d--hud {
+  position: relative;
+  top: auto;
+  right: auto;
+  margin: 0;
+  transform: none;
+  gap: 2px;
+}
+
+.smart-cube-3d--hud .smart-cube-3d__stage {
+  width: 124px;
+  height: 124px;
+}
+
+/* Same spot as the flat 3x3 image it replaces. */
+.smart-cube-3d--hud .cube3d {
+  position: relative;
+  left: -12px;
+  top: -8px;
+}
+
+.smart-cube-3d--hud .smart-cube-3d__home {
+  margin-top: -6px;
+  font-size: 10px;
+  padding: 2px 6px;
 }

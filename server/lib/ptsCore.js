@@ -2075,6 +2075,33 @@ function withPreservedCompetitionTags(canonicalTags, existing) {
   };
 }
 
+// Smart-cube reconstruction data (start state + timestamped moves, see
+// src/smart/recon/solveRecord.js). Arrives as tags.SmartCube from the client,
+// stored as its own attribute so the tag pipeline never sees it.
+const SMART_MAX_MOVES = 2000;
+function sanitizeSmartCube(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const moves = typeof input.Moves === "string" ? input.Moves.trim().split(/\s+/).filter(Boolean) : [];
+  if (!moves.length || moves.length > SMART_MAX_MOVES) return null;
+  if (!moves.every((m) => /^[URFDLB][2']?$/.test(m))) return null;
+  const times = Array.isArray(input.MoveTimes) ? input.MoveTimes.map(Number) : [];
+  if (times.length !== moves.length || !times.every((t) => Number.isFinite(t) && t >= 0)) return null;
+  const facelets = (v) => (typeof v === "string" && /^[URFDLB]{54}$/.test(v) ? v : null);
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const str = (v, n) => (typeof v === "string" ? v.slice(0, n) : null);
+  return {
+    Version: num(input.Version) ?? 2,
+    Provider: str(input.Provider, 40),
+    Reason: str(input.Reason, 20) || "",
+    StartedAtHostTs: num(input.StartedAtHostTs),
+    EndedAtHostTs: num(input.EndedAtHostTs),
+    StartFacelets: facelets(input.StartFacelets),
+    FinalFacelets: facelets(input.FinalFacelets),
+    Moves: moves.join(" "),
+    MoveTimes: times.map((t) => Math.round(t)),
+  };
+}
+
 function buildSolveItem({
   userID,
   event,
@@ -2098,12 +2125,17 @@ function buildSolveItem({
   }
 
   const finalTimeMs = computeFinalTimeMs(raw, p);
-  const ts = String(createdAt || existing?.CreatedAt || nowIso());
+  // A date before 2000 is a clock that wasn't wall-clock time (e.g. ms since
+  // a page or cube started), not a real solve date: save it as now.
+  const rawTs = String(createdAt || existing?.CreatedAt || nowIso());
+  const ts = rawTs < "2000" ? nowIso() : rawTs;
   const sid2 = String(solveID || existing?.SolveID || createSolveID());
   const canonicalTags = withPreservedCompetitionTags(sanitizeTags(tags), existing);
+  const smartCube = sanitizeSmartCube(tags?.SmartCube);
 
   return {
     ...(existing || {}),
+    ...(smartCube ? { SmartCube: smartCube } : {}),
 
     PK: `USER#${userID}`,
     SK: buildSolveSK(ts, sid2),

@@ -961,7 +961,7 @@ function buildDefaultTagConfig(tagOptions = null) {
       },
       SolveSource: {
         label: "Solve Source",
-        options: ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA"],
+        options: ["Standard", "Practice", "Shared", "Relay", "Import", "SmartCube", "WCA", "Custom Load"],
       },
     },
     CustomSlots: [

@@ -105,3 +105,53 @@
   display: block;
   pointer-events: none;
 }
+
+/* flat cube-map view: no flip (every face is visible) */
+.puzzle-svg-wrap--net {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* home HUD: keep roughly the 3D cube's footprint so the layout doesn't jump */
+.puzzle-svg-wrap--netHome {
+  min-height: 150px;
+}
+
+/* desktop home: anchor the net near the column's left edge instead of the
+   right. The scramble's add-solve "+" hangs into this corner, and this keeps
+   it inside the net's empty top-left cell at every desktop width. */
+@media (min-width: 1081px) {
+  .cube-and-event .puzzle-hud:has(.puzzle-svg-wrap--netHome) {
+    justify-content: flex-start;
+    padding-left: 24px;
+    padding-right: 0;
+  }
+
+  /* Pyraminx scrambles are one short line, so the "+" sits further left and
+     the pyramid can center on the event selector (which is offset 40px left
+     by .event-hud-inner's right padding). */
+  .cube-and-event .puzzle-hud:has(.puzzle-svg-wrap--netHome.puzzle-svg-wrap--netPyra) {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 40px;
+  }
+}
+
+/* player bar: widen the cube slot so the flat map can be larger */
+.playerbar-cube:has(.puzzle-svg-wrap--net) {
+  width: 136px;
+}
+
+.playerbar-cube .puzzle-svg-wrap--net {
+  height: auto;
+}
+
+/* A connected smart cube's live view replaces the scramble image. */
+.puzzle-hud:has(.smart-cube-3d) .puzzle-svg-wrap {
+  display: none;
+}
+
+.smartcube-hud-slot:empty {
+  display: none;
+}

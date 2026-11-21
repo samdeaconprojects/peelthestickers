@@ -6,6 +6,7 @@ import Square1SVG from "./Square1SVG";
 import PyraminxSVG from "./PyraminxSVG";
 import MegaminxSVG from "./MegaminxSVG";
 import ClockSVG from "./ClockSVG";
+import PuzzleNetSVG, { supportsPuzzleNet } from "./PuzzleNetSVG";
 import { getScrambledFaces } from "../scrambleUtils";
 import FlipIcon from "../../assets/Flip.svg";
 import ptsOH from "../../assets/ptsOH.svg";
@@ -22,6 +23,7 @@ const PuzzleSVG = ({
   isStatsHeaderIcon,
   forceWhite = false,
   colorStyle = "color", // "color" | "white" | "grayscale"
+  netView = false, // flat cube-map of every face (NxN, Skewb, Pyraminx only)
 }) => {
   const resolvedColorStyle = forceWhite ? "white" : colorStyle;
   const colorStyleClass =
@@ -136,6 +138,29 @@ const PuzzleSVG = ({
   // Combine nudges (avatar + profile)
   const nudgeX = profileNudge.x + avatarNudge.x + headerNudge.x;
   const nudgeY = profileNudge.y + avatarNudge.y + headerNudge.y;
+
+  if (netView && supportsPuzzleNet(event)) {
+    const isHomeNet = isTimerCube && !isMusicPlayer;
+    const isPyra = event === "PYRAMINX";
+    const cubeNetWidth = isMusicPlayer ? 128 : 200;
+    const netWidth = isPyra ? Math.round(cubeNetWidth * 0.88) : cubeNetWidth;
+    return (
+      <div
+        className={[
+          "puzzle-svg-wrap",
+          "puzzle-svg-wrap--net",
+          isMusicPlayer ? "puzzle-svg-wrap--musicPlayer" : "",
+          isHomeNet ? "puzzle-svg-wrap--netHome" : "",
+          isPyra ? "puzzle-svg-wrap--netPyra" : "",
+        ].filter(Boolean).join(" ")}
+        style={{ width: `${netWidth}px` }}
+      >
+        <div className={`puzzle-svg-inner${colorStyleClass}`}>
+          <PuzzleNetSVG event={event} scramble={scramble} width={netWidth} />
+        </div>
+      </div>
+    );
+  }
 
   if (isRubikEvent) {
     return (

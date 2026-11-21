@@ -1,0 +1,50 @@
+.cube3d {
+  position: relative;
+  perspective: 900px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.cube3d--draggable {
+  cursor: grab;
+}
+
+.cube3d--draggable:active {
+  cursor: grabbing;
+}
+
+.cube3d__cube,
+.cube3d__cubie {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+}
+
+.cube3d__face {
+  position: absolute;
+  width: var(--cube3d-unit);
+  height: var(--cube3d-unit);
+  margin-left: calc(var(--cube3d-unit) / -2);
+  margin-top: calc(var(--cube3d-unit) / -2);
+  background: var(--cube3d-plastic, #111);
+  box-sizing: border-box;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Matches the 2D puzzle images: near-square stickers (20px with a 2px gap
+   and 1px corners there) on the plastic. */
+.cube3d__sticker {
+  position: absolute;
+  inset: 4.5%;
+  border-radius: 5%;
+}
+

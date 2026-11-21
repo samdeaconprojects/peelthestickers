@@ -1,5 +1,20 @@
 // src/smart/ganCubeClient.js
-import { connectGanCube, cubeTimestampLinearFit } from "gan-web-bluetooth";
+import { connectGanCube } from "gan-web-bluetooth";
+import { fitMoveTimes } from "./recon/solveRecord";
+
+// gan-web-bluetooth stamps events with performance.now() (ms since the page
+// loaded), not wall-clock time. Host timestamps here are wall-clock (they date
+// the solve), so shift them by the page's time origin. Missed-and-recovered
+// moves have no local timestamp: use now.
+function toEpochMs(localTs) {
+  if (!Number.isFinite(localTs)) return Date.now();
+  if (localTs > 1e12) return localTs; // already wall-clock
+  const origin =
+    typeof performance !== "undefined" && Number.isFinite(performance.timeOrigin)
+      ? performance.timeOrigin
+      : Date.now() - (typeof performance !== "undefined" ? performance.now() : 0);
+  return Math.round(origin + localTs);
+}
 
 /**
  * GAN smart cube wrapper (works with iCarry 3).
@@ -20,9 +35,13 @@ export class GanCubeClient {
           if (!ev) return;
 
           if (ev.type === "MOVE") {
-            const cubeTsRaw = ev.ts ?? ev.timestamp ?? ev.cubeTs;
-            const cubeTs = Number(cubeTsRaw);
-            const hostTs = Date.now();
+            // cubeTimestamp is the cube's own clock (null for moves it missed
+            // and recovered); localTimestamp is when the host received it.
+            // (ev.timestamp is the host clock too, so it must not be used as
+            // the cube time.)
+            const cubeTs = ev.cubeTimestamp == null ? NaN : Number(ev.cubeTimestamp);
+            const localTs = ev.localTimestamp == null ? NaN : Number(ev.localTimestamp);
+            const hostTs = toEpochMs(localTs);
 
             onMove?.({
               move: ev.move,
@@ -81,47 +100,18 @@ export class GanCubeClient {
   }
 
   /**
-   * Compute elapsed ms using cube timestamp fit if cubeTs is present; else host time.
-   * samples: [{ cubeTs, hostTs }]
+   * The cube's idea of its state has drifted (e.g. moves missed while out of
+   * range): the user has solved it by hand, so tell the cube it is solved.
    */
-  computeElapsedMs(samples) {
-    const clean = (samples || []).filter(
-      (s) =>
-        Number.isFinite(s?.hostTs) &&
-        (s?.cubeTs == null || Number.isFinite(s?.cubeTs))
-    );
-    if (clean.length < 2) return null;
-
-    const cubePairs = clean.filter((s) => Number.isFinite(s.cubeTs));
-    if (cubePairs.length < 2) {
-      return Math.max(0, clean[clean.length - 1].hostTs - clean[0].hostTs);
-    }
-
+  async markSolved() {
     try {
-      const fit = cubeTimestampLinearFit(
-        cubePairs.map((p) => p.cubeTs),
-        cubePairs.map((p) => p.hostTs)
-      );
+      await this.conn?.sendCubeCommand?.({ type: "REQUEST_RESET" });
+    } catch (_) {}
+  }
 
-      const predictHost = (x) => {
-        if (typeof fit === "function") return fit(x);
-        if (fit && typeof fit.predict === "function") return fit.predict(x);
-        return null;
-      };
-
-      const firstCube = cubePairs[0].cubeTs;
-      const lastCube = cubePairs[cubePairs.length - 1].cubeTs;
-
-      const firstHost = predictHost(firstCube);
-      const lastHost = predictHost(lastCube);
-
-      if (!Number.isFinite(firstHost) || !Number.isFinite(lastHost)) {
-        return Math.max(0, clean[clean.length - 1].hostTs - clean[0].hostTs);
-      }
-
-      return Math.max(0, lastHost - firstHost);
-    } catch (_) {
-      return Math.max(0, clean[clean.length - 1].hostTs - clean[0].hostTs);
-    }
+  /** Elapsed ms over [{ cubeTs, hostTs }] samples (cube clock when available). */
+  computeElapsedMs(samples) {
+    const times = fitMoveTimes(samples);
+    return times.length >= 2 ? times[times.length - 1] : null;
   }
 }

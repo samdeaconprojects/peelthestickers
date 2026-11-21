@@ -181,10 +181,13 @@ export async function warmScrambleQueue(
           generateScrambleForEvent(eventKey, mode)
         )
       );
-      const nextEntries = [...existing.entries, ...generated.filter(Boolean)];
+      // Re-read after the await: the queue may have moved or had a custom
+      // scramble inserted while these were generating.
+      const latest = getExistingHistoryByKey(key);
+      const nextEntries = [...latest.entries, ...generated.filter(Boolean)];
       setExistingHistoryByKey(key, {
         entries: nextEntries,
-        index: existing.index,
+        index: latest.index,
       });
     }
 
@@ -319,5 +322,24 @@ export async function prependScramble(
 
   return {
     queue: [...getVisibleQueueFromState(nextState)],
+  };
+}
+
+// Put a user-supplied scramble at the head of the queue so it is the next one
+// to solve. The scramble that was showing moves to second, and the history
+// behind it is kept, so the back/forward arrows still walk the queue normally.
+export function insertScramble(event, scramble, { mode = null } = {}) {
+  const text = String(scramble || "").trim();
+  const key = getQueueKey(event, mode);
+  const state = getExistingHistoryByKey(key);
+  if (!text) return { queue: [...getVisibleQueueFromState(state)] };
+
+  const entries = [...state.entries];
+  entries.splice(state.index, 0, text);
+  const nextState = { entries, index: state.index };
+  setExistingHistoryByKey(key, nextState);
+
+  return {
+    queue: [...getVisibleQueueFromState(getExistingHistoryByKey(key))],
   };
 }

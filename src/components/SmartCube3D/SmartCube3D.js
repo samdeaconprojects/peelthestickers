@@ -1,193 +1,188 @@
 // src/components/SmartCube3D/SmartCube3D.js
 //
-// Live 3D view of a connected smart cube, using cubing.js <TwistyPlayer>.
+// Live 3D view of a connected smart cube, drawn with our own Cube3D (CSS 3D).
 //
-//  - Moves: parent calls addMove(token) -> player.experimentalAddMove (animates
-//    the real 3D scene).
-//  - Gyro: the cube's orientation quaternion is decomposed into yaw + pitch
-//    (fed to the TwistyPlayer orbit camera, so the cube stays solid 3D) and
-//    roll (applied as a 2D CSS rotate, which is safe — an in-plane spin).
-//    We deliberately do NOT 3D-rotate the WebGL canvas via CSS: a flat canvas
-//    turned edge-on just collapses to a line.
+//  - Moves: parent calls addMove(token); turns are queued and animated, and
+//    sped up when the cube reports moves faster than they can be shown.
+//  - State: setFacelets(facelets) snaps to the cube's real state (on connect,
+//    or whenever the cube reports it), resetToSolved() to solved.
+//  - Gyro: setQuaternion(q) turns the whole cube. Orientation is shown relative
+//    to "home" (the first reading, or when the user presses Set orientation),
+//    measured in the cube's own axes at home, so holding it white-up/green-front
+//    when setting home makes the screen match the hand.
 //
-// Imperative API (ref): addMove, resetToSolved, setHome, setQuaternion.
+// Imperative API (ref): addMove, resetToSolved, setFacelets, setHome, setQuaternion.
 
-import React, {
-  forwardRef,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-} from "react";
-import { TwistyPlayer } from "cubing/twisty";
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import Cube3D from "../Cube3D/Cube3D";
+import { SOLVED, applyMove, parseToken } from "../../smart/recon/cube3";
 import "./SmartCube3D.css";
 
-// Orientation tuning — flip a sign or swap axes here if the virtual cube turns
-// the wrong way relative to the physical one.
-const YAW_SIGN = 1;
-const PITCH_SIGN = 1;
-const ROLL_SIGN = 1;
-const BASE_LATITUDE = 25; // camera resting tilt
-const BASE_LONGITUDE = 35; // camera resting azimuth (shows 3 faces)
+const QUARTER_MS = 110;
+const FAST_MS = 55; // when moves are queueing up
+const SNAP_QUEUE = 6; // beyond this, apply moves without animating
 
-function rad2deg(r) {
-  return (r * 180) / Math.PI;
+// gan-web-bluetooth reports orientation with +X red (R), +Y blue (B), +Z white
+// (U). Our cube frame is x = R, y = U, z = F, so (x, y, z) -> (x, z, -y).
+function toCubeFrame(q) {
+  return { x: q.x, y: q.z, z: -q.y, w: q.w };
 }
 
-function normQuat(q) {
-  const len = Math.hypot(q.x, q.y, q.z, q.w) || 1;
-  return { x: q.x / len, y: q.y / len, z: q.z / len, w: q.w / len };
+function normalize(q) {
+  const n = Math.hypot(q.x, q.y, q.z, q.w) || 1;
+  return { x: q.x / n, y: q.y / n, z: q.z / n, w: q.w / n };
 }
 
-// Quaternion -> intrinsic yaw (Y), pitch (X), roll (Z) in radians.
-function quatToYawPitchRoll(q) {
-  const { x, y, z, w } = q;
+const conj = (q) => ({ x: -q.x, y: -q.y, z: -q.z, w: q.w });
 
-  // pitch (x-axis rotation)
-  const sinp = 2 * (w * x - y * z);
-  const pitch =
-    Math.abs(sinp) >= 1 ? (Math.sign(sinp) * Math.PI) / 2 : Math.asin(sinp);
-
-  // yaw (y-axis rotation)
-  const yaw = Math.atan2(2 * (w * y + z * x), 1 - 2 * (x * x + y * y));
-
-  // roll (z-axis rotation)
-  const roll = Math.atan2(2 * (w * z + x * y), 1 - 2 * (x * x + z * z));
-
-  return { yaw, pitch, roll };
-}
-
-function angleDelta(a, b) {
-  let d = a - b;
-  while (d > 180) d -= 360;
-  while (d < -180) d += 360;
-  return d;
+function mul(a, b) {
+  return {
+    w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+    x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+    y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+    z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+  };
 }
 
 const SmartCube3D = forwardRef(function SmartCube3D(
-  { className = "", showHomeButton = true },
+  { className = "", showHomeButton = true, initialState = null, placement = "timer" },
   ref
 ) {
-  const containerRef = useRef(null);
-  const playerRef = useRef(null);
-  const stageRef = useRef(null);
-
-  const lastRef = useRef(null); // { yaw, pitch, roll } degrees, latest
-  const homeRef = useRef(null); // captured home { yaw, pitch, roll }
+  const cubeRef = useRef(null);
+  // The view can mount after the cube first reported its state.
+  const stateRef = useRef(
+    initialState && String(initialState).length === 54 ? String(initialState) : SOLVED
+  );
+  const queueRef = useRef([]);
+  const currentRef = useRef(null); // { token, start, d }
   const rafRef = useRef(0);
 
-  useEffect(() => {
-    let player;
-    try {
-      player = new TwistyPlayer({
-        puzzle: "3x3x3",
-        visualization: "3D",
-        background: "none",
-        controlPanel: "none",
-        hintFacelets: "none",
-        experimentalDragInput: "none",
-        tempoScale: 5,
-        cameraLatitude: BASE_LATITUDE,
-        cameraLongitude: BASE_LONGITUDE,
-      });
-      player.classList.add("smart-cube-3d__player");
-      playerRef.current = player;
-      if (containerRef.current) containerRef.current.appendChild(player);
-    } catch (e) {
-      console.error("[PTS][SmartCube3D] failed to create TwistyPlayer", e);
-    }
+  const lastQuatRef = useRef(null);
+  const homeRef = useRef(null);
+  const gyroRafRef = useRef(0);
 
-    return () => {
-      cancelAnimationFrame(rafRef.current);
-      try {
-        player?.remove();
-      } catch (_) {}
-      playerRef.current = null;
-    };
-  }, []);
+  // Only the first state goes through props; after that the view is driven
+  // through the ref (a parent re-render mid-turn must not redraw it).
+  const [mountState] = useState(stateRef.current);
+  const compact = String(className).includes("compact");
+  const hud = placement === "hud";
+  // Only cubes with a gyro need "Set orientation"; show it once one reports.
+  const [hasGyro, setHasGyro] = useState(false);
+  const hasGyroRef = useRef(false);
 
-  const applyOrientation = () => {
+  const settle = () => {
+    cancelAnimationFrame(rafRef.current);
     rafRef.current = 0;
-    const player = playerRef.current;
-    const cur = lastRef.current;
-    if (!player || !cur) return;
+    queueRef.current = [];
+    currentRef.current = null;
+  };
 
-    const home = homeRef.current || { yaw: 0, pitch: 0, roll: 0 };
-    const yaw = angleDelta(cur.yaw, home.yaw);
-    const pitch = angleDelta(cur.pitch, home.pitch);
-    const roll = angleDelta(cur.roll, home.roll);
-
-    if (![yaw, pitch, roll].every(Number.isFinite)) return;
-
-    try {
-      player.cameraLongitude = BASE_LONGITUDE + YAW_SIGN * yaw;
-      player.cameraLatitude = Math.max(
-        -89,
-        Math.min(89, BASE_LATITUDE + PITCH_SIGN * pitch)
-      );
-    } catch (_) {}
-
-    if (stageRef.current) {
-      stageRef.current.style.transform = `rotate(${ROLL_SIGN * roll}deg)`;
+  const frame = (now) => {
+    rafRef.current = 0;
+    for (;;) {
+      if (!currentRef.current) {
+        const token = queueRef.current.shift();
+        if (!token) {
+          cubeRef.current?.draw(stateRef.current);
+          return;
+        }
+        const backlog = queueRef.current.length;
+        if (backlog >= SNAP_QUEUE) {
+          stateRef.current = applyMove(stateRef.current, token);
+          continue;
+        }
+        const p = parseToken(token);
+        const base = backlog > 1 ? FAST_MS : QUARTER_MS;
+        currentRef.current = { token, start: now, d: p && p.amount === 2 ? base * 1.5 : base };
+      }
+      const cur = currentRef.current;
+      const f = (now - cur.start) / cur.d;
+      if (f >= 1) {
+        stateRef.current = applyMove(stateRef.current, cur.token);
+        currentRef.current = null;
+        continue;
+      }
+      cubeRef.current?.draw(stateRef.current, { token: cur.token, fraction: f });
+      rafRef.current = requestAnimationFrame(frame);
+      return;
     }
   };
 
-  const schedule = () => {
-    if (rafRef.current) return;
-    rafRef.current = requestAnimationFrame(applyOrientation);
+  const kick = () => {
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(frame);
   };
+
+  const applyGyro = () => {
+    gyroRafRef.current = 0;
+    const q = lastQuatRef.current;
+    if (!q) return;
+    const home = homeRef.current || q;
+    cubeRef.current?.setOrientation(normalize(mul(conj(home), q)));
+  };
+
+  const scheduleGyro = () => {
+    if (!gyroRafRef.current) gyroRafRef.current = requestAnimationFrame(applyGyro);
+  };
+
+  const setHome = () => {
+    if (lastQuatRef.current) {
+      homeRef.current = { ...lastQuatRef.current };
+      scheduleGyro();
+    }
+  };
+
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(rafRef.current);
+      cancelAnimationFrame(gyroRafRef.current);
+    },
+    []
+  );
 
   useImperativeHandle(ref, () => ({
     addMove(token) {
       const t = String(token || "").trim();
-      if (!t) return;
-      try {
-        playerRef.current?.experimentalAddMove(t);
-      } catch (_) {}
+      if (!parseToken(t)) return;
+      queueRef.current.push(t);
+      kick();
     },
     resetToSolved() {
-      try {
-        const player = playerRef.current;
-        if (!player) return;
-        player.experimentalSetupAlg = "";
-        player.alg = "";
-      } catch (_) {}
+      settle();
+      stateRef.current = SOLVED;
+      cubeRef.current?.draw(SOLVED);
     },
-    setHome() {
-      if (lastRef.current) {
-        homeRef.current = { ...lastRef.current };
-        schedule();
+    setFacelets(facelets) {
+      const f = String(facelets || "");
+      if (f.length !== 54) return;
+      settle();
+      stateRef.current = f;
+      cubeRef.current?.draw(f);
+    },
+    setHome,
+    setQuaternion(raw) {
+      if (!raw || ![raw.x, raw.y, raw.z, raw.w].every(Number.isFinite)) return;
+      const q = normalize(toCubeFrame(raw));
+      lastQuatRef.current = q;
+      if (!homeRef.current) homeRef.current = { ...q };
+      if (!hasGyroRef.current) {
+        hasGyroRef.current = true;
+        setHasGyro(true);
       }
-    },
-    setQuaternion(q) {
-      if (!q || !Number.isFinite(q.x) || !Number.isFinite(q.w)) return;
-      const ypr = quatToYawPitchRoll(normQuat(q));
-      const deg = {
-        yaw: rad2deg(ypr.yaw),
-        pitch: rad2deg(ypr.pitch),
-        roll: rad2deg(ypr.roll),
-      };
-      if (!Object.values(deg).every(Number.isFinite)) return;
-      lastRef.current = deg;
-      if (!homeRef.current) homeRef.current = { ...deg };
-      schedule();
+      scheduleGyro();
     },
   }));
 
   return (
-    <div className={`smart-cube-3d ${className}`}>
-      <div className="smart-cube-3d__stage" ref={stageRef}>
-        <div className="smart-cube-3d__mount" ref={containerRef} />
+    <div className={`smart-cube-3d ${hud ? "smart-cube-3d--hud" : ""} ${className}`}>
+      <div className="smart-cube-3d__stage">
+        <Cube3D ref={cubeRef} state={mountState} size={hud ? 124 : compact ? 110 : 160} />
       </div>
-      {showHomeButton && (
+      {showHomeButton && hasGyro && (
         <button
           type="button"
           className="smart-cube-3d__home"
-          onClick={() => {
-            if (lastRef.current) {
-              homeRef.current = { ...lastRef.current };
-              schedule();
-            }
-          }}
+          onClick={setHome}
+          title="Hold the cube white-up, green-front and press to line the view up"
         >
           Set orientation
         </button>

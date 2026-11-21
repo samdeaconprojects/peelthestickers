@@ -1,0 +1,338 @@
+.recon {
+  --recon-cross: #e76f8a;
+  --recon-f2l: #f4a261;
+  --recon-oll: #e9c46a;
+  --recon-pll: #2ec4b6;
+  --recon-fb: #f4a261;
+  --recon-sb: #e76f8a;
+  --recon-cmll: #e9c46a;
+  --recon-lse: #2ec4b6;
+  --recon-other: #8d99ae;
+  --recon-line: rgba(255, 255, 255, 0.12);
+  --recon-muted: rgba(255, 255, 255, 0.58);
+
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--recon-line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  text-align: left;
+  min-width: 0;
+}
+
+.recon__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.recon__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.recon__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(46, 196, 182, 0.18);
+  color: #7fe3d8;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.recon__chip--plain {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.recon__totals {
+  display: flex;
+  gap: 14px;
+  font-size: 13px;
+  color: var(--recon-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.recon__totals b {
+  color: #fff;
+  font-weight: 700;
+}
+
+.recon__warn {
+  color: #ffb4a2;
+}
+
+.recon__timeline {
+  display: flex;
+  height: 22px;
+  border-radius: 7px;
+  overflow: hidden;
+  gap: 2px;
+}
+
+.recon__seg {
+  flex-basis: 0;
+  min-width: 4px;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.78);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--recon-other);
+}
+
+.recon__seg span {
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+.recon__seg--cross, .reconStep--cross { --recon-step: var(--recon-cross); }
+.recon__seg--f2l, .reconStep--f2l { --recon-step: var(--recon-f2l); }
+.recon__seg--oll, .reconStep--oll { --recon-step: var(--recon-oll); }
+.recon__seg--pll, .reconStep--pll { --recon-step: var(--recon-pll); }
+.recon__seg--fb, .reconStep--fb { --recon-step: var(--recon-fb); }
+.recon__seg--sb, .reconStep--sb { --recon-step: var(--recon-sb); }
+.recon__seg--cmll, .reconStep--cmll { --recon-step: var(--recon-cmll); }
+.recon__seg--lse, .reconStep--lse { --recon-step: var(--recon-lse); }
+.recon__seg { background: var(--recon-step, var(--recon-other)); }
+.recon__seg--f2l + .recon__seg--f2l { filter: brightness(0.9); }
+.recon__seg--f2l + .recon__seg--f2l + .recon__seg--f2l { filter: brightness(1); }
+
+.recon__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.reconStep {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr) auto auto;
+  align-items: start;
+  gap: 4px 14px;
+  padding: 9px 0;
+  border-top: 1px solid var(--recon-line);
+}
+
+.reconStep:first-child {
+  border-top: 0;
+}
+
+.reconStep__name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.reconStep__swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--recon-step, var(--recon-other));
+  flex: none;
+}
+
+.reconStep__moves {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13.5px;
+  line-height: 1.5;
+  word-spacing: 2px;
+  overflow-wrap: anywhere;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.reconStep__alg {
+  display: inline;
+}
+
+.reconMove {
+  border-radius: 4px;
+  padding: 0 1px;
+}
+
+.reconMove + .reconMove {
+  margin-left: 0.5ch;
+}
+
+.reconMove--rotation {
+  color: #7fe3d8;
+}
+
+.reconMove.is-done {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.reconMove.is-current {
+  background: var(--recon-step, #2ec4b6);
+  color: #111;
+}
+
+.recon--player .reconMove {
+  cursor: pointer;
+}
+
+.recon--player .reconMove:hover {
+  outline: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.reconStep__case {
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--recon-step, #fff);
+  font-weight: 600;
+  word-spacing: normal;
+}
+
+.reconStep__stats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.reconStep__time {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.reconStep__play {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--recon-line);
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.reconStep__play.is-active {
+  background: var(--recon-step, #2ec4b6);
+  color: #111;
+}
+
+.reconStep__play:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.reconSlot {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.reconSlot__dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.reconOll {
+  width: 34px;
+  height: 34px;
+  flex: none;
+}
+
+.reconOll__on {
+  fill: var(--recon-oll-on, #ffff00);
+}
+
+.reconOll__off {
+  fill: rgba(255, 255, 255, 0.16);
+}
+
+.reconOll__none {
+  fill: transparent;
+}
+
+.recon__muted {
+  color: var(--recon-muted);
+}
+
+.recon__note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--recon-muted);
+}
+
+.recon__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recon__player {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.recon__textBtn {
+  border: 0;
+  background: none;
+  color: #7fe3d8;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+@media (max-width: 720px) {
+  .recon {
+    padding: 12px;
+  }
+
+  .reconStep {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .reconStep__name {
+    grid-column: 1 / 2;
+  }
+
+  .reconStep__moves {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .reconStep__stats {
+    grid-column: 2 / 3;
+    grid-row: 1;
+    flex-direction: row;
+    gap: 8px;
+    align-items: baseline;
+  }
+
+  .reconStep__stats .recon__muted:last-child {
+    display: none;
+  }
+}

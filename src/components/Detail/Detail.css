@@ -31,6 +31,13 @@
   overflow: visible;
 }
 
+.detailPopupContent--wide {
+  width: 860px;
+  max-height: none;
+  /* auto margins keep a tall popup's top reachable inside the centred overlay */
+  margin: auto;
+}
+
 .detailPopupContent--embedded {
   width: 100%;
   max-width: none;
@@ -856,5 +863,11 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 2px;
+  }
+}
+
+@media (max-width: 720px) {
+  .detailPopupContent.detailPopupContent--wide {
+    max-height: none;
   }
 }

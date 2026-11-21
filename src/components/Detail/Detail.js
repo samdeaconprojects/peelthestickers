@@ -7,6 +7,7 @@ import { currentEventToString } from "../scrambleUtils";
 import { useDbStatus } from "../../contexts/DbStatusContext";
 import { updateSolve } from "../../services/updateSolve";
 import TagBar from "../TagBar/TagBar";
+import Reconstruction from "../Reconstruction/Reconstruction";
 import MoveSolvesDialog from "../SolveBulk/MoveSolvesDialog";
 import {
   isMovableSolve,
@@ -51,6 +52,8 @@ function Detail({
   const getSolveCreatedAt = (s) =>
     s?.createdAt || s?.CreatedAt || s?.DateTime || s?.datetime || s?.date || null;
   const getSolveTags = (s) => s?.tags || s?.Tags || {};
+  const getSolveSmartCube = (s) => getSolveTags(s)?.SmartCube || s?.SmartCube || null;
+  const hasReconstruction = (isArray ? solve : [solve]).some((s) => !!getSolveSmartCube(s));
   const getSolveNote = (s) => s?.note ?? s?.Note ?? "";
   const getSolvePenalty = (s) => s?.penalty ?? s?.Penalty ?? (s?.isDNF || s?.IsDNF ? "DNF" : null);
   const getSolveEvent = (s) => s?.event || s?.Event || "";
@@ -898,6 +901,16 @@ function Detail({
           {renderTagsEditor(item, index)}
         </div>
 
+        {getSolveSmartCube(item) ? (
+          <Reconstruction
+            smartCube={getSolveSmartCube(item)}
+            scramble={getSolveScramble(item)}
+            method={getSolveTags(item)?.Method || ""}
+            solveTimeMs={getSolveRawTimeMs(item)}
+            event={item?.event || item?.Event || ""}
+          />
+        ) : null}
+
         {showActions ? (
           <div className="detailActions">
             {showPenalties ? (
@@ -1034,7 +1047,10 @@ function Detail({
         }
       }}
     >
-      <div className="detailPopupContent" onClick={(event) => event.stopPropagation()}>
+      <div
+        className={`detailPopupContent${hasReconstruction ? " detailPopupContent--wide" : ""}`}
+        onClick={(event) => event.stopPropagation()}
+      >
         {detailBody}
         {moveDialog}
       </div>

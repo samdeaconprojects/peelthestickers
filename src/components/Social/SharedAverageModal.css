@@ -1,8 +1,8 @@
 .sharedAverageOverlay {
   position: fixed;
-  top: 0; left: 0;
-  right: 0; bottom: 0;
-  background: rgba(0,0,0,0.7);
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -11,218 +11,556 @@
 }
 
 .sharedAverageModal {
-  background: #1a1a1a;
-  padding: 24px;
-  border-radius: 16px;
+  --sam-accent: #2ec4b6;
+  --sam-line: rgba(255, 255, 255, 0.12);
+  --sam-fill: rgba(255, 255, 255, 0.04);
+  --sam-muted: rgba(255, 255, 255, 0.58);
+  background: #161616;
+  border-radius: 18px;
   color: white;
-  min-width: 320px;
-  width: min(96vw, 860px);
-  max-height: min(86vh, 760px);
-  overflow-y: auto;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
-}
-
-.sharedAverageModal h2 {
-  margin-bottom: 18px;
-  font-size: 24px;
-}
-
-.sharedAverageModeToggle {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.sharedAverageModeToggle button {
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
-  color: white;
-  cursor: pointer;
-  font-weight: 700;
-}
-
-.sharedAverageModeToggle button.isActive {
-  border-color: #2EC4B6;
-  background: rgba(46, 196, 182, 0.14);
-}
-
-.sharedAverageModal label {
+  min-width: 300px;
+  width: min(96vw, 620px);
+  max-height: min(90vh, 820px);
   display: flex;
   flex-direction: column;
-  margin-bottom: 12px;
-  gap: 6px;
-  font-size: 14px;
-  font-weight: 700;
+  border: 1px solid var(--sam-line);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  text-align: left;
 }
 
-.sharedAverageModal select {
+.sharedAverageModal--wide {
+  width: min(96vw, 900px);
+}
+
+/* Undo the app-wide fixed button/select sizes inside the modal. */
+.sharedAverageModal button {
+  height: auto;
+  min-height: 0;
+  line-height: 1.2;
+  font-family: inherit;
+}
+
+/* Undo the global `select { width: 100px; height: 35px; font-size: x-large }`. */
+.sharedAverageModal select,
+.sharedAverageModal .samSelect {
+  width: 100%;
+  height: auto;
+  min-height: 38px;
+  font-size: 14px;
   background: rgba(255, 255, 255, 0.06);
   color: white;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
-.sharedAverageHelperText {
-  margin: 0 0 12px;
-  color: #c8c8c8;
+/* Header / body / footer */
+.samHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 22px 12px;
+}
+
+.sharedAverageModal h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -0.2px;
+}
+
+.samSub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--sam-muted);
+}
+
+.samClose {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--sam-line);
+  background: var(--sam-fill);
+  color: white;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.samClose:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.samBody {
+  padding: 4px 22px 18px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.samFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--sam-line);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.samSummary {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.78);
+  min-width: 0;
+}
+
+/* Mode tabs: one segmented control */
+.samModeTabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--sam-line);
+}
+
+.samModeTabs button {
+  flex: 1 1 0;
+  padding: 9px 10px;
+  border-radius: 9px;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 800;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.samModeTabs button:hover {
+  color: white;
+}
+
+.samModeTabs button.isActive {
+  background: var(--sam-accent);
+  color: #0b0b0b;
+}
+
+.samBlurb {
+  margin: 10px 2px 16px;
   font-size: 13px;
   line-height: 1.45;
+  color: var(--sam-muted);
 }
 
+/* Fields */
+.samField {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+
+.samFieldLabel {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.samFieldHint {
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  text-transform: none;
+  color: var(--sam-muted);
+}
+
+.samFieldRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+/* Chips */
+.samChips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.samChips button {
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--sam-line);
+  background: var(--sam-fill);
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.samChips button:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.samChips button.isActive {
+  border-color: var(--sam-accent);
+  background: rgba(46, 196, 182, 0.16);
+  color: white;
+}
+
+.samNote {
+  margin: 8px 2px 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--sam-muted);
+}
+
+/* Tournament layout */
+.samTournament {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.samFormatCards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.samFormatCard {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--sam-line);
+  background: var(--sam-fill);
+  color: white;
+  cursor: pointer;
+}
+
+.samFormatCard.isActive {
+  border-color: var(--sam-accent);
+  background: rgba(46, 196, 182, 0.12);
+}
+
+.samFormatGlyph {
+  grid-row: 1 / 3;
+  color: rgba(255, 255, 255, 0.55);
+  display: flex;
+}
+
+.samFormatCard.isActive .samFormatGlyph {
+  color: var(--sam-accent);
+}
+
+.samFormatName {
+  font-weight: 900;
+  font-size: 14px;
+}
+
+.samFormatDesc {
+  font-size: 11px;
+  color: var(--sam-muted);
+}
+
+.samPlayers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid var(--sam-line);
+  background: rgba(255, 255, 255, 0.025);
+  min-width: 0;
+}
+
+.samPlayersHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.samPlayersActions button {
+  border: 0;
+  background: transparent;
+  color: var(--sam-accent);
+  font-weight: 800;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.samPlayers .samChips button {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.samPlayerList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0 -6px;
+  padding: 0 6px;
+}
+
+.samPlayerRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  padding: 0 4px 0 2px;
+}
+
+.samPlayerRow:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.samPlayerCheck {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.samPlayerCheck input {
+  accent-color: var(--sam-accent);
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.samPlayerSeed {
+  width: 18px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--sam-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.samPlayerName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.samPlayerName em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--sam-accent);
+  margin-left: 4px;
+}
+
+.samPlayerRow.isOut .samPlayerName {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.samPlayerMove {
+  display: flex;
+  gap: 2px;
+}
+
+.samPlayerMove button {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--sam-line);
+  background: var(--sam-fill);
+  color: white;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.samPlayerMove button:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+/* Different-events plans */
 .sharedAverageSplitGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 18px;
-}
-
-.sharedAverageSplitFields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 14px;
 }
 
 .sharedAverageMemberPlans {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-height: 320px;
+  gap: 10px;
+  max-height: 340px;
   overflow-y: auto;
-  margin-bottom: 12px;
   padding-right: 4px;
-}
-
-.sharedAverageSeedList {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 240px;
-  overflow-y: auto;
-  margin-bottom: 12px;
-}
-
-.sharedAverageSeedRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 8px;
-}
-
-.sharedAverageSeedNum {
-  width: 20px;
-  font-weight: 900;
-  opacity: 0.7;
-  text-align: center;
-}
-
-.sharedAverageSeedName {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 700;
-}
-
-.sharedAverageSeedRow button {
-  background: rgba(255, 255, 255, 0.08);
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 6px;
-  width: 28px;
-  height: 28px;
-  cursor: pointer;
-}
-
-.sharedAverageSeedRow button:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-
-.sharedAverageSplitFields label {
-  margin-bottom: 12px;
 }
 
 .sharedAveragePlan {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--sam-line);
+  background: rgba(255, 255, 255, 0.025);
 }
 
 .sharedAveragePlanHeader {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   font-size: 14px;
+  font-weight: 800;
+}
+
+.sharedAveragePlanName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sharedAveragePlanCount {
+  flex: 1;
+  font-size: 12px;
   font-weight: 700;
+  color: var(--sam-muted);
 }
 
 .sharedAveragePlanRows {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .sharedAveragePlanRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 92px auto;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 76px 34px;
+  gap: 6px;
   align-items: center;
 }
 
 .sharedAverageAddRow,
 .sharedAverageRemoveRow {
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  border: 1px solid var(--sam-line);
+  background: var(--sam-fill);
   color: white;
   cursor: pointer;
-  font-weight: 700;
+  font-weight: 800;
+}
+
+.sharedAverageAddRow {
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--sam-accent);
+}
+
+.sharedAverageRemoveRow {
+  height: 38px;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .sharedAverageRemoveRow:disabled {
   cursor: default;
-  opacity: 0.45;
+  opacity: 0.3;
 }
 
-@media (max-width: 560px) {
-  .sharedAverageSplitGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .sharedAveragePlanRow {
-    grid-template-columns: minmax(0, 1fr) 92px;
-  }
-
-  .sharedAverageRemoveRow {
-    grid-column: 1 / -1;
-  }
-}
-
+/* Footer buttons */
 .sharedAverageButtons {
   display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 16px;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .sharedAverageButtons button {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 6px;
+  padding: 10px 18px;
+  border-radius: 10px;
   cursor: pointer;
+  font-weight: 900;
+  font-size: 14px;
 }
 
-.sharedAverageButtons button:last-child {
-  background: #2EC4B6;
-  color: black;
+.samBtnGhost {
+  border: 1px solid var(--sam-line);
+  background: transparent;
+  color: white;
+}
+
+.samBtnPrimary {
+  border: 0;
+  background: var(--sam-accent);
+  color: #0b0b0b;
+}
+
+.samBtnPrimary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+@media (max-width: 720px) {
+  .samTournament {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .sharedAverageOverlay {
+    padding: 12px;
+  }
+
+  .samHeader,
+  .samBody,
+  .samFooter {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .samFooter {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .sharedAverageButtons button {
+    flex: 1;
+  }
+
+  .sharedAverageSplitGrid,
+  .samFieldRow,
+  .samFormatCards {
+    grid-template-columns: 1fr;
+  }
+
+  .samModeTabs button {
+    font-size: 13px;
+    padding: 8px 6px;
+  }
 }

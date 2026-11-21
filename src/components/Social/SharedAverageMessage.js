@@ -870,7 +870,7 @@ function SharedAverageMessage({
     if (fromEnd === 0) return "Final";
     if (fromEnd === 1) return "Semifinals";
     if (fromEnd === 2) return "Quarterfinals";
-    return `Round ${roundIdx + 1}`;
+    return `Round of ${2 ** (fromEnd + 1)}`;
   };
 
   const orderedGroupMembers = useMemo(() => {
@@ -1618,25 +1618,235 @@ function SharedAverageMessage({
     `;
   }
 
-  const renderMatchSide = (playerId, result, sideKey) => {
-    const isWinner = result?.decided && result?.winnerId === playerId;
-    const isLoser = result?.decided && result?.winnerId && result?.winnerId !== playerId;
-    const isYou = playerId && playerId === user?.UserID;
+  const tournamentSeedById = (() => {
+    const map = new Map();
+    const order = parsed?.tournament?.seedOrder?.length
+      ? parsed.tournament.seedOrder
+      : (parsed?.tournament?.players || []).map((p) => p.id);
+    order.forEach((id, idx) => map.set(id, idx + 1));
+    return map;
+  })();
+
+  const tournamentDoneCount = (playerId, start, len) => {
+    let done = 0;
+    for (let k = 0; k < len; k += 1) {
+      const t = Number(tournamentRoundResults?.[start + k]?.[playerId]?.time);
+      if (Number.isFinite(t)) done += 1;
+    }
+    return done;
+  };
+
+  // Per-side score text for a match card: the average once a side has the whole
+  // block in, round/set wins for best-of and sets, otherwise solve progress.
+  const tournamentSideScore = (rule, result, side) => {
+    if (!result || result.isBye) return "";
+    const done = side === "a" ? result.aDone : result.bDone;
+    const score = side === "a" ? result.aScore : result.bScore;
+    const len = result.len || parsed?.tournament?.blockSize || 0;
+    if (!Number.isFinite(Number(done))) return "";
+    if (rule === "average") {
+      if (done >= len && Number.isFinite(Number(score))) return formatAverageMs(score);
+      return done > 0 ? `${done}/${len}` : "";
+    }
+    if (!done && !result.decided) return "";
+    return String(score ?? 0);
+  };
+
+  const isTournamentMatchLive = (m) =>
+    !!(m?.aId && m?.bId && !m?.result?.decided && !m?.result?.isBye &&
+      ((m.result?.aDone || 0) + (m.result?.bDone || 0)) > 0);
+
+  const renderMatchSide = (m, side) => {
+    const result = m.result;
+    const playerId = side === "a" ? m.aId : m.bId;
+    const otherId = side === "a" ? m.bId : m.aId;
+    const isWinner = !!(result?.decided && result?.winnerId && result.winnerId === playerId);
+    const isLoser = !!(result?.decided && result?.winnerId && playerId && result.winnerId !== playerId);
+    const isYou = !!playerId && playerId === user?.UserID;
+    const isByeSlot = !!(m.isBye && !playerId);
+    const seed = playerId ? tournamentSeedById.get(playerId) : null;
+    const score = tournamentSideScore(parsed?.tournament?.matchRule, result, side);
     return (
       <div
         className={[
-          "tourneyMatchSide",
-          isWinner ? "tourneyMatchSide--win" : "",
-          isLoser ? "tourneyMatchSide--loss" : "",
-          isYou ? "tourneyMatchSide--you" : "",
-        ].join(" ")}
+          "tbkSide",
+          isWinner ? "tbkSide--win" : "",
+          isLoser ? "tbkSide--loss" : "",
+          isYou ? "tbkSide--you" : "",
+          !playerId ? "tbkSide--empty" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        title={playerId ? tournamentName(playerId) : undefined}
       >
-        <span className="tourneyMatchName">
-          {playerId ? tournamentName(playerId) : "—"}
-          {isYou ? " (you)" : ""}
+        <span className="tbkSeed">{seed || ""}</span>
+        <span className="tbkName">
+          {playerId ? tournamentName(playerId) : isByeSlot ? "bye" : "TBD"}
         </span>
-        {result?.decided && (
-          <span className="tourneyMatchMark">{isWinner ? "✓" : ""}</span>
+        {isYou && <span className="tbkYouTag">you</span>}
+        <span className="tbkScore">
+          {m.isBye && playerId && otherId == null ? "" : score}
+        </span>
+      </div>
+    );
+  };
+
+  const renderMatchCard = (m) => {
+    const mine =
+      !!user?.UserID && (m.aId === user.UserID || m.bId === user.UserID);
+    const live = isTournamentMatchLive(m);
+    return (
+      <div
+        className={[
+          "tbkMatch",
+          m.isBye ? "tbkMatch--bye" : "",
+          mine && !m.result?.decided ? "tbkMatch--mine" : "",
+          live ? "tbkMatch--live" : "",
+          m.result?.decided && !m.isBye ? "tbkMatch--done" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        {renderMatchSide(m, "a")}
+        {renderMatchSide(m, "b")}
+        {live && <span className="tbkLive">LIVE</span>}
+      </div>
+    );
+  };
+
+  const renderTournamentFocus = () => {
+    const t = parsed.tournament;
+    const champion = tournamentState.champion;
+    const me = myTournamentState;
+    const len = t.blockSize || tournamentState.blockSize || 0;
+
+    if (champion) {
+      const isMe = champion.id === user?.UserID;
+      return (
+        <div className="tfocus tfocus--champ">
+          <span className="tfocusTrophy" aria-hidden="true">🏆</span>
+          <div className="tfocusText">
+            <span className="tfocusKicker">Champion</span>
+            <span className="tfocusTitle">
+              {isMe ? "You won the tournament" : tournamentName(champion.id)}
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    if (t.format === "roundrobin") {
+      const myRow = (tournamentState.standings || []).find((row) => row.id === user?.UserID);
+      const rank = myRow ? tournamentState.standings.indexOf(myRow) + 1 : null;
+      const decided = (tournamentState.matches || []).filter((m) => m.result?.decided).length;
+      const total = (tournamentState.matches || []).length;
+      if (!myRow) {
+        return (
+          <div className="tfocus">
+            <div className="tfocusText">
+              <span className="tfocusKicker">Spectating</span>
+              <span className="tfocusTitle">
+                {decided} of {total} matchups decided
+              </span>
+            </div>
+          </div>
+        );
+      }
+      const done = tournamentDoneCount(user.UserID, 0, len);
+      return (
+        <div className={`tfocus ${me?.status === "solving" ? "tfocus--live" : ""}`}>
+          <div className="tfocusText">
+            <span className="tfocusKicker">
+              {me?.status === "solving" ? "Your solves" : "All your solves are in"}
+            </span>
+            <span className="tfocusTitle">
+              {myRow.wins}–{myRow.losses}
+              <span className="tfocusDim"> · {rank ? `#${rank} of ${tournamentState.standings.length}` : ""}</span>
+            </span>
+          </div>
+          <div className="tfocusProgress" aria-label={`${done} of ${len} solves`}>
+            {Array.from({ length: len }, (_, k) => (
+              <span key={k} className={k < done ? "isDone" : ""} />
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // Bracket
+    const roundLabel = (r) => bracketRoundLabel(r, t.totalRounds);
+    if (!me || me.status === "spectator") {
+      const r = tournamentState.currentRound || 0;
+      const roundMatches = (tournamentState.rounds?.[r] || []).filter((m) => !m.isBye);
+      const decided = roundMatches.filter((m) => m.result?.decided).length;
+      return (
+        <div className="tfocus">
+          <div className="tfocusText">
+            <span className="tfocusKicker">Spectating · {roundLabel(r)}</span>
+            <span className="tfocusTitle">
+              {decided} of {roundMatches.length} matches decided
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    const m = me.activeMatch;
+    const oppId = m ? (m.aId === user?.UserID ? m.bId : m.aId) : null;
+    const start = m ? t.roundOffsets?.[m.round] || 0 : 0;
+
+    if (me.status === "eliminated") {
+      return (
+        <div className="tfocus tfocus--out">
+          <div className="tfocusText">
+            <span className="tfocusKicker">Out in the {roundLabel(m?.round || 0).toLowerCase()}</span>
+            <span className="tfocusTitle">
+              Lost to {tournamentName(m?.result?.winnerId)}
+              {m?.result?.scoreLabel ? (
+                <span className="tfocusDim"> · {m.result.scoreLabel}</span>
+              ) : null}
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    const myDone = m ? tournamentDoneCount(user.UserID, start, len) : 0;
+    const oppDone = m && oppId ? tournamentDoneCount(oppId, start, len) : 0;
+    const kicker =
+      me.status === "solving"
+        ? `${roundLabel(m?.round || 0)} · your match is live`
+        : oppId
+        ? `${roundLabel(m?.round || 0)} · waiting on ${tournamentName(oppId)}`
+        : `${roundLabel(m?.round || 0)} · waiting for your opponent`;
+
+    return (
+      <div className={`tfocus ${me.status === "solving" ? "tfocus--live" : ""}`}>
+        <div className="tfocusText">
+          <span className="tfocusKicker">{kicker}</span>
+          <span className="tfocusTitle">
+            You <span className="tfocusDim">vs</span> {oppId ? tournamentName(oppId) : "TBD"}
+          </span>
+        </div>
+        {m && oppId && (
+          <div className="tfocusVs">
+            <div className="tfocusVsRow">
+              <span>You</span>
+              <span className="tfocusProgress">
+                {Array.from({ length: len }, (_, k) => (
+                  <span key={k} className={k < myDone ? "isDone" : ""} />
+                ))}
+              </span>
+            </div>
+            <div className="tfocusVsRow">
+              <span>{tournamentName(oppId)}</span>
+              <span className="tfocusProgress tfocusProgress--them">
+                {Array.from({ length: len }, (_, k) => (
+                  <span key={k} className={k < oppDone ? "isDone" : ""} />
+                ))}
+              </span>
+            </div>
+          </div>
         )}
       </div>
     );
@@ -1646,103 +1856,154 @@ function SharedAverageMessage({
     if (!parsed?.tournament || !tournamentState) return null;
     const t = parsed.tournament;
     const ruleLabel = tournamentMatchRuleLabel(t.matchRule, t.params);
+    const playerCount = (t.players || []).length;
 
-    const statusLine = tournamentState.champion
-      ? `🏆 ${tournamentName(tournamentState.champion.id)} wins`
-      : myTournamentState
-      ? {
-          solving: "Your match is live — go to the timer",
-          waiting: "Waiting on other matches",
-          eliminated: "You're out — spectating",
-          champion: "🏆 You won!",
-          done: "Your solves are in",
-          spectator: "Spectating",
-        }[myTournamentState.status] || ""
-      : "";
+    const meta = (
+      <div className="tmeta">
+        <span>{t.format === "roundrobin" ? "Round robin" : "Knockout"}</span>
+        <span>{ruleLabel}</span>
+        <span>{playerCount} players</span>
+      </div>
+    );
+
+    if (t.format === "roundrobin") {
+      const len = t.blockSize || 0;
+      return (
+        <div className="tourney">
+          {meta}
+          {renderTournamentFocus()}
+
+          <div className="tsection">
+            <div className="tsectionHead">Standings</div>
+            <div className="tstandWrap">
+              <table className="tstand">
+                <thead>
+                  <tr>
+                    <th aria-label="Rank" />
+                    <th className="tstandName">Player</th>
+                    <th>W–L</th>
+                    <th title="Solve-by-solve wins across every matchup">Rounds</th>
+                    <th>Mean</th>
+                    <th>Solves</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(tournamentState.standings || []).map((row, index) => {
+                    const done = tournamentDoneCount(row.id, 0, len);
+                    const isLeader = index === 0 && row.wins > 0;
+                    return (
+                      <tr
+                        key={row.id}
+                        className={[
+                          row.id === user?.UserID ? "tstandYou" : "",
+                          isLeader ? "tstandLeader" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                      >
+                        <td className="tstandRank">{index + 1}</td>
+                        <td className="tstandName">
+                          {tournamentName(row.id)}
+                          {row.id === user?.UserID && <span className="tbkYouTag">you</span>}
+                        </td>
+                        <td className="tstandWl">
+                          {row.wins}–{row.losses}
+                        </td>
+                        <td>{row.roundWins}</td>
+                        <td>{row.mean != null ? formatAverageMs(row.mean) : "–"}</td>
+                        <td className={done >= len ? "tstandDone" : "tstandDim"}>
+                          {done}/{len}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="tsection">
+            <div className="tsectionHead">Matchups</div>
+            <div className="tgrid">
+              {(tournamentState.matches || []).map((m) => (
+                <React.Fragment key={m.id}>{renderMatchCard(m)}</React.Fragment>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const rounds = tournamentState.rounds || [];
+    const lastRound = rounds.length - 1;
+    const champion = tournamentState.champion;
 
     return (
       <div className="tourney">
-        <div className="tourneyHead">
-          <span className="tourneyTitle">
-            {t.format === "roundrobin" ? "Round Robin" : "Bracket"} · {ruleLabel}
-          </span>
-          {statusLine && <span className="tourneySubtitle">{statusLine}</span>}
-        </div>
+        {meta}
+        {renderTournamentFocus()}
 
-        {t.format === "roundrobin" ? (
-          <>
-            <table className="tourneyStandings">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Player</th>
-                  <th>W–L</th>
-                  <th>RW</th>
-                  <th>Mean</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(tournamentState.standings || []).map((row, index) => (
-                  <tr
-                    key={row.id}
-                    className={row.id === user?.UserID ? "tourneyStandingsYou" : ""}
-                  >
-                    <td>{index + 1}</td>
-                    <td className="tourneyStandingsName">{tournamentName(row.id)}</td>
-                    <td>
-                      {row.wins}–{row.losses}
-                    </td>
-                    <td>{row.roundWins}</td>
-                    <td>{row.mean != null ? formatAverageMs(row.mean) : "–"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            <div className="tourneyMatchList">
-              {(tournamentState.matches || []).map((m) => (
-                <div key={m.id} className="tourneyMatchRow">
-                  <span>
-                    {tournamentName(m.aId)} vs {tournamentName(m.bId)}
-                  </span>
-                  <span className="tourneyMatchRowScore">
-                    {m.result?.decided
-                      ? `${tournamentName(m.result.winnerId)} · ${m.result.scoreLabel}`
-                      : m.result?.scoreLabel || "pending"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </>
-        ) : (
-          <div className="tourneyBracket">
-            {(tournamentState.rounds || []).map((round, r) => (
-              <div className="tourneyCol" key={r}>
-                <div className="tourneyColHead">
-                  {bracketRoundLabel(r, t.totalRounds)}
-                </div>
-                {round.map((m) => (
-                  <div
-                    key={m.id}
-                    className={[
-                      "tourneyMatch",
-                      (m.aId === user?.UserID || m.bId === user?.UserID) &&
-                      !m.result?.decided
-                        ? "tourneyMatch--mine"
-                        : "",
-                    ].join(" ")}
-                  >
-                    {renderMatchSide(m.aId, m.result, "a")}
-                    {renderMatchSide(m.bId, m.result, "b")}
-                    {m.result?.scoreLabel && (
-                      <div className="tourneyMatchScore">{m.result.scoreLabel}</div>
-                    )}
-                  </div>
-                ))}
+        <div className="tbkScroll">
+          <div className="tbk" style={{ "--tbk-cols": rounds.length + 1 }}>
+            {rounds.map((_, r) => (
+              <div
+                key={`h-${r}`}
+                className={[
+                  "tbkHead",
+                  !champion && r === tournamentState.currentRound ? "isCurrent" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                style={{ gridColumn: r + 1 }}
+              >
+                {bracketRoundLabel(r, t.totalRounds)}
               </div>
             ))}
+            <div className="tbkHead" style={{ gridColumn: rounds.length + 1 }}>
+              Champion
+            </div>
+
+            {rounds.map((round, r) => (
+              <div
+                key={`c-${r}`}
+                className={`tbkCol ${r > 0 ? "tbkCol--fed" : ""} ${
+                  r === lastRound ? "tbkCol--final" : ""
+                }`}
+                style={{ gridColumn: r + 1 }}
+              >
+                {r === lastRound
+                  ? round.map((m) => (
+                      <div className="tbkSlot" key={m.id}>
+                        {renderMatchCard(m)}
+                      </div>
+                    ))
+                  : chunkArray(round, 2).map((pair) => (
+                      <div className="tbkPair" key={pair[0].id}>
+                        {pair.map((m) => (
+                          <div className="tbkSlot" key={m.id}>
+                            {renderMatchCard(m)}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+              </div>
+            ))}
+
+            <div
+              className="tbkCol tbkCol--fed tbkCol--champ"
+              style={{ gridColumn: rounds.length + 1 }}
+            >
+              <div className="tbkSlot">
+                <div className={`tbkChamp ${champion ? "isSet" : ""}`}>
+                  <span aria-hidden="true">🏆</span>
+                  <span className="tbkName">
+                    {champion ? tournamentName(champion.id) : "TBD"}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
-        )}
+        </div>
       </div>
     );
   };
@@ -1779,7 +2040,7 @@ function SharedAverageMessage({
               </div>
             </div>
             <div className="sharedAverageGroupToolbar">
-              {(groupComputed?.members?.length || 0) > 1 && (
+              {!parsed?.tournament && (groupComputed?.members?.length || 0) > 1 && (
                 <div
                   className="sharedAverageViewToggle sharedAverageSortToggle"
                   role="group"

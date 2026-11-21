@@ -6,6 +6,7 @@ import React, {
   useMemo,
   useEffect,
 } from "react";
+import { DEFAULT_CUBE_COLORS, normalizeCubeColors, setCubeColors } from "../utils/cubeColors";
 import {
   getDefaultHomeStatsSlots,
   normalizeHomeStatsSlots,
@@ -56,6 +57,11 @@ function normalizeTimerFont(rawValue) {
 
   if (raw === "digital") return "digital";
   return "default";
+}
+
+function normalizeHomePuzzleSvgView(rawValue) {
+  const raw = String(rawValue || "").trim().toLowerCase();
+  return raw === "net" ? "net" : "3d";
 }
 
 function normalizeTimeListColumns(rawValue) {
@@ -218,6 +224,8 @@ export const defaultSettings = {
   cubeAutoStop: true,
   cubeStopIdleMs: 5000,
   cubeShow3D: true,
+  // Sticker + plastic colours for every cube the app draws (src/utils/cubeColors.js).
+  cubeColors: DEFAULT_CUBE_COLORS,
 
   showPlayerBar: true,
   lastEvent: "333",
@@ -231,6 +239,7 @@ export const defaultSettings = {
 
   smartCubeProvider: "gan",
   navigationArrowStyle: "scramble",
+  homePuzzleSvgView: "3d",
   showAddSolveButton: true,
   hideAutomaticHomeTags: false,
   playerBarTagFields: ["CubeModel"],
@@ -336,7 +345,9 @@ function mergeSettings(input) {
     ...defaultSettings,
     ...safe,
     smartCubeProvider,
+    cubeColors: normalizeCubeColors(safe.cubeColors),
     navigationArrowStyle,
+    homePuzzleSvgView: normalizeHomePuzzleSvgView(safe.homePuzzleSvgView),
     scrambleMode,
     timerSize,
     timerFont,
@@ -463,6 +474,10 @@ export const SettingsProvider = ({ children }) => {
       detailSurfaceSoft
     );
   }, [settings.primaryColor, settings.secondaryColor, settings.detailViewSurfaceMode]);
+
+  useEffect(() => {
+    setCubeColors(settings.cubeColors);
+  }, [settings.cubeColors]);
 
   const updateSettings = useCallback((newSettings) => {
     setSettings((prev) => mergeSettings({ ...prev, ...(newSettings || {}) }));

@@ -674,3 +674,69 @@
 .player-bar .Timer {
   margin: 0 !important;
 }
+
+/* Bluetooth timer / smart cube chip (portaled in by the Timer when the input
+   setting is GAN Bluetooth or a smart cube). Empty slot takes no space. */
+.playerbar-bt-slot {
+  display: contents;
+}
+
+.playerbar-bt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  height: 18px;
+  padding: 0 6px 0 4px;
+  box-sizing: border-box;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.75);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.playerbar-bt-chip:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.playerbar-bt-chip:disabled {
+  cursor: default;
+}
+
+.playerbar-bt-chip__icon {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.playerbar-bt-chip__label {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.playerbar-bt-chip__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.playerbar-bt-chip--connecting .playerbar-bt-chip__dot { background: #ffd000; }
+.playerbar-bt-chip--error .playerbar-bt-chip__dot { background: #ff4d4d; }
+
+.playerbar-bt-chip--connected {
+  border-color: rgba(46, 196, 182, 0.55);
+  background: rgba(46, 196, 182, 0.14);
+  color: #2ec4b6;
+}
+.playerbar-bt-chip--connected .playerbar-bt-chip__dot { background: #2ec4b6; }

@@ -61,6 +61,7 @@ function Scramble({
   currentEvent,
   isMusicPlayer,
   scrambleProgress = 0, // ✅ now treated as STEP progress
+  scrambleFix = [], // smart cube off track: moves that get back on the scramble
   copyFeedback = "idle",
 }) {
   const { settings } = useSettings();
@@ -184,13 +185,32 @@ function Scramble({
               (() => {
                 // mark tokens done by consuming steps from scrambleProgress
                 let remaining = Math.max(0, Number(scrambleProgress || 0));
+                const fix = Array.isArray(scrambleFix) ? scrambleFix : [];
+                let fixShown = false;
+                const fixGroup = (key) => (
+                  <span
+                    key={key}
+                    className="scramble-fix"
+                    title="Off the scramble: do these moves to get back on track"
+                  >
+                    {fix.map((m, k) => (
+                      <span key={k} className="scramble-fix__move">
+                        {m}
+                      </span>
+                    ))}
+                  </span>
+                );
 
-                return tokens.map((t, i) => {
+                const out = tokens.map((t, i) => {
                   const need = stepsInToken(t);
                   const done = remaining >= need;
                   remaining -= need;
+                  // The fix goes where the user is: before the first token
+                  // not yet finished.
+                  const showFixHere = fix.length && !fixShown && !done;
+                  if (showFixHere) fixShown = true;
 
-                  return (
+                  const tokenEl = (
                     <span
                       key={`${t}-${i}`}
                       style={{
@@ -205,7 +225,10 @@ function Scramble({
                       {t}
                     </span>
                   );
+                  return showFixHere ? [fixGroup(`fix-${i}`), tokenEl] : tokenEl;
                 });
+                if (fix.length && !fixShown) out.push(fixGroup("fix-end"));
+                return out;
               })()
             ) : (
               scramble

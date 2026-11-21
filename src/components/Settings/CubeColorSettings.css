@@ -1,0 +1,65 @@
+.cubeColors {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 6px 0 10px;
+}
+
+.cubeColors__preview {
+  flex: none;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cubeColors__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.cubeColors__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.cubeColors__swatch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cubeColors__swatch input[type="color"] {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  flex: none;
+}
+
+.cubeColors__swatch input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.cubeColors__swatch input[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: 6px;
+}
+
+.cubeColors__reset {
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  color: #7fe3d8;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+}

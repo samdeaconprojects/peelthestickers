@@ -323,3 +323,21 @@
     display: none;
   }
 }
+
+/* Smart cube off the scramble: the moves that put it back on track, shown
+   where the user is in the scramble. */
+.scramble-fix {
+  display: inline-flex;
+  gap: 0.4em;
+  margin-right: 8px;
+  padding: 0 0.3em;
+  border-radius: 0.25em;
+  background: rgba(255, 140, 40, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 160, 70, 0.55);
+  color: #ffb066;
+  white-space: nowrap;
+}
+
+.scramble-text .scramble-fix .scramble-fix__move + .scramble-fix__move {
+  margin-left: 0.45em;
+}

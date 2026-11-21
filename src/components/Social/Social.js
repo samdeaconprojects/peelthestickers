@@ -2404,6 +2404,10 @@ function Social({
     const memberProfiles = Array.isArray(conversation?.memberProfiles)
       ? conversation.memberProfiles
       : [];
+    const includeIds =
+      Array.isArray(config?.playerIds) && config.playerIds.length >= 2
+        ? new Set(config.playerIds.map((id) => String(id)))
+        : null;
     const players = (memberProfiles.length
       ? memberProfiles
       : [{ id: user.UserID, name: user.Username || user.Name || user.UserID }]
@@ -2412,7 +2416,9 @@ function Social({
         id: String(member?.id || member?.userID || "").trim(),
         name: member?.name || member?.username || member?.id || "Player",
       }))
-      .filter((player) => player.id);
+      .filter((player) => player.id)
+      // The host can leave members out; they spectate.
+      .filter((player) => !includeIds || includeIds.has(player.id));
 
     if (players.length < 2) return;
 

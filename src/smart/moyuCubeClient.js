@@ -274,6 +274,17 @@ export class MoyuCubeClient {
     } catch (_) {}
   }
 
+  /**
+   * The user has solved the cube by hand after our tracking drifted. MoYu has
+   * no reset command, so restart local tracking from solved; the move counter
+   * baseline stays, so the next moves apply on top of solved.
+   */
+  async markSolved() {
+    this.prevCubie = new CubieCube();
+    this.curCubie = new CubieCube();
+    this.latestFacelets = SOLVED_FACELET;
+  }
+
   getPacketLog() {
     return [...this._packetLog];
   }
@@ -590,6 +601,17 @@ export class MoyuCubeClient {
         return;
 
       case "FACELETS": {
+        // A status reply can arrive after move packets that came later on the
+        // cube (we ask for status while turning). Adopting it would rewind the
+        // model and the move counter, and the next move packet would then
+        // replay — i.e. duplicate — moves we already emitted. Ignore replies
+        // that are behind us.
+        const lag = this.prevMoveCnt === -1 ? 0 : (this.prevMoveCnt - decoded.serial) & 0xff;
+        if (lag > 0 && lag < 128) {
+          if (debugEnabled()) console.log("[PTS][MoYu] stale status ignored, lag", lag);
+          this._markDecryptOk();
+          return;
+        }
         this.latestFacelets = decoded.facelets;
         const res = this.prevCubie.fromFacelet(decoded.facelets);
         if (res !== -1) {
