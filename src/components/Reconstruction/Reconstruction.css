@@ -89,8 +89,7 @@
   flex-basis: 0;
   min-width: 4px;
   display: flex;
-  align-items: center;
-  padding: 0 6px;
+  align-items: stretch;
   overflow: hidden;
   color: rgba(0, 0, 0, 0.78);
   font-size: 11px;
@@ -99,9 +98,25 @@
   background: var(--recon-other);
 }
 
-.recon__seg span {
+.recon__segExec {
+  flex-basis: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
   overflow: hidden;
   text-overflow: clip;
+  min-width: 0;
+}
+
+/* Recognition before the step: the step's colour, hatched and dimmed. */
+.recon__segRecog {
+  flex-basis: 0;
+  min-width: 2px;
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(0, 0, 0, 0.38) 0 3px,
+    rgba(0, 0, 0, 0.12) 3px 6px
+  );
 }
 
 .recon__seg--cross, .reconStep--cross { --recon-step: var(--recon-cross); }
@@ -135,6 +150,15 @@
 
 .reconStep:first-child {
   border-top: 0;
+}
+
+.reconStep__pause {
+  flex-basis: 100%;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--recon-pause, var(--recon-muted));
+  cursor: default;
 }
 
 .reconStep__name {
@@ -297,6 +321,22 @@
   gap: 6px;
 }
 
+.recon__mismatch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: -4px;
+  font-size: 12px;
+  color: #ffd59a;
+}
+
+.recon__mismatch .recon__textBtn {
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .recon__textBtn {
   border: 0;
   background: none;
@@ -335,4 +375,17 @@
   .reconStep__stats .recon__muted:last-child {
     display: none;
   }
+}
+
+.reconStep__delta {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.reconStep__delta.is-faster { color: #4ade80; }
+.reconStep__delta.is-slower { color: #f87171; }
+
+.reconStep__delta .recon__muted {
+  font-weight: 600;
 }

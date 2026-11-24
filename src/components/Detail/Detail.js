@@ -219,6 +219,7 @@ function Detail({
       "Parity_OLL" in tagStateValue ||
       "Parity_PLL" in tagStateValue ||
       "Parity_Edge" in tagStateValue ||
+      "Mishap" in tagStateValue ||
       "SolveSource" in tagStateValue ||
       "TimerInput" in tagStateValue ||
       "Custom1" in tagStateValue ||
@@ -255,6 +256,7 @@ function Detail({
       Parity_OLL: t?.Parity_OLL ? String(t.Parity_OLL) : "",
       Parity_PLL: t?.Parity_PLL ? String(t.Parity_PLL) : "",
       Parity_Edge: t?.Parity_Edge ? String(t.Parity_Edge) : "",
+      Mishap: t?.Mishap ? String(t.Mishap) : "",
       SolveSource: t?.SolveSource ? String(t.SolveSource) : "",
       TimerInput: t?.TimerInput ? String(t.TimerInput) : "",
       Custom1: t?.Custom1 ? String(t.Custom1) : "",
@@ -465,7 +467,7 @@ function Detail({
     if (algPll) payload.Alg_PLL = algPll;
     if (algCmll) payload.Alg_CMLL = algCmll;
     if (algCll) payload.Alg_CLL = algCll;
-    for (const field of ["Parity_OLL", "Parity_PLL", "Parity_Edge"]) {
+    for (const field of ["Parity_OLL", "Parity_PLL", "Parity_Edge", "Mishap"]) {
       const value = String(tState?.[field] || "").trim();
       if (value) payload[field] = value;
     }
@@ -540,9 +542,13 @@ function Detail({
 
       const savedItem = res?.item;
       const savedSignature = getEditSignature(savedItem?.Note ?? noteValue, savedItem?.Tags ?? tagsPayload);
+      // The server keeps smart-cube data beside the tags; keep it on the local
+      // solve so the reconstruction survives a tag edit.
+      const smartCube = getSolveSmartCube(s) || savedItem?.SmartCube || null;
+      const savedTags = savedItem?.Tags ?? tagsPayload;
       patchLocalSolve(s, solveRef, {
         note: savedItem?.Note ?? noteValue,
-        tags: savedItem?.Tags ?? tagsPayload,
+        tags: smartCube ? { ...savedTags, SmartCube: smartCube } : savedTags,
         solveRef: savedItem?.SK ?? solveRef,
         createdAt: savedItem?.CreatedAt ?? getSolveCreatedAt(s),
       });
@@ -905,9 +911,12 @@ function Detail({
           <Reconstruction
             smartCube={getSolveSmartCube(item)}
             scramble={getSolveScramble(item)}
-            method={getSolveTags(item)?.Method || ""}
+            method={(isArray ? tagsState[index] : tagsState)?.Method ?? getSolveTags(item)?.Method ?? ""}
             solveTimeMs={getSolveRawTimeMs(item)}
             event={item?.event || item?.Event || ""}
+            onMethodChange={
+              isReadOnlySolve(item) ? null : (m) => updateTagField("Method", m, index)
+            }
           />
         ) : null}
 

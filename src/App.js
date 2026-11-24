@@ -28,6 +28,7 @@ import {
 import HomeStatsOverlay from "./components/HomeStats/HomeStatsOverlay";
 import EventSelector from "./components/EventSelector";
 import { setReconPool } from "./smart/recon/stepStats";
+import { algTagsFromSplits, withSplits } from "./smart/recon/splits";
 import Scramble from "./components/Scramble/Scramble";
 import PuzzleSVG from "./components/PuzzleSVGs/PuzzleSVG";
 import SignInPopup from "./components/SignInPopup/SignInPopup";
@@ -1896,6 +1897,10 @@ function App() {
   const [deleteUndoState, setDeleteUndoState] = useState(null);
   const [showDeleteUndoToast, setShowDeleteUndoToast] = useState(false);
   const [postSolveTagToast, setPostSolveTagToast] = useState("");
+  // After a smart-cube solve whose moves don't match the Method tag (a Roux
+  // solve while CFOP is selected): { detected, tagged }.
+  const [methodPrompt, setMethodPrompt] = useState(null);
+  const methodPromptTimeoutRef = useRef(null);
   const [statsSettingsContext, setStatsSettingsContext] = useState({
     eventLabel: currentEvent || "333",
     sessionLabel: currentSession || "main",
@@ -4271,6 +4276,15 @@ function App() {
     }, 8000);
   }, []);
 
+  const showMethodPrompt = useCallback((prompt) => {
+    if (methodPromptTimeoutRef.current) clearTimeout(methodPromptTimeoutRef.current);
+    methodPromptTimeoutRef.current = null;
+    setMethodPrompt(prompt || null);
+    if (prompt) {
+      methodPromptTimeoutRef.current = setTimeout(() => setMethodPrompt(null), 15000);
+    }
+  }, []);
+
   const queuePostSolveTagToast = useCallback((label) => {
     const message = String(label || "").trim();
     if (!message) return;
@@ -5139,10 +5153,17 @@ function App() {
       new Date().toISOString();
 
     // Start state + timestamped moves: everything the solve detail needs to
-    // rebuild the reconstruction (see src/smart/recon/solveRecord.js).
-    const smartTagPayload = smartMeta?.record
-      ? { SmartCube: smartMeta.record }
-      : {};
+    // rebuild the reconstruction (see src/smart/recon/solveRecord.js), plus
+    // the per-step splits stats read (src/smart/recon/splits.js).
+    const smartRecord = smartMeta?.record
+      ? withSplits(smartMeta.record, currentTags?.Method || "")
+      : null;
+    const smartTagPayload = smartRecord ? { SmartCube: smartRecord } : {};
+    showMethodPrompt(
+      smartRecord?.Splits?.Tagged
+        ? { detected: smartRecord.Splits.Method, tagged: smartRecord.Splits.Tagged }
+        : null
+    );
 
     const newTags = sharedSession
       ? buildTagPayload({
@@ -5180,6 +5201,10 @@ function App() {
           ...(usedCustomLoadedScramble ? { SolveSource: "Custom Load" } : {}),
           ...smartTagPayload,
         });
+
+    // The OLL / PLL cases the smart cube saw are this solve's alg tags (over
+    // any session default; the post-solve tag keys can still change them).
+    Object.assign(newTags, algTagsFromSplits(smartRecord?.Splits));
 
     if (isSignedIn && user) {
       if (activeSharedID && solveIndexForBroadcast !== null) {
@@ -6625,6 +6650,7 @@ function App() {
       if (
         field === "TimerInput" ||
         field === "SolveSource" ||
+        field === "Mishap" ||
         field === "Alg_OLL" ||
         field === "Alg_PLL" ||
         field === "Alg_CMLL" ||
@@ -6915,6 +6941,20 @@ function App() {
       playerBarSuppressed,
       tagScopeEventKey,
     ]
+  );
+
+  // Answers to the method prompt: retag the solve just done, and optionally
+  // keep the new method selected for the next ones.
+  const answerMethodPrompt = useCallback(
+    (prompt, { forNextSolves = false } = {}) => {
+      setMethodPrompt(null);
+      if (!prompt?.detected) return;
+      applyPostSolveTagBinding({ Method: prompt.detected });
+      if (forNextSolves) {
+        handleCurrentTagDefaultsChange({ ...(currentTags || {}), Method: prompt.detected });
+      }
+    },
+    [applyPostSolveTagBinding, currentTags, handleCurrentTagDefaultsChange]
   );
 
   const armPendingPostSolveTagChord = useCallback(
@@ -8685,6 +8725,10 @@ function App() {
                   ) : (
                     <div className="home-bottom-stack">
                       {homeLeftOfTimer !== "averages" ? (
+                        // Timer portals the smart-cube step bar in here.
+                        <div id="pts-stepbar-slot" className="home-stepbar-slot" />
+                      ) : null}
+                      {homeLeftOfTimer !== "averages" ? (
                         <AveragesDisplay
                           currentSolves={currentSolves}
                           overallSessionStats={currentSessionStatsForEvent}
@@ -9374,6 +9418,39 @@ function App() {
             className="deleteUndoToastDismiss"
             onClick={() => setShowDeleteUndoToast(false)}
             aria-label="Dismiss undo message"
+          >
+            x
+          </button>
+        </div>
+      )}
+
+      {methodPrompt && (
+        <div className="deleteUndoToast methodPromptToast" role="status" aria-live="polite">
+          <div className="deleteUndoToastText">
+            Looked like {methodPrompt.detected}, tagged {methodPrompt.tagged}.
+          </div>
+          <button
+            type="button"
+            className="deleteUndoToastAction"
+            onClick={() => answerMethodPrompt(methodPrompt)}
+            title={`Tag this solve ${methodPrompt.detected}`}
+          >
+            Tag {methodPrompt.detected}
+          </button>
+          <button
+            type="button"
+            className="deleteUndoToastAction"
+            onClick={() => answerMethodPrompt(methodPrompt, { forNextSolves: true })}
+            title={`Tag this solve ${methodPrompt.detected} and keep ${methodPrompt.detected} selected for the next solves`}
+          >
+            Switch to {methodPrompt.detected}
+          </button>
+          <button
+            type="button"
+            className="deleteUndoToastDismiss"
+            onClick={() => setMethodPrompt(null)}
+            aria-label={`Keep ${methodPrompt.tagged}`}
+            title={`Keep ${methodPrompt.tagged}`}
           >
             x
           </button>

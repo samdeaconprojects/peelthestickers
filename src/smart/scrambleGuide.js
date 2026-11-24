@@ -158,3 +158,36 @@ export function createScrambleGuide(scramble, startState = SOLVED) {
     },
   };
 }
+
+/**
+ * What the scramble display shows while the cube is off track. Fix moves the
+ * user has already done stay on screen (marked done) instead of vanishing one
+ * by one, and the whole fix clears once the cube is back on the scramble.
+ *
+ * `prev` is { moves, done } from the last call (or null); `fix` is the guide's
+ * current fix. Returns the next { moves, done }.
+ */
+export function nextFixDisplay(prev, fix) {
+  const next = Array.isArray(fix) ? fix.filter((m) => typeof m === "string" && m) : [];
+  if (!next.length) return { moves: [], done: 0 };
+  const moves = prev?.moves || [];
+  const done = prev?.done || 0;
+  const remaining = moves.slice(done);
+  const same = (a, b) => a.length === b.length && a.every((m, i) => m === b[i]);
+
+  if (same(remaining, next)) return prev;
+  // Did the next fix move: the fix is now what was left after it.
+  if (remaining.length > 1 && same(remaining.slice(1), next)) {
+    return { moves, done: done + 1 };
+  }
+  // Halfway through a double (R2 shown, one R done): keep showing R2.
+  const head = parseToken(remaining[0] || "");
+  const nh = parseToken(next[0]);
+  if (
+    head && nh && head.amount === 2 && nh.amount !== 2 && head.base === nh.base &&
+    same(remaining.slice(1), next.slice(1))
+  ) {
+    return prev;
+  }
+  return { moves: next, done: 0 };
+}

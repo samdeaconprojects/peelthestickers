@@ -880,6 +880,7 @@ const ALLOWED_TAG_KEYS = new Set([
   "Parity_OLL",
   "Parity_PLL",
   "Parity_Edge",
+  "Mishap",
   "TimerInput",
   "SolveSource",
   "Custom1",
@@ -939,6 +940,10 @@ function buildDefaultTagConfig(tagOptions = null) {
       Parity_OLL: { label: "OLL Parity", options: ["Yes"] },
       Parity_PLL: { label: "PLL Parity", options: ["Yes"] },
       Parity_Edge: { label: "Edge Parity", options: ["Yes"] },
+      Mishap: {
+        label: "Mishap",
+        options: ["Pop", "Corner Twist", "Lockup", "Misscramble", "Dropped Cube", "Timer Issue"],
+      },
       Alg_OLL: {
         label: "OLL",
         options: OLL_CASE_OPTIONS,

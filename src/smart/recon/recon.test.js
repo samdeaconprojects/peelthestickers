@@ -9,7 +9,7 @@ import {
   tokenizeAlg,
   stickerHome,
 } from "./cube3";
-import { PLL_ALGS, OCLL_ALGS, getPllTable, getOcllTable, recognizePll } from "./lastLayer";
+import { PLL_ALGS, getPllTable, recognizePll } from "./lastLayer";
 import { analyzeSolve, reconstructionText } from "./analyze";
 
 // Re-orient a physical state so every centre is on its own face (the cube frame
@@ -105,9 +105,6 @@ describe("last layer tables", () => {
     }
   });
 
-  test("OCLL table has 7 distinct cases", () => {
-    expect(getOcllTable().size).toBe(Object.keys(OCLL_ALGS).length);
-  });
 });
 
 describe("analyzeSolve", () => {
@@ -188,6 +185,36 @@ describe("analyzeSolve", () => {
     expect(a.steps.map((s) => s.key)).toEqual(steps.map((x) => x[0]));
     expect(a.displayAlg).toBe(solution);
     expect(isSolved(applyAlg(start, a.displayAlg))).toBe(true);
+  });
+
+  test("a Roux solve tagged CFOP is shown as Roux and flagged; force keeps the tag", () => {
+    const steps = ["D' F2 L' B U2 L F'", "R' U M' U' R U R'", "U R U R' U R U2 R'", "M' U M U2 M' U' M2 U2"];
+    const solution = steps.join(" ");
+    const phys = applyAlg(SOLVED, invertAlg(solution));
+    const moves = simulate(solution, { start: phys });
+    const start = toCubeFrame(phys);
+    const a = analyzeSolve({ startState: start, moves, method: "CFOP" });
+    expect(a.method).toBe("Roux");
+    expect(a.detectedMethod).toBe("Roux");
+    expect(a.taggedMethod).toBe("CFOP");
+    expect(a.methodMismatch).toBe(true);
+    const forced = analyzeSolve({ startState: start, moves, method: "CFOP", force: true });
+    expect(forced.method).toBe("CFOP");
+    expect(forced.methodMismatch).toBe(false);
+    expect(analyzeSolve({ startState: start, moves, method: "Roux" }).methodMismatch).toBe(false);
+  });
+
+  test("a CFOP solve tagged CFOP or untagged is not flagged", () => {
+    const solution = cfopSolution.map((x) => x[1]).join(" ");
+    const moves = simulate(solution);
+    const start = applyAlg(SOLVED, invertAlg(solution));
+    expect(analyzeSolve({ startState: start, moves, method: "CFOP" }).methodMismatch).toBe(false);
+    const untagged = analyzeSolve({ startState: start, moves });
+    expect(untagged.methodMismatch).toBe(false);
+    expect(untagged.detectedMethod).toBe("CFOP");
+    const taggedRoux = analyzeSolve({ startState: start, moves, method: "Roux" });
+    expect(taggedRoux.method).toBe("CFOP");
+    expect(taggedRoux.methodMismatch).toBe(true);
   });
 
   test("pairs done after a y rotation read as R-moves", () => {

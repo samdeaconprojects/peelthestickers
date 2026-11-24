@@ -28,6 +28,7 @@ import {
 } from "../HomeStats/homeStatsConfig";
 import {
   getTagColorMapForEvent,
+  MISHAP_OPTIONS,
   normalizeTagColorCatalog,
 } from "../TagBar/tagUtils";
 import {
@@ -82,13 +83,6 @@ const WCA_IMPORT_EVENT_OPTIONS = [
   { code: "SQ1", label: "Square-1" },
 ];
 
-const SMART_CUBE_PROVIDER_OPTIONS = [
-  { value: "gan", label: "GAN / GAN-Protocol" },
-  { value: "gan-gen2-compatible", label: "GAN Gen2 Compatible" },
-  { value: "moyu-wcu", label: "MoYu WCU" },
-  { value: "auto", label: "Auto (future)" },
-];
-
 const SCRAMBLE_MODE_OPTIONS = [
   { value: "random-state", label: "Random State (default)" },
   { value: "legacy", label: "Legacy" },
@@ -137,6 +131,10 @@ const DEFAULT_TAG_CONFIG = {
     Parity_Edge: {
       label: "Edge Parity",
       options: ["Yes"],
+    },
+    Mishap: {
+      label: "Mishap",
+      options: MISHAP_OPTIONS,
     },
     Alg_OLL: {
       label: "OLL",
@@ -209,6 +207,7 @@ const TAG_KEY_OPTIONS = [
   { value: "Parity_OLL", label: "OLL Parity" },
   { value: "Parity_PLL", label: "PLL Parity" },
   { value: "Parity_Edge", label: "Edge Parity" },
+  { value: "Mishap", label: "Mishap" },
   { value: "Alg_OLL", label: "OLL" },
   { value: "Alg_PLL", label: "PLL" },
   { value: "Alg_CMLL", label: "CMLL" },
@@ -491,6 +490,12 @@ function normalizeTagConfig(input) {
           ? fixed.Parity_Edge.options
           : DEFAULT_TAG_CONFIG.Fixed.Parity_Edge.options,
       },
+      Mishap: {
+        label: fixed?.Mishap?.label || "Mishap",
+        options: Array.isArray(fixed?.Mishap?.options)
+          ? fixed.Mishap.options
+          : DEFAULT_TAG_CONFIG.Fixed.Mishap.options,
+      },
       Alg_OLL: {
         label: fixed?.Alg_OLL?.label || "OLL",
         options: Array.isArray(fixed?.Alg_OLL?.options)
@@ -583,21 +588,8 @@ function mergeCubeModelCatalogIntoTagConfig(tagConfig, tagCatalog) {
   };
 }
 
-function normalizeSmartCubeProviderForUi(rawValue) {
-  const raw = String(rawValue || "").trim().toLowerCase();
-
-  if (raw === "moyu-gan") return "moyu-wcu";
-
-  if (
-    raw === "gan" ||
-    raw === "gan-gen2-compatible" ||
-    raw === "moyu-wcu" ||
-    raw === "auto"
-  ) {
-    return raw;
-  }
-
-  return "gan";
+function normalizeSmartCubeProviderForUi() {
+  return "auto";
 }
 
 function normalizeScrambleModeForUi(rawValue) {
@@ -995,9 +987,6 @@ function Settings({
 
   const isGanTimer = settings.timerInput === "GAN Bluetooth";
   const isSmartCube = settings.timerInput === "GAN Cube";
-  const smartCubeProvider = normalizeSmartCubeProviderForUi(
-    settings.smartCubeProvider || "gan"
-  );
   const isGanCube = isSmartCube;
   const scrambleMode = normalizeScrambleModeForUi(settings.scrambleMode);
   const navigationArrowStyle = normalizeNavigationArrowStyleForUi(
@@ -1078,6 +1067,9 @@ function Settings({
     }
     if (recomputeTagKey === "TimerInput") {
       return tagConfig?.Fixed?.TimerInput?.options || DEFAULT_TAG_CONFIG.Fixed.TimerInput.options;
+    }
+    if (recomputeTagKey === "Mishap") {
+      return tagConfig?.Fixed?.Mishap?.options || DEFAULT_TAG_CONFIG.Fixed.Mishap.options;
     }
 
     const customSlot = customSlots.find((slot) => slot?.slot === recomputeTagKey);
@@ -1620,32 +1612,13 @@ function Settings({
               </SettingsChoice>
             </div>
 
-            {isSmartCube && (
-              <div className="setting-item">
-                <label>Smart Cube Provider:</label>
-                <SettingsChoice
-                  value={smartCubeProvider}
-                  onChange={(e) =>
-                    updateSettings({
-                      smartCubeProvider: normalizeSmartCubeProviderForUi(e.target.value),
-                    })
-                  }
-                >
-                  {SMART_CUBE_PROVIDER_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </SettingsChoice>
-              </div>
-            )}
-
-            {isSmartCube && smartCubeProvider === "moyu-wcu" ? (
+            {isSmartCube ? (
               <div className="settingsHintText">
-                MoYu AI / WCU uses its own Bluetooth path. Save settings first, then
-                connect from the timer. If the cube is found but won't sync, allow the
-                browser's Bluetooth "device advertisements" permission (Chrome) or pair
-                the cube once so its address is known.
+                GAN and MoYu cubes connect from the same button on the timer: pick
+                your cube in the browser's Bluetooth list and the right connection is
+                used. If a MoYu cube is found but won't sync, allow the browser's
+                Bluetooth "device advertisements" permission (Chrome) or pair the cube
+                once so its address is known.
               </div>
             ) : null}
 
@@ -1685,6 +1658,15 @@ function Settings({
                     type="checkbox"
                     checked={settings.cubeShow3D !== false}
                     onChange={(e) => updateSettings({ cubeShow3D: e.target.checked })}
+                  />
+                </div>
+
+                <div className="setting-item">
+                  <label>Show Step Bar Under Time</label>
+                  <input
+                    type="checkbox"
+                    checked={settings.showSolveStepBar !== false}
+                    onChange={(e) => updateSettings({ showSolveStepBar: e.target.checked })}
                   />
                 </div>
               </>

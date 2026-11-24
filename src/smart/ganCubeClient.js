@@ -47,12 +47,17 @@ export class GanCubeClient {
               move: ev.move,
               cubeTs: Number.isFinite(cubeTs) ? cubeTs : null,
               hostTs,
+              serial: Number.isFinite(ev.serial) ? ev.serial : null,
             });
             return;
           }
 
           if (ev.type === "FACELETS") {
-            onFacelets?.({ facelets: ev.facelets });
+            // serial = the cube's move counter when it took this snapshot.
+            onFacelets?.({
+              facelets: ev.facelets,
+              serial: Number.isFinite(ev.serial) ? ev.serial : null,
+            });
             return;
           }
 

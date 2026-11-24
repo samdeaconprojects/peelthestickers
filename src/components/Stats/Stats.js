@@ -15,6 +15,7 @@ import BucketTable from "./BucketTable";
 import PieChart from "./PieChart";
 import { PENALTY_SLICE_COLORS } from "./PieChartBuilder";
 import TagBreakdownPie from "./TagBreakdownPie";
+import StepSplits from "./StepSplits";
 import StatFocusModal from "./StatFocusModal";
 import { computeSolveIndexOffset } from "./solveIndexOffset";
 import AllEventsTimeMatrix from "./AllEventsTimeMatrix";
@@ -2291,7 +2292,12 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
       penalty: item.Penalty || null,
       note: item.Note || "",
       datetime: created,
-      tags: item.Tags || {},
+      // Smart-cube data lives beside the tags on the server; carry it the way
+      // the rest of the app does (tags.SmartCube) for reconstructions and splits.
+      tags:
+        item.SmartCube && !item.Tags?.SmartCube
+          ? { ...(item.Tags || {}), SmartCube: item.SmartCube }
+          : item.Tags || {},
       sessionID: item.SessionID || item.SessionId || item.sessionID || sessionId,
     };
   }, [sessionId]);
@@ -6570,6 +6576,15 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
     () => (useBucketBackedRange && tagBreakdownAggregateItems ? [] : visiblePageFilteredRawSolves),
     [tagBreakdownAggregateItems, useBucketBackedRange, visiblePageFilteredRawSolves]
   );
+  // Smart-cube step splits read the loaded solves (every smart-cube solve keeps its own splits).
+  const stepSplitsSolves = useMemo(
+    () =>
+      (visiblePageFilteredRawSolves || []).filter((s) => {
+        const tags = s?.tags || s?.Tags || {};
+        return !!(tags.SmartCube || s?.SmartCube);
+      }),
+    [visiblePageFilteredRawSolves]
+  );
   const selectedTagPills = useMemo(() => {
     const tagLabels = getSharedTagLabels(safeTagConfig);
     const tagColors = getTagColorMapForEvent(tagColorCatalog, statsEvent === ALL_EVENTS ? "" : statsEvent);
@@ -10466,6 +10481,7 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
               )}
 
               {layoutViewMode !== "time" && (
+                <div className="stats-tagStack">
                 <div
                   className={`stats-item stats-item--tagBreakdown statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
                   aria-busy={chartCardsLoading}
@@ -10482,6 +10498,15 @@ const [scopeModalSection, setScopeModalSection] = useState("event");  const comp
                     profileColor={user?.Color || user?.color || "#2EC4B6"}
                     onBucketSolvesOpen={openTagBucketSolves}
                   />
+                </div>
+                {stepSplitsSolves.length ? (
+                  <div
+                    className={`stats-item stats-item--stepSplits statsCardShell ${chartCardsLoading ? "is-loading" : ""}`}
+                    aria-busy={chartCardsLoading}
+                  >
+                    <StepSplits solves={stepSplitsSolves} onSolveOpen={openSolveDetail} />
+                  </div>
+                ) : null}
                 </div>
               )}
 

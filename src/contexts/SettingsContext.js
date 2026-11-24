@@ -224,6 +224,7 @@ export const defaultSettings = {
   cubeAutoStop: true,
   cubeStopIdleMs: 5000,
   cubeShow3D: true,
+  showSolveStepBar: true,
   // Sticker + plastic colours for every cube the app draws (src/utils/cubeColors.js).
   cubeColors: DEFAULT_CUBE_COLORS,
 
@@ -237,7 +238,7 @@ export const defaultSettings = {
   wcaImportSolveSource: "WCA",
   wcaImportLastSyncAt: "",
 
-  smartCubeProvider: "gan",
+  smartCubeProvider: "auto",
   navigationArrowStyle: "scramble",
   homePuzzleSvgView: "3d",
   showAddSolveButton: true,
@@ -265,21 +266,10 @@ export const defaultSettings = {
   scrambleMode: "random-state",
 };
 
-function normalizeSmartCubeProvider(rawValue) {
-  const raw = String(rawValue || "").trim().toLowerCase();
-
-  if (raw === "moyu-gan") return "moyu-wcu";
-
-  if (
-    raw === "gan" ||
-    raw === "gan-gen2-compatible" ||
-    raw === "moyu-wcu" ||
-    raw === "auto"
-  ) {
-    return raw;
-  }
-
-  return defaultSettings.smartCubeProvider;
+// One connect button for every brand: the cube picked decides the driver
+// (src/smart/autoCubeClient.js). Older saved choices (gan, moyu-wcu) fold in.
+function normalizeSmartCubeProvider() {
+  return "auto";
 }
 
 const HOME_LEFT_OF_TIMER_OPTIONS = ["none", "timelist", "averages"];

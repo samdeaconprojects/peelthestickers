@@ -147,3 +147,17 @@ export function readSmartRecord(smart) {
 
   return { startState, startSource, moves, provider: smart.Provider || null, reason: smart.Reason || "" };
 }
+
+/** Identity of a SmartCube record (same moves and times = same solve). */
+export function smartKey(smart) {
+  if (!smart) return "";
+  if (typeof smart === "object" && !Array.isArray(smart) && smart.Moves) {
+    const times = smart.MoveTimes || [];
+    return `${smart.StartFacelets || ""}|${smart.Moves}|${times.length}|${times[times.length - 1]}`;
+  }
+  try {
+    return JSON.stringify(smart);
+  } catch (_) {
+    return "";
+  }
+}

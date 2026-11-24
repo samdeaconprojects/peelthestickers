@@ -28,6 +28,9 @@ const PLL_CASE_OPTIONS = [
   "Y Perm",
 ];
 
+// Things that went wrong during a solve, tagged afterwards.
+export const MISHAP_OPTIONS = ["Pop", "Corner Twist", "Lockup", "Misscramble", "Dropped Cube", "Timer Issue"];
+
 export const DEFAULT_TAG_CONFIG = {
   Fixed: {
     CubeModel: { label: "Cube Model", options: [] },
@@ -50,6 +53,10 @@ export const DEFAULT_TAG_CONFIG = {
     Parity_Edge: {
       label: "Edge Parity",
       options: ["Yes"],
+    },
+    Mishap: {
+      label: "Mishap",
+      options: MISHAP_OPTIONS,
     },
     Alg_OLL: {
       label: "OLL",
@@ -92,6 +99,7 @@ export const SHARED_TAG_FIELDS = [
   "Parity_OLL",
   "Parity_PLL",
   "Parity_Edge",
+  "Mishap",
   "Alg_PLL",
   "Alg_OLL",
   "Alg_CMLL",
@@ -506,6 +514,12 @@ export function normalizeTagConfig(input) {
           ? fixed.Parity_Edge.options
           : DEFAULT_TAG_CONFIG.Fixed.Parity_Edge.options,
       },
+      Mishap: {
+        label: fixed?.Mishap?.label || "Mishap",
+        options: Array.isArray(fixed?.Mishap?.options)
+          ? fixed.Mishap.options
+          : DEFAULT_TAG_CONFIG.Fixed.Mishap.options,
+      },
       Alg_OLL: {
         label: fixed?.Alg_OLL?.label || "OLL",
         options: Array.isArray(fixed?.Alg_OLL?.options)
@@ -562,6 +576,7 @@ export function makeEmptyTagSelection() {
     Parity_OLL: "",
     Parity_PLL: "",
     Parity_Edge: "",
+    Mishap: "",
     Alg_OLL: "",
     Alg_PLL: "",
     Alg_CMLL: "",
@@ -626,6 +641,7 @@ export function getSharedTagLabels(tagConfig) {
     Parity_OLL: cfg.Fixed.Parity_OLL.label || "OLL Parity",
     Parity_PLL: cfg.Fixed.Parity_PLL.label || "PLL Parity",
     Parity_Edge: cfg.Fixed.Parity_Edge.label || "Edge Parity",
+    Mishap: cfg.Fixed.Mishap.label || "Mishap",
     Alg_OLL: cfg.Fixed.Alg_OLL.label || "OLL",
     Alg_PLL: cfg.Fixed.Alg_PLL.label || "PLL",
     Alg_CMLL: cfg.Fixed.Alg_CMLL.label || "CMLL",
@@ -673,6 +689,11 @@ export function getSharedTagFieldMeta(tagConfig) {
       field: "Parity_Edge",
       label: cfg.Fixed.Parity_Edge.label || "Edge Parity",
       options: cfg.Fixed.Parity_Edge.options || [],
+    },
+    {
+      field: "Mishap",
+      label: cfg.Fixed.Mishap.label || "Mishap",
+      options: cfg.Fixed.Mishap.options || [],
     },
     {
       field: "Alg_PLL",
@@ -809,6 +830,7 @@ export function collectTagSelectionOptions(solves, tagConfig, cubeModelOptions =
     Parity_OLL: new Set(cfg.Fixed.Parity_OLL.options || []),
     Parity_PLL: new Set(cfg.Fixed.Parity_PLL.options || []),
     Parity_Edge: new Set(cfg.Fixed.Parity_Edge.options || []),
+    Mishap: new Set(cfg.Fixed.Mishap.options || []),
     Alg_OLL: new Set(cfg.Fixed.Alg_OLL.options || []),
     Alg_PLL: new Set(cfg.Fixed.Alg_PLL.options || []),
     Alg_CMLL: new Set(cfg.Fixed.Alg_CMLL.options || []),

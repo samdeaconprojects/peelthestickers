@@ -341,11 +341,12 @@ function normaliseMoves(moves) {
  * @param {object} input
  * @param {string} input.startState  54-char facelets before the first move
  * @param {Array<{move:string,t:number}>} input.moves  cube-frame moves, t = ms from first move
- * @param {string} [input.method]  "CFOP" | "Roux" | anything else = auto
+ * @param {string} [input.method]  the Method tag: "CFOP" | "Roux" | anything else = auto
+ * @param {boolean} [input.force]  analyse as `method` even if the solve looks like another
  * @param {boolean} [input.timingsOnly]  skip notation and last-layer cases
  *   (step keys and times only; used to compare many solves cheaply)
  */
-export function analyzeSolve({ startState, moves, method, timingsOnly = false } = {}) {
+export function analyzeSolve({ startState, moves, method, timingsOnly = false, force = false } = {}) {
   const ms = normaliseMoves(moves);
   if (!ms.length) return null;
   const start = startState && String(startState).length === 54 ? String(startState) : null;
@@ -355,19 +356,21 @@ export function analyzeSolve({ startState, moves, method, timingsOnly = false } 
   for (const m of ms) states.push(applyMove(states[states.length - 1], m.move));
   const endsSolved = isSolved(states[states.length - 1]);
 
+  // `method` is the solve's Method tag (a hint). The solve itself decides:
+  // Roux finishes both blocks long before a cross exists; CFOP builds its
+  // cross before any 1x2x3 block can be complete. A tag that disagrees with
+  // that (a Roux solve in a CFOP-tagged session) is reported, not followed,
+  // unless `force` is set.
   const wanted = String(method || "").trim().toLowerCase();
-  let chosen = null;
-  const cfop = wanted === "roux" ? null : analyzeCfop(states, ms.map((m) => m.face));
-  const roux = wanted === "cfop" ? null : analyzeRoux(states, ms.map((m) => m.face));
-  if (wanted === "cfop") chosen = "CFOP";
-  else if (wanted === "roux") chosen = "Roux";
-  else {
-    // Roux finishes both blocks long before a cross exists; CFOP builds its
-    // cross before any 1x2x3 block can be complete.
-    const cfopCross = cfop?.score ? cfop.crossEnd : Infinity;
-    const rouxFirst = !!roux && roux.score >= 2 && roux.sbEnd < cfopCross;
-    chosen = rouxFirst ? "Roux" : "CFOP";
-  }
+  const tagged = wanted === "cfop" ? "CFOP" : wanted === "roux" ? "Roux" : null;
+  const faces = ms.map((m) => m.face);
+  const cfop = analyzeCfop(states, faces);
+  const roux = analyzeRoux(states, faces);
+  const cfopCross = cfop?.score ? cfop.crossEnd : Infinity;
+  const rouxFirst = !!roux && roux.score >= 2 && roux.sbEnd < cfopCross;
+  const detected = rouxFirst ? "Roux" : cfop?.score ? "CFOP" : null;
+  let chosen = tagged && (force || !detected) ? tagged : detected || "CFOP";
+  const methodMismatch = !!(tagged && detected && tagged !== detected);
 
   const pick = chosen === "Roux" ? roux : cfop;
   const rawEnds = pick?.ends || [];
@@ -449,9 +452,17 @@ export function analyzeSolve({ startState, moves, method, timingsOnly = false } 
     s.group = STEP_GROUP[s.key] || "other";
   }
 
+  const methodInfo = {
+    detectedMethod: detected,
+    taggedMethod: tagged,
+    // The tag says one method, the moves say another.
+    methodMismatch: methodMismatch && !force,
+  };
+
   if (timingsOnly) {
     return {
       method: pick?.score ? chosen : null,
+      ...methodInfo,
       steps,
       totalMs: t[t.length - 1] || 0,
       solved: endsSolved,
@@ -472,6 +483,7 @@ export function analyzeSolve({ startState, moves, method, timingsOnly = false } 
 
   return {
     method: pick?.score ? chosen : null,
+    ...methodInfo,
     bottom,
     bottomColour: bottom ? FACE_COLOURS[centerOf(SOLVED, bottom)] : null,
     rotation,

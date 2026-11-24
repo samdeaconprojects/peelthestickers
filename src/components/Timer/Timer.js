@@ -9,6 +9,8 @@ import { setTimerBusy } from '../../utils/timerActivity';
 
 import { createSmartCubeClient } from '../../smart/createSmartCubeClient';
 import { getSmartCubeProviderLabel } from '../../smart/smartCubeProviderMeta';
+import SolveStepBar, { STEP_BAR_SLOT_ID } from './SolveStepBar';
+import ResetIcon from '../../assets/Flip.svg';
 import { SOLVED as SOLVED_FACELETS, applyAlg as applyAlgToFacelets, applyMove as applyMoveToFacelets, isSolved as isFaceletStateSolved } from '../../smart/recon/cube3';
 import { createScrambleGuide } from '../../smart/scrambleGuide';
 import { buildSmartRecord, recordElapsedMs } from '../../smart/recon/solveRecord';
@@ -231,7 +233,7 @@ function renderTimerValue(value, timerFont, showPenaltySuffix) {
 const TOUCH_HOLD_MS = 300;
 
 const TOUCH_TIMER_EXCLUDE =
-  'button, a, input, textarea, select, label, [role="button"], [contenteditable="true"], .gan-side-controls, .home-timer-side';
+  'button, a, input, textarea, select, label, [role="button"], [contenteditable="true"], .gan-side-controls, .home-timer-side, .solveStepBar';
 
 // Touches start the timer only on the home timer area (or the fullscreen inspection
 // overlay), never on a control inside it.
@@ -294,8 +296,10 @@ function Timer({
   // SMART CUBE
   // -------------------------
   const isCubeMode = settings?.timerInput === 'GAN Cube';
-  const smartCubeProvider = settings?.smartCubeProvider || 'gan';
-  const smartCubeProviderLabel = getSmartCubeProviderLabel(smartCubeProvider);
+  const smartCubeProvider = settings?.smartCubeProvider || 'auto';
+  // The auto client finds out the brand from the cube picked: name it once known.
+  const [cubeDeviceLabel, setCubeDeviceLabel] = useState(null);
+  const smartCubeProviderLabel = cubeDeviceLabel || getSmartCubeProviderLabel(smartCubeProvider);
 
   const [cubeConnected, setCubeConnected] = useState(false);
   const [cubeConnecting, setCubeConnecting] = useState(false);
@@ -346,6 +350,9 @@ function Timer({
   // Follows the cube through the scramble by state (see smart/scrambleGuide);
   // null = start a fresh one from the cube's state at the next scramble turn.
   const scrambleGuideRef = useRef(null);
+  // Move counter of the last move the cube reported, to spot state reports
+  // that were taken before it (GAN cubes also send their state unasked).
+  const lastMoveSerialRef = useRef(null);
   const scrambleTextRef = useRef("");
   const lastProgressEmitRef = useRef(-1);
 
@@ -775,8 +782,9 @@ function Timer({
     clearCubeIdleTimer();
 
     const moves = cubeMoveLogRef.current || [];
+    const cubeBrand = cubeClientRef.current?.brand || smartCubeProvider;
     const record = buildSmartRecord({
-      provider: smartCubeProvider,
+      provider: cubeBrand,
       reason,
       startState: solveStartStateRef.current,
       moves,
@@ -814,7 +822,7 @@ function Timer({
 
       const smartMeta = {
         source: "SMART_CUBE",
-        provider: smartCubeProvider,
+        provider: cubeBrand,
         providerLabel: smartCubeProviderLabel,
         reason,
         scramble: solveScrambleRef.current || scrambleTextRef.current || "",
@@ -842,7 +850,7 @@ function Timer({
       emitCubeSolveEvent({
         ms: null,
         reason,
-        provider: smartCubeProvider,
+        provider: cubeBrand,
         providerLabel: smartCubeProviderLabel,
         record,
         scramble: solveScrambleRef.current || scrambleTextRef.current || "",
@@ -886,6 +894,7 @@ function Timer({
 
     try {
       cubeClientRef.current = createSmartCubeClient(smartCubeProvider);
+      setCubeDeviceLabel(null);
 
       cubeSamplesRef.current = [];
       cubeMoveLogRef.current = [];
@@ -911,11 +920,23 @@ function Timer({
       scrambleGuideRef.current = null;
       lastProgressEmitRef.current = -1;
       emitScrambleProgress(0, scrambleTokensRef.current.length);
+      lastMoveSerialRef.current = null;
 
       await cubeClientRef.current.connect({
-        onFacelets: ({ facelets }) => {
+        onFacelets: ({ facelets, serial }) => {
           cubeFaceletsRef.current = facelets;
           faceletsRequestInFlightRef.current = false;
+
+          // A report from before (or after) the last move we handled is out of
+          // step with what we track: an older one would wind the scramble back
+          // (or "reset to solved" just after the user's first turn); a newer
+          // one means moves are on their way and will arrive as moves.
+          const lastSerial = lastMoveSerialRef.current;
+          const inStep =
+            serial == null || lastSerial == null || ((serial - lastSerial) & 0xff) === 0;
+          if (!inStep && cubePhaseRef.current !== 'solving' && cubePhaseRef.current !== 'finalizing') {
+            return;
+          }
 
           // Outside a solve the cube's own report is the truth. During a solve
           // the locally tracked state already includes moves this report may
@@ -972,9 +993,10 @@ function Timer({
           } catch (_) {}
         },
 
-        onMove: ({ move, cubeTs, hostTs }) => {
+        onMove: ({ move, cubeTs, hostTs, serial }) => {
           const mv = normalizeMoveToken(move);
           if (!mv) return;
+          if (serial != null) lastMoveSerialRef.current = serial;
 
           smartCube3DRef.current?.addMove(mv);
 
@@ -1159,6 +1181,7 @@ function Timer({
 
       setCubeConnected(true);
       setCubeDot('connected');
+      setCubeDeviceLabel(cubeClientRef.current?.label || null);
 
       cubeClientRef.current?.requestFacelets?.();
     } catch (e) {
@@ -1219,6 +1242,7 @@ function Timer({
     setCubeConnected(false);
     setCubeConnecting(false);
     setCubeDot('disconnected');
+    setCubeDeviceLabel(null);
 
     cubePhaseRef.current = 'awaiting_scramble';
     cubeArmedRef.current = false;
@@ -1554,6 +1578,23 @@ function Timer({
   useEffect(() => () => {
     if (!inPlayerBar) setTimerBusy(false);
   }, [inPlayerBar]);
+  // Smart-cube step bar under the time, for the latest solve when it has one.
+  const latestHasSmart = !!(latestSolve?.tags?.SmartCube || latestSolve?.Tags?.SmartCube || latestSolve?.SmartCube);
+  const showStepBar =
+    latestHasSmart &&
+    settings?.showSolveStepBar !== false &&
+    !inPlayerBar &&
+    !timerOn &&
+    !ganTimerOn &&
+    !isInspecting &&
+    !cubeSolving;
+  // App keeps a slot above the averages for the bar; without one (averages
+  // beside the timer, shared views) it sits under the time.
+  const [stepBarSlot, setStepBarSlot] = useState(null);
+  useEffect(() => {
+    const el = showStepBar ? document.getElementById(STEP_BAR_SLOT_ID) : null;
+    if (el !== stepBarSlot) setStepBarSlot(el);
+  });
   const effectiveElapsedTime = isGanMode ? ganElapsedTime : elapsedTime;
   const effectiveLastTime = isGanMode ? ganLastTime : lastTime;
   const effectiveLastPenalty = isGanMode ? ganLastPenalty : lastPenalty;
@@ -1771,21 +1812,23 @@ function Timer({
                     onClick={connectCube}
                     disabled={cubeConnecting}
                     style={{ opacity: cubeConnecting ? 0.6 : 1 }}
-                    title={smartCubeProviderLabel}
+                    title="GAN and MoYu cubes are found automatically"
                   >
-                    {cubeConnecting ? "Connecting…" : `Connect ${smartCubeProviderLabel}`}
+                    {cubeConnecting ? "Connecting…" : `Connect ${getSmartCubeProviderLabel(smartCubeProvider)}`}
                   </button>
                 ) : (
                   <>
                     <button onClick={disconnectCube}>Disconnect</button>
                     <button
+                      className="gan-controls__iconBtn"
                       onClick={(e) => {
                         e.currentTarget.blur();
                         resetCubeToSolved();
                       }}
-                      title="Out of sync? Solve the cube by hand, then press this to set it back to solved"
+                      title="Reset to solved: if the cube is out of sync, solve it by hand, then press this"
+                      aria-label="Reset cube to solved"
                     >
-                      Reset to solved
+                      <img className="gan-controls__icon" src={ResetIcon} alt="" />
                     </button>
                   </>
                 )}
@@ -1882,7 +1925,7 @@ function Timer({
               </div>
             </div>
           ) : (
-            <>
+            <div className="timer-valueAnchor">
               <p
                 ref={timerTextRef}
                 className={`Timer ${displayHasMinutes ? "Timer--with-minutes" : ""} ${useCondensedTimerLayout ? "Timer--home-long" : ""} ${(isGanMode || isCubeMode || settings.timerInput === "Keyboard") ? "Timer--static" : ""} ${compact ? "Timer--compact" : ""} ${inPlayerBar ? "Timer--playerbar" : ""} ${!inPlayerBar ? `Timer--size-${timerSize}` : ""} Timer--font-${timerFont}`}
@@ -1900,7 +1943,14 @@ function Timer({
                   ? renderTimerValue(displayTime, timerFont, displayHasPenaltySuffix)
                   : (manualTime || "Type")}
               </p>
-            </>
+              {showStepBar ? (
+                stepBarSlot ? (
+                  createPortal(<SolveStepBar solve={latestSolve} />, stepBarSlot)
+                ) : (
+                  <SolveStepBar solve={latestSolve} variant="inline" />
+                )
+              ) : null}
+            </div>
           )}
         </div>
       ) : (

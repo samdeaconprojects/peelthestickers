@@ -1,6 +1,7 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useRef } from "react";
 import "./Scramble.css";
 import { useSettings } from "../../contexts/SettingsContext";
+import { nextFixDisplay } from "../../smart/scrambleGuide";
 
 import ForwardSVG from "../../assets/ForwardSVG.svg";
 import BackwardSVG from "../../assets/BackwardSVG.svg";
@@ -116,6 +117,13 @@ function Scramble({
       maxWidth = 80;
   }
 
+  // Fix moves stay up (done ones crossed out) until the cube is back on track.
+  const fixDisplayRef = useRef(null);
+  const fixDisplay = useMemo(() => {
+    fixDisplayRef.current = nextFixDisplay(fixDisplayRef.current, scrambleFix);
+    return fixDisplayRef.current;
+  }, [scrambleFix]);
+
   const tokens = useMemo(() => {
     const text = String(scramble || "").trim();
     if (!text) return [];
@@ -185,7 +193,7 @@ function Scramble({
               (() => {
                 // mark tokens done by consuming steps from scrambleProgress
                 let remaining = Math.max(0, Number(scrambleProgress || 0));
-                const fix = Array.isArray(scrambleFix) ? scrambleFix : [];
+                const fix = fixDisplay.moves;
                 let fixShown = false;
                 const fixGroup = (key) => (
                   <span
@@ -194,7 +202,12 @@ function Scramble({
                     title="Off the scramble: do these moves to get back on track"
                   >
                     {fix.map((m, k) => (
-                      <span key={k} className="scramble-fix__move">
+                      <span
+                        key={k}
+                        className={`scramble-fix__move${
+                          k < fixDisplay.done ? " scramble-fix__move--done" : ""
+                        }`}
+                      >
                         {m}
                       </span>
                     ))}

@@ -27,6 +27,7 @@ export const TILE_TAG_DEFAULT_ORDER = [
   "Parity_OLL",
   "Parity_PLL",
   "Parity_Edge",
+  "Mishap",
   ...CUSTOM_FIELDS,
 ];
 

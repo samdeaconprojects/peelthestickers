@@ -24,7 +24,8 @@ import {
 } from "./moyuProtocol";
 import { isValidMoyuDecryptedPacket } from "./moyuPacketSanity";
 
-const NAME_PREFIXES = ["WCU_", "MY32", "MY33", "MHC"];
+export const MOYU_NAME_PREFIXES = ["WCU_", "MY32", "MY33", "MHC"];
+const NAME_PREFIXES = MOYU_NAME_PREFIXES;
 const ADVERTISEMENT_TIMEOUT_MS = 10000;
 const MAC_RE = /^([0-9A-Fa-f]{2}[:\-\s]){5}[0-9A-Fa-f]{2}$/;
 

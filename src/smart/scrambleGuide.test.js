@@ -1,4 +1,4 @@
-import { createScrambleGuide, pushSimplified } from "./scrambleGuide";
+import { createScrambleGuide, nextFixDisplay, pushSimplified } from "./scrambleGuide";
 import { SOLVED, applyAlg, formatToken } from "./recon/cube3";
 
 const feed = (guide, alg) => {
@@ -66,4 +66,25 @@ test("a stray turn that commutes with the next move doesn't undo good moves", ()
   snap = g.onMove("L'");
   expect(snap).toMatchObject({ progress: 2, offTrack: false });
   expect(feed(g, "U F").complete).toBe(true);
+});
+
+test("fix display keeps done moves until back on track", () => {
+  let d = nextFixDisplay(null, ["L'", "U", "R"]);
+  expect(d).toEqual({ moves: ["L'", "U", "R"], done: 0 });
+  d = nextFixDisplay(d, ["U", "R"]);
+  expect(d).toEqual({ moves: ["L'", "U", "R"], done: 1 });
+  d = nextFixDisplay(d, ["R"]);
+  expect(d).toEqual({ moves: ["L'", "U", "R"], done: 2 });
+  d = nextFixDisplay(d, []);
+  expect(d).toEqual({ moves: [], done: 0 });
+});
+
+test("fix display: half a double keeps the double, a new wrong turn restarts", () => {
+  let d = nextFixDisplay(null, ["R2", "U"]);
+  d = nextFixDisplay(d, ["R", "U"]);
+  expect(d).toEqual({ moves: ["R2", "U"], done: 0 });
+  d = nextFixDisplay(d, ["U"]);
+  expect(d).toEqual({ moves: ["R2", "U"], done: 1 });
+  d = nextFixDisplay(d, ["F", "U"]);
+  expect(d).toEqual({ moves: ["F", "U"], done: 0 });
 });

@@ -1,9 +1,7 @@
 // src/smart/recon/lastLayer.js
 //
 // Last-layer case recognition for a state whose first two layers are solved
-// with the last layer on top (U). PLL is recognised against all 21 cases;
-// OLL is described by its edge shape, and the 7 all-edges-oriented (OCLL)
-// cases are named. Tables are built lazily from the algorithms below, so the
+// with the last layer on top (U): all 21 PLLs and all 57 OLLs by number. Tables are built lazily from the algorithms below, so the
 // algorithms themselves are the source of truth (cube3.test / lastLayer.test
 // check they are valid and distinct).
 
@@ -39,16 +37,85 @@ export const PLL_ALGS = {
   Z: "M' U M2 U M2 U M' U2 M2",
 };
 
-// The seven cases with all four last-layer edges already oriented.
-export const OCLL_ALGS = {
-  "21 · H": "R U R' U R U' R' U R U2 R'",
-  "22 · Pi": "R U2 R2 U' R2 U' R2 U2 R",
-  "23 · Headlights": "R2 D R' U2 R D' R' U2 R'",
-  "24 · T": "r U R' U' r' F R F'",
-  "25 · Bowtie": "F' r U R' U' r' F R",
-  "26 · Antisune": "R U2 R' U' R U' R'",
-  "27 · Sune": "R U R' U R U2 R'",
+// All 57 OLL cases by their standard number: one alg each (inverted, it sets
+// the case up). The seven with every edge already oriented (OCLL, 21-27) keep
+// their nicknames. lastLayer.test checks each against a second, independent
+// alg for the same number, so a wrong number can't slip in.
+export const OLL_ALGS = {
+  1: "R U2 R2 F R F' U2 R' F R F'",
+  2: "F R U R' U' F' f R U R' U' f'",
+  3: "f R U R' U' f' U' F R U R' U' F'",
+  4: "f R U R' U' f' U F R U R' U' F'",
+  5: "r' U2 R U R' U r",
+  6: "r U2 R' U' R U' r'",
+  7: "r U R' U R U2 r'",
+  8: "r' U' R U' R' U2 r",
+  9: "R U R' U' R' F R2 U R' U' F'",
+  10: "R U R' U R' F R F' R U2 R'",
+  11: "r' R2 U R' U R U2 R' U M'",
+  12: "F R U R' U' F' U F R U R' U' F'",
+  13: "r U' r' U' r U r' F' U F",
+  14: "R' F R U R' F' R F U' F'",
+  15: "r' U' r R' U' R U r' U r",
+  16: "r U r' R U R' U' r U' r'",
+  17: "R U R' U R' F R F' U2 R' F R F'",
+  18: "r U R' U R U2 r2 U' R U' R' U2 r",
+  19: "M U R U R' U' M' R' F R F'",
+  20: "r U R' U' M2 U R U' R' U' M'",
+  21: "R U R' U R U' R' U R U2 R'",
+  22: "R U2 R2 U' R2 U' R2 U2 R",
+  23: "R2 D R' U2 R D' R' U2 R'",
+  24: "r U R' U' r' F R F'",
+  25: "F' r U R' U' r' F R",
+  26: "R U2 R' U' R U' R'",
+  27: "R U R' U R U2 R'",
+  28: "r U R' U' r' R U R U' R'",
+  29: "R U R' U' R U' R' F' U' F R U R'",
+  30: "F U R U2 R' U' R U2 R' U' F'",
+  31: "R' U' F U R U' R' F' R",
+  32: "S R U R' U' R' F R f'",
+  33: "R U R' U' R' F R F'",
+  34: "R U R2 U' R' F R U R U' F'",
+  35: "R U2 R2 F R F' R U2 R'",
+  36: "L' U' L U' L' U L U L F' L' F",
+  37: "F R' F' R U R U' R'",
+  38: "R U R' U R U' R' U' R' F R F'",
+  39: "L F' L' U' L U F U' L'",
+  40: "R' F R U R' U' F' U R",
+  41: "R U R' U R U2 R' F R U R' U' F'",
+  42: "R' U' R U' R' U2 R F R U R' U' F'",
+  43: "F' U' L' U L F",
+  44: "F U R U' R' F'",
+  45: "F R U R' U' F'",
+  46: "R' U' R' F R F' U R",
+  47: "R' U' R' F R F' R' F R F' U R",
+  48: "F R U R' U' R U R' U' F'",
+  49: "r U' r2 U r2 U r2 U' r",
+  50: "r' U r2 U' r2 U' r2 U r'",
+  51: "F U R U' R' U R U' R' F'",
+  52: "R U R' U R U' B U' B' R'",
+  53: "r' U' R U' R' U R U' R' U2 r",
+  54: "r U R' U R U' R' U R U2 r'",
+  55: "R U2 R2 U' R U' R' U2 F R F'",
+  56: "F R U R' U' R F' r U R' U' r'",
+  57: "R U R' U' M' U R U' r'",
 };
+
+export const OLL_NICKNAMES = {
+  21: "H",
+  22: "Pi",
+  23: "Headlights",
+  24: "T",
+  25: "Bowtie",
+  26: "Antisune",
+  27: "Sune",
+};
+
+/** "OLL 27 · Sune", "OLL 45". */
+export function ollCaseName(n) {
+  return OLL_NICKNAMES[n] ? `OLL ${n} · ${OLL_NICKNAMES[n]}` : `OLL ${n}`;
+}
+
 
 /** Re-orient so the original D colour is on D (undoes net y-less rotations in algs). */
 function keepDOnBottom(state) {
@@ -88,7 +155,7 @@ function canonical(state, keyFn) {
 }
 
 let pllTable = null;
-let ocllTable = null;
+let ollTable = null;
 
 function buildTable(algs, keyFn) {
   const table = new Map();
@@ -104,9 +171,22 @@ export function getPllTable() {
   return pllTable;
 }
 
-export function getOcllTable() {
-  if (!ocllTable) ocllTable = buildTable(OCLL_ALGS, ollKey);
-  return ocllTable;
+/** canonical OLL pattern -> case number. */
+export function getOllTable() {
+  if (!ollTable) ollTable = buildTable(OLL_ALGS, ollKey);
+  return ollTable;
+}
+
+/** The state an alg solves: solved with the alg undone (last layer on U). */
+export function caseStateOf(alg) {
+  return keepDOnBottom(applyAlg(SOLVED, invertAlg(alg)));
+}
+
+/** The OLL case number for an alg (as performed from its case), or null. */
+export function ollNumberOfAlg(alg) {
+  const s = caseStateOf(alg);
+  const n = getOllTable().get(canonical(s, ollKey));
+  return n == null ? null : Number(n);
 }
 
 const SOLVED_PLL_KEY = canonical(SOLVED, pllKey);
@@ -150,14 +230,14 @@ export function describeOll(stateLLOnTop) {
     shape = opposite ? "line" : "L";
   } else shape = "other";
 
+  const number = getOllTable().get(key);
   let name;
-  if (shape === "cross") {
-    const ocll = getOcllTable().get(key);
-    name = ocll ? `OLL ${ocll}` : "OCLL";
-  } else if (shape === "dot") name = "Dot OLL";
+  if (number != null) name = ollCaseName(Number(number));
+  else if (shape === "cross") name = "OCLL";
+  else if (shape === "dot") name = "Dot OLL";
   else if (shape === "line") name = "Line OLL";
   else if (shape === "L") name = "L-shape OLL";
   else name = "OLL";
 
-  return { name, edges: shape, skip: false, pattern };
+  return { name, number: number == null ? null : Number(number), edges: shape, skip: false, pattern };
 }

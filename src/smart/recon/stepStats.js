@@ -12,8 +12,10 @@
 // steps, so a folded step is never measured against a single pair.
 
 import { useSyncExternalStore } from "react";
-import { analyzeSolve } from "./analyze";
-import { readSmartRecord } from "./solveRecord";
+import { smartKey } from "./solveRecord";
+import { splitsForSolve } from "./splits";
+
+export { smartKey };
 
 // Fewer comparable solves than this: no verdict (the step shows neutral).
 export const MIN_SAMPLES = 3;
@@ -53,47 +55,24 @@ export function useReconPool() {
 
 // ---- per-solve timings (cached) ------------------------------------------------
 
-const cache = new Map();
+const cache = new WeakMap();
 
-export function smartKey(smart) {
-  if (!smart) return "";
-  if (typeof smart === "object" && !Array.isArray(smart) && smart.Moves) {
-    const times = smart.MoveTimes || [];
-    return `${smart.StartFacelets || ""}|${smart.Moves}|${times.length}|${times[times.length - 1]}`;
-  }
-  try {
-    return JSON.stringify(smart);
-  } catch (_) {
-    return "";
-  }
-}
 
+// The solve's step splits (stored with it, or analysed once and cached in
+// splits.js; the Stats page and step averages share the same cache).
 function timingsFor(entry) {
-  const key = `${smartKey(entry.smart)}|${entry.method}`;
-  if (cache.has(key)) return cache.get(key);
-  let result = null;
-  try {
-    const record = readSmartRecord(entry.smart);
-    const a = record
-      ? analyzeSolve({
-          startState: record.startState,
-          moves: record.moves,
-          method: entry.method,
-          timingsOnly: true,
-        })
-      : null;
-    if (a && a.method) {
-      result = {
-        method: a.method,
-        steps: a.steps
-          .filter((s) => s.keys && s.moveCount > 0)
-          .map((s) => ({ keys: s.keys, durationMs: s.durationMs })),
-      };
-    }
-  } catch (_) {
-    result = null;
-  }
-  cache.set(key, result);
+  const splits = splitsForSolve({ tags: { SmartCube: entry.smart, Method: entry.method } });
+  if (!splits?.Method) return null;
+  if (cache.has(splits)) return cache.get(splits);
+  const result = {
+    method: splits.Method,
+    steps: splits.Steps.filter((s) => s.Mv > 0).map((s) => ({
+      keys: s.K,
+      durationMs: s.Ms,
+      recognitionMs: s.Rec || 0,
+    })),
+  };
+  cache.set(splits, result);
   return result;
 }
 
@@ -119,7 +98,7 @@ function timeOnKeys(timings, keys) {
  * solves that were faster at this step (0 = fastest yet, 1 = slowest), ties
  * counting half; null when there are fewer than MIN_SAMPLES to compare with.
  */
-export function buildStepRanker(entries, { event, method, exclude } = {}) {
+function comparableTimings(entries, { event, method, exclude } = {}) {
   const excludeKey = exclude ? smartKey(exclude) : null;
   const others = [];
   for (const e of entries || []) {
@@ -128,6 +107,40 @@ export function buildStepRanker(entries, { event, method, exclude } = {}) {
     const t = timingsFor(e);
     if (t && (!method || t.method === method)) others.push(t);
   }
+  return others;
+}
+
+function rankAmong(samples, value) {
+  if (samples.length < MIN_SAMPLES) return { rank01: null, n: samples.length };
+  let faster = 0;
+  for (const v of samples) {
+    if (v < value) faster += 1;
+    else if (v === value) faster += 0.5;
+  }
+  return { rank01: faster / samples.length, n: samples.length };
+}
+
+/**
+ * Like buildStepRanker, for the recognition pause before a step: compared with
+ * the pause before the same step (the step starting with the same key) in the
+ * user's other solves. Null for the first step (timed from the first move).
+ */
+export function buildRecognitionRanker(entries, opts = {}) {
+  const others = comparableTimings(entries, opts);
+  return (step) => {
+    if (!step?.keys?.length || !(step.moveCount > 0) || !(step.from > 0)) return null;
+    const first = step.keys[0];
+    const samples = [];
+    for (const o of others) {
+      const s = o.steps.find((x) => x.keys[0] === first);
+      if (s && Number.isFinite(s.recognitionMs)) samples.push(s.recognitionMs);
+    }
+    return rankAmong(samples, step.recognitionMs);
+  };
+}
+
+export function buildStepRanker(entries, opts = {}) {
+  const others = comparableTimings(entries, opts);
   return (step) => {
     if (!step?.keys?.length || !(step.moveCount > 0)) return null;
     const samples = [];
@@ -135,13 +148,7 @@ export function buildStepRanker(entries, { event, method, exclude } = {}) {
       const v = timeOnKeys(o, step.keys);
       if (v != null) samples.push(v);
     }
-    if (samples.length < MIN_SAMPLES) return { rank01: null, n: samples.length };
-    let faster = 0;
-    for (const v of samples) {
-      if (v < step.durationMs) faster += 1;
-      else if (v === step.durationMs) faster += 0.5;
-    }
-    return { rank01: faster / samples.length, n: samples.length };
+    return rankAmong(samples, step.durationMs);
   };
 }
 

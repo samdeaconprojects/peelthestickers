@@ -13,8 +13,8 @@ export const SMART_CUBE_PROVIDER_META = {
     shortLabel: "MoYu",
   },
   auto: {
-    label: "Auto",
-    shortLabel: "Auto",
+    label: "Smart Cube",
+    shortLabel: "Smart Cube",
   },
 };
 

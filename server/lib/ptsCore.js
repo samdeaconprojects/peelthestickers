@@ -2046,6 +2046,7 @@ function sanitizeTags(input = {}) {
     Parity_OLL: cleanTagValue(input?.Parity_OLL),
     Parity_PLL: cleanTagValue(input?.Parity_PLL),
     Parity_Edge: cleanTagValue(input?.Parity_Edge),
+    Mishap: cleanTagValue(input?.Mishap),
     TimerInput: cleanTagValue(input?.TimerInput || input?.InputType),
     SolveSource: derivedSolveSource,
     Custom1: cleanTagValue(input?.Custom1),
@@ -2099,6 +2100,37 @@ function sanitizeSmartCube(input) {
     FinalFacelets: facelets(input.FinalFacelets),
     Moves: moves.join(" "),
     MoveTimes: times.map((t) => Math.round(t)),
+    ...(sanitizeSmartSplits(input.Splits) ? { Splits: sanitizeSmartSplits(input.Splits) } : {}),
+  };
+}
+
+// Per-step breakdown derived from the moves (src/smart/recon/splits.js), kept
+// so stats can read step times without replaying every solve.
+const SPLIT_KEY = /^(cross|pair[1-4]|oll|pll|fb|sb|cmll|lse)$/;
+// The alg a case was solved with: move notation only.
+const SPLIT_ALG = /^[A-Za-z0-9' ]{1,160}$/;
+
+function sanitizeSmartSplits(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  if (!Array.isArray(input.Steps) || !input.Steps.length || input.Steps.length > 16) return null;
+  const ms = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.round(Number(v)) : 0);
+  const steps = [];
+  for (const s of input.Steps) {
+    const keys = Array.isArray(s?.K) ? s.K.map(String) : [];
+    if (!keys.length || keys.length > 8 || !keys.every((k) => SPLIT_KEY.test(k))) return null;
+    const step = { K: keys, Ms: ms(s.Ms), Rec: ms(s.Rec), Exe: ms(s.Exe), Mv: ms(s.Mv) };
+    if (typeof s.Case === "string" && s.Case.trim()) step.Case = s.Case.trim().slice(0, 40);
+    if (typeof s.Alg === "string" && SPLIT_ALG.test(s.Alg.trim())) step.Alg = s.Alg.trim().slice(0, 160);
+    steps.push(step);
+  }
+  const method = input.Method === "CFOP" || input.Method === "Roux" ? input.Method : null;
+  if (!method) return null;
+  return {
+    V: ms(input.V) || 1,
+    Method: method,
+    ...(input.Tagged === "CFOP" || input.Tagged === "Roux" ? { Tagged: input.Tagged } : {}),
+    Bottom: typeof input.Bottom === "string" ? input.Bottom.slice(0, 12) : null,
+    Steps: steps,
   };
 }
 
@@ -2172,6 +2204,7 @@ function buildSolveItem({
     Tag_Parity_OLL: canonicalTags.Parity_OLL,
     Tag_Parity_PLL: canonicalTags.Parity_PLL,
     Tag_Parity_Edge: canonicalTags.Parity_Edge,
+    Tag_Mishap: canonicalTags.Mishap,
     Tag_TimerInput: canonicalTags.TimerInput,
     Tag_SolveSource: canonicalTags.SolveSource,
     Tag_Custom1: canonicalTags.Custom1,
@@ -2197,6 +2230,7 @@ function buildSolveItem({
       Parity_OLL: canonicalTags.Parity_OLL,
       Parity_PLL: canonicalTags.Parity_PLL,
       Parity_Edge: canonicalTags.Parity_Edge,
+      Mishap: canonicalTags.Mishap,
       TimerInput: canonicalTags.TimerInput,
       SolveSource: canonicalTags.SolveSource,
       Custom1: canonicalTags.Custom1,
@@ -2277,6 +2311,7 @@ function getSolveTagPairsFromItem(solveItem) {
   add("Parity_OLL", firstNonEmpty(solveItem?.Tag_Parity_OLL, nestedTags?.Parity_OLL));
   add("Parity_PLL", firstNonEmpty(solveItem?.Tag_Parity_PLL, nestedTags?.Parity_PLL));
   add("Parity_Edge", firstNonEmpty(solveItem?.Tag_Parity_Edge, nestedTags?.Parity_Edge));
+  add("Mishap", firstNonEmpty(solveItem?.Tag_Mishap, nestedTags?.Mishap));
   add(
     "TimerInput",
     firstNonEmpty(

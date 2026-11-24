@@ -2068,6 +2068,21 @@ td:nth-child(13) {
   grid-column: 1 / -1;
 }
 
+/* Tag breakdown, with the smart-cube step splits under it when there are any. */
+.stats-tagStack {
+  grid-area: tagbreakdown;
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.stats-item--stepSplits {
+  padding: 18px;
+  cursor: default;
+}
+
 .stats-grid--time .stats-item--lineWide {
   grid-column: 1 / -1;
   padding: 8px 6px 10px;

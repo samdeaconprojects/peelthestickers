@@ -417,3 +417,42 @@ test("getDayKey honours the time zone with its cached formatters", () => {
   assert.strictEqual(getDayKey(at, { timeZone: "America/Los_Angeles" }), "2026-01-01");
   assert.strictEqual(getDayKey(at, { timeZone: "UTC" }), "2026-01-02");
 });
+
+test("buildSolveItem keeps smart-cube step splits and drops malformed ones", () => {
+  const { buildSolveItem: build } = require("./ptsCore");
+  const smart = {
+    Version: 2,
+    Moves: "R U R' U'",
+    MoveTimes: [0, 100, 200, 300],
+    Splits: {
+      V: 1,
+      Method: "CFOP",
+      Bottom: "white",
+      Steps: [
+        { K: ["cross", "pair1"], Ms: 200.4, Rec: 0, Exe: 200, Mv: 3 },
+        { K: ["pll"], Ms: 100, Rec: 40, Exe: 60, Mv: 1, Case: "T perm", Alg: "R U R' U'", Extra: "x" },
+        { K: ["oll"], Ms: 10, Rec: 0, Exe: 10, Mv: 1, Case: "Line OLL", Alg: "<script>" },
+      ],
+    },
+  };
+  const item = build({ userID: "u", event: "333", sessionID: "main", rawTimeMs: 300, tags: { SmartCube: smart } });
+  assert.deepStrictEqual(item.SmartCube.Splits, {
+    V: 1,
+    Method: "CFOP",
+    Bottom: "white",
+    Steps: [
+      { K: ["cross", "pair1"], Ms: 200, Rec: 0, Exe: 200, Mv: 3 },
+      { K: ["pll"], Ms: 100, Rec: 40, Exe: 60, Mv: 1, Case: "T perm", Alg: "R U R' U'" },
+      { K: ["oll"], Ms: 10, Rec: 0, Exe: 10, Mv: 1, Case: "Line OLL" },
+    ],
+  });
+  const bad = build({
+    userID: "u",
+    event: "333",
+    sessionID: "main",
+    rawTimeMs: 300,
+    tags: { SmartCube: { ...smart, Splits: { ...smart.Splits, Steps: [{ K: ["$evil"], Ms: 1 }] } } },
+  });
+  assert.strictEqual(bad.SmartCube.Splits, undefined);
+  assert.strictEqual(bad.SmartCube.Moves, "R U R' U'");
+});

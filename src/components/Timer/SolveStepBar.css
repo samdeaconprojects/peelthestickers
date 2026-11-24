@@ -1,0 +1,235 @@
+.solveStepBar {
+  --ssb-cross: #e76f8a;
+  --ssb-f2l: #f4a261;
+  --ssb-oll: #e9c46a;
+  --ssb-pll: #2ec4b6;
+  --ssb-fb: #f4a261;
+  --ssb-sb: #e76f8a;
+  --ssb-cmll: #e9c46a;
+  --ssb-lse: #2ec4b6;
+  --ssb-other: #8d99ae;
+
+  position: relative;
+  width: min(560px, 90%);
+  margin: 6px auto 0;
+  padding: 4px 0;
+  font-family: "Jost", sans-serif;
+  user-select: none;
+}
+
+/* Above the averages: as wide as they are. */
+.solveStepBar--slot {
+  width: min(920px, 100%);
+  margin: 0 auto;
+}
+
+.solveStepBar__track {
+  display: flex;
+  gap: 2px;
+  height: 22px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.solveStepBar__seg {
+  position: relative;
+  flex-basis: 0;
+  min-width: 3px;
+  display: flex;
+  cursor: pointer;
+  background: var(--ssb-step, var(--ssb-other));
+  opacity: 0.9;
+  transition: opacity 120ms ease, filter 120ms ease, box-shadow 120ms ease;
+}
+
+.solveStepBar__seg--cross { --ssb-step: var(--ssb-cross); }
+.solveStepBar__seg--f2l { --ssb-step: var(--ssb-f2l); }
+.solveStepBar__seg--oll { --ssb-step: var(--ssb-oll); }
+.solveStepBar__seg--pll { --ssb-step: var(--ssb-pll); }
+.solveStepBar__seg--fb { --ssb-step: var(--ssb-fb); }
+.solveStepBar__seg--sb { --ssb-step: var(--ssb-sb); }
+.solveStepBar__seg--cmll { --ssb-step: var(--ssb-cmll); }
+.solveStepBar__seg--lse { --ssb-step: var(--ssb-lse); }
+.solveStepBar__seg--f2l + .solveStepBar__seg--f2l { filter: brightness(0.88); }
+.solveStepBar__seg--f2l + .solveStepBar__seg--f2l + .solveStepBar__seg--f2l { filter: none; }
+
+.solveStepBar__seg.is-active,
+.solveStepBar__seg:hover {
+  opacity: 1;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.75);
+}
+
+.solveStepBar__rec {
+  flex-basis: 0;
+  background: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.32) 0 3px, transparent 3px 6px);
+}
+
+.solveStepBar__exe {
+  flex-basis: 0;
+}
+
+.solveStepBar__label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.solveStepBar__name {
+  font-weight: 800;
+}
+
+.solveStepBar__caseInline {
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.solveStepBar__time {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.solveStepBar__chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.solveStepBar__chip {
+  display: inline-flex;
+  padding: 1.5px;
+  gap: 1.5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.solveStepBar__chipDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+/* Hover card, above the bar so it never covers the time list below. */
+.solveStepBar__card {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: var(--card-x);
+  transform: translateX(-50%);
+  z-index: 30;
+  min-width: 210px;
+  max-width: min(360px, 92vw);
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(18, 20, 26, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+  text-align: left;
+  pointer-events: none;
+}
+
+.solveStepBar__card--start { left: 0; transform: none; }
+.solveStepBar__card--end { left: auto; right: 0; transform: none; }
+
+.solveStepBar__cardHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #fff;
+}
+
+.solveStepBar__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+  background: var(--ssb-step, var(--ssb-other));
+}
+
+.solveStepBar__cardTitle {
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.solveStepBar__case {
+  color: rgba(255, 255, 255, 0.62);
+  white-space: nowrap;
+}
+
+.solveStepBar__cardTime {
+  margin-left: auto;
+  padding-left: 10px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.solveStepBar__cardRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.solveStepBar__cardRow b {
+  color: #fff;
+  font-weight: 800;
+}
+
+.solveStepBar__cardRow--cmp {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.solveStepBar__moves {
+  margin-top: 5px;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #fff;
+  white-space: normal;
+  word-spacing: 2px;
+}
+
+/* Delta tag: this step against the user's average (same alg / case / step). */
+.solveStepBar__delta {
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  background: rgba(10, 12, 16, 0.62);
+}
+
+.solveStepBar__delta.is-faster { color: #4ade80; }
+.solveStepBar__delta.is-slower { color: #f87171; }
+
+.solveStepBar__avgs {
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: grid;
+  gap: 3px;
+}
+
+.solveStepBar__avg {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.solveStepBar__avg b { color: #fff; }
+.solveStepBar__avg small { color: rgba(255, 255, 255, 0.5); font-size: 10px; }
+.solveStepBar__avgLabel { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

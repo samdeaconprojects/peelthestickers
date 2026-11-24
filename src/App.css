@@ -121,6 +121,11 @@ button:hover {
   color: rgba(255, 255, 255, 0.74);
 }
 
+.methodPromptToast {
+  flex-wrap: wrap;
+  max-width: min(520px, calc(100vw - 24px));
+}
+
 .player-bar {
   transition: transform 1.5s ease-in-out;
 }
@@ -545,6 +550,33 @@ select {
   margin-bottom: 0;
 }
 
+/* Smart-cube step bar (portalled in by Timer), just above the averages. It
+   takes the averages' top auto margin so they keep their place. */
+.home-bottom-stack > .home-stepbar-slot {
+  order: 1;
+  /* Above the timer, whose text box reaches down over this spot. */
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  padding: 0 16px;
+  box-sizing: border-box;
+  margin-top: auto;
+  transform: translateY(-30px);
+}
+
+.home-bottom-stack > .home-stepbar-slot:empty {
+  display: none;
+}
+
+.home-bottom-stack > .home-stepbar-slot:not(:empty) + .averages-table {
+  margin-top: 10px;
+}
+
+/* Averages alone in the stack (time list beside the timer) aren't shifted up. */
+.home-bottom-stack:has(> .averages-table:last-child) > .home-stepbar-slot {
+  transform: none;
+}
+
 /* Averages moved beside the timer: keep the time list pinned to the bottom. */
 .home-bottom-stack > .time-list-container:first-child {
   margin-top: auto;
@@ -554,7 +586,8 @@ select {
    averages toward the bottom and keep them centered but narrow enough to stay clear of
    the time list column. HomeTimerSide sets the width/scale vars; until it has, the
    scale var is undefined, so --home-averages-scale falls back to the inherited value. */
-.home-bottom-stack > .averages-table:only-child {
+/* (:last-child, not :only-child: the step bar slot sits before the averages.) */
+.home-bottom-stack > .averages-table:last-child {
   --home-averages-scale: var(--home-side-avg-scale);
   width: min(100%, var(--home-side-avg-max-width, 780px));
   max-width: none;
@@ -1002,6 +1035,15 @@ select {
 
   .home-bottom-stack > .time-list-container:first-child {
     margin-top: 0;
+  }
+
+  .home-bottom-stack > .home-stepbar-slot {
+    margin-top: 0;
+    transform: none;
+  }
+
+  .home-bottom-stack > .home-stepbar-slot:not(:empty) + .averages-table {
+    margin-top: -8px;
   }
 
   /* Shared (head-to-head) home view */

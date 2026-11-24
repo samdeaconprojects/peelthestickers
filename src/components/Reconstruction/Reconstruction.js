@@ -8,9 +8,15 @@ import React, { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import "./Reconstruction.css";
 import { analyzeSolve, reconstructionText } from "../../smart/recon/analyze";
 import { readSmartRecord } from "../../smart/recon/solveRecord";
+import { buildStepAverages, formatDelta } from "../../smart/recon/splits";
 import { applyAlg } from "../../smart/recon/cube3";
 import { faceHex, useCubeColors } from "../../utils/cubeColors";
-import { buildStepRanker, rankColour, useReconPool } from "../../smart/recon/stepStats";
+import {
+  buildRecognitionRanker,
+  buildStepRanker,
+  rankColour,
+  useReconPool,
+} from "../../smart/recon/stepStats";
 
 const CubePlayer = React.lazy(() => import("../Cube3D/CubePlayer"));
 
@@ -95,6 +101,34 @@ function perfText(p, prefix = "") {
   return `${prefix}Faster than ${pct}% of ${p.n} other solve${p.n === 1 ? "" : "s"}`;
 }
 
+// The pause before a step: how long it took to recognise the case / find the
+// next pair. Coloured against the same pause in the user's other solves.
+function RecognitionPause({ step, perf }) {
+  const label = step.key === "oll" || step.key === "pll" ? "Recognition" : "Pause";
+  return (
+    <span
+      className="reconStep__pause"
+      style={perf && perf.rank01 != null ? { "--recon-pause": rankColour(perf.rank01) } : undefined}
+      title={`${label} before ${step.label}${perfText(perf, " · ")}`}
+    >
+      ↳ {fmt(step.recognitionMs)}s
+    </span>
+  );
+}
+
+// "−0.38 vs your avg" (green when faster), the average and count on hover.
+function AvgDelta({ data, label }) {
+  if (!data || data.mean == null || data.delta == null) return null;
+  return (
+    <span
+      className={`reconStep__delta ${data.delta < 0 ? "is-faster" : "is-slower"}`}
+      title={`Average ${fmt(data.mean)}s over ${data.n} other solve${data.n === 1 ? "" : "s"}`}
+    >
+      {formatDelta(data.delta)} <span className="recon__muted">{label}</span>
+    </span>
+  );
+}
+
 function stepCaseLabel(step) {
   if (step.caseName === "skip") return `${step.label} skip`;
   return step.caseName || null;
@@ -119,11 +153,18 @@ export default function Reconstruction({
   method = "",
   solveTimeMs = null,
   event = "",
+  // (method) => void: retag the solve. Offered when the tag and the moves disagree.
+  onMethodChange = null,
 }) {
   const record = useMemo(() => readSmartRecord(smartCube), [smartCube]);
+  // Show the solve as its tag says even though the moves look like another method.
+  const [forceTagged, setForceTagged] = useState(false);
   const analysis = useMemo(
-    () => (record ? analyzeSolve({ startState: record.startState, moves: record.moves, method }) : null),
-    [record, method]
+    () =>
+      record
+        ? analyzeSolve({ startState: record.startState, moves: record.moves, method, force: forceTagged })
+        : null,
+    [record, method, forceTagged]
   );
   const colors = useCubeColors();
   const [showPlayer, setShowPlayer] = useState(false);
@@ -136,10 +177,17 @@ export default function Reconstruction({
 
   // Each step against the same step in the user's other smart-cube solves.
   const pool = useReconPool();
-  const perf = useMemo(() => {
-    if (!analysis) return [];
-    const rank = buildStepRanker(pool, { event, method: analysis.method, exclude: smartCube });
-    return analysis.steps.map((s) => rank(s));
+  const { perf, recogPerf, avgs } = useMemo(() => {
+    if (!analysis) return { perf: [], recogPerf: [], avgs: [] };
+    const opts = { event, method: analysis.method, exclude: smartCube };
+    const rank = buildStepRanker(pool, opts);
+    const rankRecog = buildRecognitionRanker(pool, opts);
+    const avg = buildStepAverages(pool, opts);
+    return {
+      perf: analysis.steps.map((s) => rank(s)),
+      recogPerf: analysis.steps.map((s) => rankRecog(s)),
+      avgs: analysis.steps.map((s) => avg(s)),
+    };
   }, [pool, event, analysis, smartCube]);
 
   // Everything the player replays: the solver's hold first (e.g. z2, applied
@@ -170,6 +218,7 @@ export default function Reconstruction({
 
   const total = analysis.totalMs || 0;
   const timelineSteps = analysis.steps.filter((s) => s.durationMs > 0);
+  const recogTotal = analysis.steps.reduce((a, s) => a + (s.recognitionMs || 0), 0);
 
   const copy = async () => {
     const full = [String(scramble || "").trim(), "", text].filter((x, i) => i !== 0 || x).join("\n");
@@ -216,9 +265,37 @@ export default function Reconstruction({
         <div className="recon__totals">
           <span><b>{analysis.stm}</b> moves</span>
           <span><b>{fmtTps(analysis.tps)}</b> tps</span>
+          {recogTotal > 0 && total > 0 ? (
+            <span title="Time spent between steps (recognition / lookahead pauses)">
+              <b>{fmt(recogTotal)}</b> recog ({Math.round((recogTotal / total) * 100)}%)
+            </span>
+          ) : null}
           {!analysis.solved ? <span className="recon__warn">not solved</span> : null}
         </div>
       </header>
+
+      {analysis.methodMismatch || forceTagged ? (
+        <div className="recon__mismatch">
+          <span>
+            Tagged {analysis.taggedMethod}, but this looks like a {analysis.detectedMethod} solve.
+          </span>
+          {onMethodChange && analysis.detectedMethod ? (
+            <button
+              type="button"
+              className="recon__textBtn"
+              onClick={() => {
+                setForceTagged(false);
+                onMethodChange(analysis.detectedMethod);
+              }}
+            >
+              Tag as {analysis.detectedMethod}
+            </button>
+          ) : null}
+          <button type="button" className="recon__textBtn" onClick={() => setForceTagged((v) => !v)}>
+            {forceTagged ? `Show as ${analysis.detectedMethod}` : `Show as ${analysis.taggedMethod}`}
+          </button>
+        </div>
+      ) : null}
 
       {total > 0 && timelineSteps.length ? (
         <div className="recon__timeline" role="img" aria-label="Time per step">
@@ -230,9 +307,16 @@ export default function Reconstruction({
                 flexGrow: s.durationMs,
                 ...stepColourStyle(perf[analysis.steps.indexOf(s)]),
               }}
-              title={`${s.label}: ${fmt(s.durationMs)}s${perfText(perf[analysis.steps.indexOf(s)], " · ")}`}
+              title={`${s.label}: ${fmt(s.durationMs)}s${
+                s.recognitionMs > 0 ? ` (recog ${fmt(s.recognitionMs)} · exec ${fmt(s.executionMs)})` : ""
+              }${perfText(perf[analysis.steps.indexOf(s)], " · ")}`}
             >
-              <span>{TIMELINE_LABEL[s.key] || s.label}</span>
+              {s.recognitionMs > 0 ? (
+                <span className="recon__segRecog" style={{ flexGrow: s.recognitionMs }} />
+              ) : null}
+              <span className="recon__segExec" style={{ flexGrow: Math.max(1, s.executionMs) }}>
+                {TIMELINE_LABEL[s.key] || s.label}
+              </span>
             </div>
           ))}
         </div>
@@ -252,6 +336,7 @@ export default function Reconstruction({
                 <span className="reconStep__label">{s.label}</span>
                 {slotLabel(s, colors)}
                 {s.oll && !s.oll.skip ? <OllDiagram pattern={s.oll.pattern} colour={ollHex} /> : null}
+                {i > 0 && s.recognitionMs > 0 ? <RecognitionPause step={s} perf={recogPerf[i]} /> : null}
               </div>
               <div className="reconStep__moves">
                 {s.tokens.length ? (
@@ -289,10 +374,11 @@ export default function Reconstruction({
                   {s.stm} mv · {fmtTps(s.tps)} tps
                 </span>
                 {s.recognitionMs > 0 ? (
-                  <span className="recon__muted">
-                    recog {fmt(s.recognitionMs)} · exec {fmt(s.executionMs)}
-                  </span>
+                  <span className="recon__muted">exec {fmt(s.executionMs)}</span>
                 ) : null}
+                <AvgDelta data={avgs[i]?.step} label="vs your avg" />
+                <AvgDelta data={avgs[i]?.case} label={avgs[i]?.case ? `vs ${avgs[i].case.name} avg` : ""} />
+                <AvgDelta data={avgs[i]?.alg} label="vs this alg avg" />
               </div>
               <button
                 type="button"
