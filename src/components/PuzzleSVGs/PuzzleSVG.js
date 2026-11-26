@@ -44,6 +44,8 @@ const PuzzleSVG = ({
     MEGAMINX: 19,
     PYRAMINX: 22,
     CLOCK: 17,
+    // FTO art is a full square (2.1x size), so it needs a smaller base.
+    FTO: 20,
   };
 
   // Base size for non-rubik puzzles
@@ -116,6 +118,8 @@ const PuzzleSVG = ({
     CLOCK: { x: 2, y: 0 },
     SQ1: { x: 2, y: 0 },
     SKEWB: { x: 2, y: 0 },
+    // centred over the 22px icon box like the other non-cube icons
+    FTO: { x: 2, y: 0 },
   };
 
   const headerNudge = isStatsHeaderIcon ? headerNudgeByEvent[event] || { x: 0, y: 0 } : { x: 0, y: 0 };
