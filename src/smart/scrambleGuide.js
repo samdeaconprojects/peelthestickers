@@ -16,6 +16,12 @@
 //
 // Progress is in quarter-turn steps (a double counts 2), matching the
 // scramble display.
+//
+// A fix never stops halfway through a double: the display can't show "one
+// quarter of U2 done", so a user put back there would do the whole U2 again
+// and end up halfway the other way round. The fix carries on to finish the
+// double instead (and landing back there after a detour asks for the last
+// quarter).
 
 import { SOLVED, applyMove, formatToken, parseToken, tokenizeAlg } from "./recon/cube3";
 
@@ -64,7 +70,9 @@ export function createScrambleGuide(scramble, startState = SOLVED) {
   tokens.forEach((t) => {
     if (t.amount === 2) {
       for (const half of [1, 3]) {
-        checkpoints.push({ state: applyMove(s, { base: t.base, amount: half }), steps: steps + 1 });
+        // `finish`: the quarter turn that completes the double from here.
+        const finish = { base: t.base, amount: half };
+        checkpoints.push({ state: applyMove(s, finish), steps: steps + 1, finish });
       }
     }
     s = applyMove(s, t);
@@ -79,10 +87,28 @@ export function createScrambleGuide(scramble, startState = SOLVED) {
   }
 
   let state = checkpoints[0].state;
-  let anchor = 0; // steps at the last on-track point
+  let anchorCp = checkpoints[0]; // the last on-track point
+  let anchor = 0; // its steps
+  let here = checkpoints[0]; // the checkpoint the cube is at, or null off track
   let detour = []; // simplified turns since then
   let progress = 0; // shown: where the user is, or where the fix lands
   let fix = [];
+
+  // Fix moves (parsed) that land on checkpoint `c`, carried on to the end of
+  // the double if `c` is halfway through one. Returns { moves, steps }.
+  function finishDouble(moves, c) {
+    if (!c.finish) return { moves, steps: c.steps };
+    const out = moves.slice();
+    const last = out[out.length - 1];
+    if (last && last.base === c.finish.base) {
+      const amount = mod4(last.amount + c.finish.amount);
+      if (amount) out[out.length - 1] = { base: last.base, amount };
+      else out.pop();
+    } else {
+      out.push(c.finish);
+    }
+    return { moves: out, steps: c.steps + 1 };
+  }
 
   const nearest = (list, to) =>
     list.reduce((best, c) =>
@@ -134,26 +160,40 @@ export function createScrambleGuide(scramble, startState = SOLVED) {
       const p = parseToken(move);
       if (!p || !p.amount || !AXIS[p.base]) return snapshot();
       state = applyMove(state, p);
+      const prev = here;
+      here = null;
 
       const hits = byState.get(state);
       if (hits) {
         // Back on track (possibly further along, or further back).
         const c = nearest(hits, progress);
-        anchor = progress = c.steps;
+        here = c;
+        anchorCp = c;
+        anchor = c.steps;
         detour = [];
-        fix = [];
+        // Halfway through a double straight from its start: the user is doing
+        // it and knows it. Got there any other way (the last move of a fix, or
+        // turning back from the end of the double): ask for the quarter that
+        // finishes it.
+        const doingIt = prev && !prev.finish && prev.steps === c.steps - 1;
+        if (c.finish && !doingIt) {
+          const done = finishDouble([], c);
+          progress = done.steps;
+          fix = done.moves.map((m) => formatToken(m.base, m.amount));
+        } else {
+          progress = c.steps;
+          fix = [];
+        }
         return snapshot();
       }
 
       pushSimplified(detour, move);
       const found = shortestFix(state);
-      if (found) {
-        progress = found.c.steps;
-        fix = found.path.map((m) => formatToken(m.base, m.amount));
-      } else {
-        progress = anchor;
-        fix = fixFor(detour);
-      }
+      const done = found
+        ? finishDouble(found.path, found.c)
+        : finishDouble(fixFor(detour).map((t) => parseToken(t)), anchorCp);
+      progress = done.steps;
+      fix = done.moves.map((m) => formatToken(m.base, m.amount));
       return snapshot();
     },
   };

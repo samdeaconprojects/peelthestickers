@@ -277,8 +277,8 @@ body {
 /* Only nudge NxN cubes. Non-NxN puzzles (pyraminx, megaminx, skewb, clock, sq1)
    rely on the scale() transform set in NameTag.css for the same wrap element;
    this selector is more specific, so guarding it keeps their scale-down intact. */
-.left-slot-auth .nametagCube:not(.nametagCube--pyraminx):not(.nametagCube--megaminx):not(.nametagCube--skewb):not(.nametagCube--clock):not(.nametagCube--sq1) .puzzle-svg-wrap,
-.left-slot-auth .nametagCube:not(.nametagCube--pyraminx):not(.nametagCube--megaminx):not(.nametagCube--skewb):not(.nametagCube--clock):not(.nametagCube--sq1) .puzzle-svg-inner {
+.left-slot-auth .nametagCube:not(.nametagCube--pyraminx):not(.nametagCube--megaminx):not(.nametagCube--skewb):not(.nametagCube--clock):not(.nametagCube--sq1):not(.nametagCube--fto) .puzzle-svg-wrap,
+.left-slot-auth .nametagCube:not(.nametagCube--pyraminx):not(.nametagCube--megaminx):not(.nametagCube--skewb):not(.nametagCube--clock):not(.nametagCube--sq1):not(.nametagCube--fto) .puzzle-svg-inner {
   transform: translateY(2px);
 }
 

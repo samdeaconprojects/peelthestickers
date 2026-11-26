@@ -622,6 +622,7 @@ function sharedEventLabel(evt) {
     "SKEWB": "Skewb",
     "SQ1": "Square-1",
     "CLOCK": "Clock",
+    "FTO": "FTO",
   };
   return labels[key] || key;
 }
@@ -6518,41 +6519,29 @@ function App() {
       return cached;
     }
 
+    // Every solve in the session is loaded, so the loaded solves are the truth for
+    // best/worst single. The cached stats can still name a solve that was just
+    // deleted (they only refresh once the server answers), so they are replaced
+    // here rather than merged.
     const bestSolve = findBestSingleSolve(baseCurrentSolves);
     const worstSolve = findWorstSingleSolve(baseCurrentSolves);
-    const cachedBestMs = Number(cached?.BestSingleMs);
-    const cachedWorstMs = Number(cached?.WorstSingleMs);
     const bestSolveMs = Number(bestSolve?.time ?? bestSolve?.finalTimeMs);
     const worstSolveMs = Number(worstSolve?.time ?? worstSolve?.finalTimeMs);
 
-    if (
-      !bestSolve &&
-      !worstSolve
-    ) {
-      return cached;
-    }
+    if (!cached && !bestSolve && !worstSolve) return null;
 
     const next = { ...(cached || {}) };
 
-    if (
-      Number.isFinite(bestSolveMs) &&
-      (!Number.isFinite(cachedBestMs) || bestSolveMs < cachedBestMs)
-    ) {
-      next.BestSingleMs = bestSolveMs;
-      next.BestSingleSolveSK = bestSolve?.solveRef || bestSolve?.SK || null;
-      next.BestSingleAt =
-        bestSolve?.createdAt || bestSolve?.datetime || bestSolve?.CreatedAt || bestSolve?.DateTime || null;
-    }
+    next.BestSingleMs = Number.isFinite(bestSolveMs) ? bestSolveMs : null;
+    next.BestSingleSolveSK = bestSolve ? bestSolve?.solveRef || bestSolve?.SK || null : null;
+    next.BestSingleAt = bestSolve
+      ? bestSolve?.createdAt || bestSolve?.datetime || bestSolve?.CreatedAt || bestSolve?.DateTime || null
+      : null;
 
-    if (
-      Number.isFinite(worstSolveMs) &&
-      (!Number.isFinite(cachedWorstMs) || worstSolveMs > cachedWorstMs)
-    ) {
-      next.WorstSingleMs = worstSolveMs;
-      next.WorstSingleSolveSK = worstSolve?.solveRef || worstSolve?.SK || null;
-    }
+    next.WorstSingleMs = Number.isFinite(worstSolveMs) ? worstSolveMs : null;
+    next.WorstSingleSolveSK = worstSolve ? worstSolve?.solveRef || worstSolve?.SK || null : null;
 
-    return Object.keys(next).length ? next : null;
+    return next;
   }, [baseCurrentSolves, currentSession, eventKey, practiceMode, sessionStats]);
   const currentSessionTotalSolveCount = Number(
     currentSessionStatsForEvent?.SolveCountTotal ??

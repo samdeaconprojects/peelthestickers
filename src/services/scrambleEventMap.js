@@ -20,6 +20,9 @@ const PTS_TO_CUBING_EVENT = {
   CLOCK: "clock",
   MEGAMINX: "minx",
 
+  // Not a WCA event; users add it as a custom event named "FTO".
+  FTO: "fto",
+
   RELAY: null,
 };
 

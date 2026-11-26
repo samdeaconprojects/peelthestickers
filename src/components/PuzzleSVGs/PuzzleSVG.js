@@ -5,6 +5,7 @@ import SkewbSVG from "./SkewbSVG";
 import Square1SVG from "./Square1SVG";
 import PyraminxSVG from "./PyraminxSVG";
 import MegaminxSVG from "./MegaminxSVG";
+import FTOSVG from "./FTOSVG";
 import ClockSVG from "./ClockSVG";
 import PuzzleNetSVG, { supportsPuzzleNet } from "./PuzzleNetSVG";
 import { getScrambledFaces } from "../scrambleUtils";
@@ -221,6 +222,7 @@ const PuzzleSVG = ({
     MEGAMINX: MegaminxSVG,
     PYRAMINX: PyraminxSVG,
     CLOCK: ClockSVG,
+    FTO: FTOSVG,
   };
 
   const SpecificPuzzle = eventMap[event];

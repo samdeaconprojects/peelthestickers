@@ -522,6 +522,18 @@
   transform: translate(-10px, 2px);
 }
 
+/* The visible outline here is the 42px ::before, wider than the 38px cube
+   frame, so FTO (scaled in NameTag.css) needs a further nudge to centre in it. */
+.socialPage .postNameAndPicture .name-tag-link--profileCorner .name-tag-cubeFrame .nametagCube--fto > .puzzle-svg-wrap {
+  transform: translateX(5px) scale(0.3) !important;
+}
+
+/* The cube frame clips its art, and it sits left of the outline, so the
+   nudged FTO would lose its right edge; it fits the outline without clipping. */
+.socialPage .postNameAndPicture .name-tag-link--profileCorner .name-tag-cubeFrame:has(.nametagCube--fto) {
+  overflow: visible;
+}
+
 .socialPage .postNameAndPicture .name-tag-link--profileCorner:hover::before,
 .socialPage .postNameAndPicture .name-tag-link--profileCorner:focus-visible::before {
   width: 100%;

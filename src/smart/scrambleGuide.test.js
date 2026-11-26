@@ -68,6 +68,40 @@ test("a stray turn that commutes with the next move doesn't undo good moves", ()
   expect(feed(g, "U F").complete).toBe(true);
 });
 
+test("a wrong turn halfway through a double: the fix finishes the double", () => {
+  const g = createScrambleGuide("R U2 F D");
+  let snap = feed(g, "R U B"); // one U of U2, then a stray B
+  // Not "B'" alone: that leaves the cube halfway through U2 while the display
+  // shows a whole U2 to do, and doing it lands halfway the other way.
+  expect(snap).toMatchObject({ progress: 3, fix: ["B'", "U"] });
+  expect(nextFixDisplay(nextFixDisplay(null, ["B'", "U"]), ["U"])).toEqual({
+    moves: ["B'", "U"],
+    done: 1,
+  });
+  snap = feed(g, "B' U");
+  expect(snap).toMatchObject({ progress: 3, offTrack: false, fix: [] });
+  expect(g.onMove("F")).toMatchObject({ progress: 4, fix: [] });
+  expect(feed(g, "D").complete).toBe(true);
+});
+
+test("back halfway through a double some other way asks for the last quarter", () => {
+  const g = createScrambleGuide("R U2 F");
+  const snap = feed(g, "R U' B B'"); // undid the stray B without the fix
+  expect(snap).toMatchObject({ progress: 3, fix: ["U'"] });
+  expect(g.onMove("U'")).toMatchObject({ progress: 3, fix: [] });
+});
+
+test("turning back from the end of a double asks to finish it again", () => {
+  const g = createScrambleGuide("R U2 F");
+  feed(g, "R U2");
+  expect(g.onMove("U'")).toMatchObject({ progress: 3, fix: ["U"] });
+});
+
+test("halfway through a double by turning it is still just progress", () => {
+  const g = createScrambleGuide("R U2 F");
+  expect(feed(g, "R U")).toMatchObject({ progress: 2, fix: [] });
+});
+
 test("fix display keeps done moves until back on track", () => {
   let d = nextFixDisplay(null, ["L'", "U", "R"]);
   expect(d).toEqual({ moves: ["L'", "U", "R"], done: 0 });

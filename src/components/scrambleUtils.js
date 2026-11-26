@@ -98,6 +98,9 @@ export function currentEventToString(currentEvent) {
     case 'SQ1':
       n = "Square-1";
       break;
+    case 'FTO':
+      n = "FTO";
+      break;
 
     default:
       n = "3x3";
@@ -118,6 +121,8 @@ export function generateScramble(currentEvent) {
         return generateSkewbScramble();
   } else if ( currentEvent === "SQ1") {
         return generateSquare1Scramble();
+  } else if (String(currentEvent || "").toUpperCase() === "FTO") {
+        return generateFtoScramble();
   }
 
   const n = currentEventToN(currentEvent);
@@ -306,6 +311,20 @@ export function generatePryaminxScramble() {
   return out.join(" ");
 }
 
+
+// Random-move FTO scramble (legacy mode only; random-state comes from cubing.js).
+export function generateFtoScramble(length = 30) {
+  const faces = ["U", "D", "R", "L", "F", "B", "BR", "BL"];
+  const moves = [];
+  let last = null;
+  while (moves.length < length) {
+    const face = faces[Math.floor(Math.random() * faces.length)];
+    if (face === last) continue;
+    last = face;
+    moves.push(face + (Math.random() < 0.5 ? "'" : ""));
+  }
+  return moves.join(" ");
+}
 
 export function generateSkewbScramble() {
   const faces = ["U", "L", "R", "B"];

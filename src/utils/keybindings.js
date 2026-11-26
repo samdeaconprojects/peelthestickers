@@ -15,6 +15,7 @@ export const EVENT_KEYBINDING_LABELS = {
   MEGAMINX: "Megaminx",
   PYRAMINX: "Pyraminx",
   "333BLD": "3x3 BLD",
+  FTO: "FTO",
 };
 
 export const defaultEventBindings = {
@@ -31,6 +32,7 @@ export const defaultEventBindings = {
   MEGAMINX: "Primary+M",
   PYRAMINX: "Primary+P",
   "333BLD": "Primary+B",
+  FTO: "Primary+F",
 };
 
 export const PAGE_KEYBINDING_LABELS = {

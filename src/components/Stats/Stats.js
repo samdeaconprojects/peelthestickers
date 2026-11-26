@@ -413,6 +413,7 @@ function getEventDisplayMeta(eventValue) {
     "SQ1": "Square-1",
     "MEGAMINX": "Megaminx",
     "CLOCK": "Clock",
+    "FTO": "FTO",
   };
 
   return {
@@ -433,6 +434,7 @@ const TIME_VIEW_EVENT_MATRIX_ORDER = [
   "SKEWB",
   "SQ1",
   "MEGAMINX",
+  "FTO",
   "333OH",
   "333FEW",
   "333BLD",

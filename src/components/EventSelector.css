@@ -197,6 +197,28 @@
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
+/* Six puzzle cards with longer names (Pyraminx, Megaminx…): tighten the
+   card so the names fit at desktop width. */
+.event-gallery--compact .event-card {
+  padding: 8px;
+  gap: 4px;
+}
+
+.event-gallery--compact .event-chip-icon {
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+}
+
+/* Shrink the art with it; `scale` composes with each puzzle's transform. */
+.event-gallery--compact .event-chip-icon > * {
+  scale: 0.8;
+}
+
+.event-gallery--compact .event-card-title {
+  font-size: 13px;
+}
+
 .event-gallery--five {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
@@ -291,7 +313,8 @@
   .event-chip-icon--megaminx,
   .event-chip-icon--skewb,
   .event-chip-icon--clock,
-  .event-chip-icon--sq1
+  .event-chip-icon--sq1,
+  .event-chip-icon--fto
 ) {
   transform: translateY(2px);
 }
@@ -301,7 +324,8 @@
 .event-chip-icon--megaminx,
 .event-chip-icon--skewb,
 .event-chip-icon--clock,
-.event-chip-icon--sq1 {
+.event-chip-icon--sq1,
+.event-chip-icon--fto {
   width: 40px;
   height: 40px;
   flex-basis: 40px;
@@ -315,7 +339,8 @@
   .event-chip-icon--megaminx,
   .event-chip-icon--skewb,
   .event-chip-icon--clock,
-  .event-chip-icon--sq1
+  .event-chip-icon--sq1,
+  .event-chip-icon--fto
 ) > * {
   transform: scale(1.05);
   transform-origin: left center;
@@ -344,6 +369,11 @@
 
 .event-chip-icon--clock > * {
   transform: scale(0.33) translate(11px, 12px);
+  transform-origin: center;
+}
+
+.event-chip-icon--fto > * {
+  transform: scale(0.38) translate(-4px, 6px);
   transform-origin: center;
 }
 
@@ -574,7 +604,8 @@
     .event-chip-icon--megaminx,
     .event-chip-icon--skewb,
     .event-chip-icon--clock,
-    .event-chip-icon--sq1
+    .event-chip-icon--sq1,
+    .event-chip-icon--fto
   ) > * {
     transform: scale(0.95);
     transform-origin: left center;

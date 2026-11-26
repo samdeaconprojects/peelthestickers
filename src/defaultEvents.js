@@ -60,6 +60,7 @@ export const DEFAULT_EVENTS = [
   "PYRAMINX",
   "SKEWB",
   "SQ1",
+  "FTO",
   "FMC",
   ...RELAY_EVENT_IDS,
 ];

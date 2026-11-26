@@ -83,6 +83,14 @@
   transform: translate(-15px, 2px);
 }
 
+/* FTO art is full-size; shrink it to fit the small post/social frame.
+   !important: Social.css and Detail.css nudge .puzzle-svg-wrap in these
+   frames with more specific selectors meant for the cube art. */
+.name-tag-link--profileCorner .name-tag-cubeFrame .nametagCube--fto > .puzzle-svg-wrap {
+  transform: scale(0.34) !important;
+  transform-origin: center !important;
+}
+
 /* -------------------------------------------------
    Only non-NxN: create a viewport + scale down
    ------------------------------------------------- */
@@ -92,7 +100,8 @@
 .nametagCube--megaminx,
 .nametagCube--skewb,
 .nametagCube--clock,
-.nametagCube--sq1 {
+.nametagCube--sq1,
+.nametagCube--fto {
   width: 34px;
   height: 34px;
   position: relative;
@@ -108,7 +117,8 @@
   .nametagCube--megaminx,
   .nametagCube--skewb,
   .nametagCube--clock,
-  .nametagCube--sq1
+  .nametagCube--sq1,
+  .nametagCube--fto
 ) {
   transform: translateY(3px);
 }
@@ -118,7 +128,8 @@
   .nametagCube--megaminx,
   .nametagCube--skewb,
   .nametagCube--clock,
-  .nametagCube--sq1
+  .nametagCube--sq1,
+  .nametagCube--fto
 ) {
   transform: translateY(2px) scale(0.85);
   transform-origin: left center;
@@ -130,6 +141,7 @@
 .nametagCube--skewb > *    { transform: scale(0.34) translate(10px, 16px); transform-origin: center; }
 .nametagCube--clock > *    { transform: scale(0.26) translate(14px, 15px); transform-origin: center; }
 .nametagCube--sq1 > *      { transform: scale(0.34) translate(0px, -1px); transform-origin: center; }
+.nametagCube--fto > *      { transform: scale(0.31) translate(-3px, -3px); transform-origin: center; }
 
 .nametagText {
   flex: 0 1 auto;               /* text can shrink if needed */

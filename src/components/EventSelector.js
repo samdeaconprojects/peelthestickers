@@ -85,6 +85,7 @@ const getEventAccent = (eventId) => {
   if (ev === "SQ1") return "#ff8e72";
   if (ev === "MEGAMINX") return "#ff6b9c";
   if (ev === "CLOCK") return "#b59cff";
+  if (ev === "FTO") return "#c084fc";
   return "#9fb0c7";
 };
 
@@ -230,6 +231,7 @@ const EventSelector = forwardRef(function EventSelector(
       { id: "555BLD", name: "5BLD" },
       { id: "333MULTIBLD", name: "MBLD" },
       { id: "333FEW", name: "Fewest" },
+      { id: "FTO", name: "FTO" },
     ],
     []
   );
@@ -398,9 +400,17 @@ const EventSelector = forwardRef(function EventSelector(
 
   const curatedEventSections = useMemo(() => {
     const getEvent = (id) => eventLookup.get(id);
+    // A custom event whose ID is now built in (e.g. a user-made "FTO") is
+    // already listed above; don't show it twice.
+    const builtInIds = new Set(wcaEvents.map((event) => event.id));
+    const plainCustomEvents = (customEvents || []).filter(
+      (event) =>
+        !event?.isRelayEvent &&
+        !builtInIds.has(normalizeEventId(event?.EventID || event?.id))
+    );
     return [
       {
-        label: "WCA",
+        label: "Main",
         rows: [
           {
             key: "nxn",
@@ -416,8 +426,8 @@ const EventSelector = forwardRef(function EventSelector(
           },
           {
             key: "other",
-            className: "event-gallery--five",
-            events: ["PYRAMINX", "SKEWB", "SQ1", "MEGAMINX", "CLOCK"].map(getEvent).filter(Boolean),
+            className: "event-gallery--six event-gallery--compact",
+            events: ["PYRAMINX", "SKEWB", "SQ1", "MEGAMINX", "CLOCK", "FTO"].map(getEvent).filter(Boolean),
           },
         ],
       },
@@ -432,14 +442,13 @@ const EventSelector = forwardRef(function EventSelector(
         ],
       },
       userID &&
-        customEvents.some((event) => !event?.isRelayEvent) && {
+        plainCustomEvents.length > 0 && {
           label: "Custom Events",
           rows: [
             {
               key: "custom",
               className: "event-gallery--auto",
-              events: customEvents
-                .filter((event) => !event?.isRelayEvent)
+              events: plainCustomEvents
                 .map((e) => ({
                   id: e.EventID || e.id,
                   name: e.EventName || e.name || e.EventID || e.id,
@@ -449,7 +458,7 @@ const EventSelector = forwardRef(function EventSelector(
           ],
         },
     ].filter(Boolean);
-  }, [eventLookup, customEvents, relayEvents, userID]);
+  }, [eventLookup, customEvents, relayEvents, userID, wcaEvents]);
 
   // -----------------------------
   // Sessions for selected event

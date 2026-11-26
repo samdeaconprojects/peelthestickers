@@ -19,6 +19,7 @@ export const PROFILE_CUBE_TRANSFORMS = {
   SKEWB: "translate(-9px, -12px) scale(0.85)",
   MEGAMINX: "translate(-4px, -16px) scale(0.8)",
   PYRAMINX: "translate(0px, -18px) scale(0.88)",
+  FTO: "translate(7px, -13px) scale(0.78)",
 };
 
 function getEventLabel(event) {

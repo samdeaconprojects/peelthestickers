@@ -209,6 +209,7 @@ const PROFILE_TIME_MATRIX_ORDER = [
   "PYRAMINX",
   "SKEWB",
   "SQ1",
+  "FTO",
   "333BLD",
   "444BLD",
   "555BLD",
